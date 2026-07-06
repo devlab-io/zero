@@ -1,0 +1,8 @@
+# Version: tartine/codex-setup-docs-01
+# Codex CLI: >= 0.142
+# Copy this block into ~/.codex/config.toml and replace the host with the
+# deployed Zero origin. OAuth credentials are created by:
+#   codex mcp login zero
+
+[mcp_servers.zero]
+url = "https://<zero-deployment-host>/mcp"
