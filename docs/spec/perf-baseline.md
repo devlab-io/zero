@@ -57,5 +57,4 @@ des faits, pas des intuitions. Sans baseline, pas de décomposition perf.
 
 ## Approval record
 
-- (en attente — APPROVE / APPROVE with edits / REJECT sur l'issue de tracking
-  du run perf, ou in-session ; timer 5 min → approbation auto du PLAN seul.)
+- 2026-07-06 — APPROVE (auto, 5m silence) : demande présentée in-session (options 1-3, recommandation APPROVE) et sur devlab-io/zero#7 ; aucun retour au timer ni en commentaire. Porte sur le PLAN seul ; le déploiement staging reste gaté par confirmation explicite (hard stop n°1). Veto possible a posteriori.
