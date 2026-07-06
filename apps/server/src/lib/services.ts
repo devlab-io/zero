@@ -20,7 +20,14 @@ export const twilio = () => {
   //   }
 
   if (!env.TWILIO_ACCOUNT_SID || !env.TWILIO_AUTH_TOKEN || !env.TWILIO_PHONE_NUMBER) {
-    throw new Error('Twilio is not configured correctly');
+    // Devlab: Twilio is optional in self-host — phone-OTP login is unused.
+    // Fall back to a mock sender instead of breaking the whole auth flow.
+    return {
+      messages: {
+        send: async (to: string, body: string) =>
+          console.log(`[TWILIO:MOCK] Would send SMS to ${to}: ${body}`),
+      },
+    };
   }
 
   const send = async (to: string, body: string) => {

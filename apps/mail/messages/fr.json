@@ -584,7 +584,13 @@
           "bulkDelete": "Suppression en masse",
           "bulkSelect": "Sélection en masse",
           "bulkArchive": "Archivage en masse",
-          "bulkStar": "Marquage en masse avec étoile"
+          "bulkStar": "Marquage en masse avec étoile",
+          "replyToThread": "Répondre au mail ciblé",
+          "replyAllToThread": "Répondre à tous au mail ciblé",
+          "forwardThread": "Transférer le mail ciblé",
+          "remindThread": "Me le rappeler demain (snooze)",
+          "archive": "Terminé — archiver",
+          "remind": "Me le rappeler demain (snooze)"
         }
       },
       "labels": {

@@ -361,6 +361,9 @@ const createAuthConfig = () => {
       'https://staging.0.email',
       'https://0.email',
       'http://localhost:3000',
+      // Devlab: front served on 3001 locally + trust the configured app URL
+      'http://localhost:3001',
+      env.VITE_PUBLIC_APP_URL,
     ],
     session: {
       cookieCache: {

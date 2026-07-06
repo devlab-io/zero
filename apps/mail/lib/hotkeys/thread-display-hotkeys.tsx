@@ -1,4 +1,5 @@
 import { mailNavigationCommandAtom } from '@/hooks/use-mail-navigation';
+import { useOptimisticActions } from '@/hooks/use-optimistic-actions';
 import { enhancedKeyboardShortcuts } from '@/config/shortcuts';
 import useMoveTo from '@/hooks/driver/use-move-to';
 import useDelete from '@/hooks/driver/use-delete';
@@ -24,8 +25,24 @@ export function ThreadDisplayHotkeys() {
   const { mutate: deleteThread } = useDelete();
   const { mutate: moveTo } = useMoveTo();
   const setMailNavigationCommand = useSetAtom(mailNavigationCommandAtom);
+  const { optimisticMoveThreadsTo, optimisticSnooze } = useOptimisticActions();
 
   const handlers = {
+    // Devlab: d = done — archive the open thread and move to the next one.
+    archive: () => {
+      if (!openThreadId) return;
+      optimisticMoveThreadsTo([openThreadId], params.folder ?? 'inbox', 'archive');
+      setMailNavigationCommand('next');
+    },
+    // Devlab: h = remind — snooze to tomorrow 08:00 and move on (undo: mod+z).
+    remind: () => {
+      if (!openThreadId) return;
+      const wakeAt = new Date();
+      wakeAt.setDate(wakeAt.getDate() + 1);
+      wakeAt.setHours(8, 0, 0, 0);
+      optimisticSnooze([openThreadId], params.folder ?? 'inbox', wakeAt);
+      setMailNavigationCommand('next');
+    },
     closeView: () => closeView(new KeyboardEvent('keydown', { key: 'Escape' })),
     reply: () => {
       setMode('reply');

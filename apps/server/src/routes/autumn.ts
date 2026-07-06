@@ -23,6 +23,32 @@ type AutumnContext = {
   };
 } & HonoContext;
 
+// Devlab self-host: when no AUTUMN_SECRET_KEY is configured, billing is disabled
+// and every /api/autumn/* route answers with a permissive stub. Without this,
+// the frontend's useBilling() hook receives an error and force-signs the user out.
+const selfHostFeature = {
+  unlimited: true,
+  balance: 999999,
+  usage: 0,
+  included_usage: 999999,
+  next_reset_at: null,
+  interval: 'month',
+  enabled: true,
+};
+
+const selfHostCustomer = (id: string, name: string, email: string) => ({
+  id,
+  name,
+  email,
+  // 'pro-example' matches the frontend's PRO_PLANS list → unlocks all Pro gates in self-host
+  products: [{ id: 'pro-example', name: 'Pro (Self-hosted)', status: 'active' }],
+  features: {
+    'chat-messages': { id: 'chat-messages', ...selfHostFeature },
+    connections: { id: 'connections', ...selfHostFeature },
+    'brain-activity': { id: 'brain-activity', ...selfHostFeature },
+  },
+});
+
 export const autumnApi = new Hono<AutumnContext>()
   .use('*', async (c, next) => {
     const { sessionUser } = c.var;
@@ -38,6 +64,25 @@ export const autumnApi = new Hono<AutumnContext>()
             },
           },
     );
+    if (!env.AUTUMN_SECRET_KEY) {
+      const { customerData } = c.var;
+      if (!customerData) return c.json({ error: 'No customer ID found' }, 401);
+      const path = c.req.path;
+      if (path.endsWith('/customers'))
+        return c.json(
+          selfHostCustomer(
+            customerData.customerId,
+            customerData.customerData.name,
+            customerData.customerData.email,
+          ),
+        );
+      if (path.endsWith('/check')) return c.json({ allowed: true, balance: 999999 });
+      if (path.endsWith('/track')) return c.json({ success: true });
+      if (path.endsWith('/pricing_table')) return c.json({ list: [] });
+      if (path.includes('/entities')) return c.json({ list: [] });
+      // attach / cancel / billing portals: billing is not available in self-host
+      return c.json({ error: 'Billing disabled in self-hosted mode' }, 200);
+    }
     c.set('autumn', new Autumn({ secretKey: env.AUTUMN_SECRET_KEY }));
     await next();
   })
