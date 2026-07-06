@@ -42,13 +42,31 @@ import {
   type ISnoozeBatch,
   type ParsedMessage,
 } from '../../types';
-import type { IGetThreadResponse, IGetThreadsResponse, MailManager } from '../../lib/driver/types';
+import type {
+  IGetThreadResponse,
+  IGetThreadsResponse,
+  MailManager,
+  ParsedDraft,
+} from '../../lib/driver/types';
 import { connectionToDriver, getZeroSocketAgent, reSyncThread } from '../../lib/server-utils';
 import { generateWhatUserCaresAbout, type UserTopic } from '../../lib/analyze/interests';
+import {
+  beginGeneratingDraftOutboxJob,
+  beginSendingDraftOutboxJob,
+  failDraftOutboxJob,
+  findNextApprovedDraftOutboxSendAt,
+  findNextDueApprovedDraftOutboxItem,
+  findNextQueuedDraftOutboxItem,
+  getDraftOutboxItem,
+  markDraftOutboxJobReady,
+  markDraftOutboxJobSent,
+  type DraftOutboxItem,
+} from '../../lib/draft-outbox';
 import { DurableObjectOAuthClientProvider } from 'agents/mcp/do-oauth-client-provider';
 import { AiChatPrompt, GmailSearchAssistantSystemPrompt } from '../../lib/prompts';
 import { Migratable, Queryable, Transfer } from 'dormroom';
 import type { CreateDraftData } from '../../lib/schemas';
+import { generateAutomaticDraft } from '../../thread-workflow-utils';
 import { drizzle } from 'drizzle-orm/durable-sqlite';
 import { getPrompt } from '../../pipelines.effect';
 import { AIChatAgent } from 'agents/ai-chat-agent';
@@ -75,6 +93,7 @@ import { create } from './db';
 
 const decoder = new TextDecoder();
 const maxCount = 20;
+const DRAFT_OUTBOX_CONNECTION_ID_KEY = 'draftOutboxConnectionId';
 
 // Error types for getUserTopics
 export class StorageError extends Error {
@@ -386,6 +405,7 @@ export class ZeroDriver extends DurableObject<ZeroEnv> {
 
   async setName(name: string) {
     this.name = name;
+    await this.ctx.storage.put(DRAFT_OUTBOX_CONNECTION_ID_KEY, name);
     await this.ctx.blockConcurrencyWhile(async () => {
       await this.setupAuth();
     });
@@ -713,6 +733,207 @@ export class ZeroDriver extends DurableObject<ZeroEnv> {
       this.ctx.waitUntil(conn.end());
     }
     if (!this.agent) this.agent = await getZeroSocketAgent(this.name);
+  }
+
+  private async getDraftOutboxConnectionId() {
+    if (this.name !== 'general') return this.name;
+
+    const storedConnectionId = await this.ctx.storage.get<string>(DRAFT_OUTBOX_CONNECTION_ID_KEY);
+    if (storedConnectionId) {
+      this.name = storedConnectionId;
+      return storedConnectionId;
+    }
+
+    return null;
+  }
+
+  async armDraftOutboxAlarm(scheduledSendAt?: number | null) {
+    const connectionId = await this.getDraftOutboxConnectionId();
+    if (!connectionId) return;
+
+    await this.ctx.storage.put(DRAFT_OUTBOX_CONNECTION_ID_KEY, connectionId);
+
+    const alarmAt = Math.max(Date.now(), scheduledSendAt ?? Date.now());
+    const currentAlarm = await this.ctx.storage.getAlarm();
+    if (currentAlarm === null || alarmAt < currentAlarm) {
+      await this.ctx.storage.setAlarm(alarmAt);
+    }
+  }
+
+  async alarm() {
+    await this.processDraftOutboxAlarm();
+  }
+
+  private async processDraftOutboxAlarm() {
+    const connectionId = await this.getDraftOutboxConnectionId();
+    if (!connectionId) return;
+
+    this.name = connectionId;
+    await this.setupAuth();
+
+    const { db, conn } = createDb(this.env.HYPERDRIVE.connectionString);
+    try {
+      const now = new Date();
+      const dueApproved = await findNextDueApprovedDraftOutboxItem(db, connectionId, now);
+      if (dueApproved) {
+        await this.sendDraftOutboxItem(db, dueApproved);
+      }
+
+      const queued = await findNextQueuedDraftOutboxItem(db, connectionId);
+      if (queued) {
+        await this.generateDraftOutboxItem(db, queued);
+      }
+
+      await this.armNextDraftOutboxAlarm(db, connectionId);
+    } finally {
+      this.ctx.waitUntil(conn.end());
+    }
+  }
+
+  private async armNextDraftOutboxAlarm(
+    db: ReturnType<typeof createDb>['db'],
+    connectionId: string,
+  ) {
+    const nextQueued = await findNextQueuedDraftOutboxItem(db, connectionId);
+    if (nextQueued) {
+      await this.ctx.storage.setAlarm(Date.now());
+      return;
+    }
+
+    const nextSendAt = await findNextApprovedDraftOutboxSendAt(db, connectionId);
+    if (nextSendAt) {
+      await this.ctx.storage.setAlarm(Math.max(Date.now(), nextSendAt.getTime()));
+    }
+  }
+
+  private async generateDraftOutboxItem(
+    db: ReturnType<typeof createDb>['db'],
+    item: DraftOutboxItem,
+  ) {
+    let current = item;
+    try {
+      current = await beginGeneratingDraftOutboxJob(db, item);
+      const draftData = await this.createDraftDataForOutboxItem(current);
+      const createdDraft = await this.createDraft(draftData);
+
+      if (!createdDraft?.id) {
+        throw new Error(createdDraft?.error ?? 'Gmail draft creation returned no id');
+      }
+
+      await markDraftOutboxJobReady(db, current, {
+        gmailDraftId: createdDraft.id,
+        subject: draftData.subject,
+        body: draftData.message,
+      });
+
+      if (draftData.threadId) {
+        this.ctx.waitUntil(reSyncThread(current.connectionId, draftData.threadId));
+      }
+    } catch (error) {
+      await this.failLatestDraftOutboxState(db, item, error);
+    }
+  }
+
+  private async sendDraftOutboxItem(db: ReturnType<typeof createDb>['db'], item: DraftOutboxItem) {
+    let current = item;
+    try {
+      current = await beginSendingDraftOutboxJob(db, item);
+      const draft = await this.getDraft(current.gmailDraftId!);
+      await this.sendDraft(current.gmailDraftId!, this.toOutgoingMessage(current, draft));
+      await markDraftOutboxJobSent(db, current);
+
+      if (current.threadId) {
+        this.ctx.waitUntil(reSyncThread(current.connectionId, current.threadId));
+      }
+    } catch (error) {
+      await this.failLatestDraftOutboxState(db, item, error);
+    }
+  }
+
+  private async failLatestDraftOutboxState(
+    db: ReturnType<typeof createDb>['db'],
+    item: DraftOutboxItem,
+    error: unknown,
+  ) {
+    const latest = await getDraftOutboxItem(db, {
+      id: item.id,
+      connectionId: item.connectionId,
+    });
+    if (!latest || latest.status === 'sent' || latest.status === 'cancelled') return;
+
+    await failDraftOutboxJob(
+      db,
+      latest,
+      error instanceof Error ? error.message : String(error),
+    );
+  }
+
+  private async createDraftDataForOutboxItem(item: DraftOutboxItem): Promise<CreateDraftData> {
+    if (!this.connection) {
+      throw new Error('No connection available');
+    }
+
+    if (!item.threadId) {
+      return {
+        to: '',
+        cc: '',
+        bcc: '',
+        subject: item.subject,
+        message: item.body || item.mission || '',
+        attachments: [],
+        id: null,
+        threadId: null,
+        fromEmail: this.connection.email,
+      };
+    }
+
+    const thread = await this.getThread(item.threadId);
+    const latestMessage = thread.latest ?? thread.messages[thread.messages.length - 1];
+    const replyTo = latestMessage?.sender?.email ?? '';
+    const cc =
+      latestMessage?.cc
+        ?.map((recipient) => recipient.email)
+        .filter((email) => email && email !== this.connection?.email)
+        .join(', ') ?? '';
+    const originalSubject = latestMessage?.subject || item.subject;
+    const replySubject = originalSubject.startsWith('Re: ')
+      ? originalSubject
+      : `Re: ${originalSubject}`;
+    const generatedBody =
+      item.body ||
+      (await generateAutomaticDraft(item.connectionId, thread, this.connection)) ||
+      item.mission ||
+      '';
+
+    return {
+      to: replyTo,
+      cc,
+      bcc: '',
+      subject: item.subject === 'Draft' ? replySubject : item.subject,
+      message: generatedBody,
+      attachments: [],
+      id: null,
+      threadId: item.threadId,
+      fromEmail: this.connection.email,
+    };
+  }
+
+  private toRecipients(emails?: string[]): IOutgoingMessage['to'] {
+    return emails?.filter(Boolean).map((email) => ({ email })) ?? [];
+  }
+
+  private toOutgoingMessage(item: DraftOutboxItem, draft?: ParsedDraft): IOutgoingMessage {
+    return {
+      to: this.toRecipients(draft?.to),
+      cc: this.toRecipients(draft?.cc),
+      bcc: this.toRecipients(draft?.bcc),
+      subject: draft?.subject ?? item.subject,
+      message: draft?.content ?? item.body,
+      attachments: [],
+      headers: {},
+      threadId: item.threadId ?? undefined,
+      fromEmail: this.connection?.email,
+    };
   }
 
   async syncFolders() {
