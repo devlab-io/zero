@@ -14,7 +14,7 @@ héros landing `public/email-preview.png` 1 133 020 octets ; tsc mail = 99 erreu
 - RUN: `test $(stat -f%z apps/mail/public/email-preview.png) -lt 300000 && echo HERO_OK` -> expected output `HERO_OK` (héros < 300 kB, format optimisé accepté si le .png est remplacé — le check suit le fichier réellement référencé par HomeContent.tsx; renommage autorisé si HomeContent est mis à jour, alors adapter via un fichier .png de même chemin ou laisser un png optimisé)
 - RUN: `cd apps/mail && VITE_PUBLIC_BACKEND_URL="https://x.invalid" VITE_PUBLIC_APP_URL="https://x.invalid" npx react-router build > /tmp/p0-build.log 2>&1; echo "build exit: $?"` -> expected output `build exit: 0`
 - RUN: `find apps/mail/build/client/assets -name "*.js" -size +900k | wc -l` -> expected output `0` (plus aucun chunk JS > 900 kB raw)
-- RUN: `du -sk apps/mail/build/client/assets | cut -f1` -> expected: <= 4600 (total assets ≤ ~4,5 MB, vs 5,59 MB baseline)
+- RUN: `find apps/mail/build/client/assets -name "*.js" -exec stat -f%z {} + | awk '{s+=$1} END {print int(s/1024)}'` -> expected: <= 4600 (total JS ≤ ~4,6 MB kB, vs 5 828 kB baseline JS-only ; le du global était pollué par 4,5 MB de SVG hors levier)
 - RUN: `test $(cd apps/mail && npx tsc --noEmit 2>&1 | grep -c "error TS") -le 99 && echo TSC_NO_NEW_ERRORS` -> expected output `TSC_NO_NEW_ERRORS`
 - RUN: `git status --porcelain -- apps/server packages | wc -l` -> expected output `0` (mail uniquement)
 
