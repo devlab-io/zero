@@ -352,7 +352,7 @@
         "NODE_ENV": "development",
         "COOKIE_DOMAIN": "",
         "VITE_PUBLIC_BACKEND_URL": "https://zero-server-staging.devlab-tahiti.workers.dev",
-        "VITE_PUBLIC_APP_URL": "https://zero-mail-staging.devlab-tahiti.workers.dev",
+        "VITE_PUBLIC_APP_URL": "https://zero-staging.devlab-tahiti.workers.dev",
         "DISABLE_CALLS": "",
         "DROP_AGENT_TABLES": "false",
         "THREAD_SYNC_MAX_COUNT": "60",
