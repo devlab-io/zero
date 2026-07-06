@@ -23,7 +23,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useEmailAliases } from '@/hooks/use-email-aliases';
 import useComposeEditor from '@/hooks/use-compose-editor';
 import { CurvedArrow, Sparkles, X } from '../icons/icons';
-import { gitHubEmojis } from '@tiptap/extension-emoji';
+import { getGitHubEmojis } from '@/lib/emoji-data';
 import { AnimatePresence, motion } from 'motion/react';
 import { zodResolver } from '@hookform/resolvers/zod';
 
@@ -604,7 +604,7 @@ export function EmailComposer({
   const replaceEmojiShortcodes = (text: string): string => {
     if (!text.trim().length || !text.includes(':')) return text;
     return text.replace(shortcodeRegex, (match, shortcode): string => {
-      const emoji = gitHubEmojis.find(
+      const emoji = getGitHubEmojis().find(
         (e) => e.shortcodes.includes(shortcode) || e.name === shortcode,
       );
       return emoji?.emoji ?? match;

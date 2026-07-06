@@ -18,7 +18,7 @@ import { useIsMobile } from '@/hooks/use-mobile';
 import React, { useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { useSession } from '@/lib/auth-client';
-import { useAIFullScreen } from './ai-sidebar';
+import { useAIFullScreen } from './use-ai-sidebar';
 import { useStats } from '@/hooks/use-stats';
 import { useLocation } from 'react-router';
 import { cn, FOLDERS } from '@/lib/utils';

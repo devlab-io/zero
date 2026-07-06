@@ -1,5 +1,5 @@
 import { Avatar, AvatarFallback, AvatarImage } from '../ui/avatar';
-import { useAIFullScreen, useAISidebar } from '../ui/ai-sidebar';
+import { useAIFullScreen, useAISidebar } from '../ui/use-ai-sidebar';
 import { VoiceProvider } from '@/providers/voice-provider';
 import useComposeEditor from '@/hooks/use-compose-editor';
 import { useRef, useCallback, useEffect } from 'react';

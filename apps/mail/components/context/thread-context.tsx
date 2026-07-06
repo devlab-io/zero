@@ -325,7 +325,9 @@ export function ThreadContextMenu({
         disabled: false,
       },
     ],
-    [m, handleThreadReply, handleThreadReplyAll, handleThreadForward],
+    // `m` is a module-level constant namespace; using it as a runtime value here retained
+    // the whole paraglide catalog in the bundle (kills tree-shaking of unused messages).
+    [handleThreadReply, handleThreadReplyAll, handleThreadForward],
   );
 
   const handleDelete = () => () => {
@@ -552,7 +554,9 @@ export function ThreadContextMenu({
         disabled: false,
       },
     ],
-    [isUnread, isImportant, isStarred, m, handleReadUnread, handleToggleImportant, handleFavorites],
+    // `m` is a module-level constant namespace; using it as a runtime value here retained
+    // the whole paraglide catalog in the bundle (kills tree-shaking of unused messages).
+    [isUnread, isImportant, isStarred, handleReadUnread, handleToggleImportant, handleFavorites],
   );
 
   const renderAction = (action: EmailAction) => {

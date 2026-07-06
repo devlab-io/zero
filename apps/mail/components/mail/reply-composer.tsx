@@ -2,8 +2,8 @@ import { useUndoSend } from '@/hooks/use-undo-send';
 import { constructReplyBody, constructForwardBody } from '@/lib/utils';
 import { useActiveConnection } from '@/hooks/use-connections';
 import { useEmailAliases } from '@/hooks/use-email-aliases';
-import { EmailComposer } from '../create/email-composer';
 import { useHotkeysContext } from 'react-hotkeys-hook';
+import { loadGitHubEmojis } from '@/lib/emoji-data';
 import { useTRPC } from '@/providers/query-provider';
 import { useMutation } from '@tanstack/react-query';
 import { useSettings } from '@/hooks/use-settings';
@@ -14,9 +14,19 @@ import { useDraft } from '@/hooks/use-drafts';
 import { m } from '@/paraglide/messages';
 import type { Sender } from '@/types';
 import { useQueryState } from 'nuqs';
-import { useEffect } from 'react';
+import { lazy, Suspense, useEffect } from 'react';
 import posthog from 'posthog-js';
 import { toast } from 'sonner';
+
+// Loaded lazily: the editor (tiptap/prosemirror) only downloads when the user actually
+// opens a reply/forward composer, keeping it out of the initial mail chunk. The emoji
+// dataset (static JSON asset) is awaited too so the Emoji extension always initializes
+// with the full list (its emoticon input rules are built at editor creation).
+const EmailComposer = lazy(() =>
+  Promise.all([import('../create/email-composer'), loadGitHubEmojis()]).then(([mod]) => ({
+    default: mod.EmailComposer,
+  })),
+);
 
 interface ReplyComposeProps {
   messageId?: string;
@@ -256,6 +266,13 @@ export default function ReplyCompose({ messageId }: ReplyComposeProps) {
 
   return (
     <div className="w-full rounded-2xl overflow-visible border">
+      <Suspense
+        fallback={
+          <div className="flex h-[120px] w-full items-center justify-center">
+            <div className="h-5 w-5 animate-spin rounded-full border-2 border-gray-300 border-t-blue-600" />
+          </div>
+        }
+      >
       <EmailComposer
         editorClassName="min-h-[50px]"
         className="w-full max-w-none! pb-1 overflow-visible"
@@ -274,6 +291,7 @@ export default function ReplyCompose({ messageId }: ReplyComposeProps) {
         settingsLoading={settingsLoading}
         replyingTo={replyToMessage?.sender.email}
       />
+      </Suspense>
     </div>
   );
 }

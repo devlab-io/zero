@@ -6,6 +6,68 @@ import { type Shortcut } from '@/config/shortcuts';
 import { m } from '@/paraglide/messages';
 import { type ReactNode } from 'react';
 
+// Literal lookups keep the paraglide catalog tree-shakable (no dynamic `m[...]` access).
+const actionLabels: Record<string, () => string> = {
+  newEmail: m['pages.settings.shortcuts.actions.newEmail'],
+  sendEmail: m['pages.settings.shortcuts.actions.sendEmail'],
+  reply: m['pages.settings.shortcuts.actions.reply'],
+  replyAll: m['pages.settings.shortcuts.actions.replyAll'],
+  forward: m['pages.settings.shortcuts.actions.forward'],
+  drafts: m['pages.settings.shortcuts.actions.drafts'],
+  inbox: m['pages.settings.shortcuts.actions.inbox'],
+  sentMail: m['pages.settings.shortcuts.actions.sentMail'],
+  delete: m['pages.settings.shortcuts.actions.delete'],
+  search: m['pages.settings.shortcuts.actions.search'],
+  markAsUnread: m['pages.settings.shortcuts.actions.markAsUnread'],
+  muteThread: m['pages.settings.shortcuts.actions.muteThread'],
+  printEmail: m['pages.settings.shortcuts.actions.printEmail'],
+  archiveEmail: m['pages.settings.shortcuts.actions.archiveEmail'],
+  markAsSpam: m['pages.settings.shortcuts.actions.markAsSpam'],
+  moveToFolder: m['pages.settings.shortcuts.actions.moveToFolder'],
+  undoLastAction: m['pages.settings.shortcuts.actions.undoLastAction'],
+  viewEmailDetails: m['pages.settings.shortcuts.actions.viewEmailDetails'],
+  goToDrafts: m['pages.settings.shortcuts.actions.goToDrafts'],
+  expandEmailView: m['pages.settings.shortcuts.actions.expandEmailView'],
+  helpWithShortcuts: m['pages.settings.shortcuts.actions.helpWithShortcuts'],
+  recordHotkey: m['pages.settings.shortcuts.actions.recordHotkey'],
+  pressKeys: m['pages.settings.shortcuts.actions.pressKeys'],
+  releaseKeys: m['pages.settings.shortcuts.actions.releaseKeys'],
+  selectAll: m['pages.settings.shortcuts.actions.selectAll'],
+  commandPalette: m['pages.settings.shortcuts.actions.commandPalette'],
+  markAsRead: m['pages.settings.shortcuts.actions.markAsRead'],
+  exitSelectionMode: m['pages.settings.shortcuts.actions.exitSelectionMode'],
+  closeCompose: m['pages.settings.shortcuts.actions.closeCompose'],
+  goToSpam: m['pages.settings.shortcuts.actions.goToSpam'],
+  goToArchive: m['pages.settings.shortcuts.actions.goToArchive'],
+  goToBin: m['pages.settings.shortcuts.actions.goToBin'],
+  scrollDown: m['pages.settings.shortcuts.actions.scrollDown'],
+  scrollUp: m['pages.settings.shortcuts.actions.scrollUp'],
+  goToSettings: m['pages.settings.shortcuts.actions.goToSettings'],
+  showImportant: m['pages.settings.shortcuts.actions.showImportant'],
+  showAllMail: m['pages.settings.shortcuts.actions.showAllMail'],
+  showPersonal: m['pages.settings.shortcuts.actions.showPersonal'],
+  showUpdates: m['pages.settings.shortcuts.actions.showUpdates'],
+  showPromotions: m['pages.settings.shortcuts.actions.showPromotions'],
+  showUnread: m['pages.settings.shortcuts.actions.showUnread'],
+  selectUnderCursor: m['pages.settings.shortcuts.actions.selectUnderCursor'],
+  openVoice: m['pages.settings.shortcuts.actions.openVoice'],
+  clearAllFilters: m['pages.settings.shortcuts.actions.clearAllFilters'],
+  markAsImportant: m['pages.settings.shortcuts.actions.markAsImportant'],
+  markAsUnimportant: m['pages.settings.shortcuts.actions.markAsUnimportant'],
+  bulkDelete: m['pages.settings.shortcuts.actions.bulkDelete'],
+  bulkSelect: m['pages.settings.shortcuts.actions.bulkSelect'],
+  bulkArchive: m['pages.settings.shortcuts.actions.bulkArchive'],
+  bulkStar: m['pages.settings.shortcuts.actions.bulkStar'],
+  replyToThread: m['pages.settings.shortcuts.actions.replyToThread'],
+  replyAllToThread: m['pages.settings.shortcuts.actions.replyAllToThread'],
+  forwardThread: m['pages.settings.shortcuts.actions.forwardThread'],
+  remindThread: m['pages.settings.shortcuts.actions.remindThread'],
+  archive: m['pages.settings.shortcuts.actions.archive'],
+  remind: m['pages.settings.shortcuts.actions.remind'],
+};
+
+const actionLabel = (action: string): string => actionLabels[action]?.() ?? action;
+
 export default function ShortcutsPage() {
   const {
     shortcuts,
@@ -67,11 +129,9 @@ export default function ShortcutsPage() {
                   if (shortcut.action in categoryActionIndex && categorySettings.length) {
                     const idx = categoryActionIndex[shortcut.action];
                     const cat = categorySettings[idx];
-                    label = cat
-                      ? `Show ${cat.name}`
-                      : m[`pages.settings.shortcuts.actions.${shortcut.action}`]();
+                    label = cat ? `Show ${cat.name}` : actionLabel(shortcut.action);
                   } else {
-                    label = m[`pages.settings.shortcuts.actions.${shortcut.action}`]();
+                    label = actionLabel(shortcut.action);
                   }
 
                   return (
