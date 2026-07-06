@@ -359,7 +359,7 @@
         "VITE_PUBLIC_APP_URL": "https://zero-staging.devlab-tahiti.workers.dev",
         "DISABLE_CALLS": "",
         "DROP_AGENT_TABLES": "false",
-        "THREAD_SYNC_MAX_COUNT": "60",
+        "THREAD_SYNC_MAX_COUNT": "2000",
         "THREAD_SYNC_LOOP": "true",
         "DISABLE_WORKFLOWS": "false",
         "OTEL_EXPORTER_OTLP_ENDPOINT": "https://api.axiom.co/v1/traces",
