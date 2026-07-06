@@ -11,6 +11,13 @@ const errorToasts = ['early_access_required', 'unauthorized'] as const;
 type ErrorToast = (typeof errorToasts)[number];
 type ErrorMessage = (typeof errorMessages)[number];
 
+// Literal lookups keep the paraglide catalog tree-shakable (no dynamic `m[...]` access).
+const errorMessageText: Record<ErrorToast | ErrorMessage, () => string> = {
+  required_scopes_missing: m['errorMessages.required_scopes_missing'],
+  early_access_required: m['errorMessages.early_access_required'],
+  unauthorized: m['errorMessages.unauthorized'],
+};
+
 const isErrorToast = (error: string): error is (typeof errorToasts)[number] =>
   errorToasts.includes(error as ErrorToast);
 
@@ -22,7 +29,7 @@ const ErrorMessage = () => {
 
   useEffect(() => {
     if (error && isErrorToast(error)) {
-      toast.error(m[`errorMessages.${error}`]());
+      toast.error(errorMessageText[error]());
     }
   });
 
@@ -35,7 +42,7 @@ const ErrorMessage = () => {
       <div className="flex items-center">
         <TriangleAlert size={28} />
         <p className="ml-2 text-sm text-black/80 dark:text-white/80">
-          {m[`errorMessages.${error}`]()}
+          {errorMessageText[error]()}
         </p>
       </div>
     </div>

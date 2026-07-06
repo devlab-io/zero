@@ -1,7 +1,8 @@
 import { useEditor, type KeyboardShortcutCommand, Extension, generateJSON } from '@tiptap/react';
 import { AutoComplete } from '@/components/create/editor-autocomplete';
 import { defaultExtensions } from '@/components/create/extensions';
-import Emoji, { gitHubEmojis } from '@tiptap/extension-emoji';
+import Emoji from '@tiptap/extension-emoji';
+import { getGitHubEmojis } from '@/lib/emoji-data';
 import { FileHandler } from '@tiptap/extension-file-handler';
 import Placeholder from '@tiptap/extension-placeholder';
 import { Plugin, PluginKey } from '@tiptap/pm/state';
@@ -219,7 +220,9 @@ const useComposeEditor = ({
       placeholder,
     }),
     Emoji.configure({
-      emojis: gitHubEmojis,
+      // Loaded from a static JSON asset before the editor chunk mounts (see
+      // lib/emoji-data.ts) instead of shipping ~480 kB of data inside the JS bundle.
+      emojis: getGitHubEmojis(),
       enableEmoticons: true,
       // suggestion,
     }),

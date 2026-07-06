@@ -6,7 +6,22 @@ import oxlintPlugin from 'vite-plugin-oxlint';
 import babel from 'vite-plugin-babel';
 import tailwindcss from "@tailwindcss/vite";
 import { defineConfig } from 'vite';
+import { createRequire } from 'node:module';
+import path from 'node:path';
 import dedent from 'dedent';
+
+const require = createRequire(import.meta.url);
+// Client code only uses renderToString/renderToStaticMarkup (lib/email-utils.client.tsx,
+// lib/sanitize-tip-tap-html.tsx). The 'react-dom/server' entry is CJS and statically
+// requires BOTH the legacy renderer (renderToString) and the full streaming renderer
+// (renderToReadableStream, ~85 kB min) that nothing on the client uses and that CJS
+// interop cannot tree-shake. Point the bare 'react-dom/server' specifier at the legacy
+// renderer file that entry itself loads. NOTE: 'react-dom/server.browser' (used by
+// app/entry.server.tsx for prerendering) does NOT match this alias and keeps streaming.
+const reactDomServerLegacy = path.join(
+  path.dirname(require.resolve('react-dom/package.json')),
+  'cjs/react-dom-server-legacy.browser.production.js',
+);
 
 const ReactCompilerConfig = {
   /* ... */
@@ -19,6 +34,11 @@ export default defineConfig({
     cloudflare(),
     babel({
       filter: /\.[jt]sx?$/,
+      // The react-compiler pass is only meant for app source. Without this exclude the
+      // babel transform re-printed every node_modules/paraglide module, which destroyed
+      // rollup tree-shaking annotations (retaining e.g. the full paraglide catalog) and
+      // slowed the build for no benefit.
+      exclude: [/node_modules/, /\/paraglide\//],
       babelConfig: {
         presets: ['@babel/preset-typescript'], // if you use TypeScript
         plugins: [['babel-plugin-react-compiler', ReactCompilerConfig]],
@@ -26,6 +46,21 @@ export default defineConfig({
     }),
     tsconfigPaths(),
     tailwindcss(),
+    {
+      // @tiptap/extension-emoji inlines its full emoji dataset (~480 kB) and references
+      // it from the extension's DEFAULT options, so it can never be tree-shaken even
+      // though every editor in this app passes `emojis` explicitly (loaded from the
+      // static JSON asset in lib/emoji-data.ts before any editor chunk mounts — see the
+      // React.lazy factories in reply-composer/create-email/mail). Emptying the default
+      // lets rollup drop the duplicate inline dataset. Same approach as the existing
+      // pnpm patch on novel (patches/novel.patch), applied at build time instead.
+      name: 'strip-emoji-default-dataset',
+      transform(code, id) {
+        if (id.includes('@tiptap/extension-emoji') && code.includes('emojis: emojis,')) {
+          return code.replace('emojis: emojis,', 'emojis: [],');
+        }
+      },
+    },
     {
       name: 'add-headers',
       applyToEnvironment: (env) => env.name === 'client',
@@ -69,6 +104,7 @@ export default defineConfig({
   resolve: {
     alias: {
       tslib: 'tslib/tslib.es6.js',
+      'react-dom/server': reactDomServerLegacy,
     },
   },
 });

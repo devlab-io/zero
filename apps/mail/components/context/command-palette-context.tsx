@@ -753,12 +753,20 @@ export function CommandPalette({ children }: { children: React.ReactNode }) {
       },
     ];
 
+    // Literal lookups keep the paraglide catalog tree-shakable (no dynamic `m[...]` access).
+    const groupTitles: Record<string, () => string> = {
+      mail: m['common.commandPalette.groups.mail'],
+      settings: m['common.commandPalette.groups.settings'],
+      actions: m['common.commandPalette.groups.actions'],
+      help: m['common.commandPalette.groups.help'],
+      navigation: m['common.commandPalette.groups.navigation'],
+    };
+
     Object.entries(otherCommands).forEach(([groupKey, items]) => {
       if (items.length > 0) {
         let groupTitle = groupKey;
         try {
-          const translationKey = `common.commandPalette.groups.${groupKey}` as any;
-          groupTitle = (m as any)[translationKey]() || groupKey;
+          groupTitle = groupTitles[groupKey]?.() || groupKey;
         } catch {}
 
         result.push({

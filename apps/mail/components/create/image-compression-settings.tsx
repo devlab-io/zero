@@ -12,21 +12,28 @@ interface ImageCompressionSettingsProps {
   className?: string;
 }
 
+// Literal lookups keep the paraglide catalog tree-shakable (no dynamic `m[...]` access).
 const qualityOptions = [
   {
     value: 'low' as const,
     icon: Zap,
     color: 'text-green-600',
+    label: m['pages.createEmail.imageCompression.low.label'],
+    description: m['pages.createEmail.imageCompression.low.description'],
   },
   {
     value: 'medium' as const,
     icon: Image,
     color: 'text-blue-600',
+    label: m['pages.createEmail.imageCompression.medium.label'],
+    description: m['pages.createEmail.imageCompression.medium.description'],
   },
   {
     value: 'original' as const,
     icon: FileImage,
     color: 'text-purple-600',
+    label: m['pages.createEmail.imageCompression.original.label'],
+    description: m['pages.createEmail.imageCompression.original.description'],
   },
 ];
 
@@ -63,10 +70,10 @@ export function ImageCompressionSettings({
                     <Icon className={`h-4 w-4 ${option.color}`} />
                     <div className="flex flex-col">
                       <Label htmlFor={option.value} className="cursor-pointer text-sm font-medium">
-                        {m[`pages.createEmail.imageCompression.${option.value}.label`]()}
+                        {option.label()}
                       </Label>
                       <span className="text-muted-foreground text-xs">
-                        {m[`pages.createEmail.imageCompression.${option.value}.description`]()}
+                        {option.description()}
                       </span>
                     </div>
                   </div>

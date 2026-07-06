@@ -1,8 +1,18 @@
 import { BoldIcon, ItalicIcon, UnderlineIcon, StrikethroughIcon, CodeIcon } from 'lucide-react';
-import type { SelectorItem } from './editor.node-selector';
 import { EditorBubbleItem, useEditor } from 'novel';
 import { Button } from '@/components/ui/button';
+import type { LucideIcon } from 'lucide-react';
+import type { Editor } from '@tiptap/core';
 import { cn } from '@/lib/utils';
+
+// './editor.node-selector' does not exist in this repo; the type is defined inline so the
+// file typechecks (this component is currently unreferenced).
+interface SelectorItem {
+  name: string;
+  icon: LucideIcon;
+  command: (editor: Editor) => void;
+  isActive: (editor: Editor) => boolean;
+}
 
 export const TextButtons = () => {
   const { editor } = useEditor();

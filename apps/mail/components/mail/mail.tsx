@@ -11,19 +11,27 @@ import { ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable';
 import { useCommandPalette } from '../context/command-palette-context';
 import { useHotkeys, useHotkeysContext } from 'react-hotkeys-hook';
 import { ThreadDisplay } from '@/components/mail/thread-display';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { useActiveConnection } from '@/hooks/use-connections';
 import { Check, ChevronDown, RefreshCcw } from 'lucide-react';
 import { useMediaQuery } from '../../hooks/use-media-query';
 import useSearchLabels from '@/hooks/use-labels-search';
-import * as CustomIcons from '@/components/icons/icons';
 import { MailList } from '@/components/mail/mail-list';
 import { useNavigate, useParams } from 'react-router';
 import { useMail } from '@/components/mail/use-mail';
 import { SidebarToggle } from '../ui/sidebar-toggle';
 import { PricingDialog } from '../ui/pricing-dialog';
 import { clearBulkSelectionAtom } from './use-mail';
-import AISidebar from '@/components/ui/ai-sidebar';
+import { loadGitHubEmojis } from '@/lib/emoji-data';
+// Loaded lazily so the AI sidebar bundle (AIChat, livekit/elevenlabs, agents) is only
+// fetched when the mail surface renders it, not as part of the initial route chunk.
+// The AI chat embeds a compose editor, so the emoji dataset (static JSON asset) is
+// awaited too — the Emoji extension needs it at editor creation.
+const AISidebar = lazy(() =>
+  Promise.all([import('@/components/ui/ai-sidebar'), loadGitHubEmojis()]).then(([mod]) => ({
+    default: mod.default,
+  })),
+);
 import { useThreads } from '@/hooks/use-threads';
 import AIToggleButton from '../ai-toggle-button';
 import { useIsMobile } from '@/hooks/use-mobile';
@@ -568,7 +576,11 @@ export function MailLayout() {
             </div>
           )}
 
-          {activeConnection?.id ? <AISidebar /> : null}
+          {activeConnection?.id ? (
+            <Suspense fallback={null}>
+              <AISidebar />
+            </Suspense>
+          ) : null}
           {activeConnection?.id ? <AIToggleButton /> : null}
         </ResizablePanelGroup>
       </div>
@@ -584,6 +596,34 @@ interface CategoryItem {
   colors?: string;
 }
 
+// Every category icon the product can produce (defaultMailCategories on the server uses
+// Lightning/Mail/ScanEye; the switch below covers the rest). A literal map instead of
+// `import * as CustomIcons` keeps the 97-export icon module tree-shakable.
+const categoryIcons: Record<string, typeof Lightning> = {
+  Lightning,
+  Mail,
+  ScanEye,
+  User,
+  Bell,
+  Tag,
+};
+
+// Literal lookups keep the paraglide catalog tree-shakable (no dynamic `m[...]` access).
+const mailCategoryLabels: Record<string, () => string> = {
+  primary: m['common.mailCategories.primary'],
+  allMail: m['common.mailCategories.allMail'],
+  important: m['common.mailCategories.important'],
+  personal: m['common.mailCategories.personal'],
+  updates: m['common.mailCategories.updates'],
+  promotions: m['common.mailCategories.promotions'],
+  social: m['common.mailCategories.social'],
+  unread: m['common.mailCategories.unread'],
+  starred: m['common.mailCategories.starred'],
+  notes: m['common.mailCategories.notes'],
+  forums: m['common.mailCategories.forums'],
+  work: m['common.mailCategories.work'],
+};
+
 export const Categories = () => {
   const defaultCategoryIdInner = useDefaultCategoryId();
   const categorySettings = useCategorySettings();
@@ -595,19 +635,19 @@ export const Categories = () => {
     const base = {
       id: cat.id,
       name: (() => {
-        const key = `common.mailCategories.${cat.id
+        const key = cat.id
           .split(' ')
           .map((w, i) => (i === 0 ? w.toLowerCase() : w))
-          .join('')}` as keyof typeof m;
-        return m[key] && typeof m[key] === 'function' ? (m[key] as () => string)() : cat.name;
+          .join('');
+        return mailCategoryLabels[key]?.() ?? cat.name;
       })(),
       searchValue: cat.searchValue,
     } as const;
 
     // Helper to decide fill colour depending on selection
     const isSelected = activeCategory === cat.id;
-    if (cat.icon && cat.icon in CustomIcons) {
-      const DynamicIcon = CustomIcons[cat.icon as keyof typeof CustomIcons];
+    const DynamicIcon = cat.icon ? categoryIcons[cat.icon] : undefined;
+    if (DynamicIcon) {
       return {
         ...base,
         icon: (
