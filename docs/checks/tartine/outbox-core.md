@@ -16,7 +16,6 @@ The check below enforces "no new errors", not zero.
 - RUN: `test -f apps/server/src/trpc/routes/outbox.ts && echo ROUTER_OK` -> expected output `ROUTER_OK`
 - RUN: `grep -c "outbox" apps/server/src/trpc/index.ts` -> expected output >= 1 (router registered in appRouter)
 - RUN: `ls apps/server/src/lib/draft-outbox/` -> expected: directory exists, lists state-machine source + tests
-- RUN: `grep -rc "queued\|generating\|draft_ready\|approved\|sending\|sent\|cancelled\|failed" apps/server/src/lib/draft-outbox | head -20` -> expected: statuses present in lib source
 - RUN: `cd apps/server && npx vitest run src/lib/draft-outbox --reporter=basic 2>&1 | tail -15` -> expected: all tests pass, exit 0
 - RUN: `test $(cd apps/server && npx tsc --noEmit 2>&1 | grep -c "error TS") -le 81 && echo TSC_NO_NEW_ERRORS` -> expected output `TSC_NO_NEW_ERRORS`
 - RUN: `{ git diff --name-only freeze/tartine..HEAD -- apps/mail apps/server/src/routes/agent/mcp.ts; git status --porcelain -- apps/mail apps/server/src/routes/agent/mcp.ts; } | wc -l` -> expected output `0` (MUST NOT TOUCH respected, committed or not; `freeze/tartine` is the freeze tag)

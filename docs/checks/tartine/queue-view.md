@@ -13,12 +13,12 @@ i18n source of truth: `apps/mail/messages/<locale>.json` (inlang/paraglide).
 
 - RUN: `ls "apps/mail/app/(routes)/queue"` -> expected: route directory exists (page + any nested files)
 - RUN: `ls apps/mail/components/queue` -> expected: queue components directory exists
-- RUN: `grep -rc "outbox" "apps/mail/app/(routes)/queue" apps/mail/components/queue | paste -sd+ - | bc` -> expected output >= 1 (view consumes the #2 outbox tRPC router)
+- RUN: `grep -rho "outbox" "apps/mail/app/(routes)/queue" apps/mail/components/queue | wc -l` -> expected output >= 1 (view consumes the #2 outbox tRPC router)
 - RUN: `grep -c "queue" apps/mail/messages/en.json` -> expected output >= 1 (EN labels present)
 - RUN: `grep -c "queue" apps/mail/messages/fr.json` -> expected output >= 1 (FR labels present)
 - RUN: `test $(cd apps/mail && npx tsc --noEmit 2>&1 | grep -c "error TS") -le 98 && echo TSC_NO_NEW_ERRORS` -> expected output `TSC_NO_NEW_ERRORS`
-- RUN: `{ git diff --name-only freeze/tartine..HEAD -- apps/server; git status --porcelain -- apps/server; } | wc -l` -> expected output `0` (MUST NOT TOUCH: server untouched, committed or not; `freeze/tartine` is the freeze tag)
-- RUN: `{ git diff --name-only freeze/tartine..HEAD -- "apps/mail/app/(routes)/mail" "apps/mail/app/(routes)/settings"; git status --porcelain -- "apps/mail/app/(routes)/mail" "apps/mail/app/(routes)/settings"; } | wc -l` -> expected output `0` (other mail routes untouched)
+- RUN: `{ git diff --name-only base/tartine-wave2..HEAD -- apps/server; git status --porcelain -- apps/server; } | wc -l` -> expected output `0` (MUST NOT TOUCH: server untouched, committed or not; `base/tartine-wave2` is the tag the orchestrator sets on this job's worktree base commit at wave-2 dispatch — post-#2-merge)
+- RUN: `{ git diff --name-only base/tartine-wave2..HEAD -- "apps/mail/app/(routes)/mail" "apps/mail/app/(routes)/settings"; git status --porcelain -- "apps/mail/app/(routes)/mail" "apps/mail/app/(routes)/settings"; } | wc -l` -> expected output `0` (other mail routes untouched)
 
 ## Judge-only checks
 

@@ -13,7 +13,7 @@ Rule: any builder edit under docs/checks/ is an automatic FAIL.
 - RUN: `grep -ci "draft.only" docs/agent/codex-setup.md` -> expected output >= 1 (draft-only warning present: no send tool exposed)
 - RUN: `grep -c "codex mcp login zero" docs/agent/codex-setup.md` -> expected output >= 1 (OAuth better-auth login step)
 - RUN: `ls docs/agent/ | wc -l` -> expected output >= 2 (versioned example config snippet ships alongside the doc)
-- RUN: `{ git diff --name-only freeze/tartine..HEAD -- apps packages; git status --porcelain -- apps packages; } | wc -l` -> expected output `0` (MUST NOT TOUCH: zero code changes, committed or not; `freeze/tartine` is the freeze tag)
+- RUN: `{ git diff --name-only base/tartine-wave3..HEAD -- apps packages; git status --porcelain -- apps packages; } | wc -l` -> expected output `0` (MUST NOT TOUCH: zero code changes, committed or not; `base/tartine-wave3` is the tag the orchestrator sets on this job's worktree base commit at wave-3 dispatch — post-#3-merge)
 
 ## Judge-only checks
 

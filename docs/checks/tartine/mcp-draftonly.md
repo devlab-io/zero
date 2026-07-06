@@ -18,7 +18,7 @@ mcp.ts line ~238 at freeze.
 - RUN: `ls apps/server/src/lib/mail-sanitize/` -> expected: directory exists with sanitizer source + tests
 - RUN: `cd apps/server && npx vitest run src/lib/mail-sanitize --reporter=basic 2>&1 | tail -15` -> expected: all tests pass, exit 0
 - RUN: `test $(cd apps/server && npx tsc --noEmit 2>&1 | grep -c "error TS") -le 81 && echo TSC_NO_NEW_ERRORS` -> expected output `TSC_NO_NEW_ERRORS`
-- RUN: `{ git diff --name-only freeze/tartine..HEAD -- apps/mail apps/server/src/db apps/server/src/trpc; git status --porcelain -- apps/mail apps/server/src/db apps/server/src/trpc; } | wc -l` -> expected output `0` (MUST NOT TOUCH respected, committed or not: outbox/#2 surfaces and mail app untouched; `freeze/tartine` is the freeze tag)
+- RUN: `{ git diff --name-only base/tartine-wave2..HEAD -- apps/mail apps/server/src/db apps/server/src/trpc; git status --porcelain -- apps/mail apps/server/src/db apps/server/src/trpc; } | wc -l` -> expected output `0` (MUST NOT TOUCH respected, committed or not: outbox/#2 surfaces and mail app untouched; `base/tartine-wave2` is the tag the orchestrator sets on this job's worktree base commit at wave-2 dispatch — post-#2-merge)
 
 ## Judge-only checks
 
