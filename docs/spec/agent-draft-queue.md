@@ -82,3 +82,8 @@ une-touche depuis une vue dédiée de Zero, avec undo 15 s.
 ## Open human decisions
 
 Aucune bloquante. Révocables : A1-A5 ci-dessus.
+
+## Approval record
+
+- 2026-07-06 — In-session, repo owner (Thomas Verdenne), VERBATIM: « APPROVE »
+  (message unique, en réponse à la demande d'approbation timed-ruling).
