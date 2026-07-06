@@ -7,11 +7,12 @@ import {
 } from '@/components/ui/dialog';
 import { Sidebar, SidebarContent, SidebarFooter, SidebarHeader } from '@/components/ui/sidebar';
 import { navigationConfig, bottomNavItems } from '@/config/navigation';
-// import { useTRPC } from '@/providers/query-provider';
+import { useTRPC } from '@/providers/query-provider';
 import { useSidebar } from '@/components/ui/sidebar';
 import { CreateEmail } from '../create/create-email';
 // import { useMutation } from '@tanstack/react-query';
 import { PencilCompose, X } from '../icons/icons';
+import { useQuery } from '@tanstack/react-query';
 import { useBilling } from '@/hooks/use-billing';
 import { useIsMobile } from '@/hooks/use-mobile';
 import React, { useMemo, useState } from 'react';
@@ -43,6 +44,14 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const { data: stats } = useStats();
   const location = useLocation();
   const { data: session } = useSession();
+  const trpc = useTRPC();
+  const { data: pendingQueueItems } = useQuery(
+    trpc.outbox.list.queryOptions(
+      { status: 'draft_ready' },
+      { enabled: !!session?.user.id, staleTime: 15_000 },
+    ),
+  );
+  const pendingQueueCount = pendingQueueItems?.length ?? 0;
   const { currentSection, navItems } = useMemo(() => {
     // Find which section we're in based on the pathname
     const section = Object.entries(navigationConfig).find(([, config]) =>
@@ -51,7 +60,10 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
 
     const currentSection = section?.[0] || 'mail';
     if (navigationConfig[currentSection]) {
-      const items = [...navigationConfig[currentSection].sections];
+      const items = navigationConfig[currentSection].sections.map((section) => ({
+        ...section,
+        items: section.items.map((item) => ({ ...item })),
+      }));
 
       if (currentSection === 'mail' && stats && stats.length) {
         if (items[0]?.items[0]) {
@@ -63,6 +75,23 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
             stats.find((stat) => stat.label?.toLowerCase() === FOLDERS.SENT)?.count ?? 0;
         }
       }
+      if (currentSection === 'mail' && pendingQueueCount > 0) {
+        const queueItem = items.flatMap((item) => item.items).find((item) => item.id === 'queue');
+        if (queueItem) {
+          const BaseIcon = queueItem.icon;
+          queueItem.icon = React.forwardRef<SVGSVGElement, React.SVGProps<SVGSVGElement>>(
+            ({ className, ...iconProps }, ref) => (
+              <span className={cn('relative inline-flex shrink-0', className)}>
+                <BaseIcon {...iconProps} ref={ref} className="h-4 w-4" />
+                <span className="absolute -right-2 -top-2 flex h-4 min-w-4 items-center justify-center rounded-full bg-emerald-600 px-1 text-[10px] font-semibold leading-none text-white">
+                  {pendingQueueCount > 99 ? '99+' : pendingQueueCount}
+                </span>
+              </span>
+            ),
+          );
+          queueItem.icon.displayName = 'QueueNavIconWithBadge';
+        }
+      }
 
       return { currentSection, navItems: items };
     } else {
@@ -71,7 +100,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         navItems: [],
       };
     }
-  }, [location.pathname, stats]);
+  }, [location.pathname, stats, pendingQueueCount]);
 
   const showComposeButton = currentSection === 'mail';
   const { state } = useSidebar();

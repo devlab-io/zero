@@ -43,8 +43,10 @@ export const createLoggingMiddleware = () => {
         const userId = c.var.sessionUser?.id;
 
         // Initialize logging service
+        // Devlab: Datadog export is opt-in — without DD_API_KEY, skip silently
+        // instead of constructing-and-throwing on every single tRPC call.
         let loggingService: LoggingService | undefined;
-        if (userId && c.env) {
+        if (userId && c.env && c.env.DD_API_KEY && c.env.DD_APP_KEY) {
             try {
                 loggingService = new LoggingService(c.env);
                 loggingService.initializeSession(sessionId, userId);

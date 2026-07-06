@@ -220,12 +220,14 @@ const Thread = memo(
         <div
           className={cn('select-none border-b md:my-1 md:border-none')}
           onClick={onClick ? onClick(latestMessage) : undefined}
-          //   onMouseEnter={() => {
-          //     window.dispatchEvent(new CustomEvent('emailHover', { detail: { id: idToUse } }));
-          //   }}
-          //   onMouseLeave={() => {
-          //     window.dispatchEvent(new CustomEvent('emailHover', { detail: { id: null } }));
-          //   }}
+          // Devlab: hover targeting restored — required for Superhuman-style
+          // single-key actions (d/r/a/f/h) on the thread under the cursor.
+          onMouseEnter={() => {
+            window.dispatchEvent(new CustomEvent('emailHover', { detail: { id: idToUse } }));
+          }}
+          onMouseLeave={() => {
+            window.dispatchEvent(new CustomEvent('emailHover', { detail: { id: null } }));
+          }}
         >
           <div
             data-thread-id={idToUse}

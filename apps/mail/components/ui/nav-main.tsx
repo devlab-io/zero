@@ -59,9 +59,12 @@ export function NavMain({ items }: NavMainProps) {
   const { data: intercomToken } = useQuery(trpc.user.getIntercomToken.queryOptions());
 
   React.useEffect(() => {
-    if (intercomToken) {
+    // Devlab: Intercom was hardcoded to the editor's workspace ('aavenrba'),
+    // identifying every self-host user against THEIR support console. Opt-in now.
+    const intercomAppId = import.meta.env.VITE_PUBLIC_INTERCOM_APP_ID as string | undefined;
+    if (intercomToken && intercomAppId) {
       Intercom({
-        app_id: 'aavenrba',
+        app_id: intercomAppId,
         intercom_user_jwt: intercomToken,
       });
     }

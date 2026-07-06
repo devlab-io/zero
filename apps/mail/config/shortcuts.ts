@@ -122,6 +122,28 @@ const threadDisplayShortcuts: Shortcut[] = [
     description: 'Move to Bin',
     scope: 'thread-display',
   },
+  // Devlab — Superhuman-style keys
+  {
+    keys: ['d'],
+    action: 'archive',
+    type: 'single',
+    description: 'Done — archive and go to next',
+    scope: 'thread-display',
+  },
+  {
+    keys: ['e'],
+    action: 'archive',
+    type: 'single',
+    description: 'Archive (Gmail muscle-memory alias)',
+    scope: 'thread-display',
+  },
+  {
+    keys: ['h'],
+    action: 'remind',
+    type: 'single',
+    description: 'Remind me tomorrow 8am (snooze)',
+    scope: 'thread-display',
+  },
 ];
 
 const navigation: Shortcut[] = [
@@ -225,8 +247,18 @@ const globalShortcuts: Shortcut[] = [
 ];
 
 const mailListShortcuts: Shortcut[] = [
+  // Devlab — Superhuman-style keys: d=done, r=reply, a=reply all, f=forward, h=remind.
+  // Mark-as-read moved to 'm'; delete moved to mod+backspace (a bare key for a
+  // destructive bulk action was an accident waiting to happen).
   {
     keys: ['r'],
+    action: 'replyToThread',
+    type: 'single',
+    description: 'Reply to focused email',
+    scope: 'mail-list',
+  },
+  {
+    keys: ['m'],
     action: 'markAsRead',
     type: 'single',
     description: 'Mark as read',
@@ -248,17 +280,39 @@ const mailListShortcuts: Shortcut[] = [
   },
   {
     keys: ['a'],
-    action: 'bulkArchive',
+    action: 'replyAllToThread',
     type: 'single',
-    description: 'Bulk archive',
+    description: 'Reply all to focused email',
+    scope: 'mail-list',
+  },
+  {
+    keys: ['f'],
+    action: 'forwardThread',
+    type: 'single',
+    description: 'Forward focused email',
     scope: 'mail-list',
   },
   {
     keys: ['d'],
-    action: 'bulkDelete',
+    action: 'archiveEmail',
     type: 'single',
-    description: 'Bulk delete',
+    description: 'Done — archive',
     scope: 'mail-list',
+  },
+  {
+    keys: ['h'],
+    action: 'remindThread',
+    type: 'single',
+    description: 'Remind me tomorrow 8am (snooze)',
+    scope: 'mail-list',
+  },
+  {
+    keys: ['mod', 'backspace'],
+    action: 'bulkDelete',
+    type: 'combination',
+    description: 'Delete (move to bin)',
+    scope: 'mail-list',
+    preventDefault: true,
   },
   {
     keys: ['s'],

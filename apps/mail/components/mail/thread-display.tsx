@@ -182,6 +182,15 @@ export function ThreadDisplay() {
   const [activeReplyId, setActiveReplyId] = useQueryState('activeReplyId');
   const [, setDraftId] = useQueryState('draftId');
 
+  // Devlab: threads can be opened directly in reply/replyAll/forward mode from the
+  // mail list (r / a / f). When a mode arrives without an explicit reply target,
+  // default to the latest message once the thread has loaded.
+  useEffect(() => {
+    if (mode && !activeReplyId && emailData?.messages?.length) {
+      setActiveReplyId(emailData.messages[emailData.messages.length - 1]?.id ?? '');
+    }
+  }, [mode, activeReplyId, emailData?.messages, setActiveReplyId]);
+
   const [focusedIndex, setFocusedIndex] = useAtom(focusedIndexAtom);
   const trpc = useTRPC();
   const { mutateAsync: toggleImportant } = useMutation(trpc.mail.toggleImportant.mutationOptions());
