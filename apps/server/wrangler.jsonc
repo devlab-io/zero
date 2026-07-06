@@ -250,6 +250,9 @@
           "index_name": "messages-vector-staging",
         },
       ],
+      "limits": {
+        "cpu_ms": 300000,
+      },
       "durable_objects": {
         "bindings": [
           {
