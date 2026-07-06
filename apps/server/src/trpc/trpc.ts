@@ -2,6 +2,8 @@ import { getActiveConnection, getZeroDB } from '../lib/server-utils';
 import { Ratelimit, type RatelimitConfig } from '@upstash/ratelimit';
 import type { HonoContext, HonoVariables } from '../ctx';
 import { getConnInfo } from 'hono/cloudflare-workers';
+import { env } from 'cloudflare:workers';
+import type { ZeroEnv } from '../env';
 import { initTRPC, TRPCError } from '@trpc/server';
 import { createLoggingMiddleware } from '../lib/trpc-logging';
 
@@ -144,6 +146,9 @@ export const createRateLimiterMiddleware = (config: {
   generatePrefix: (ctx: TrpcContext, input: any) => string;
 }) =>
   t.middleware(async ({ next, ctx, input }) => {
+    // Devlab self-host: sans Redis, pas de rate limiting (no-op).
+    const zenv = env as unknown as ZeroEnv;
+    if (!zenv.REDIS_URL || !zenv.REDIS_TOKEN) return next();
     const ratelimiter = new Ratelimit({
       redis: redis(),
       limiter: config.limiter,

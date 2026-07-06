@@ -326,23 +326,29 @@ export const createAuth = () => {
 };
 
 const createAuthConfig = () => {
-  const cache = redis();
+  // Devlab self-host: Redis optionnel — sans REDIS_URL/TOKEN, better-auth
+  // retombe sur Postgres seul (pas de secondaryStorage).
+  const cache = env.REDIS_URL && env.REDIS_TOKEN ? redis() : null;
   const { db } = createDb(env.HYPERDRIVE.connectionString);
   return {
     database: drizzleAdapter(db, { provider: 'pg' }),
-    secondaryStorage: {
-      get: async (key: string) => {
-        const value = await cache.get(key);
-        return typeof value === 'string' ? value : value ? JSON.stringify(value) : null;
-      },
-      set: async (key: string, value: string, ttl?: number) => {
-        if (ttl) await cache.set(key, value, { ex: ttl });
-        else await cache.set(key, value);
-      },
-      delete: async (key: string) => {
-        await cache.del(key);
-      },
-    },
+    ...(cache
+      ? {
+          secondaryStorage: {
+            get: async (key: string) => {
+              const value = await cache.get(key);
+              return typeof value === 'string' ? value : value ? JSON.stringify(value) : null;
+            },
+            set: async (key: string, value: string, ttl?: number) => {
+              if (ttl) await cache.set(key, value, { ex: ttl });
+              else await cache.set(key, value);
+            },
+            delete: async (key: string) => {
+              await cache.del(key);
+            },
+          },
+        }
+      : {}),
     advanced: {
       ipAddress: {
         disableIpTracking: true,
