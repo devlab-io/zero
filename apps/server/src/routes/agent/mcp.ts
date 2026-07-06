@@ -16,8 +16,10 @@
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { getThread, getZeroAgent } from '../../lib/server-utils';
+import { sanitizeMailContent } from '../../lib/mail-sanitize';
 import { composeEmail } from '../../trpc/routes/ai/compose';
 import { getCurrentDateContext } from '../../lib/prompts';
+import { enqueueDraftJob } from '../../lib/draft-outbox';
 import { connection } from '../../db/schema';
 import { FOLDERS } from '../../lib/utils';
 import { env } from 'cloudflare:workers';
@@ -25,6 +27,21 @@ import { eq, and } from 'drizzle-orm';
 import { McpAgent } from 'agents/mcp';
 import { createDb } from '../../db';
 import z from 'zod';
+
+const draftRecipientSchema = z.object({
+  email: z.string(),
+  name: z.string().optional(),
+});
+
+type DraftRecipient = z.infer<typeof draftRecipientSchema>;
+
+const formatDraftRecipient = (recipient: DraftRecipient) => {
+  if (!recipient.name) return recipient.email;
+  return `${recipient.name.replace(/[<>]/g, '').trim()} <${recipient.email}>`;
+};
+
+const formatDraftRecipients = (recipients: DraftRecipient[]) =>
+  recipients.map(formatDraftRecipient).join(', ');
 
 export class ZeroMCP extends McpAgent<typeof env, Record<string, unknown>, { userId: string }> {
   server = new McpServer({
@@ -235,73 +252,81 @@ export class ZeroMCP extends McpAgent<typeof env, Record<string, unknown>, { use
     );
 
     this.server.registerTool(
-      'sendEmail',
+      'createDraft',
       {
-        description: 'Send a new email',
+        description: 'Create a Gmail draft for later human review',
         inputSchema: {
-          to: z.array(
-            z.object({
-              email: z.string(),
-              name: z.string().optional(),
-            }),
-          ),
+          to: z.array(draftRecipientSchema),
           subject: z.string(),
           message: z.string(),
-          cc: z
-            .array(
-              z.object({
-                email: z.string(),
-                name: z.string().optional(),
-              }),
-            )
-            .optional(),
-          bcc: z
-            .array(
-              z.object({
-                email: z.string(),
-                name: z.string().optional(),
-              }),
-            )
-            .optional(),
+          cc: z.array(draftRecipientSchema).optional(),
+          bcc: z.array(draftRecipientSchema).optional(),
           threadId: z.string().optional(),
-          draftId: z.string().optional(),
         },
       },
       async (data) => {
         if (!this.activeConnectionId) {
           throw new Error('No active connection');
         }
-        try {
-          const { draftId, ...mail } = data;
+        const draft = await agent.createDraft({
+          to: formatDraftRecipients(data.to),
+          cc: data.cc?.length ? formatDraftRecipients(data.cc) : undefined,
+          bcc: data.bcc?.length ? formatDraftRecipients(data.bcc) : undefined,
+          subject: data.subject,
+          message: data.message,
+          attachments: [],
+          id: null,
+          threadId: data.threadId ?? null,
+          fromEmail: null,
+        });
 
-          if (draftId) {
-            await agent.sendDraft(draftId, {
-              ...mail,
-              attachments: [],
-              headers: {},
-            });
-          } else {
-            await agent.create({
-              ...mail,
-              attachments: [],
-              headers: {},
-            });
-          }
-
-          return {
-            content: [
-              {
-                type: 'text' as const,
-                text: 'Email sent successfully',
-              },
-            ],
-          };
-        } catch (error) {
-          console.error('Error sending email:', error);
-          throw new Error(
-            'Failed to send email: ' + (error instanceof Error ? error.message : String(error)),
-          );
+        if (draft?.error) {
+          throw new Error(`Failed to create draft: ${draft.error}`);
         }
+
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: draft?.id ? `Draft created: ${draft.id}` : 'Draft created',
+            },
+          ],
+        };
+      },
+    );
+
+    this.server.registerTool(
+      'enqueueDraftJob',
+      {
+        description: 'Queue a draft job in the outbox for later human review',
+        inputSchema: {
+          threadId: z.string().optional(),
+          mission: z.string().optional(),
+          subject: z.string().optional(),
+          body: z.string().optional(),
+        },
+      },
+      async (data) => {
+        if (!this.activeConnectionId) {
+          throw new Error('No active connection');
+        }
+
+        const queued = await enqueueDraftJob(db, {
+          connectionId: this.activeConnectionId,
+          threadId: data.threadId ?? null,
+          mission: data.mission ?? null,
+          subject: data.subject ?? null,
+          body: data.body ?? null,
+        });
+
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: `Draft job queued: ${queued.id}`,
+            },
+          ],
+        };
       },
     );
 
@@ -378,7 +403,7 @@ export class ZeroMCP extends McpAgent<typeof env, Record<string, unknown>, { use
           },
           {
             type: 'text' as const,
-            text: `Latest Message Raw Content: ${thread.latest?.decodedBody}`,
+            text: `Latest Message Sanitized Content: ${sanitizeMailContent(thread.latest?.decodedBody).text}`,
           },
           {
             type: 'text' as const,
