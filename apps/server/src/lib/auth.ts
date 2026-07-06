@@ -159,13 +159,12 @@ const connectionHandlerHook = async (account: Account) => {
 
 export const createAuth = () => {
   const twilioClient = twilio();
-  const dub = new Dub();
 
   return betterAuth({
     plugins: [
-      dubAnalytics({
-        dubClient: dub,
-      }),
+      // Devlab: Dub attribution analytics is opt-in — only wire the plugin when a
+      // DUB_API_KEY is configured; otherwise auth events tried to phone dub.co.
+      ...(env.DUB_API_KEY ? [dubAnalytics({ dubClient: new Dub() })] : []),
       mcp({
         loginPage: env.VITE_PUBLIC_APP_URL + '/login',
       }),
