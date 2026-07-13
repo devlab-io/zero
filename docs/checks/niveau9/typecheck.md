@@ -12,6 +12,15 @@ mail (constat mesuré vague 1). Scoping des gates :
   (shared-types-package) : son acceptation inclut `pnpm --filter @zero/mail exec tsc
   --noEmit` = 0 TOTAL. Le palier A2 final du barème reste 0 erreur ×2 apps — aucun
   affaiblissement de la cible finale du run.
+- Amendement 2 (RULING cascade 2026-07-13, #13 — re-gel freeze/niveau9-v4) : PROUVÉ hors
+  de portée du périmètre de #25 par deux jobs indépendants (#25/ADR 0004 : double racine
+  trpc+auth, émission .d.ts impossible TS2742/zod v4 bundlée ; #29 : découplage env.ts
+  non viable, mesures 0→76 / 17→97). Le gate `tsc mail direct = 0 TOTAL` est transféré
+  NOMMÉMENT — 2ᵉ et DERNIER transfert (3ᵉ échec = stop architecture, D9) — à l'issue
+  corrective `trpc-type-boundary` (coupe à l'exposition des types : AppRouter/contexte
+  tRPC/auth). #25 est jugé sur son périmètre livré (package @zero/types, 5 imports
+  percés éliminés, frontière relative 0 + règle ESLint, FRONTIER_MAX 0), mail ratchet
+  ≤17 inchangé. Le palier A2 FINAL du barème reste 0 erreur ×2 apps.
 - Tout libellé CI/digest du typecheck nomme les deux compteurs (« server strict = 0
   (bloquant) · mail ratchet ≤17 ») — jamais « typecheck vert » tant que mail ≠ 0 total.
 
