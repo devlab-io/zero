@@ -1,9 +1,9 @@
 # Checkrun: w2g-i18n-01-checkrun
-generated: 2026-07-13T20:59:29Z  runner: sh  config: /Users/thomasverdenne/cc/zero/.architect/checkrun-w2g-01.json
-check_file: docs/checks/niveau9/grading-rubric.md  freeze_sha: 453c6ef37e72026a2de89443f983989c4e74379b
+generated: 2026-07-13T21:14:19Z  runner: sh  config: /Users/thomasverdenne/cc/zero/.architect/checkrun-w2g-01.json
+check_file: docs/checks/niveau9/grading-rubric.md  freeze_sha: bdb4a4966e66f71ebd866de32f6f973db9091543
 executor_config: bash
-integrity: check_file_matches_freeze=true head=6e327865a1e0e7d38968086907445a44776c4d21
-changed_files: 24 listed below; docs_checks_touched=false
+integrity: check_file_matches_freeze=true head=a9b48c3865ef63106d32fbf45490044e70888320
+changed_files: 25 listed below; docs_checks_touched=false
 apps/mail/app/(auth)/zero/login/page.tsx
 apps/mail/app/(auth)/zero/signup/page.tsx
 apps/mail/app/(routes)/settings/categories/page.tsx
@@ -27,4 +27,5 @@ apps/mail/hooks/use-undo-send.ts
 apps/mail/messages/en.json
 apps/mail/messages/fr.json
 apps/mail/providers/voice-provider.tsx
+docs/jobs/niveau9/w2g-i18n-01-checkrun.md
 docs/jobs/niveau9/w2g-i18n-01.md
