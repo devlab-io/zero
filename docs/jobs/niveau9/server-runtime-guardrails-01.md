@@ -200,8 +200,50 @@ db-push-guard :
   couvre le script db:push, ce fichier en est l'implémentation).
 - `apps/server/src/env-schema.ts` (nouveau) : extraction pure du schéma pour testabilité Node.
 
-### En attente
-- **D1** : `catch{}` vide restant = driver:181 (#42). Ta décision demandée (waiver 1 ligne ou
-  #42 avant juge froid). N'affecte que le RUN whole-server ; mon périmètre = 0.
+### env.ts — découplage graphe profond (addendum #25) : TENTÉ, IMPOSSIBLE proprement
 
-STATUS: PASS (tsc 0 · 23 tests · ratchet/typecheck/agent-surface/migrations verts · wrangler dry-run OK · D1 cross-frontière #42 en attente de ruling)
+Ruling addendum : découpler `env.ts` de `import type … from './main'` + `'./routes/agent'`
+(qui font tirer le graphe serveur profond dans le tsc de mail via `@zero/server/{trpc,auth}`
+→ racine des 17 erreurs mail).
+
+Investigation + test empirique (env.ts seul, dans ma boundary) :
+- Les bindings DO de `ZeroEnv` sont typés `DurableObjectNamespace<ClasseConcrète & QueryableHandler>`.
+  Le code serveur en dépend réellement : `server-utils.ts` appelle `.setName`, `.setupAuth`,
+  `.getThread`, `.modifyThreadLabelsInDB`, `.getDatabaseSize`, `.forceReSync`, etc. (5 sites
+  `.get()` + `getZeroAgent` consommé partout, dont pipelines.ts #31 et routes/agent/sync.ts #42).
+- Piste privilégiée du ruling (dériver de l'ambient `Cloudflare.Env['ZERO_*']`, sans import
+  de classes) — **MESURÉ** :
+
+  | | tsc server | tsc mail |
+  |---|---|---|
+  | avant (imports profonds) | **0** | **17** |
+  | après (dérivation Cloudflare.Env) | **76** | **97** |
+
+  Server explose (perte de `& QueryableHandler`/méthodes concrètes → 76 erreurs, dont dans
+  #42/#31 intouchables) ET mail empire (l'ambient `Cloudflare.Env` de mail n'a pas ces DO → 97).
+
+- Piste 2 du ruling (stubs structurels locaux / interfaces vides) — **bloquée structurellement** :
+  le blocage n'est pas seulement server-utils.ts (éditable), il y a un usage DIRECT des types DO
+  concrets DANS des fichiers hors boundary :
+  - `routes/agent/sync.ts:99` (#42) : `this.env.THREAD_SYNC_WORKER.get(...).syncThread(connection, …)`
+    — pour typechecker, `ZeroEnv.THREAD_SYNC_WORKER` DOIT porter `syncThread` avec la bonne
+    signature ; un stub local devrait re-déclarer cette signature (types `connection`/retour =
+    types-domaine du concret) → re-tire le graphe, ou casse #42 que je ne touche pas.
+  - `pipelines.ts` (#31) : consomme `getZeroAgent(...).stub.<méthodes concrètes>` — même
+    contrainte, hors boundary.
+  Reconstruire des interfaces locales = re-déclarer toute la surface RPC des DO avec des
+  signatures typées-domaine (fragile, dupliqué, et les signatures re-tirent le graphe). Ce n'est
+  pas propre dans env.ts seul.
+
+Conclusion : **le découplage n'est pas réalisable proprement dans la boundary env.ts** (bloqué par
+l'usage direct des types DO concrets dans #42 `routes/agent/sync.ts:99` et #31 `pipelines.ts`, +
+re-fuite des types-domaine via toute reconstruction de stub). La vraie correction est en amont
+(#25) : couper la chaîne AppRouter → contexte tRPC → `env: ZeroEnv` → classes DO au niveau de
+l'exposition des types (packages/types / exports / contexte tRPC), au-delà de env.ts et croisant
+#42/#31. `env.ts` restauré à l'état qui marche (server 0, mail 17). → Issue corrective pour #25.
+
+### En attente
+- **D1** : `catch{}` vide restant = driver:181 (#42). RULING reçu : jugé sur mon périmètre
+  (= 0) ; résidu 1 consigné et DÛ par #42. Rien à faire de mon côté. ✓
+
+STATUS: COMPLETE_WITH_CONCERNS — 7/7 points d'acceptation livrés et vérifiés (tsc server 0 · 23 tests · console 440→132, périmètre 314→0 · console-ratchet/typecheck-report bloquant/check-agent-surface/migrations-consistency/wrangler dry-run tous verts). Concerns : (1) Sentry via client enveloppe minimal, pas le SDK — le SDK casse le gate tsc-0 (ADR 0005, ruling ACCEPTÉ) ; (2) découplage graphe profond env.ts IMPOSSIBLE proprement dans la boundary — bloqué par l'usage direct des types DO concrets dans #42/#31 → issue corrective #25 ; (3) `catch{}` vide résiduel driver:181 = dette nominale de #42 (mon périmètre = 0, ruling ACCEPTÉ). Non commité.
