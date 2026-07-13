@@ -252,7 +252,7 @@ courant). Montage MINIMAL dans `thread-display.tsx` : **+3 lignes** (import + `<
 aucune autre modification — le composant lit `picker`/`threadId`/`folder` lui-même. Handlers
 `openLabels`/`openMove` (thread-display-hotkeys) posent la query-state `picker`. Logique pure
 extraite + testée : `label-move-picker.logic.ts` (`availableMoveDestinations`, `isLabelOnThread`)
-— 5 tests.
+— 3 tests. *(Correction orchestrateur : le rapport annonçait « 5 tests » ; comptage réel = 3 `it()`.)*
 
 **(c) `g s` starred — Piste 1 (nav vers la recherche existante).** `ALLOWED_FOLDERS` n'a pas de
 `starred`, mais `use-threads` lit `searchValue.value` comme `q` de la requête. Donc `g s` =

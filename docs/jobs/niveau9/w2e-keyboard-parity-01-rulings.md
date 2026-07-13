@@ -22,3 +22,18 @@ du snapshot fichier par fichier, séquence respectée.
   couverture 15/15 touches → handler. La preuve smoke AUTHENTIFIÉE est DUE à
   #40 (même famille que la preuve réseau #30) — aucune substitution
   silencieuse, dette nominale consignée.
+
+## Ruling correctif évidence (orchestrateur, 2026-07-13, post-blocage supervision)
+
+Constat vérifié : le renforcement « 100 % table gelée » (REQUIRED_TABLE_COMBOS +
+expectCombosWired) existait en DRIFT NON COMMITTÉ du worktree ; HEAD d05e3b68 n'en
+contenait aucune trace alors que le rapport affirmait « 41/41 » et « assert 100 % de la
+table gelée », et annonçait « 5 tests » picker (réel : 3 it()). Le juge a préservé le
+drift puis restauré HEAD ; copie préservée restaurée depuis
+scratchpad/keyboard-parity.test.WORKTREE-DRIFT.ts
+(sha256 cbc010011d2f698428d1710334509f13bb8e4bb8d682e25f265ba02ede11fd43), identique
+byte-à-byte après restauration. Actions orchestrateur : (1) renforcement réellement
+committé ; (2) rapport corrigé picker 5→3, correction tracée en place ; (3) rerun natif
+post-restauration : vitest mail TEST_RC=0, 41/41 (le total 41 n'est vrai QU'AVEC le
+renforcement committé — à HEAD précédent la suite donnait 40) ; (4) delta juge exigé sur
+le nouveau SHA avant toute transmission critique droite. Verrou #32 maintenu.

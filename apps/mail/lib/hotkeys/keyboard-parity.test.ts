@@ -95,22 +95,52 @@ describe('Shortwave keyboard parity — registry ↔ handler coverage (frozen ch
       '/', 'c', 'r', 'a', 'f', 'd', 'h', 's', 'j', 'k', 'x',
       'g+i', 'mod+k', 'shift+?', 'escape',
     ];
-    const missing: string[] = [];
-    for (const wanted of SMOKE_COMBOS) {
-      const rows = keyboardShortcuts.filter((shortcut) => combo(shortcut) === wanted);
-      if (rows.length === 0) {
-        missing.push(`${wanted} — not registered`);
-        continue;
-      }
-      const anyWired = rows.some((shortcut) => {
-        const resolved = resolveHandledSet(shortcut);
-        return resolved?.set.includes(shortcut.action);
-      });
-      if (!anyWired) missing.push(`${wanted} — registered but unwired`);
-    }
-    expect(missing).toEqual([]);
+    expectCombosWired(SMOKE_COMBOS);
+  });
+
+  // 100% of the frozen table — docs/spec/niveau8-mailos.md §Shortwave keyboard contract.
+  // Every in-scope key combo must be registered AND resolve to a live handler. The spec's
+  // out-of-parity carve-outs (team sharing/assignment/channels/todos, AI snippets,
+  // favorite-search number slots, account-number switching) are intentionally NOT here.
+  it('every in-scope frozen-table key combo is registered and wired', () => {
+    const REQUIRED_TABLE_COMBOS = [
+      // Compose
+      'c', 'r', 'a', 'f', 'mod+enter', 'mod+shift+enter',
+      // Global
+      '/', 'escape', 'shift+?', 'mod+/', 'mod+k', 'mod+shift+k', 'mod+shift+p', 'mod+,',
+      'mod+shift+l', 'mod+z',
+      // Thread
+      'd', 'e', '[', ']', 'b', 'h', 's', 'l', 'v', '#', 'delete', 'mod+backspace',
+      'u', 'shift+u', 'shift+i', '+', '-',
+      // List
+      'j', 'arrowdown', 'k', 'arrowup', 'x', 'enter', 'arrowright', 'arrowleft',
+      'space', 'shift+space',
+      // Layout
+      'mod+\\',
+      // Navigate (g …)
+      'g+i', 'g+s', 'g+b', 'g+h', 'g+e', 'g+t', 'g+d', 'g+!', 'g+#',
+    ];
+    expectCombosWired(REQUIRED_TABLE_COMBOS);
   });
 });
+
+/** Assert each key combo is registered AND at least one of its rows resolves to a handler. */
+function expectCombosWired(combos: string[]) {
+  const missing: string[] = [];
+  for (const wanted of combos) {
+    const rows = keyboardShortcuts.filter((shortcut) => combo(shortcut) === wanted);
+    if (rows.length === 0) {
+      missing.push(`${wanted} — not registered`);
+      continue;
+    }
+    const anyWired = rows.some((shortcut) => {
+      const resolved = resolveHandledSet(shortcut);
+      return resolved?.set.includes(shortcut.action);
+    });
+    if (!anyWired) missing.push(`${wanted} — registered but unwired`);
+  }
+  expect(missing).toEqual([]);
+}
 
 describe('single-key exclusion — isTypingOrModalTarget (frozen check #4)', () => {
   it('is true for input, textarea and select elements', () => {
