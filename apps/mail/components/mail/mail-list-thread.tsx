@@ -3,7 +3,8 @@ import { memo, useCallback, useMemo } from 'react';
 import { useOptimisticThreadState } from '@/components/mail/optimistic-thread-state';
 import { focusedIndexAtom } from '@/hooks/use-mail-navigation';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import type { ThreadProps } from '@/types';
+import type { MailListItem } from '@/hooks/use-mail-list-data';
+import type { IGetThreadResponse, ParsedMessage } from '@zero/types';
 import { ThreadContextMenu } from '@/components/context/thread-context';
 import { useOptimisticActions } from '@/hooks/use-optimistic-actions';
 import { useMail, type Config } from '@/components/mail/use-mail';
@@ -25,18 +26,69 @@ import { Check } from 'lucide-react';
 import { useQueryState } from 'nuqs';
 import { useAtom } from 'jotai';
 
+/**
+ * #30 — synthesize the thread-row view model from the rich list projection (subject /
+ * sender / date / labels / unread) WITHOUT fetching the body. Labels double as `tags` so
+ * STARRED / IMPORTANT detection keeps working; `body` stays empty (snippet removed by ruling).
+ */
+function buildProjectedThreadData(message: MailListItem): IGetThreadResponse {
+  const labels = message.labels ?? [];
+  const latest: ParsedMessage = {
+    id: message.id,
+    threadId: message.id,
+    title: message.subject ?? '',
+    subject: message.subject ?? '',
+    tags: labels.map((label) => ({ id: label.id, name: label.name, type: 'label' })),
+    sender: message.sender ?? { email: '' },
+    to: [],
+    cc: null,
+    bcc: null,
+    tls: false,
+    receivedOn: message.receivedOn ?? '',
+    unread: message.unread ?? false,
+    body: '',
+    processedHtml: '',
+    blobUrl: '',
+  };
+  return {
+    messages: [latest],
+    latest,
+    hasUnread: message.unread ?? false,
+    totalReplies: 0,
+    labels,
+  };
+}
+
 export const Thread = memo(
   function Thread({
     message,
     onClick,
     isKeyboardFocused,
     index,
-  }: ThreadProps & { index?: number }) {
+  }: {
+    message: MailListItem;
+    onClick?: (message: ParsedMessage) => () => void;
+    isKeyboardFocused?: boolean;
+    index?: number;
+  }) {
     const [searchValue] = useSearchValue();
     const { folder } = useParams<{ folder: string }>();
     const [, threads] = useThreads();
     const [threadId] = useQueryState('threadId');
-    const { data: getThreadData, isGroupThread, latestDraft } = useThread(message.id);
+    // #30: rich-projection rows render from `message` and DO NOT fetch the body
+    // (enabled:false → no per-row mail.get, no processEmailContent). Thin rows (search,
+    // via rawListThreads) fall back to the per-thread fetch so search keeps working.
+    // Sent is excluded: its row shows recipients (latestMessage.to), which the threads
+    // projection does not carry — keep fetching there to preserve that display.
+    const isProjected = message.unread !== undefined && folder !== FOLDERS.SENT;
+    const thread = useThread(message.id, { enabled: !isProjected });
+    const projectedData = useMemo(
+      () => (isProjected ? buildProjectedThreadData(message) : undefined),
+      [isProjected, message],
+    );
+    const getThreadData = isProjected ? projectedData : thread.data;
+    const isGroupThread = isProjected ? false : thread.isGroupThread;
+    const latestDraft = isProjected ? undefined : thread.latestDraft;
     const [id, setThreadId] = useQueryState('threadId');
     const [focusedIndex, setFocusedIndex] = useAtom(focusedIndexAtom);
 
@@ -441,11 +493,21 @@ export const Thread = memo(
     ) : null;
   },
   (prev, next) => {
+    const p = prev.message;
+    const n = next.message;
+    // #30: the row now renders from the projection carried on `message`, so the memo must
+    // also compare the projected fields — otherwise a server refetch that updates
+    // subject/date/unread/sender/labels would be dropped by the id-only comparison.
     const isSameMessage =
-      prev.message.id === next.message.id &&
+      p.id === n.id &&
       prev.isKeyboardFocused === next.isKeyboardFocused &&
       prev.index === next.index &&
-      Object.is(prev.onClick, next.onClick);
+      Object.is(prev.onClick, next.onClick) &&
+      p.subject === n.subject &&
+      p.receivedOn === n.receivedOn &&
+      p.unread === n.unread &&
+      (p.sender?.email ?? '') === (n.sender?.email ?? '') &&
+      (p.labels?.length ?? 0) === (n.labels?.length ?? 0);
     return isSameMessage;
   },
 );

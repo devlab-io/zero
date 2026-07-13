@@ -62,7 +62,7 @@ export const useThreads = () => {
   return [threadsQuery, threads, isReachingEnd, loadMore] as const;
 };
 
-export const useThread = (threadId: string | null) => {
+export const useThread = (threadId: string | null, options?: { enabled?: boolean }) => {
   const { data: session } = useSession();
   const [_threadId] = useQueryState('threadId');
   const id = threadId ? threadId : _threadId;
@@ -70,13 +70,16 @@ export const useThread = (threadId: string | null) => {
   const { data: settings } = useSettings();
   const { theme: systemTheme } = useTheme();
 
+  // #30: list rows served from the rich projection pass { enabled: false } so opening the
+  // inbox triggers NO per-row mail.get (and no processEmailContent). The body is fetched
+  // only for the active thread and for thin paths (search) that lack the projection.
   const threadQuery = useQuery(
     trpc.mail.get.queryOptions(
       {
         id: id!,
       },
       {
-        enabled: !!id && !!session?.user.id,
+        enabled: (options?.enabled ?? true) && !!id && !!session?.user.id,
         staleTime: 1000 * 60 * 60, // 1 minute
       },
     ),

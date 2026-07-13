@@ -9,11 +9,10 @@ import {
   deleteAllSpam,
   reSyncThread,
 } from '../../lib/server-utils';
-import {
-  IGetThreadResponseSchema,
-  IGetThreadsResponseSchema,
-  type IGetThreadsResponse,
-} from '../../lib/driver/types';
+import { IGetThreadResponseSchema, type IGetThreadsResponse } from '../../lib/driver/types';
+// V4.1 list-projection (issue #30) : la liste sert la projection riche (superset de
+// IGetThreadsResponse). Élargit le .output() pour ne PAS stripper subject/sender/date/labels/unread.
+import { ThreadsResponseSchema } from '@zero/types';
 import { updateWritingStyleMatrix } from '../../services/writing-style-service';
 import type { DeleteAllSpamResponse, IEmailSendBatch } from '../../types';
 import { activeDriverProcedure, router, privateProcedure } from '../trpc';
@@ -82,7 +81,7 @@ export const mailRouter = router({
         labelIds: z.array(z.string()).optional().default([]),
       }),
     )
-    .output(IGetThreadsResponseSchema)
+    .output(ThreadsResponseSchema)
     .query(async ({ ctx, input }) => {
       const { folder, maxResults, cursor, q, labelIds } = input;
       const { activeConnection } = ctx;

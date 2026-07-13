@@ -25,14 +25,69 @@
  * projection *content*.
  */
 
-import type { IGetThreadResponse, IGetThreadsResponse } from '../../lib/driver/types';
+import type { IGetThreadResponse } from '../../lib/driver/types';
+import type { ThreadsResponse } from '@zero/types';
 import { GmailSearchAssistantSystemPrompt } from '../../lib/prompts';
 import type { ZeroDriverInternal } from './internal';
-import type { ParsedMessage } from '../../types';
+import type { ParsedMessage, Sender } from '../../types';
 import { get, getThreadLabels } from './db';
+import { threadLabels as threadLabelsTable, labels as labelsTable } from './db/schema';
+import { inArray, eq } from 'drizzle-orm';
 import { openai } from '@ai-sdk/openai';
 import { generateText } from 'ai';
-import { Effect, pipe } from 'effect';
+import { Effect } from 'effect';
+
+/** Row shape carried out of {@link queryThreads}: id + the rich list columns (#30). */
+type ThreadRow = {
+  id: string;
+  latest_received_on: string | null;
+  latest_subject: string | null;
+  latest_sender: Sender | null;
+};
+
+/** Project a `threads` DB row down to the rich list-projection row (#30). */
+function projectRow(thread: {
+  id: string;
+  latestReceivedOn: string | null;
+  latestSubject: string | null;
+  latestSender: Sender | null;
+}): ThreadRow {
+  return {
+    id: String(thread.id),
+    latest_received_on: thread.latestReceivedOn ?? null,
+    latest_subject: thread.latestSubject ?? null,
+    latest_sender: thread.latestSender ?? null,
+  };
+}
+
+/**
+ * Batch-load `thread_labels` for a page of threads in ONE query (#30). Keeps the list
+ * path from doing a per-row label lookup; reads `self.db` without touching `db/**`.
+ */
+async function getLabelsForThreads(
+  db: ZeroDriverInternal['db'],
+  threadIds: string[],
+): Promise<Map<string, { id: string; name: string }[]>> {
+  const byThread = new Map<string, { id: string; name: string }[]>();
+  if (threadIds.length === 0) return byThread;
+
+  const rows = await db
+    .select({
+      threadId: threadLabelsTable.threadId,
+      id: labelsTable.id,
+      name: labelsTable.name,
+    })
+    .from(threadLabelsTable)
+    .innerJoin(labelsTable, eq(labelsTable.id, threadLabelsTable.labelId))
+    .where(inArray(threadLabelsTable.threadId, threadIds));
+
+  for (const row of rows) {
+    const list = byThread.get(row.threadId);
+    if (list) list.push({ id: row.id, name: row.name });
+    else byThread.set(row.threadId, [{ id: row.id, name: row.name }]);
+  }
+  return byThread;
+}
 
 /** R2 object key for a thread's stored message bodies. */
 function threadKey(name: string, threadId: string) {
@@ -171,7 +226,7 @@ function queryThreads(
     maxResults: number;
   },
 ) {
-  return Effect.tryPromise(async () => {
+  return Effect.tryPromise(async (): Promise<ThreadRow[]> => {
     const { labelIds = [], folder, q, pageToken, maxResults } = params;
 
     console.log('[queryThreads] params:', { labelIds, folder, q, pageToken, maxResults });
@@ -180,7 +235,6 @@ function queryThreads(
     const {
       findThreadsWithPagination,
       findThreadsByFolderWithPagination,
-      findThreadsByFolder,
       findThreadsWithAnyLabels,
       findThreadsWithTextSearch,
       list,
@@ -190,33 +244,20 @@ function queryThreads(
     if (!folder && labelIds.length === 0 && !q && !pageToken) {
       console.log('[queryThreads] Case: all threads');
       const threads = await list(self.db);
-      return threads.map((thread) => ({
-        id: thread.id,
-        latest_received_on: thread.latestReceivedOn,
-      }));
+      return threads.map(projectRow);
     }
 
-    // Case 2: Folder only
+    // Case 2: Folder only — always via the SQL-LIMIT paginated query so the first
+    // inbox page is bounded at the database (#30), not fetch-all-then-slice.
     if (folder && labelIds.length === 0 && !q) {
       const folderLabel = folder.toUpperCase();
       console.log('[queryThreads] Case: folder only', { folderLabel });
 
-      if (pageToken) {
-        const result = await findThreadsByFolderWithPagination(self.db, folderLabel, {
-          pageToken,
-          maxResults,
-        });
-        return result.threads.map((thread) => ({
-          id: thread.id,
-          latest_received_on: thread.latestReceivedOn,
-        }));
-      } else {
-        const threads = await findThreadsByFolder(self.db, folderLabel);
-        return threads.slice(0, maxResults).map((thread) => ({
-          id: thread.id,
-          latest_received_on: thread.latestReceivedOn,
-        }));
-      }
+      const result = await findThreadsByFolderWithPagination(self.db, folderLabel, {
+        pageToken,
+        maxResults,
+      });
+      return result.threads.map(projectRow);
     }
 
     // Case 3: Single label only
@@ -230,16 +271,10 @@ function queryThreads(
           pageToken,
           maxResults,
         });
-        return result.threads.map((thread) => ({
-          id: thread.id,
-          latest_received_on: thread.latestReceivedOn,
-        }));
+        return result.threads.map(projectRow);
       } else {
         const threads = await findThreadsWithAnyLabels(self.db, [labelId]);
-        return threads.slice(0, maxResults).map((thread) => ({
-          id: thread.id,
-          latest_received_on: thread.latestReceivedOn,
-        }));
+        return threads.slice(0, maxResults).map(projectRow);
       }
     }
 
@@ -247,10 +282,7 @@ function queryThreads(
     if (q && !folder && labelIds.length === 0) {
       console.log('[queryThreads] Case: text search only', { q });
       const threads = await findThreadsWithTextSearch(self.db, q);
-      return threads.slice(0, maxResults).map((thread) => ({
-        id: thread.id,
-        latest_received_on: thread.latestReceivedOn,
-      }));
+      return threads.slice(0, maxResults).map(projectRow);
     }
 
     // Case 5: Complex filtering (folder + labels + search + pagination)
@@ -274,11 +306,46 @@ function queryThreads(
       requireAllLabels: true, // Require all labels to be present
     });
 
-    return result.threads.map((thread) => ({
-      id: thread.id,
-      latest_received_on: thread.latestReceivedOn,
-    }));
+    return result.threads.map(projectRow);
   });
+}
+
+/**
+ * Pure reshape (#30): DO `threads` rows + batched `thread_labels` → the rich list
+ * projection. Extracted so it is unit-testable with fake DO data (no SQLite/DO needed).
+ * Carries NO message body and NO base64 — subject/sender/date/labels/unread only.
+ */
+export function buildThreadProjection(
+  rows: ThreadRow[],
+  labelsByThread: Map<string, { id: string; name: string }[]>,
+  maxResults: number,
+): ThreadsResponse {
+  if (!rows.length) {
+    return { threads: [], nextPageToken: '' };
+  }
+
+  const threads = rows.map((row) => {
+    const labels = labelsByThread.get(row.id) ?? [];
+    return {
+      id: row.id,
+      historyId: null,
+      // Coalesce DB nulls to undefined so the item stays assignable to non-nullable
+      // consumers of listThreads (the `.output()` schema forbids null on these).
+      subject: row.latest_subject ?? undefined,
+      sender: row.latest_sender ?? undefined,
+      receivedOn: row.latest_received_on ?? undefined,
+      labels,
+      unread: labels.some((label) => label.id === 'UNREAD'),
+    };
+  });
+
+  // Cursor heuristic preserved from the pre-projection path: last row's latest_received_on.
+  const nextPageToken =
+    threads.length === maxResults && rows.length > 0
+      ? String(rows[rows.length - 1].latest_received_on)
+      : null;
+
+  return { threads, nextPageToken };
 }
 
 export async function getThreadsFromDB(
@@ -290,7 +357,7 @@ export async function getThreadsFromDB(
     maxResults?: number;
     pageToken?: string;
   },
-): Promise<IGetThreadsResponse> {
+): Promise<ThreadsResponse> {
   const { maxResults = 50 } = params;
   const normalizedParams = {
     ...params,
@@ -298,40 +365,17 @@ export async function getThreadsFromDB(
     maxResults,
   };
 
-  const program = pipe(
-    queryThreads(self, normalizedParams),
-    Effect.map((result) => {
-      if (result?.length) {
-        const threads = result.map((row) => ({
-          id: String(row.id),
-          historyId: null,
-        }));
-
-        // Use latest_received_on for pagination cursor
-        const nextPageToken =
-          threads.length === maxResults && result.length > 0
-            ? String(result[result.length - 1].latest_received_on)
-            : null;
-
-        return {
-          threads,
-          nextPageToken,
-        };
-      }
-      return {
-        threads: [],
-        nextPageToken: '',
-      };
-    }),
-    Effect.catchAll((error) =>
-      Effect.sync(() => {
-        console.error('Failed to get threads from database:', error);
-        throw error;
-      }),
-    ),
-  );
-
-  return await Effect.runPromise(program);
+  try {
+    const rows = await Effect.runPromise(queryThreads(self, normalizedParams));
+    const labelsByThread = await getLabelsForThreads(
+      self.db,
+      rows.map((row) => row.id),
+    );
+    return buildThreadProjection(rows, labelsByThread, maxResults);
+  } catch (error) {
+    console.error('Failed to get threads from database:', error);
+    throw error;
+  }
 }
 
 export async function getThreadFromDB(
