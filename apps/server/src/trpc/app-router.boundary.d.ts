@@ -882,6 +882,17 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
                 threads: {
                     id: string;
                     historyId: string | null;
+                    subject?: string | undefined;
+                    sender?: {
+                        email: string;
+                        name?: string | undefined;
+                    } | undefined;
+                    receivedOn?: string | undefined;
+                    unread?: boolean | undefined;
+                    labels?: {
+                        name: string;
+                        id: string;
+                    }[] | undefined;
                     $raw?: unknown;
                 }[];
                 nextPageToken: string | null;
