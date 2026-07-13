@@ -230,18 +230,26 @@ Durée mesurée : 1801 s (30 min réelles). Les 4 invariants prouvés sur toute 
 - **maxAttempts=3** constant = 1 + READ_RETRY_MAX ⇒ pas de boucle de requêtes croissante.
 - **1** exécution par shortcut sous churn de 25 registrations ⇒ pas de double exécution.
 
-## Gate final (post-tous-rulings) — RC natifs
+## Gate final de clôture (séquence CI complète, post-tous-rulings) — RC natifs séquentiels
 
 ```
-pnpm --filter @zero/mail exec tsc --noEmit          → RC=0
-pnpm --filter @zero/server exec tsc --noEmit        → RC=0
-pnpm --filter @zero/mail exec vitest run            → RC=0  (14 files / 84 tests)
-node scripts/checks/loc-ratchet.mjs                 → RC=0  (>800 = 4/4 ; frontier 0/0)
-node scripts/checks/type-ratchet.mjs                → RC=0  (any mail 23/23, server 14/15, total 37/38)
-node scripts/checks/console-ratchet.mjs             → RC=0  (server 132/132, front 121/143)
-vitest run --config vitest.soak.config.ts (30 min)  → RC=0  (SOAK PASS, 1797 iters)
+pnpm install --frozen-lockfile --ignore-scripts     → RC=0
+pnpm --filter @zero/server types                    → RC=0
+pnpm --filter @zero/mail types                       → RC=0
+pnpm --filter @zero/mail exec react-router typegen   → RC=0
+pnpm --filter @zero/mail exec tsc --noEmit           → RC=0
+pnpm --filter @zero/server exec tsc --noEmit         → RC=0
+pnpm --filter @zero/mail exec vitest run             → RC=0  (14 files / 84 tests)
+pnpm --filter @zero/server exec vitest run           → RC=0  (9 files / 70 tests — inclut
+                                                              state-machine.test.ts : idempotence outbox, point 7)
+node scripts/checks/loc-ratchet.mjs                  → RC=0  (>800 = 4/4 ; frontier 0/0)
+node scripts/checks/type-ratchet.mjs                 → RC=0  (any mail 23/23, server 14/15, total 37/38)
+node scripts/checks/console-ratchet.mjs              → RC=0  (server 132/132, front 121/143)
+node scripts/security/check-agent-surface.mjs        → RC=0  (least scopes, bounded session cache, draft-only MCP)
+vitest run --config apps/mail/vitest.soak.config.ts  → RC=0  (SOAK PASS, 1797 iters, 1801 s — §dédié ci-dessus)
 git rev-parse HEAD → 5331ac6a… (INCHANGÉ — aucun commit ; l'orchestrateur commite après vérif)
 ```
+Logs : `.architect/tmp/gates/CLOSE-*.log` + `.architect/tmp/soak/soak.log`.
 
 `any(mail)` reste à 23/23 (aucun `any` introduit) ; `console(front)` a BAISSÉ 122→121 (effet mort retiré).
 
