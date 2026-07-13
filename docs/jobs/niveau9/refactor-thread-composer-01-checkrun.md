@@ -1,10 +1,10 @@
 # Checkrun: refactor-thread-composer-01-checkrun
-generated: 2026-07-13T15:09:43Z  runner: sh  config: /Users/thomasverdenne/cc/zero/.architect/checkrun-refactor-thread-composer-01.json
+generated: 2026-07-13T15:21:15Z  runner: sh  config: /Users/thomasverdenne/cc/zero/.architect/checkrun-refactor-thread-composer-01.json
 check_file: docs/checks/niveau9/structure.md  freeze_sha: 85451f71
 Executor: bash
 executor_config: bash
-integrity: check_file_matches_freeze=true head=52fe19e284383430c6a4f309efdb9aed954c53ca
-changed_files: 103 listed below; docs_checks_touched=false
+integrity: check_file_matches_freeze=true head=8414dbcb453dd1378f73091bbada8a129b6c7429
+changed_files: 114 listed below; docs_checks_touched=false
 .gitignore
 apps/mail/components/create/email-composer.attachments.tsx
 apps/mail/components/create/email-composer.content-preview.tsx
@@ -18,6 +18,11 @@ apps/mail/components/mail/mail-display.parts.tsx
 apps/mail/components/mail/mail-display.print.ts
 apps/mail/components/mail/mail-display.research.tsx
 apps/mail/components/mail/mail-display.tsx
+apps/mail/components/mail/mail-list-draft.tsx
+apps/mail/components/mail/mail-list-labels.tsx
+apps/mail/components/mail/mail-list-thread-actions.tsx
+apps/mail/components/mail/mail-list-thread.tsx
+apps/mail/components/mail/mail-list-utils.ts
 apps/mail/components/mail/mail-list.tsx
 apps/mail/components/mail/print-styles.ts
 apps/mail/components/mail/reply-composer.tsx
@@ -30,6 +35,8 @@ apps/mail/components/mail/thread-display.print.ts
 apps/mail/components/mail/thread-display.tsx
 apps/mail/components/ui/ai-sidebar.tsx
 apps/mail/components/ui/prompts-dialog.tsx
+apps/mail/hooks/use-mail-list-data.ts
+apps/mail/hooks/use-mail-selection.ts
 apps/mail/hooks/use-threads.ts
 apps/mail/package.json
 apps/server/.dev.vars.example
@@ -88,6 +95,10 @@ docs/adr/0003-tracing-strategy.md
 docs/adr/0004-shared-types-package.md
 docs/adr/0004-structured-logger.md
 docs/adr/0005-server-sentry.md
+docs/jobs/niveau9/refactor-mail-list-data-01-checkrun.md
+docs/jobs/niveau9/refactor-mail-list-data-01-rulings.md
+docs/jobs/niveau9/refactor-mail-list-data-01.md
+docs/jobs/niveau9/refactor-thread-composer-01-checkrun.md
 docs/jobs/niveau9/refactor-thread-composer-01-rulings.md
 docs/jobs/niveau9/refactor-thread-composer-01.md
 docs/jobs/niveau9/server-runtime-guardrails-01-checkrun.md
@@ -111,17 +122,16 @@ scripts/checks/loc-ratchet.mjs
 
 ## RUN (mécanique — check-runner) line 6
 $ grep -rnE "(\.\./)+server/src" apps/mail --include='*.ts' --include='*.tsx' | wc -l
-exit: 0  ms: 58  bytes: 9
+exit: 0  ms: 118  bytes: 9
        0
 
 ## RUN (mécanique — check-runner) line 7
 $ find apps/mail/app apps/mail/components apps/mail/lib apps/mail/hooks apps/mail/store apps/server/src \( -name '*.ts' -o -name '*.tsx' \) ! -name '*.d.ts' ! -name '*.test.*' -exec wc -l {} + | sort -rn | head -15
-exit: 0  ms: 33  bytes: 718
-   65445 total
+exit: 0  ms: 48  bytes: 714
+   65611 total
     1922 apps/mail/components/context/command-palette-context.tsx
     1332 apps/mail/components/home/HomeContent.tsx
     1293 apps/server/src/lib/driver/microsoft.ts
-    1096 apps/mail/components/mail/mail-list.tsx
      873 apps/server/src/pipelines.ts
      871 apps/server/src/trpc/routes/mail.ts
      849 apps/mail/components/mail/mail.tsx
@@ -132,3 +142,4 @@ exit: 0  ms: 33  bytes: 718
      663 apps/mail/components/ui/nav-user.tsx
      631 apps/mail/lib/utils.ts
      630 apps/mail/components/queue/queue-review.tsx
+     623 apps/server/src/lib/server-utils.ts
