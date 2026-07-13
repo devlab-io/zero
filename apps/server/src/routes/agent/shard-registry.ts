@@ -14,12 +14,26 @@
  * Reuse or distribution of this file requires a license from Zero Email Inc.
  */
 
-// Entry point / re-export barrel for the agent Durable Objects (issue #22 split).
-// The three DO classes and the Effect error/result surface were extracted into
-// cohesive modules; this barrel preserves the module's public export contract
-// (main.ts and env.ts import the classes from here — surface unchanged).
+import { Migratable, Queryable } from 'dormroom';
+import { DurableObject } from 'cloudflare:workers';
+import { type ZeroEnv } from '../../env';
 
-export * from './errors';
-export { ShardRegistry } from './shard-registry';
-export { ZeroAgent } from './chat-agent';
-export { ZeroDriver } from './zero-driver';
+@Migratable({
+  migrations: {
+    1: [
+      `CREATE TABLE IF NOT EXISTS shards (
+      shard_id TEXT PRIMARY KEY,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      last_used TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )`,
+    ],
+  },
+})
+@Queryable()
+export class ShardRegistry extends DurableObject<ZeroEnv> {
+  sql: SqlStorage;
+  constructor(ctx: DurableObjectState, env: ZeroEnv) {
+    super(ctx, env);
+    this.sql = ctx.storage.sql;
+  }
+}
