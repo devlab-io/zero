@@ -27,15 +27,16 @@ const FRONTIER_MAX = 0;
 // path -> measured LOC (ceiling). Full list of files > THRESHOLD at baseline.
 const BUDGET = {
   // agent/index.ts (2274 -> 25, barrel — issue #22 mergée) : entrée prunée.
-  // re-snapshot orchestrateur 2026-07-13 (ruling #13/#23) : +9 par merges jugés PASS
-  // (typing #20, quick wins perf) ; le fichier appartient à #28 qui le fera fondre.
-  'apps/mail/components/context/command-palette-context.tsx': 1922,
+  // command-palette-context.tsx (1922 -> 631, registre/vues/storage extraits — issue #28
+  // mergée) : entrée prunée. Modules dérivés (registry 247, views 574, filter-view 333,
+  // storage 58) tous <=800.
   // icons.tsx (1783 -> 10, barrel de familles — issue #41 mergée) : entrée prunée.
   // mail-display.tsx (1736 -> 774, découpé par responsabilité : print / attachments /
   // research / labels / parts — issue #27 refactor-thread-composer) : entrée prunée.
   // chat.ts (supprimé, code mort — issue #24 mergée) : entrée prunée.
   // google.ts retiré (1487 -> 155, façade — issue #23 mergée) : entrée prunée.
-  'apps/mail/components/home/HomeContent.tsx': 1332,
+  // HomeContent.tsx (1332 -> 43, sections marketing extraites vers home/sections/* — issue
+  // #28 mergée) : entrée prunée. Sections dérivées toutes <=400.
   'apps/server/src/lib/driver/microsoft.ts': 1294, // ADR: driver Microsoft
   // main.ts (1261 -> 333, montages — issue #24 mergée) : entrée prunée.
   // email-composer.tsx (1170 -> 729, découpé : types / content-preview / fields /
