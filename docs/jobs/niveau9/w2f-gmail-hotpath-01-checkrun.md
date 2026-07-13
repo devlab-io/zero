@@ -1,13 +1,16 @@
 # Checkrun: w2f-gmail-hotpath-01-checkrun
-generated: 2026-07-13T17:22:09Z  runner: sh  config: /Users/thomasverdenne/cc/zero/.architect/checkrun-w2f-01.json
+generated: 2026-07-13T17:45:25Z  runner: sh  config: /Users/thomasverdenne/cc/zero/.architect/checkrun-w2f-01.json
 check_file: docs/checks/niveau9/typecheck.md  freeze_sha: 85451f71
 Executor: bash
 executor_config: bash
-integrity: check_file_matches_freeze=true head=703f71a54551d66b319b2d5b9da0eb3490f057ef
-changed_files: 158 listed below; docs_checks_touched=false
+integrity: check_file_matches_freeze=true head=89267e281cc9494604444459928cf2f783b18dac
+changed_files: 202 listed below; docs_checks_touched=true
 .github/workflows/ci.yml
 .gitignore
 apps/mail/app/(routes)/mail/layout.tsx
+apps/mail/app/entry.client.tsx
+apps/mail/app/instrument.ts
+apps/mail/app/root.tsx
 apps/mail/components/context/command-palette-context.tsx
 apps/mail/components/context/command-palette-filter-view.tsx
 apps/mail/components/context/command-palette-storage.ts
@@ -37,6 +40,8 @@ apps/mail/components/mail/mail-display.tsx
 apps/mail/components/mail/mail-list-draft.tsx
 apps/mail/components/mail/mail-list-labels.tsx
 apps/mail/components/mail/mail-list-thread-actions.tsx
+apps/mail/components/mail/mail-list-thread-projection.ts
+apps/mail/components/mail/mail-list-thread.test.ts
 apps/mail/components/mail/mail-list-thread.tsx
 apps/mail/components/mail/mail-list-utils.ts
 apps/mail/components/mail/mail-list.tsx
@@ -50,13 +55,39 @@ apps/mail/components/mail/thread-display.message-list.tsx
 apps/mail/components/mail/thread-display.print.ts
 apps/mail/components/mail/thread-display.tsx
 apps/mail/components/ui/ai-sidebar.tsx
+apps/mail/components/ui/animated-number.test.ts
+apps/mail/components/ui/animated-number.tsx
+apps/mail/components/ui/animated-number.tween.ts
 apps/mail/components/ui/prompts-dialog.tsx
+apps/mail/components/ui/spinner.tsx
+apps/mail/components/ui/text-shimmer.tsx
+apps/mail/components/voice-button.tsx
 apps/mail/hooks/use-mail-list-data.ts
 apps/mail/hooks/use-mail-selection.ts
 apps/mail/hooks/use-threads.ts
 apps/mail/lib/trpc-boundary.test-d.ts
 apps/mail/package.json
+apps/mail/providers/client-providers.tsx
+apps/mail/providers/posthog-analytics.tsx
+apps/mail/public/ai-summary.png
+apps/mail/public/assets/m0 rounded edges.png
+apps/mail/public/assets/m0 rounded edges.svg
+apps/mail/public/assets/m0 w lines rounded edges.png
+apps/mail/public/assets/m0 w lines rounded edges.svg
+apps/mail/public/assets/m0 w lines.png
+apps/mail/public/assets/m0 w lines.svg
+apps/mail/public/assets/mail0.io - Text + logo w lines.png
+apps/mail/public/assets/mail0.io - Text + logo w lines.svg
+apps/mail/public/assets/mail0.io - Text w lines.png
+apps/mail/public/assets/mail0.io - Text w lines.svg
+apps/mail/public/empty-state-light.svg
+apps/mail/public/opened-mail.svg
+apps/mail/public/snooze-home.png
+apps/mail/public/star-home.png
+apps/mail/public/verified-home.png
+apps/mail/react-router.config.ts
 apps/mail/tsconfig.json
+apps/mail/vite.config.ts
 apps/server/.dev.vars.example
 apps/server/package.json
 apps/server/scripts/db-push-guard.mjs
@@ -77,6 +108,8 @@ apps/server/src/lib/driver/gmail-backoff.test.ts
 apps/server/src/lib/driver/gmail-backoff.ts
 apps/server/src/lib/driver/gmail-batch.test.ts
 apps/server/src/lib/driver/gmail-batch.ts
+apps/server/src/lib/driver/gmail-sync-persist.test.ts
+apps/server/src/lib/driver/gmail-sync-persist.ts
 apps/server/src/lib/driver/google-messages.ts
 apps/server/src/lib/driver/google-threads.ts
 apps/server/src/lib/driver/google-transport.ts
@@ -102,6 +135,8 @@ apps/server/src/lib/trpc-logging.ts
 apps/server/src/main.ts
 apps/server/src/pipelines.effect.ts
 apps/server/src/pipelines.ts
+apps/server/src/routes/agent/projection.test.ts
+apps/server/src/routes/agent/projection.ts
 apps/server/src/routes/ai.ts
 apps/server/src/routes/index.ts
 apps/server/src/services/writing-style-service.ts
@@ -130,6 +165,7 @@ docs/adr/0004-shared-types-package.md
 docs/adr/0004-structured-logger.md
 docs/adr/0005-server-sentry.md
 docs/adr/0006-trpc-type-boundary.md
+docs/checks/niveau9/grading-rubric.md
 docs/jobs/niveau9/refactor-mail-list-data-01-checkrun.md
 docs/jobs/niveau9/refactor-mail-list-data-01-rulings.md
 docs/jobs/niveau9/refactor-mail-list-data-01.md
@@ -149,6 +185,13 @@ docs/jobs/niveau9/shared-types-package-01.md
 docs/jobs/niveau9/trpc-type-boundary-01-checkrun.md
 docs/jobs/niveau9/trpc-type-boundary-01-rulings.md
 docs/jobs/niveau9/trpc-type-boundary-01.md
+docs/jobs/niveau9/w2a-list-projection-01-checkrun.md
+docs/jobs/niveau9/w2a-list-projection-01-rulings.md
+docs/jobs/niveau9/w2a-list-projection-01.md
+docs/jobs/niveau9/w2cd-client-weight-01-checkrun.md
+docs/jobs/niveau9/w2cd-client-weight-01-rulings.md
+docs/jobs/niveau9/w2cd-client-weight-01.md
+docs/jobs/niveau9/w2f-gmail-hotpath-01-checkrun.md
 docs/jobs/niveau9/w2f-gmail-hotpath-01-rulings.md
 docs/jobs/niveau9/w2f-gmail-hotpath-01.md
 packages/eslint-config/config.ts
@@ -162,11 +205,12 @@ packages/types/tsconfig.json
 pnpm-lock.yaml
 scripts/checks/console-ratchet.mjs
 scripts/checks/loc-ratchet.mjs
+scripts/checks/measure-critical.py
 scripts/checks/typecheck-report.mjs
 
 ## RUN (mécanique — check-runner ; l'app hors périmètre de l'issue est informative) line 28
 $ pnpm --filter @zero/mail exec tsc --noEmit 2>&1 | tail -5
-exit: 0  ms: 11286  bytes: 330
+exit: 0  ms: 7945  bytes: 330
 lib/server-tool.ts(21,31): error TS2558: Expected 0 type arguments, but got 1.
 ../server/src/types.ts(184,46): error TS2304: Cannot find name 'Env'.
 undefined
@@ -175,14 +219,14 @@ undefined
 
 ## RUN (mécanique — check-runner ; l'app hors périmètre de l'issue est informative) line 29
 $ pnpm --filter @zero/server exec tsc --noEmit 2>&1 | tail -5
-exit: 0  ms: 3636  bytes: 0
+exit: 0  ms: 3294  bytes: 0
 
 ## RUN (mécanique — check-runner ; l'app hors périmètre de l'issue est informative) line 30
 $ grep -rE ":\s*any\b|as any|<any>|\bany\[\]" apps/mail/app apps/mail/components apps/mail/lib apps/mail/hooks apps/mail/store apps/server/src --include='*.ts' --include='*.tsx' --exclude='*.d.ts' --exclude='*.test.*' | wc -l
-exit: 0  ms: 81  bytes: 9
+exit: 0  ms: 80  bytes: 9
       37
 
 ## RUN (mécanique — check-runner ; l'app hors périmètre de l'issue est informative) line 31
 $ grep -rn "@ts-nocheck" apps/mail apps/server --include='*.ts' --include='*.tsx' --exclude='*.d.ts' | wc -l
-exit: 0  ms: 41  bytes: 9
+exit: 0  ms: 40  bytes: 9
        0
