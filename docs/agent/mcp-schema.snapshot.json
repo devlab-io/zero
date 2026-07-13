@@ -1,0 +1,493 @@
+{
+  "server": {
+    "name": "zero-mcp",
+    "version": "1.1.0"
+  },
+  "draftOnly": true,
+  "canSendMail": false,
+  "canPermanentlyDeleteMail": false,
+  "canReportSpam": false,
+  "canChangeAccountSettings": false,
+  "statement": "This MCP server is draft-only. No tool can send mail, permanently delete mail, report spam, or change account settings. Agent output stops at a Gmail draft or a reviewable outbox item; a human in Zero performs any send.",
+  "tools": [
+    {
+      "name": "getServerCapabilities",
+      "category": "read",
+      "mutates": false,
+      "idempotent": true,
+      "description": "Report this MCP server health and capabilities as JSON: name/version, that it is draft-only, the registered tools, and the hard guarantees that no tool can send mail, permanently delete mail, report spam, or change account settings. Read-only; stores nothing.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "getConnections",
+      "category": "read",
+      "mutates": false,
+      "idempotent": true,
+      "description": "List the email accounts (connections) linked to the authenticated user — email address and provider only. Read-only.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "getActiveConnection",
+      "category": "read",
+      "mutates": false,
+      "idempotent": true,
+      "description": "Return the account currently selected for subsequent tools (email and provider). Read-only.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "setActiveConnection",
+      "category": "read",
+      "mutates": false,
+      "idempotent": true,
+      "description": "Select which already-connected account subsequent tools act on, by email address. Changes only the in-session active-account selection; it does NOT modify any account setting and never sends mail. Unknown or other-user addresses are rejected without revealing existence.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "description": "Email address of an already-connected account to select"
+          }
+        },
+        "required": [
+          "email"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "listThreads",
+      "category": "read",
+      "mutates": false,
+      "idempotent": true,
+      "description": "List email threads as COMPACT metadata only: subject, thread id, latest date, sender, unread flag and label names. Never returns message bodies or attachments. Read-only.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "folder": {
+            "type": "string",
+            "description": "Mailbox folder to list (default inbox)"
+          },
+          "labelIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Restrict to threads carrying these labels"
+          },
+          "maxResults": {
+            "type": "number",
+            "description": "Max threads to return"
+          },
+          "pageToken": {
+            "type": "string",
+            "description": "Opaque cursor from a previous page"
+          },
+          "query": {
+            "type": "string",
+            "description": "Optional Gmail-style query filter"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "searchThreads",
+      "category": "read",
+      "mutates": false,
+      "idempotent": true,
+      "description": "Search email threads and return COMPACT metadata only (subject, id, date, sender, unread, labels). Never returns message bodies or attachments. Read-only.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "folder": {
+            "type": "string",
+            "description": "Folder to search within (default inbox)"
+          },
+          "maxResults": {
+            "type": "number",
+            "description": "Max threads to return"
+          },
+          "pageToken": {
+            "type": "string",
+            "description": "Opaque cursor from a previous page"
+          },
+          "query": {
+            "type": "string",
+            "description": "Search text; matched against stored thread metadata"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "getThread",
+      "category": "read",
+      "mutates": false,
+      "idempotent": true,
+      "description": "Fetch one thread by id on demand: subject, latest date, sender, and the sanitized text of the latest message (hidden and remote content stripped). Read-only.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "threadId": {
+            "type": "string",
+            "description": "Thread id to fetch on demand"
+          }
+        },
+        "required": [
+          "threadId"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "getThreadSummary",
+      "category": "read",
+      "mutates": false,
+      "idempotent": true,
+      "description": "Return a short AI summary plus subject/sender/date for one thread. Read-only; stores nothing.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Thread id to summarize"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "getUserLabels",
+      "category": "read",
+      "mutates": false,
+      "idempotent": true,
+      "description": "List all labels available to the user (name, id, color). Read-only.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "getLabel",
+      "category": "read",
+      "mutates": false,
+      "idempotent": true,
+      "description": "Get one label by id (name and id). Read-only.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Label id to fetch"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "getCurrentDate",
+      "category": "read",
+      "mutates": false,
+      "idempotent": true,
+      "description": "Return the current server date and time. Read-only.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "composeEmail",
+      "category": "read",
+      "mutates": false,
+      "idempotent": true,
+      "description": "Draft an email body with AI assistance and RETURN it to you as text. It only returns text: it does not create a draft, store anything, or send mail.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "cc": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "emailSubject": {
+            "type": "string"
+          },
+          "prompt": {
+            "type": "string",
+            "description": "Instruction or rough draft for the email body"
+          },
+          "threadMessages": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "body": {
+                  "type": "string"
+                },
+                "cc": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "from": {
+                  "type": "string"
+                },
+                "subject": {
+                  "type": "string"
+                },
+                "to": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "body",
+                "from",
+                "subject",
+                "to"
+              ],
+              "additionalProperties": false
+            },
+            "description": "Prior thread messages for context"
+          },
+          "to": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "prompt"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "listOutbox",
+      "category": "read",
+      "mutates": false,
+      "idempotent": true,
+      "description": "List the authenticated user outbox draft jobs (id, status, subject, thread, timestamps), optionally filtered by status. Read-only.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "generating",
+              "draft_ready",
+              "approved",
+              "sending",
+              "sent",
+              "cancelled",
+              "failed"
+            ],
+            "description": "Filter to one outbox status"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "getOutboxItem",
+      "category": "read",
+      "mutates": false,
+      "idempotent": true,
+      "description": "Inspect one outbox draft job the user owns, by id. Ids that are missing or owned by another user return an identical not-found result without revealing which. Read-only.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Outbox item id owned by the authenticated user"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "createDraft",
+      "category": "write",
+      "mutates": true,
+      "idempotent": true,
+      "description": "Create a Gmail draft stored in the user Gmail Drafts folder for later human review. Stores the given recipients, subject and body as an UNSENT draft. This NEVER sends the email — sending is a separate human action in Zero. Pass a stable idempotencyKey so retries return the same draft instead of creating duplicates.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "bcc": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "email": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "email"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "cc": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "email": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "email"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "description": "Stable key: repeat calls return the same draft instead of duplicating it"
+          },
+          "message": {
+            "type": "string"
+          },
+          "subject": {
+            "type": "string"
+          },
+          "threadId": {
+            "type": "string",
+            "description": "Reply within an existing thread"
+          },
+          "to": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "email": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "email"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "message",
+          "subject",
+          "to"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "enqueueDraftJob",
+      "category": "write",
+      "mutates": true,
+      "idempotent": true,
+      "description": "Store a reviewable draft job in the outbox with status \"queued\". The job holds the given mission/subject/body; a background step later turns it into a Gmail draft that a human must approve in Zero before anything is sent. This NEVER sends mail. Duplicate calls with identical fields return the same outbox item (idempotent).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "body": {
+            "type": "string"
+          },
+          "mission": {
+            "type": "string",
+            "description": "What the reviewable draft should accomplish"
+          },
+          "subject": {
+            "type": "string"
+          },
+          "threadId": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "cancelOutboxItem",
+      "category": "write",
+      "mutates": true,
+      "idempotent": true,
+      "description": "Cancel an outbox draft job the user owns while it is still queued, generating, draft_ready or approved. Idempotent: cancelling an already-cancelled item reports it as such. Never sends mail. Other-user or missing ids return not-found without revealing existence.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Outbox item id to cancel (idempotent)"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "retryOutboxItem",
+      "category": "write",
+      "mutates": true,
+      "idempotent": true,
+      "description": "Re-queue a FAILED outbox draft job the user owns for another generation attempt. Idempotent: retrying an item already back in the queue reports it as such. Never sends mail; sending still requires human approval. Other-user or missing ids return not-found.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Failed outbox item id to re-queue (idempotent)"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false
+      }
+    }
+  ]
+}
