@@ -1,0 +1,294 @@
+import { describe, expect, it, vi, beforeEach } from 'vitest';
+
+// --- Le hook est testé comme fonction (pas de @testing-library dans le repo). On mocke la
+// SURFACE de hooks (react useCallback, jotai useAtom, react-query, nuqs, use-mail, tRPC,
+// posthog, sonner, thread-actions, paraglide) → useOptimisticActions() s'exécute comme du
+// code plat et renvoie ses callbacks. On exerce ensuite les VRAIS corps + le VRAI
+// optimisticActionsManager. Déterministe, sans renderer.
+//
+// Tous les espions sont créés UNE fois dans vi.hoisted (références stables capturées par les
+// factories de mock) ; on nettoie via clearAllMocks entre les tests. -------------------
+
+const h = vi.hoisted(() => {
+  const toast = Object.assign(vi.fn(), { error: vi.fn(), dismiss: vi.fn() });
+  return {
+    // useAtom est appelé 3× dans un ORDRE FIXE : bgQueue, addOptimistic, removeOptimistic.
+    atomCall: 0,
+    setBackgroundQueue: vi.fn(),
+    addOptimisticAction: vi.fn(() => 'opt-1'),
+    removeOptimisticAction: vi.fn(),
+    threadId: null as string | null,
+    setThreadId: vi.fn(),
+    mutationSpies: {} as Record<string, ReturnType<typeof vi.fn>>,
+    refetchQueries: vi.fn(() => Promise.resolve(undefined)),
+    invalidateQueries: vi.fn(() => Promise.resolve(undefined)),
+    toast,
+    capture: vi.fn(),
+    moveThreadsTo: vi.fn(() => Promise.resolve(undefined)),
+    setMail: vi.fn(),
+  };
+});
+
+vi.mock('react', async (orig) => ({
+  ...(await orig<typeof import('react')>()),
+  useCallback: (fn: unknown) => fn,
+}));
+vi.mock('jotai', async (orig) => ({
+  ...(await orig<typeof import('jotai')>()),
+  useAtom: () => {
+    const idx = h.atomCall++;
+    if (idx === 0) return [undefined, h.setBackgroundQueue];
+    if (idx === 1) return [undefined, h.addOptimisticAction];
+    if (idx === 2) return [undefined, h.removeOptimisticAction];
+    return [undefined, () => {}];
+  },
+}));
+vi.mock('@/store/backgroundQueue', () => ({ backgroundQueueAtom: { __bg: true } }));
+vi.mock('nuqs', () => ({
+  useQueryState: (key: string) =>
+    key === 'threadId' ? [h.threadId, h.setThreadId] : [null, () => {}],
+}));
+vi.mock('@/components/mail/use-mail', () => ({
+  useMail: () => [{ bulkSelected: [] }, h.setMail],
+}));
+vi.mock('@/lib/thread-actions', () => ({ moveThreadsTo: h.moveThreadsTo }));
+vi.mock('@/paraglide/messages', () => ({ m: new Proxy({}, { get: () => () => 'msg' }) }));
+vi.mock('posthog-js', () => ({ default: { capture: h.capture } }));
+vi.mock('sonner', () => ({ toast: h.toast }));
+
+function trpcProxy(path = ''): any {
+  return new Proxy(function () {}, {
+    get(_t, prop) {
+      if (prop === 'mutationOptions') return () => ({ __key: path.replace(/^\./, '') });
+      if (prop === 'queryKey') return () => [path];
+      return trpcProxy(`${path}.${String(prop)}`);
+    },
+    apply: () => ({}),
+  });
+}
+vi.mock('@/providers/query-provider', () => ({ useTRPC: () => trpcProxy() }));
+vi.mock('@tanstack/react-query', () => ({
+  useMutation: (opts: { __key?: string }) => {
+    const key = opts?.__key ?? 'unknown';
+    h.mutationSpies[key] ??= vi.fn().mockResolvedValue(undefined);
+    return { mutateAsync: h.mutationSpies[key] };
+  },
+  useQueryClient: () => ({
+    refetchQueries: h.refetchQueries,
+    invalidateQueries: h.invalidateQueries,
+  }),
+}));
+
+const { useOptimisticActions } = await import('./use-optimistic-actions');
+const { optimisticActionsManager } = await import('@/lib/optimistic-actions-manager');
+
+const flush = () => new Promise((r) => setTimeout(r, 0));
+// Reset le compteur d'ordre useAtom juste avant chaque invocation du hook.
+const hook = () => {
+  h.atomCall = 0;
+  return useOptimisticActions();
+};
+const lastToastOpts = () => (h.toast as any).mock.calls[0][1];
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  h.addOptimisticAction.mockReturnValue('opt-1');
+  h.refetchQueries.mockResolvedValue(undefined);
+  h.invalidateQueries.mockResolvedValue(undefined);
+  h.moveThreadsTo.mockResolvedValue(undefined);
+  h.threadId = null;
+  h.atomCall = 0;
+  for (const k of Object.keys(h.mutationSpies)) delete h.mutationSpies[k];
+  optimisticActionsManager.pendingActions.clear();
+  optimisticActionsManager.pendingActionsByType.clear();
+  optimisticActionsManager.lastActionId = null;
+});
+
+describe('useOptimisticActions — garde-fous', () => {
+  it('no-op sur liste de fils vide', () => {
+    const a = hook();
+    a.optimisticMarkAsRead([]);
+    a.optimisticToggleStar([], true);
+    a.optimisticMoveThreadsTo([], 'inbox', 'archive');
+    expect(h.addOptimisticAction).not.toHaveBeenCalled();
+  });
+
+  it('optimisticToggleLabel : no-op sans labelId', () => {
+    hook().optimisticToggleLabel(['t1'], '', true);
+    expect(h.addOptimisticAction).not.toHaveBeenCalled();
+  });
+
+  it('optimisticDeleteDraft : no-op sans id', () => {
+    hook().optimisticDeleteDraft('');
+    expect(h.addOptimisticAction).not.toHaveBeenCalled();
+  });
+});
+
+describe('useOptimisticActions — markAsRead (silent = exécution directe)', () => {
+  it('enregistre l’action optimiste, exécute la mutation, capture posthog, nettoie', async () => {
+    const a = hook();
+    a.optimisticMarkAsRead(['t1'], true); // silent → doAction() direct (pas de toast)
+    expect(h.addOptimisticAction).toHaveBeenCalledWith({
+      type: 'READ',
+      threadIds: ['t1'],
+      read: true,
+    });
+    await flush();
+    expect(h.mutationSpies['mail.markAsRead']).toHaveBeenCalledWith({ ids: ['t1'] });
+    expect(h.capture).toHaveBeenCalledWith('email_marked_read');
+    // Comportement ACTUEL : `typeActions` est capturé PUIS vidé, donc `size === 1` est faux
+    // au moment du test → pas de refetch dans ce chemin (quirk produit ; #34 peut le changer).
+    expect(optimisticActionsManager.pendingActions.size).toBe(0);
+  });
+
+  it('chemin d’erreur : mutation rejette → toast.error + nettoyage', async () => {
+    h.mutationSpies['mail.markAsRead'] = vi.fn().mockRejectedValue(new Error('net'));
+    const a = hook();
+    a.optimisticMarkAsRead(['t1'], true);
+    await flush();
+    expect(h.toast.error).toHaveBeenCalledWith('Action failed');
+    expect(h.removeOptimisticAction).toHaveBeenCalledWith('opt-1');
+    expect(optimisticActionsManager.pendingActions.size).toBe(0);
+  });
+});
+
+describe('useOptimisticActions — toast : auto-close vs undo', () => {
+  it('auto-close déclenche l’exécution', async () => {
+    const a = hook();
+    a.optimisticMarkAsRead(['t1']); // non silent → toast
+    expect(h.toast).toHaveBeenCalledTimes(1);
+    const opts = lastToastOpts();
+    expect(opts.action.label).toBe('Undo');
+    await opts.onAutoClose();
+    await flush();
+    expect(h.mutationSpies['mail.markAsRead']).toHaveBeenCalled();
+  });
+
+  it('bouton Undo annule sans exécuter la mutation', async () => {
+    const a = hook();
+    a.optimisticMarkAsRead(['t1']);
+    lastToastOpts().action.onClick();
+    expect(h.removeOptimisticAction).toHaveBeenCalledWith('opt-1');
+    expect(optimisticActionsManager.pendingActions.size).toBe(0);
+    await flush();
+    expect(h.mutationSpies['mail.markAsRead']).not.toHaveBeenCalled();
+  });
+
+  it('message pluralisé pour une sélection multiple', () => {
+    hook().optimisticMarkAsRead(['t1', 't2', 't3']);
+    expect((h.toast as any).mock.calls[0][0]).toContain('(3 items)');
+  });
+});
+
+describe('useOptimisticActions — variantes d’actions', () => {
+  it('markAsUnread → mutation markAsUnread + action READ:false', async () => {
+    hook().optimisticMarkAsUnread(['t1']);
+    await lastToastOpts().onAutoClose();
+    await flush();
+    expect(h.addOptimisticAction).toHaveBeenCalledWith({
+      type: 'READ',
+      threadIds: ['t1'],
+      read: false,
+    });
+    expect(h.mutationSpies['mail.markAsUnread']).toHaveBeenCalledWith({ ids: ['t1'] });
+    expect(h.capture).toHaveBeenCalledWith('email_marked_unread');
+  });
+
+  it('toggleStar (starred) → event email_starred', async () => {
+    hook().optimisticToggleStar(['t1'], true);
+    await lastToastOpts().onAutoClose();
+    await flush();
+    expect(h.mutationSpies['mail.toggleStar']).toHaveBeenCalledWith({ ids: ['t1'] });
+    expect(h.capture).toHaveBeenCalledWith('email_starred');
+  });
+
+  it('toggleImportant (false) → event email_unmarked_important', async () => {
+    hook().optimisticToggleImportant(['t1'], false);
+    await lastToastOpts().onAutoClose();
+    await flush();
+    expect(h.mutationSpies['mail.toggleImportant']).toHaveBeenCalledWith({ ids: ['t1'] });
+    expect(h.capture).toHaveBeenCalledWith('email_unmarked_important');
+  });
+
+  it('toggleLabel (add) → modifyLabels avec addLabels', async () => {
+    hook().optimisticToggleLabel(['t1'], 'LBL', true);
+    await lastToastOpts().onAutoClose();
+    await flush();
+    expect(h.mutationSpies['mail.modifyLabels']).toHaveBeenCalledWith({
+      threadId: ['t1'],
+      addLabels: ['LBL'],
+      removeLabels: [],
+    });
+    expect(h.capture).toHaveBeenCalledWith('email_label_added');
+  });
+
+  it('moveThreadsTo → thread-actions + file de fond + ferme le fil ouvert', async () => {
+    h.threadId = 't1';
+    const a = hook();
+    a.optimisticMoveThreadsTo(['t1'], 'inbox', 'archive');
+    expect(h.setBackgroundQueue).toHaveBeenCalledWith({ type: 'add', threadId: 'thread:t1' });
+    expect(h.setThreadId).toHaveBeenCalledWith(null); // fil ouvert refermé
+    await lastToastOpts().onAutoClose();
+    await flush();
+    expect(h.moveThreadsTo).toHaveBeenCalledWith({
+      threadIds: ['t1'],
+      currentFolder: 'inbox',
+      destination: 'archive',
+    });
+    expect(h.capture).toHaveBeenCalledWith('email_moved');
+  });
+
+  it('deleteThreads → bulkDelete', async () => {
+    hook().optimisticDeleteThreads(['t1'], 'inbox');
+    await lastToastOpts().onAutoClose();
+    await flush();
+    expect(h.mutationSpies['mail.bulkDelete']).toHaveBeenCalledWith({ ids: ['t1'] });
+  });
+
+  it('snooze → mutation snoozeThreads(wakeAt ISO)', async () => {
+    const wake = new Date(Date.now() + 3_600_000);
+    hook().optimisticSnooze(['t1'], 'inbox', wake);
+    await lastToastOpts().onAutoClose();
+    await flush();
+    expect(h.mutationSpies['mail.snoozeThreads']).toHaveBeenCalledWith({
+      ids: ['t1'],
+      wakeAt: wake.toISOString(),
+    });
+    expect(h.capture).toHaveBeenCalledWith('email_snoozed');
+  });
+
+  it('unsnooze → mutation unsnoozeThreads', async () => {
+    hook().optimisticUnsnooze(['t1'], 'snoozed');
+    await lastToastOpts().onAutoClose();
+    await flush();
+    expect(h.mutationSpies['mail.unsnoozeThreads']).toHaveBeenCalledWith({ ids: ['t1'] });
+    expect(h.capture).toHaveBeenCalledWith('email_unsnoozed');
+  });
+
+  it('deleteDraft → drafts.delete + invalidation', async () => {
+    hook().optimisticDeleteDraft('draft-1');
+    await lastToastOpts().onAutoClose();
+    await flush();
+    expect(h.mutationSpies['drafts.delete']).toHaveBeenCalledWith({ id: 'draft-1' });
+    expect(h.invalidateQueries).toHaveBeenCalled();
+    expect(h.capture).toHaveBeenCalledWith('draft_deleted');
+  });
+});
+
+describe('useOptimisticActions — undoLastAction', () => {
+  it('annule la dernière action en attente et vide le registre', () => {
+    const a = hook();
+    a.optimisticMarkAsRead(['t1']); // crée une action en attente (toast, pas encore auto-close)
+    expect(optimisticActionsManager.lastActionId).not.toBeNull();
+    expect(optimisticActionsManager.pendingActions.size).toBe(1);
+
+    a.undoLastAction();
+    expect(h.removeOptimisticAction).toHaveBeenCalledWith('opt-1'); // via l’undo enregistré
+    expect(optimisticActionsManager.pendingActions.size).toBe(0);
+    expect(optimisticActionsManager.lastActionId).toBeNull();
+  });
+
+  it('no-op quand il n’y a aucune dernière action', () => {
+    expect(() => hook().undoLastAction()).not.toThrow();
+  });
+});
