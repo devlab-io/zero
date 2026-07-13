@@ -62,6 +62,18 @@ export class GoogleMailManager implements MailManager {
   public get(id: string) {
     return this.threads.get(id);
   }
+  /**
+   * Batch full-fetch + parse de N threads en ⌈N/50⌉ round-trips (issue #31). Hors interface
+   * MailManager (primitive Gmail) : le workflow de sync l'utilise via un driver partagé pour
+   * coalescer le chemin chaud ~2000 threads.get/cycle.
+   */
+  public getMany(ids: string[]) {
+    return this.threads.getMany(ids);
+  }
+  /** Logge le compteur d'appels Gmail du cycle (via lib/logger) et le remet à zéro. */
+  public logSyncCycleCalls(label?: string) {
+    return this.transport.logCycleCallCount(label);
+  }
   public markAsRead(threadIds: string[]) {
     return this.threads.markAsRead(threadIds);
   }
