@@ -107,3 +107,28 @@ chargement froid /mail/inbox SANS interaction → AUCUNE requête de chunk creat
 posthog, motion transition, reply-composer ; puis interaction → chargement + fonctionnel
 correct. Le gate A8 se juge sur les octets réseau initiaux réels, pas seulement sur la
 fermeture du manifest.
+
+## Ruling plancher légitime + option A motion (orchestrateur, 2026-07-13)
+
+Constat builder VALIDÉ : le chunk route de mail.tsx (~104 KB) est de l'UI TOUJOURS
+RENDUE au load inbox (MailList/virtua/dnd, empty state ThreadDisplay, barre compose) —
+le lazifier serait exactement le metric-gaming interdit par f143abf9 (la mesure gelée
+baisserait sans réduire les octets réseau initiaux). Réduction légitime du rows =
+features réellement différées seulement (marginale). chunk-KS7C4IRE ancré dans l'arbre
+toujours-rendu. DONC : le gate 420, tel que défini par la fermeture statique de
+measure-critical.py, n'est PAS atteignable légitimement par du lazy-loading — plancher
+légitime ≈ 510 KiB après motion.
+
+DÉCISION BUILDER : option (A) — investir motion (les octets disparaissent RÉELLEMENT du
+chargement initial : 3 icônes animées réécrites motion→CSS avec API impérative
+préservée, + AddConnectionDialog lazy dans nav-user désormais débloqué post-#38).
+Puis #6b (protocole cold-boot ou verified-no-op), puis candidature en
+COMPLETE_WITH_CONCERNS avec : plancher chiffré, analyse d'impossibilité légitime
+complète au rapport (c'est une PIÈCE pour le jugement final A8), libellé honnête —
+« gate 420 NON atteint ; plancher légitime ~510 ; l'écart est structurel (UI
+toujours-rendue), pas un défaut d'exécution ».
+
+NIVEAU BARÈME (hors builder) : la re-définition éventuelle de la mesure (octets réseau
+initiaux réels plutôt que fermeture statique) ou l'amendement du gate est une décision
+critique droite / propriétaire — jurisprudence #20→#25→#43 (amendement nommé + re-gel).
+Remontée faite au superviseur ; AUCUN amendement par le builder.
