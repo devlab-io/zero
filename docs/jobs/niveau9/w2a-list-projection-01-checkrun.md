@@ -1,10 +1,10 @@
 # Checkrun: w2a-list-projection-01-checkrun
-generated: 2026-07-13T16:43:55Z  runner: sh  config: /Users/thomasverdenne/cc/zero/.architect/checkrun-w2a-01.json
+generated: 2026-07-13T17:09:33Z  runner: sh  config: /Users/thomasverdenne/cc/zero/.architect/checkrun-w2a-01.json
 check_file: docs/checks/niveau9/typecheck.md  freeze_sha: 85451f71
 Executor: bash
 executor_config: bash
-integrity: check_file_matches_freeze=true head=d10f2b39b5eac3b8b60e8213f16c73fc955a2bf3
-changed_files: 152 listed below; docs_checks_touched=false
+integrity: check_file_matches_freeze=true head=a3fcba66896817f1cb655d07bd92b2ca23dc6d69
+changed_files: 155 listed below; docs_checks_touched=false
 .github/workflows/ci.yml
 .gitignore
 apps/mail/app/(routes)/mail/layout.tsx
@@ -37,6 +37,8 @@ apps/mail/components/mail/mail-display.tsx
 apps/mail/components/mail/mail-list-draft.tsx
 apps/mail/components/mail/mail-list-labels.tsx
 apps/mail/components/mail/mail-list-thread-actions.tsx
+apps/mail/components/mail/mail-list-thread-projection.ts
+apps/mail/components/mail/mail-list-thread.test.ts
 apps/mail/components/mail/mail-list-thread.tsx
 apps/mail/components/mail/mail-list-utils.ts
 apps/mail/components/mail/mail-list.tsx
@@ -143,6 +145,7 @@ docs/jobs/niveau9/shared-types-package-01.md
 docs/jobs/niveau9/trpc-type-boundary-01-checkrun.md
 docs/jobs/niveau9/trpc-type-boundary-01-rulings.md
 docs/jobs/niveau9/trpc-type-boundary-01.md
+docs/jobs/niveau9/w2a-list-projection-01-checkrun.md
 docs/jobs/niveau9/w2a-list-projection-01-rulings.md
 docs/jobs/niveau9/w2a-list-projection-01.md
 packages/eslint-config/config.ts
@@ -160,18 +163,18 @@ scripts/checks/typecheck-report.mjs
 
 ## RUN (mécanique — check-runner ; l'app hors périmètre de l'issue est informative) line 28
 $ pnpm --filter @zero/mail exec tsc --noEmit 2>&1 | tail -5
-exit: 0  ms: 4049  bytes: 0
+exit: 0  ms: 4132  bytes: 0
 
 ## RUN (mécanique — check-runner ; l'app hors périmètre de l'issue est informative) line 29
 $ pnpm --filter @zero/server exec tsc --noEmit 2>&1 | tail -5
-exit: 0  ms: 3841  bytes: 0
+exit: 0  ms: 3925  bytes: 0
 
 ## RUN (mécanique — check-runner ; l'app hors périmètre de l'issue est informative) line 30
 $ grep -rE ":\s*any\b|as any|<any>|\bany\[\]" apps/mail/app apps/mail/components apps/mail/lib apps/mail/hooks apps/mail/store apps/server/src --include='*.ts' --include='*.tsx' --exclude='*.d.ts' --exclude='*.test.*' | wc -l
-exit: 0  ms: 74  bytes: 9
+exit: 0  ms: 79  bytes: 9
       37
 
 ## RUN (mécanique — check-runner ; l'app hors périmètre de l'issue est informative) line 31
 $ grep -rn "@ts-nocheck" apps/mail apps/server --include='*.ts' --include='*.tsx' --exclude='*.d.ts' | wc -l
-exit: 0  ms: 48  bytes: 9
+exit: 0  ms: 49  bytes: 9
        0
