@@ -2,6 +2,7 @@ import { getActiveConnection, getZeroDB } from '../server-utils';
 import { getContext } from 'hono/context-storage';
 import type { gmail_v1 } from '@googleapis/gmail';
 import type { HonoContext } from '../../ctx';
+import { logger } from '../logger';
 
 import { toByteArray } from 'base64-js';
 export const FatalErrors = ['invalid_grant'];
@@ -9,15 +10,15 @@ export const FatalErrors = ['invalid_grant'];
 export const deleteActiveConnection = async () => {
   const c = getContext<HonoContext>();
   const activeConnection = await getActiveConnection();
-  if (!activeConnection) return console.log('No connection ID found');
+  if (!activeConnection) return logger.info('No connection ID found');
   const session = await c.var.auth.api.getSession({ headers: c.req.raw.headers });
-  if (!session) return console.log('No session found');
+  if (!session) return logger.info('No session found');
   try {
     await c.var.auth.api.signOut({ headers: c.req.raw.headers });
     const db = await getZeroDB(session.user.id);
     await db.deleteActiveConnection(activeConnection.id);
   } catch (error) {
-    console.error('Server: Error deleting connection:', error);
+    logger.error('Server: Error deleting connection:', error);
     throw error;
   }
 };
@@ -37,7 +38,7 @@ export const findHtmlBody = (parts: gmail_v1.Schema$MessagePart[]): string => {
       if (found) return found;
     }
   }
-  console.log('⚠️ Driver: No HTML content found in message parts');
+  logger.info('⚠️ Driver: No HTML content found in message parts');
   return '';
 };
 

@@ -8,6 +8,7 @@ import { sanitizeTipTapHtml } from '../sanitize-tip-tap-html';
 import type { IOutgoingMessage } from '../../types';
 import { createMimeMessage } from 'mimetext';
 import { fromBinary } from './utils';
+import { logger } from '../logger';
 import * as he from 'he';
 
 export class GmailDrafts {
@@ -312,7 +313,7 @@ export class GmailDrafts {
               body: attachmentData ?? '',
             };
           } catch (e) {
-            console.error('Failed to get attachment', e);
+            logger.error('Failed to get attachment', e);
             return null;
           }
         }),
