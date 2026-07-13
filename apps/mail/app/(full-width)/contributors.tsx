@@ -174,14 +174,22 @@ export default function OpenPage() {
 
   const { data: repoData, error: repoError } = useQuery({
     queryFn: () =>
-      fetch(`https://api.github.com/repos/${REPOSITORY}`).then((res) => res.json() as any),
+      fetch(`https://api.github.com/repos/${REPOSITORY}`).then(
+        (res) =>
+          res.json() as Promise<{
+            stargazers_count: number;
+            forks_count: number;
+            subscribers_count: number;
+            open_issues_count: number;
+          }>,
+      ),
     queryKey: ['repo-data', REPOSITORY],
   });
 
   const { data: commitsData, error: commitsError } = useQuery({
     queryFn: () =>
       fetch(`https://api.github.com/repos/${REPOSITORY}/commits?per_page=100`).then(
-        (res) => res.json() as any,
+        (res) => res.json() as Promise<{ commit: { author: { date: string } } }[]>,
       ),
     queryKey: ['commits-data', REPOSITORY],
   });
@@ -189,7 +197,7 @@ export default function OpenPage() {
   const { data: prsData, error: prsError } = useQuery({
     queryFn: () =>
       fetch(`https://api.github.com/repos/${REPOSITORY}/pulls?state=open`).then(
-        (res) => res.json() as any,
+        (res) => res.json() as Promise<unknown[]>,
       ),
     queryKey: ['prs-data', REPOSITORY],
   });

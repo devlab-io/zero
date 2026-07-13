@@ -9,7 +9,7 @@ import {
 import { Form, FormControl, FormDescription, FormField, FormItem } from '@/components/ui/form';
 import { SettingsCard } from '@/components/settings/settings-card';
 import { useSession, signOut } from '@/lib/auth-client';
-import { zodResolver } from '@hookform/resolvers/zod';
+import { zodResolver } from '@/lib/zod-resolver';
 import { useTRPC } from '@/providers/query-provider';
 import { useMutation } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';

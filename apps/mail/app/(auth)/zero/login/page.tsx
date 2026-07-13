@@ -1,5 +1,5 @@
 import { Form, FormControl, FormField, FormItem, FormLabel } from '@/components/ui/form';
-import { zodResolver } from '@hookform/resolvers/zod';
+import { zodResolver } from '@/lib/zod-resolver';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useForm } from 'react-hook-form';

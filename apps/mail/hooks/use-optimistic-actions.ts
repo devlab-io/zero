@@ -472,7 +472,7 @@ export function useOptimisticActions() {
     createPendingAction({
       type: 'UNSNOOZE',
       threadIds,
-      params: { currentFolder } as any,
+      params: { currentFolder },
       optimisticId,
       execute: async () => {
         await unsnoozeThreads({ ids: threadIds });
@@ -496,7 +496,7 @@ export function useOptimisticActions() {
     createPendingAction({
       type: 'DELETE_DRAFT',
       threadIds: [draftId],
-      params: {} as any,
+      params: {},
       optimisticId,
       execute: async () => {
         await deleteDraft({ id: draftId });

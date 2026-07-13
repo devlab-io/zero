@@ -120,6 +120,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
 
       await conversation.startSession({
         agentId: agentId,
+        connectionType: 'websocket',
         onMessage: (message) => {
           // TODO: Handle message, ideally send it to ai chat agent or show it somewhere on the screen?
           console.log('message', message);

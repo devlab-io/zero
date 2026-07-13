@@ -19,9 +19,11 @@
 import { execSync } from 'node:child_process';
 
 // Measured 2026-07-12 after `wrangler types` (server --env local; mail).
-// server driven to 0 by issue #21 (tsc-zero-server) and tightened here so a regression
-// is a hard gate; mail remains at the niveau9 baseline (owned by #20).
-const BASELINE = { server: 0, mail: 135 };
+// union orchestrateur (ruling 2026-07-13) : server porté à 0 par #21 (gate dure) ;
+// mail resserré 135->119 par #20 (0 erreur locale ; le résidu sous séquence wrangler-only
+// = 47 stubs générés régénérables par `react-router typegen` — le flip de sortie de
+// vague ajoute typegen à la séquence et resserre mail -> 0).
+const BASELINE = { server: 0, mail: 119 };
 
 const blocking =
   process.argv.includes('--blocking') ||

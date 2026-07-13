@@ -107,8 +107,7 @@ async function createDraftFromMailto(mailtoData: {
   const RETRY_DELAY = 1000; // 1 second
 
   // Helper function to handle Invalid To header errors by toggling format
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const handleInvalidToHeader = (draftData: any) => {
+  const handleInvalidToHeader = (draftData: { to: string | string[] }) => {
     if (Array.isArray(draftData.to)) {
       // Convert array to comma-separated string
       draftData.to = draftData.to.join(',');

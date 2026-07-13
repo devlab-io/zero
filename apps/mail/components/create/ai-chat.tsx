@@ -15,6 +15,7 @@ import { VoiceButton } from '../voice-button';
 import { EditorContent } from '@tiptap/react';
 import { CurvedArrow } from '../icons/icons';
 import { Tools } from '../../types/tools';
+import type { Label } from '@/types';
 import { Button } from '../ui/button';
 import { format } from 'date-fns-tz';
 import { useQueryState } from 'nuqs';
@@ -117,21 +118,6 @@ const ExampleQueries = ({ onQueryClick }: { onQueryClick: (query: string) => voi
   );
 };
 
-// interface Message {
-//   id: string;
-//   role: 'user' | 'assistant' | 'data' | 'system';
-//   parts: Array<{
-//     type: string;
-//     text?: string;
-//     toolInvocation?: {
-//       toolName: string;
-//       result?: {
-//         threads?: Array<{ id: string; title: string; snippet: string }>;
-//       };
-//       args?: any;
-//     };
-//   }>;
-// }
 
 export interface AIChatProps {
   messages: AiMessage[];
@@ -147,42 +133,57 @@ export interface AIChatProps {
 }
 
 // Subcomponents for ToolResponse
-const GetThreadToolResponse = ({ result, args }: { result: any; args: any }) => {
+const GetThreadToolResponse = ({ result, args }: { result: unknown; args: unknown }) => {
   // Extract threadId from result or args
   let threadId: string | null = null;
   if (typeof result === 'string') {
     const match = result.match(/<thread id="([^"]+)" ?\/>/);
     if (match?.[1]) threadId = match[1];
   }
-  if (!threadId && args?.id && typeof args.id === 'string') threadId = args.id;
+  if (!threadId && args && typeof args === 'object' && 'id' in args) {
+    const id = (args as { id?: unknown }).id;
+    if (typeof id === 'string') threadId = id;
+  }
   if (!threadId) return null;
   return <ThreadPreview threadId={threadId} />;
 };
 
-const GetUserLabelsToolResponse = ({ result }: { result: any }) => {
-  if (!result?.labels) return null;
+const GetUserLabelsToolResponse = ({ result }: { result: unknown }) => {
+  if (!result || typeof result !== 'object' || !('labels' in result)) return null;
+  const labels = (result as { labels?: unknown }).labels;
+  if (!Array.isArray(labels)) return null;
   return (
     <div className="flex flex-wrap gap-2">
-      {result.labels.map((label: any) => (
+      {labels.map((label: Label) => (
         <MailLabels key={label.id} labels={[label]} />
       ))}
     </div>
   );
 };
 
-const ComposeEmailToolResponse = ({ result }: { result: any }) => {
-  if (!result?.newBody) return null;
+const ComposeEmailToolResponse = ({ result }: { result: unknown }) => {
+  if (!result || typeof result !== 'object' || !('newBody' in result)) return null;
+  const newBody = (result as { newBody?: unknown }).newBody;
+  if (!newBody || typeof newBody !== 'string') return null;
   return (
     <div className="rounded-lg border border-gray-200 p-4 dark:border-gray-800">
       <div className="prose dark:prose-invert max-w-none">
-        <Markdown>{result.newBody}</Markdown>
+        <Markdown>{newBody}</Markdown>
       </div>
     </div>
   );
 };
 
 // Main ToolResponse switcher
-const ToolResponse = ({ toolName, result, args }: { toolName: string; result: any; args: any }) => {
+const ToolResponse = ({
+  toolName,
+  result,
+  args,
+}: {
+  toolName: string;
+  result: unknown;
+  args: unknown;
+}) => {
   switch (toolName) {
     case Tools.GetThread:
       return <GetThreadToolResponse result={result} args={args} />;
@@ -296,7 +297,8 @@ export function AIChat({
                 <div key={`${message.id}-${index}`} className="mb-2 flex flex-col" data-message-role={message.role}>
                   {toolParts.map(
                     (part, index) =>
-                      part.toolInvocation?.result && (
+                      part.toolInvocation?.state === 'result' &&
+                      part.toolInvocation.result && (
                         <ToolResponse
                           key={`${part.toolInvocation.toolName}-${index}`}
                           toolName={part.toolInvocation.toolName}

@@ -14,7 +14,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { SettingsCard } from '@/components/settings/settings-card';
-import { zodResolver } from '@hookform/resolvers/zod';
+import { zodResolver } from '@/lib/zod-resolver';
 import { Switch } from '@/components/ui/switch';
 import { Button } from '@/components/ui/button';
 import { useForm } from 'react-hook-form';

@@ -50,9 +50,9 @@ export default function SelectAllCheckbox({ className }: { className?: string })
         if (!page?.nextPageToken) break;
         cursor = page.nextPageToken;
       }
-    } catch (err: any) {
+    } catch (err) {
       console.error('Failed to fetch all thread IDs', err);
-      toast.error(err?.message ?? 'Failed to select all emails');
+      toast.error((err instanceof Error ? err.message : undefined) ?? 'Failed to select all emails');
     }
 
     return ids;

@@ -15,7 +15,7 @@ export const RecursiveFolder = ({
   count,
 }: {
   label: Label & { originalLabel?: Label };
-  activeAccount?: any;
+  activeAccount?: { providerId?: string } | null;
   count?: number;
 }) => {
   const { labels, setLabels } = useSearchLabels();
@@ -76,7 +76,7 @@ export const RecursiveFolder = ({
         count={count || 0}
         className="max-w-[192px]"
       >
-        {label.labels?.map((childLabel: any) => (
+        {label.labels?.map((childLabel: Label) => (
           <RecursiveFolder
             key={childLabel.id}
             label={childLabel}
