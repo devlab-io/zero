@@ -59,5 +59,6 @@ worker-configuration.d.ts
 .pnpm-store
 tsx-0/
 
-tools.json.architect/
+tools.json
+.architect/
 .gstack/
