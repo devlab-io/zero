@@ -1,0 +1,38 @@
+{
+  "note": "Local, sandbox smoke with injected driver fakes (no network, no OAuth-console, no prod). A fully live authenticated /mcp session against local/staging requires an interactive better-auth OIDC login unavailable here (blocker documented in docs/agent/mcp-smoke.md, precedent #28/#40). This exercises the read-only and draft-only handlers end-to-end and proves no send path exists.",
+  "readonly": {
+    "capabilitiesSendable": false,
+    "listThreadsSample": [
+      "ID: thread-1 | Subject: Proposition commerciale Devlab | From: Hinatea <hinatea@client.pf> | Date: 2026-07-13T08:00:00.000Z | Unread: yes | Labels: Inbox, Unread",
+      "ID: thread-2 | Subject: Suivi hebdo | From: Unknown sender | Date: 2026-07-12T08:00:00.000Z | Unread: no | Labels: —"
+    ],
+    "getOutboxItemSample": {
+      "id": "outbox-1",
+      "status": "draft_ready",
+      "subject": "Re: Facture 2026-07",
+      "threadId": "thread-1",
+      "gmailDraftId": "gdraft-1",
+      "scheduledSendAt": null,
+      "error": null,
+      "createdAt": "2026-07-13T00:00:00.000Z",
+      "updatedAt": "2026-07-13T00:00:00.000Z"
+    }
+  },
+  "draftOnly": {
+    "createDraftFirst": {
+      "id": "gmail-draft-1",
+      "deduped": false
+    },
+    "createDraftDuplicateSameKey": {
+      "id": "gmail-draft-1",
+      "deduped": true
+    },
+    "distinctGmailDraftsCreated": 1,
+    "sendCallsObserved": 0
+  },
+  "assertions": {
+    "oneLogicalDraftPerKey": true,
+    "zeroSends": true,
+    "draftOnlyGuaranteed": true
+  }
+}
