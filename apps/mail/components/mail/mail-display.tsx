@@ -194,7 +194,7 @@ const MailDisplay = ({ emailData, index, totalEmails, demo, threadAttachments }:
     if (!personEmail) return;
 
     await navigator.clipboard.writeText(personEmail || '');
-    toast.success('Email copied to clipboard');
+    toast.success(m['common.mailDisplay.emailCopied']());
   }, []);
 
 

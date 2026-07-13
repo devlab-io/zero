@@ -1,4 +1,5 @@
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip';
+import { m } from '@/paraglide/messages';
 import { ArrowsPointingIn, PanelLeftOpen, Phone } from '../icons/icons';
 import { useActiveConnection } from '@/hooks/use-connections';
 import { ResizablePanel } from '@/components/ui/resizable';
@@ -257,7 +258,7 @@ function AISidebar({ className }: AISidebarProps) {
         currentFilter: searchValue.value ?? undefined,
         messages: chatState.messages,
       });
-      toast.error('Error, please try again later');
+      toast.error(m['common.actions.errorTryAgainLater']());
     },
     onResponse: (response) => {
       posthog.capture('AI Chat Response', {

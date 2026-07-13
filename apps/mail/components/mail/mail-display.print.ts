@@ -1,3 +1,4 @@
+import { m } from '@/paraglide/messages';
 import type { Attachment, ParsedMessage } from '@/types';
 import { cleanHtml } from '@/lib/email-utils';
 import { formatDate } from '@/lib/utils';
@@ -203,6 +204,6 @@ export function printMail(
       }
     } catch (error) {
       console.error('Error printing email:', error);
-      toast.error('Failed to print email. Please try again.');
+      toast.error(m['common.mailDisplay.failedToPrint']());
     }
   };

@@ -7,6 +7,7 @@ import {
   RotateCcwIcon,
 } from 'lucide-react';
 import { SummarizeMessage, SummarizeThread, ReSummarizeThread } from '@zero/types';
+import { m } from '@/paraglide/messages';
 import {
   Dialog,
   DialogContent,
@@ -59,11 +60,11 @@ export function PromptsDialog() {
   const { mutateAsync: updatePrompt, isPending: isSavingPrompt } = useMutation(
     trpc.brain.updatePrompt.mutationOptions({
       onSuccess: () => {
-        toast.success('Prompt updated');
+        toast.success(m['common.settings.promptUpdated']());
         queryClient.invalidateQueries({ queryKey: trpc.brain.getPrompts.queryKey() });
       },
       onError: (error) => {
-        toast.error(error.message ?? 'Failed to update prompt');
+        toast.error(error.message ?? m['common.settings.failedToUpdatePrompt']());
       },
     }),
   );

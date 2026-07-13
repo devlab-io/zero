@@ -1,4 +1,5 @@
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { m } from '@/paraglide/messages';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useState } from 'react';
@@ -51,7 +52,7 @@ export function SnoozeDialog({ trigger, onConfirm, open: controlledOpen, onOpenC
     }
 
     if (wakeDate.getTime() <= Date.now()) {
-      toast.error('Please choose a future date and time.');
+      toast.error(m['common.mail.snoozeFutureDate']());
       return;
     }
 
