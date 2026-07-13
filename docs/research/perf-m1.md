@@ -51,16 +51,57 @@ entier ; la partie chaude est déjà sous la cible (≤ 0,2 s) dans ces conditio
 4. **M2 devra consigner warp on/off + colo et mesurer les deux états si
    possible** (sans modifier la config réseau de Thomas : état trouvé = état mesuré).
 
-## 3. Parcours authentifié (axes 4 et 8) — PENDING
+## 3. Parcours authentifié (axes 3 et 4) — MESURÉ
 
-**BLOCKED session** : login Google requis dans un navigateur importable
-(Chrome vide ; session staging de Thomas dans Dia, non supporté par
-l'importateur ; extraction manuelle du trousseau exclue — sensible).
-Monitor d'import armé ; à réception : N+1 observé en réel (nombre de
-`mail.get` + `processEmailContent` au premier rendu), ouverture de fil
-froid/chaud ×5, payloads, Hyperdrive froid/chaud (procédure prête :
-chaîne browse lecture seule). Sync initiale (axe 8) : aucune re-sync forcée
-sans décision explicite de Thomas — sera estimée des logs si observable,
-sinon reste provisoire.
+*Session : cookies staging de Thomas (Chrome Profile 1), déchiffrés via la
+librairie du skill, chargés en session headless browse, fichier temp effacé.
+Lecture seule. Inbox `/mail/inbox` chargée en conditions PPT/warp-off.*
 
-**Notes provisoires des axes 4 et 8 : inchangées (4 et 3) jusqu'à mesure.**
+### 3.1 — Premier rendu de l'inbox : le double N+1 MESURÉ (axe 3)
+
+Capture réseau du premier rendu (194 requêtes, dont 55 tRPC = **2 259 kB**) :
+
+| Appel tRPC | Occurrences | Signal |
+|---|---|---|
+| `mail.listThreads` | **1** | 6 732 ms, **947 octets** (renvoie des IDs seuls) |
+| `mail.get` | **20** | total **1 802 kB**, moy 90 kB, **max 202 kB**, latences 4,0-5,9 s (médiane 4,9 s) |
+| `mail.processEmailContent` | **16** | médiane 1 929 ms (max 3 363 ms) — sanitisation d'un HTML que la liste n'affiche pas |
+| `bimi.getByEmail` | 12 | logos expéditeurs |
+| divers (settings, labels, connections, outbox…) | 6 | — |
+
+**Le N+1 de la revue est confirmé en production, chiffré :** une liste de
+~13-20 fils visibles déclenche **20 `mail.get` de fils complets (1,8 MB) + 16
+sanitisations serveur**, là où `listThreads` ne renvoie que 947 octets d'IDs.
+C'est le coût dominant du parcours authentifié, exactement comme prédit. **Axe
+3 = 2/10 confirmé mesuré** (avant w2a). Cible w2a : 1 requête `listThreads`
+projetée, 0 `mail.get`, ~947 o → ~quelques kB de métadonnées.
+
+### 3.2 — Ouverture de fil (axe 4)
+
+Ouverture d'un fil (froid, jamais ouvert cette session) : la requête `mail.get`
+du corps **n'apparaît pas** — le corps est déjà en cache, sur-préchargé par le
+N+1 de la liste. Ne restent que `processEmailContent` (~1,7 s), `getMessageAttachments`,
+`verifyEmail`, `brain.generateSummary` — 6 chacun (fils multi-messages). Perçu
+~1,7-3 s dominé par la sanitisation serveur.
+
+**Effet pervers à documenter pour w2a** : l'ouverture paraît « correcte »
+(1,7 s) **uniquement parce que la liste a déjà tout téléchargé**. Une fois le
+N+1 supprimé, l'ouverture devra charger son propre `mail.get` (4-5 s mesurés
+solo) **sauf préchargement du fil au survol/sélection** (pattern Superhuman,
+W2-A reco ou vague ultérieure). **Sans préchargement, w2a déplace le coût de la
+liste vers l'ouverture — à cadrer explicitement.** Axe 4 : ~4-5/10, dépendant
+de la stratégie de préchargement post-w2a.
+
+### 3.3 — Signal cold-path (axe 9)
+
+`listThreads` à **6,7 s pour 947 octets** = presque tout serveur (isolate
+froid + Hyperdrive + requête DO du folder). Cohérent avec le froid isolate
+mesuré au §1 (~1,5 s) amplifié par le chemin DO/Hyperdrive à froid. Renforce
+le levier lazy-import stack IA (w3f).
+
+### 3.4 — Sync initiale (axe 8) — toujours PENDING
+
+Aucune re-sync forcée (écriture — hors périmètre lecture seule sans décision
+explicite). `wrangler tail` non lancé cette session. **Axe 8 reste provisoire
+(3/10)** ; à mesurer en M2 avec logs d'observabilité, ou lors d'un ajout de
+compte contrôlé.
