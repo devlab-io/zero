@@ -141,6 +141,8 @@ Après merge de #34 et rebase de ma branche, `pnpm --filter @zero/mail exec vite
 
 Tests non tautologiques (échouables) : le test d'erreur casserait si `undo`/`reconcile`/l'action Retry disparaissaient ; le test succès casserait si le refresh régressait à nouveau.
 
+_Supervision propriétaire (orchestrateur)_ : une ligne de commentaire corrigée dans mon worktree — `use-optimistic-actions.test.ts:141`, attribution rectifiée en « bug détecté par #35, fix livré par #34 » (le bug a été DÉTECTÉ côté #35, le correctif `isLastPendingOfType` LIVRÉ par #34). Intégrée telle quelle ; re-gates rejoués sur cet état (tsc 0/0, 3× RC 0/0/0, coverage inchangée).
+
 ## 3× `pnpm test` (RC natifs — état FINAL post-#34)
 
 ```
