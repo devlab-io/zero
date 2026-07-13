@@ -260,11 +260,13 @@ extraite + testée : `label-move-picker.logic.ts` (`availableMoveDestinations`, 
 palette « Is Starred », vue starred live sans nouvelle route. Registre : `g s` remis (séquence),
 manifeste `NAV_SEQUENCE_ACTIONS`.
 
-**Gates vague 2 (RC natifs) :** tsc `server 0 / mail 0` (blocking, RC 0) · **40/40 tests**
-(ajouts : send-and-archive 4, label-move-picker.logic 3) · build `✓ 10.78s` ·
+**Gates vague 2 (RC natifs) :** tsc `server 0 / mail 0` (blocking, RC 0) · **41/41 tests**
+(ajouts : send-and-archive 4, label-move-picker.logic 3, + assertion coverage) · build `✓ 10.78s` ·
 loc/console/type ratchets PASSED (aucun ajout `any`/`console`,
-aucun fichier > 800 LOC). Coverage `keyboard-parity` reste vert : `g s`/`l`/`v`/`sendAndArchive`
-résolvent tous vers un handler via le manifeste.
+aucun fichier > 800 LOC). Coverage `keyboard-parity` : `g s`/`l`/`v`/`sendAndArchive`
+résolvent tous vers un handler via le manifeste, ET un test assert **100 % de la table gelée**
+(chaque combo in-scope enregistré + résolu ; carve-outs réels de la spec exclus —
+team/assignment/snippets/favorite-slots/account-switch).
 
 **Footprints ruling-gated :** thread-display.tsx **+3 l.** (≤10 requis) ; email-composer.tsx
 **+35 l.** (le handler send+archive + son wiring minimal, rien d'autre). vitest.config.ts : alias
