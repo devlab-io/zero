@@ -83,6 +83,10 @@ export default function ReplyCompose({ messageId }: ReplyComposeProps) {
   }) => {
     if (!replyToMessage || !activeConnection?.email) return;
 
+    // Optimistic send (W2-H): show an immediate "Sending…" state and close the
+    // composer as soon as the send resolves — no blocking refetch in the close path.
+    const sendingToast = toast.loading(m['states.sending']());
+
     try {
       const userEmail = activeConnection.email.toLowerCase();
       const userName = activeConnection.name || session?.user?.name || '';
@@ -180,11 +184,15 @@ export default function ReplyCompose({ messageId }: ReplyComposeProps) {
       });
 
       posthog.capture('Reply Email Sent');
+      toast.dismiss(sendingToast);
 
-      // Reset states
+      // Close the composer immediately; reconcile the thread in the BACKGROUND.
+      // The blocking `await refetch()` was the measured cold-path stall (W2-H) —
+      // it is now fire-and-forget so the send feels instant.
       setMode(null);
-      await refetch();
-      
+      setActiveReplyId(null);
+      void refetch();
+
       handleUndoSend(result, settings, {
         to: data.to,
         cc: data.cc,
@@ -195,6 +203,7 @@ export default function ReplyCompose({ messageId }: ReplyComposeProps) {
         scheduleAt: data.scheduleAt,
       });
     } catch (error) {
+      toast.dismiss(sendingToast);
       console.error('Error sending email:', error);
       toast.error(m['pages.createEmail.failedToSendEmail']());
     }

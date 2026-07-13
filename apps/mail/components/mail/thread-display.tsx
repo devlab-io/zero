@@ -40,10 +40,12 @@ import { useMutation } from '@tanstack/react-query';
 import { useIsMobile } from '@/hooks/use-mobile';
 import ReplyCompose from './reply-composer';
 import { NotesPanel } from './note-panel';
+import { selectThreadViewState } from '@/lib/thread-view-state';
+import { useIsOffline } from '@/hooks/use-online-status';
 import { cn, FOLDERS } from '@/lib/utils';
 import { m } from '@/paraglide/messages';
 import { useParams } from 'react-router';
-import { Inbox } from 'lucide-react';
+import { Inbox, RefreshCcw } from 'lucide-react';
 import { useQueryState } from 'nuqs';
 import { useAtom } from 'jotai';
 import { toast } from 'sonner';
@@ -62,7 +64,8 @@ export function ThreadDisplay() {
 
   const folder = params?.folder ?? 'inbox';
   const [id, setThreadId] = useQueryState('threadId');
-  const { data: emailData, isLoading, refetch: refetchThread } = useThread(id ?? null);
+  const { data: emailData, isLoading, isError, refetch: refetchThread } = useThread(id ?? null);
+  const isOffline = useIsOffline();
   const [, items] = useThreads();
   const [isStarred, setIsStarred] = useState(false);
   const [isImportant, setIsImportant] = useState(false);
@@ -235,6 +238,16 @@ export function ThreadDisplay() {
     setNavigationDirection(null);
   }, [setNavigationDirection]);
 
+  // Honest active-thread state (issue #34): a failed fetch shows a finite error
+  // with retry/back — never an endless skeleton.
+  const threadState = selectThreadViewState({
+    hasSelection: !!id,
+    hasData: !!emailData,
+    isLoading,
+    isError,
+    isOffline,
+  });
+
   return (
     <div
       className={cn(
@@ -250,7 +263,7 @@ export function ThreadDisplay() {
           isFullscreen ? 'fixed inset-0 z-50' : '',
         )}
       >
-        {!id ? (
+        {threadState === 'no-selection' ? (
           <div className="flex h-full items-center justify-center">
             <div className="flex flex-col items-center justify-center gap-2 text-center">
               <EmptyStateIcon width={200} height={200} />
@@ -286,7 +299,7 @@ export function ThreadDisplay() {
               </div>
             </div>
           </div>
-        ) : !emailData || isLoading ? (
+        ) : threadState === 'loading' ? (
           <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
             <ScrollArea className="h-full flex-1" type="auto">
               <div className="pb-4">
@@ -294,7 +307,38 @@ export function ThreadDisplay() {
               </div>
             </ScrollArea>
           </div>
-        ) : (
+        ) : threadState === 'error' ? (
+          <div className="flex h-full items-center justify-center p-6">
+            <div className="flex max-w-md flex-col items-center justify-center gap-3 text-center">
+              <EmptyStateIcon width={160} height={160} />
+              <div>
+                <p className="text-lg">{m['states.thread.errorTitle']()}</p>
+                <p className="text-md text-muted-foreground dark:text-white/50">
+                  {isOffline
+                    ? m['states.mailList.offlineNotice']()
+                    : m['states.thread.errorDescription']()}
+                </p>
+              </div>
+              <div className="mt-1 flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => void refetchThread()}
+                  className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-md border bg-white px-3 text-sm transition-colors hover:bg-gray-100 dark:border-none dark:bg-[#313131] dark:hover:bg-[#404040]"
+                >
+                  <RefreshCcw className="h-4 w-4" />
+                  {m['states.thread.retry']()}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleClose}
+                  className="text-muted-foreground inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-md px-3 text-sm transition-colors hover:bg-gray-100 dark:hover:bg-[#313131]"
+                >
+                  {m['states.thread.back']()}
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : id && emailData ? (
           <>
             <div
               className={cn(
@@ -526,7 +570,7 @@ export function ThreadDisplay() {
               <LabelMovePicker />
             </div>
           </>
-        )}
+        ) : null}
       </div>
     </div>
   );

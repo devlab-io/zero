@@ -7,7 +7,11 @@ import { useSearchValue } from '@/hooks/use-search-value';
 import { EmptyStateIcon } from '../icons/empty-state-svg';
 import type { ParsedMessage } from '@/types';
 import { useSettings } from '@/hooks/use-settings';
+import { selectMailListState } from '@/lib/mail-list-state';
+import { useIsOffline } from '@/hooks/use-online-status';
 import { VList, type VListHandle } from 'virtua';
+import { RefreshCcw } from 'lucide-react';
+import { m } from '@/paraglide/messages';
 import { cn, FOLDERS } from '@/lib/utils';
 import { Thread } from './mail-list-thread';
 import { Draft } from './mail-list-draft';
@@ -34,10 +38,13 @@ export const MailList = memo(
       isFetching,
       isFetchingNextPage,
       isFetchingThreadBodies,
+      isError,
       hasNextPage,
       loadMore,
       refetch,
     } = useMailListData();
+
+    const isOffline = useIsOffline();
 
     const itemsRef = useRef(items);
     const parentRef = useRef<HTMLDivElement>(null);
@@ -135,6 +142,15 @@ export const MailList = memo(
 
     const filteredItems = useMemo(() => items.filter((item) => item.id), [items]);
 
+    // Honest network/state selection (issue #34): a failed read never renders as
+    // "empty" and cached rows survive a failed refresh.
+    const viewState = selectMailListState({
+      itemCount: items.length,
+      isLoading,
+      isError,
+      isOffline,
+    });
+
     const Comp = useMemo(() => (folder === FOLDERS.DRAFT ? Draft : Thread), [folder]);
 
     const vListRenderer = useCallback(
@@ -183,20 +199,42 @@ export const MailList = memo(
           )}
         >
           <>
-            {isLoading ? (
+            {viewState === 'loading' ? (
               <div className="flex h-32 w-full items-center justify-center">
                 <div className="h-4 w-4 animate-spin rounded-full border-2 border-neutral-900 border-t-transparent dark:border-white dark:border-t-transparent" />
               </div>
-            ) : !items || items.length === 0 ? (
+            ) : viewState === 'error' ? (
+              <div className="flex w-full items-center justify-center p-6">
+                <div className="flex max-w-md flex-col items-center justify-center gap-3 text-center">
+                  <EmptyStateIcon width={160} height={160} />
+                  <div>
+                    <p className="text-lg">{m['states.mailList.errorTitle']()}</p>
+                    <p className="text-md text-muted-foreground dark:text-white/50">
+                      {isOffline
+                        ? m['states.mailList.offlineNotice']()
+                        : m['states.mailList.errorDescription']()}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => void refetch()}
+                    className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-md border px-3 text-sm transition-colors hover:bg-gray-100 dark:hover:bg-[#313131]"
+                  >
+                    <RefreshCcw className="h-4 w-4" />
+                    {m['states.retry']()}
+                  </button>
+                </div>
+              </div>
+            ) : viewState === 'empty' ? (
               <div className="flex w-full items-center justify-center">
                 <div className="flex flex-col items-center justify-center gap-2 text-center">
                   <EmptyStateIcon width={200} height={200} />
                   <div className="mt-5">
-                    <p className="text-lg">It's empty here</p>
+                    <p className="text-lg">{m['states.mailList.emptyTitle']()}</p>
                     <p className="text-md text-muted-foreground dark:text-white/50">
-                      Search for another email or{' '}
+                      {m['states.mailList.emptyDescription']()}{' '}
                       <button type="button" className="underline cursor-pointer" onClick={clearFilters}>
-                        clear filters
+                        {m['states.mailList.clearFilters']()}
                       </button>
                     </p>
                   </div>
@@ -204,6 +242,23 @@ export const MailList = memo(
               </div>
             ) : (
               <div className="flex flex-1 flex-col" id="mail-list-scroll">
+                {viewState === 'stale' ? (
+                  <div className="flex items-center justify-between gap-2 border-b border-amber-200/60 bg-amber-50 px-3 py-1.5 text-xs text-amber-800 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-300">
+                    <span>
+                      {isOffline
+                        ? m['states.mailList.offlineNotice']()
+                        : m['states.mailList.staleNotice']()}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => void refetch()}
+                      className="inline-flex cursor-pointer items-center gap-1 rounded px-1.5 py-0.5 font-medium transition-colors hover:bg-amber-100 dark:hover:bg-amber-500/20"
+                    >
+                      <RefreshCcw className="h-3 w-3" />
+                      {m['states.retry']()}
+                    </button>
+                  </div>
+                ) : null}
                 <VList
                   ref={vListRef}
                   count={filteredItems.length}

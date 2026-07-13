@@ -1,5 +1,6 @@
 import { addOptimisticActionAtom, removeOptimisticActionAtom } from '@/store/optimistic-updates';
 import { optimisticActionsManager, type PendingAction } from '@/lib/optimistic-actions-manager';
+import { buildOptimisticFailureToast, isLastPendingOfType } from '@/lib/optimistic-recovery';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 
 import { backgroundQueueAtom } from '@/store/backgroundQueue';
@@ -78,6 +79,12 @@ export function useOptimisticActions() {
     return await queryClient.refetchQueries({ queryKey: trpc.labels.list.queryKey() });
   }, [queryClient]);
 
+  // Failure-only reconciliation (issue #34, check point 6): pull the thread list
+  // from the server so a failed optimistic action cannot leave the UI drifted.
+  const reconcileFailedAction = useCallback(async () => {
+    await queryClient.invalidateQueries({ queryKey: trpc.mail.listThreads.queryKey() });
+  }, [queryClient, trpc]);
+
   function createPendingAction({
     type,
     threadIds,
@@ -85,6 +92,7 @@ export function useOptimisticActions() {
     optimisticId,
     execute,
     undo,
+    retry,
     toastMessage,
   }: {
     type: keyof typeof ActionType;
@@ -93,6 +101,7 @@ export function useOptimisticActions() {
     optimisticId: string;
     execute: () => Promise<void>;
     undo: () => void;
+    retry: () => void;
     toastMessage: string;
     folders?: string[];
   }) {
@@ -129,18 +138,33 @@ export function useOptimisticActions() {
         }
 
         const typeActions = optimisticActionsManager.pendingActionsByType.get(type);
+        // Capture BEFORE removal: `typeActions` is the SAME Set that the delete below
+        // mutates, so reading its size afterwards is always one short. size === 1 here
+        // means THIS action is the last of its type → run the single success refresh.
+        // (Routed fix #35: the post-delete check left the single-action refresh dead.)
+        const isLastOfType = isLastPendingOfType(typeActions?.size ?? 0);
         optimisticActionsManager.pendingActions.delete(pendingActionId);
         optimisticActionsManager.pendingActionsByType.get(type)?.delete(pendingActionId);
-        if (typeActions?.size === 1) {
+        if (isLastOfType) {
           await refreshData();
           removeOptimisticAction(optimisticId);
         }
       } catch (error) {
         console.error('Action failed:', error);
-        removeOptimisticAction(optimisticId);
+        // Reconcile the optimistic view: undo() removes the optimistic hide AND
+        // clears any background-queue entry (MOVE/DELETE) so the thread reappears
+        // instead of vanishing silently.
+        undo();
         optimisticActionsManager.pendingActions.delete(pendingActionId);
         optimisticActionsManager.pendingActionsByType.get(type)?.delete(pendingActionId);
-        toast.error('Action failed');
+        await reconcileFailedAction();
+        // Surface a recovery action (issue #34, check point 6): retry re-applies the intent.
+        const recovery = buildOptimisticFailureToast({
+          failedLabel: m['states.actionFailed'](),
+          retryLabel: m['states.retry'](),
+          onRetry: retry,
+        });
+        toast.error(recovery.message, { action: recovery.action, duration: recovery.duration });
       }
     }
 
@@ -194,6 +218,7 @@ export function useOptimisticActions() {
         undo: () => {
           removeOptimisticAction(optimisticId);
         },
+        retry: () => optimisticMarkAsRead(threadIds, silent),
         toastMessage: silent ? '' : 'Marked as read',
       });
     },
@@ -224,6 +249,7 @@ export function useOptimisticActions() {
       undo: () => {
         removeOptimisticAction(optimisticId);
       },
+      retry: () => optimisticMarkAsUnread(threadIds),
       toastMessage: 'Marked as unread',
     });
   }
@@ -249,6 +275,7 @@ export function useOptimisticActions() {
         undo: () => {
           removeOptimisticAction(optimisticId);
         },
+        retry: () => optimisticToggleStar(threadIds, starred),
         toastMessage: starred
           ? m['common.actions.addedToFavorites']()
           : m['common.actions.removedFromFavorites'](),
@@ -315,6 +342,7 @@ export function useOptimisticActions() {
           setBackgroundQueue({ type: 'delete', threadId: `thread:${id}` });
         });
       },
+      retry: () => optimisticMoveThreadsTo(threadIds, currentFolder, destination),
       toastMessage: successMessage,
       folders: [currentFolder, destination],
     });
@@ -362,6 +390,7 @@ export function useOptimisticActions() {
           setBackgroundQueue({ type: 'delete', threadId: `thread:${id}` });
         });
       },
+      retry: () => optimisticDeleteThreads(threadIds, currentFolder),
       toastMessage: m['common.actions.movedToBin'](),
     });
   }
@@ -391,6 +420,7 @@ export function useOptimisticActions() {
         undo: () => {
           removeOptimisticAction(optimisticId);
         },
+        retry: () => optimisticToggleImportant(threadIds, isImportant),
         toastMessage: isImportant ? 'Marked as important' : 'Unmarked as important',
       });
     },
@@ -426,6 +456,7 @@ export function useOptimisticActions() {
       undo: () => {
         removeOptimisticAction(optimisticId);
       },
+      retry: () => optimisticToggleLabel(threadIds, labelId, add),
       toastMessage: add
         ? `Label added${threadIds.length > 1 ? ` to ${threadIds.length} threads` : ''}`
         : `Label removed${threadIds.length > 1 ? ` from ${threadIds.length} threads` : ''}`,
@@ -456,6 +487,7 @@ export function useOptimisticActions() {
       undo: () => {
         removeOptimisticAction(optimisticId);
       },
+      retry: () => optimisticSnooze(threadIds, currentFolder, wakeAt),
       toastMessage: `Snoozed until ${wakeAt.toLocaleString()}`,
       folders: [currentFolder, 'snoozed'],
     });
@@ -480,6 +512,7 @@ export function useOptimisticActions() {
       undo: () => {
         removeOptimisticAction(optimisticId);
       },
+      retry: () => optimisticUnsnooze(threadIds, currentFolder),
       toastMessage: 'Moved to Inbox',
       folders: [currentFolder, 'inbox'],
     });
@@ -505,6 +538,7 @@ export function useOptimisticActions() {
       undo: () => {
         removeOptimisticAction(optimisticId);
       },
+      retry: () => optimisticDeleteDraft(draftId),
       toastMessage: 'Draft deleted',
     });
   }
