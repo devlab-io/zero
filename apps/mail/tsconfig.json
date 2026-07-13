@@ -4,7 +4,14 @@
     "lib": ["dom", "dom.iterable", "esnext"],
     "types": ["node", "vite/client"],
     "paths": {
-      "@/*": ["./*"]
+      "@/*": ["./*"],
+      // `dormroom` (+ the modules it re-exports) ships raw strict-incompatible `.ts`
+      // that tsc walks into via the server sources pulled in by the `@zero/server/trpc`
+      // AppRouter type, reporting ~20 node_modules errors. Resolve its types from the
+      // single shared vendor mirror #21 already added server-side (no local duplicate to
+      // drift) — same shim as apps/server/tsconfig.json. Types-only; wrangler bundles the
+      // real JS; `strict` untouched.
+      "dormroom": ["../server/src/vendor/dormroom.d.ts"]
     },
     "rootDirs": [".", "./.react-router/types"]
   },

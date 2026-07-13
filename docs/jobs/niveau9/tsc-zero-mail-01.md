@@ -236,3 +236,43 @@ STATUS: COMPLETE_WITH_CONCERNS
   types) dans docs/testing.md / ci.yml — hors de mon périmètre d'écriture ; sinon +47 erreurs de stubs.
 - Bug latent `mail.listThreads` (forme minimale) signalé, non corrigé (correction = fetch = hors
   périmètre types-only).
+
+---
+
+## Follow-up (2026-07-13) — shim `dormroom` côté mail (post-merge #21)
+
+CONTEXTE : job commité `9de53723`, branche rebasée sur `factory/niveau9` incluant le merge de #21
+(`c5aef988` : `tsc server = 0`). #21 a résolu les packages Durable Object livrés en `.ts` brut via un
+miroir de types `apps/server/src/vendor/dormroom.d.ts` + `apps/server/tsconfig.json` →
+`paths."dormroom"`. Le programme tsc de mail tirait toujours `dormroom` (et ses re-exports) via les
+sources serveur **sans** ce mapping — d'où la réserve D1 partiellement résiduelle côté node_modules.
+Worktree re-vérifié (`git log/status`) avant action ; séquence complète re-jouée (`wrangler types`
+server+mail, `react-router typegen`).
+
+TÂCHE : appliquer le même shim côté mail. **1 seul fichier touché** : `apps/mail/tsconfig.json`.
+
+Choix documenté : **référence inter-app** vers le miroir partagé
+`"dormroom": ["../server/src/vendor/dormroom.d.ts"]` (source unique, aucun duplicata à maintenir en
+phase avec les packages ni avec la copie serveur ; cohérent avec le couplage AppRouter déjà présent ;
+`tsconfig.json` n'est pas scanné par le check frontière A1 qui ne cible que `*.ts/*.tsx`). Une copie
+locale aurait introduit un risque de dérive à deux fichiers.
+
+Preuves `pnpm --filter @zero/mail exec tsc --noEmit` (séquence complète) :
+
+```
+AVANT : 37 erreurs — 0 apps/mail | 20 node_modules (6 dormroom + 14 re-exports) | 17 ../server/src
+APRÈS : 17 erreurs — 0 apps/mail | 0 node_modules                              | 17 ../server/src
+```
+
+Les 17 résiduelles sont toutes dans `../server/src/**` (collision d'`Env` ambiant inter-app, ex.
+`Property 'AI' does not exist on type 'Env'` — **transférée à #25 par ruling, hors périmètre**).
+
+Ratchets verts après :
+```
+type-ratchet: any(mail)=23/23  any(server)=14/15  any(total)=37/38  → PASSED
+typecheck-report: server 0/0, mail 17/119 (report mode)             → OK
+```
+
+`git status` : seul `apps/mail/tsconfig.json` modifié (aucun autre changement, bornes non touchées).
+
+STATUS: COMPLETE
