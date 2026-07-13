@@ -8,6 +8,7 @@ import { useParams } from 'react-router';
 import { Check } from '../icons/icons';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
+import { m } from '@/paraglide/messages';
 
 export default function SelectAllCheckbox({ className }: { className?: string }) {
   const [mail, setMail] = useMail();
@@ -52,7 +53,9 @@ export default function SelectAllCheckbox({ className }: { className?: string })
       }
     } catch (err) {
       console.error('Failed to fetch all thread IDs', err);
-      toast.error((err instanceof Error ? err.message : undefined) ?? 'Failed to select all emails');
+      toast.error(
+        (err instanceof Error ? err.message : undefined) ?? m['common.mail.failedToSelectAll'](),
+      );
     }
 
     return ids;
@@ -69,10 +72,10 @@ export default function SelectAllCheckbox({ className }: { className?: string })
     setMail((prev) => ({ ...prev, bulkSelected: loadedIds }));
 
     toast(
-      `${loadedIds.length} conversation${loadedIds.length !== 1 ? 's' : ''} on this page selected.`,
+      m['common.mail.conversationsSelected']({ count: loadedIds.length }),
       {
         action: {
-          label: 'Select all conversations',
+          label: m['common.mail.selectAllConversations'](),
           onClick: async () => {
             try {
               if (!allIdsCache.current) {
@@ -85,7 +88,7 @@ export default function SelectAllCheckbox({ className }: { className?: string })
             } catch (err) {
               console.error(err);
               setIsFetchingIds(false);
-              toast.error('Failed to select all conversations');
+              toast.error(m['common.mail.failedToSelectAllConversations']());
             }
           },
         },

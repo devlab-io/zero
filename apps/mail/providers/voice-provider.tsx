@@ -1,3 +1,4 @@
+import { m } from '@/paraglide/messages';
 import { createContext, useContext, useState } from 'react';
 import { useConversation } from '@elevenlabs/react';
 // import { callServerTool } from '@/lib/server-tool';
@@ -96,7 +97,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       setHasPermission(true);
       return true;
     } catch {
-      toast.error('Microphone access denied. Please enable microphone permissions.');
+      toast.error(m['common.voice.micDenied']());
       setHasPermission(false);
       return false;
     }
@@ -140,7 +141,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
 
       setOpen(true);
     } catch {
-      toast.error('Failed to start conversation. Please try again.');
+      toast.error(m['common.voice.startFailed']());
     }
   };
 
@@ -149,7 +150,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       await conversation.endSession();
       setCurrentContext(null);
     } catch {
-      toast.error('Failed to end conversation');
+      toast.error(m['common.voice.endFailed']());
     }
   };
 

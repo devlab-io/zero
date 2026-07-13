@@ -24,6 +24,7 @@ import { Copy } from 'lucide-react';
 import { Input } from './ui/input';
 import { useState } from 'react';
 import { toast } from 'sonner';
+import { m } from '@/paraglide/messages';
 import z from 'zod';
 
 const verificationSchema = z.object({
@@ -71,7 +72,7 @@ export const SetupInboxDialog = () => {
           phoneNumber: data.phoneNumber,
         });
         setShowOtpInput(true);
-        toast.success('Verification code sent to your phone');
+        toast.success(m['common.setupPhone.codeSent']());
       } else if (data.otp) {
         const isVerified = await authClient.phoneNumber.verify({
           phoneNumber: data.phoneNumber,
@@ -80,18 +81,20 @@ export const SetupInboxDialog = () => {
         console.log('isVerified', isVerified);
 
         if (isVerified.error) {
-          toast.error('Invalid verification code');
+          toast.error(m['common.setupPhone.invalidCode']());
         } else {
           refetch();
-          toast.success('Phone number verified successfully');
+          toast.success(m['common.setupPhone.verified']());
         }
       } else {
-        toast.error('Please enter a valid OTP');
+        toast.error(m['common.setupPhone.enterValidOtp']());
       }
     } catch (error) {
       console.error(error);
       toast.error(
-        showOtpInput ? 'Failed to verify phone number' : 'Failed to send verification code',
+        showOtpInput
+          ? m['common.setupPhone.verifyFailed']()
+          : m['common.setupPhone.sendFailed'](),
       );
     } finally {
       setIsVerifying(false);
@@ -188,7 +191,7 @@ export const SetupInboxDialog = () => {
 export const CallInboxDialog = () => {
   const copyNumber = () => {
     navigator.clipboard.writeText(import.meta.env.VITE_PUBLIC_PHONE_NUMBER);
-    toast.success('Number copied to clipboard');
+    toast.success(m['common.setupPhone.numberCopied']());
   };
   return (
     <DropdownMenu>

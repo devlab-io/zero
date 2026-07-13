@@ -118,12 +118,12 @@ export function NavUser() {
   const handleClearCache = useCallback(async () => {
     queryClient.clear();
     await idbClear();
-    toast.success('Cache cleared successfully');
+    toast.success(m['common.navUser.cacheCleared']());
   }, []);
 
   const handleCopyConnectionId = useCallback(async () => {
     await navigator.clipboard.writeText(activeConnection?.id || '');
-    toast.success('Connection ID copied to clipboard');
+    toast.success(m['common.navUser.connectionIdCopied']());
   }, [activeConnection]);
 
   const { data: activeAccount } = useActiveConnection();

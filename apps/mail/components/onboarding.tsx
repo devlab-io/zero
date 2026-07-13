@@ -1,51 +1,8 @@
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { useState, useEffect, type ReactNode } from 'react';
+import { m } from '@/paraglide/messages';
 import { Button } from '@/components/ui/button';
 import confetti from 'canvas-confetti';
-
-const steps: {
-  title: string;
-  description: ReactNode;
-  video?: string;
-  image?: string;
-}[] = [
-  {
-    title: 'Welcome to Zero Email!',
-    description: 'Your new intelligent email experience starts here.',
-    image: '/onboarding/get-started.webp',
-  },
-  {
-    title: 'Chat with your inbox',
-    description: 'Zero allows you to chat with your inbox, and take actions on your behalf.',
-    video: '/onboarding/step2.mp4',
-  },
-  {
-    title: 'AI Compose & Reply',
-    description: 'Our AI assistant allows you to write emails that sound like you.',
-    video: '/onboarding/step1.mp4',
-  },
-  {
-    title: 'Label your emails',
-    description: 'Zero helps you label your emails to focus on what matters.',
-    video: '/onboarding/step3.mp4',
-  },
-  {
-    title: 'Coming Soon',
-    description: (
-      <>
-        <span className="text-muted-foreground mb-4">
-          We're excited to bring these powerful features to all users very soon!
-        </span>
-      </>
-    ),
-    image: '/onboarding/coming-soon.webp',
-  },
-  {
-    title: 'Ready to start?',
-    description: 'Click below to begin your intelligent email experience!',
-    image: '/onboarding/ready.webp',
-  },
-];
 
 export function OnboardingDialog({
   open,
@@ -54,6 +11,43 @@ export function OnboardingDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
+  const steps: {
+    title: string;
+    description: ReactNode;
+    video?: string;
+    image?: string;
+  }[] = [
+    {
+      title: m['common.onboarding.welcomeTitle'](),
+      description: m['common.onboarding.welcomeDescription'](),
+      image: '/onboarding/get-started.webp',
+    },
+    {
+      title: m['common.onboarding.chatTitle'](),
+      description: m['common.onboarding.chatDescription'](),
+      video: '/onboarding/step2.mp4',
+    },
+    {
+      title: m['common.onboarding.composeTitle'](),
+      description: m['common.onboarding.composeDescription'](),
+      video: '/onboarding/step1.mp4',
+    },
+    {
+      title: m['common.onboarding.labelTitle'](),
+      description: m['common.onboarding.labelDescription'](),
+      video: '/onboarding/step3.mp4',
+    },
+    {
+      title: m['common.onboarding.comingSoonTitle'](),
+      description: m['common.onboarding.comingSoonDescription'](),
+      image: '/onboarding/coming-soon.webp',
+    },
+    {
+      title: m['common.onboarding.readyTitle'](),
+      description: m['common.onboarding.readyDescription'](),
+      image: '/onboarding/ready.webp',
+    },
+  ];
   const [currentStep, setCurrentStep] = useState(0);
 
   useEffect(() => {
@@ -137,10 +131,12 @@ export function OnboardingDialog({
                 variant="outline"
                 disabled={currentStep === 0}
               >
-                Go back
+                {m['common.onboarding.goBack']()}
               </Button>
               <Button size={'xs'} onClick={handleNext}>
-                {currentStep === steps.length - 1 ? 'Get Started' : 'Next'}
+                {currentStep === steps.length - 1
+                  ? m['common.onboarding.getStarted']()
+                  : m['common.onboarding.next']()}
               </Button>
             </div>
             <div className="flex items-center justify-center">

@@ -1,3 +1,4 @@
+import { m } from '@/paraglide/messages';
 import type { Attachment } from '@/types';
 import { Docx, Figma, ImageFile, PDF } from '../icons/icons';
 import { FileText } from 'lucide-react';
@@ -67,7 +68,7 @@ export const downloadAttachment = async (attachment: {
     window.URL.revokeObjectURL(url);
   } catch (error) {
     console.error('Error downloading attachment:', error);
-    toast.error('Failed to download attachment');
+    toast.error(m['common.mailDisplay.failedToDownloadAttachment']());
   }
 };
 
@@ -165,7 +166,7 @@ export const openAttachment = async (attachment: {
     }
   } catch (error) {
     console.error('Error opening attachment:', error);
-    toast.error('Failed to open attachment');
+    toast.error(m['common.mailDisplay.failedToOpenAttachment']());
   }
 };
 

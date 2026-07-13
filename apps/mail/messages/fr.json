@@ -57,7 +57,9 @@
       "errorDeletingSpam": "Échec de la suppression des emails indésirables",
       "confirmDeleteSpam": "Supprimer tous les spams",
       "confirmDeleteSpamDescription": "Êtes-vous sûr de vouloir supprimer tous les emails indésirables ? Cette action est irréversible.",
-      "confirmDelete": "Supprimer"
+      "confirmDelete": "Supprimer",
+      "linkCopied": "Lien copié dans le presse-papier !",
+      "errorTryAgainLater": "Erreur, veuillez réessayer plus tard"
     },
     "themes": {
       "dark": "Sombre",
@@ -142,7 +144,9 @@
       "otherAccounts": "Autres comptes",
       "switchingAccounts": "Changement de compte...",
       "accountSwitched": "Compte changé avec succès",
-      "failedToSwitchAccount": "Échec du changement de compte. Veuillez réessayer."
+      "failedToSwitchAccount": "Échec du changement de compte. Veuillez réessayer.",
+      "cacheCleared": "Cache vidé avec succès",
+      "connectionIdCopied": "ID de connexion copié dans le presse-papier"
     },
     "mailCategories": {
       "primary": "Principale",
@@ -219,7 +223,11 @@
       "cancel": "Annuler",
       "goToWebsite": "Accéder au site",
       "failedToUnsubscribe": "Échec de la désinscription à la liste de diffusion",
-      "print": "Imprimer"
+      "print": "Imprimer",
+      "failedToDownloadAttachment": "Échec du téléchargement de la pièce jointe",
+      "failedToOpenAttachment": "Échec de l'ouverture de la pièce jointe",
+      "emailCopied": "Email copié dans le presse-papier",
+      "failedToPrint": "Échec de l'impression de l'email. Veuillez réessayer."
     },
     "threadDisplay": {
       "exitFullscreen": "Quitter le mode plein écran",
@@ -322,7 +330,9 @@
       "failedToSave": "Échec de la sauvegarde des paramètres",
       "languageChanged": "Langue changée en {locale}",
       "defaultEmailUpdated": "Adresse e-mail par défaut mise à jour dans Gmail",
-      "failedToUpdateGmailAlias": "Échec de la mise à jour de l'alias par défaut dans les paramètres Gmail"
+      "failedToUpdateGmailAlias": "Échec de la mise à jour de l'alias par défaut dans les paramètres Gmail",
+      "promptUpdated": "Requête mise à jour",
+      "failedToUpdatePrompt": "Échec de la mise à jour de la requête"
     },
     "mail": {
       "replies": [
@@ -391,7 +401,27 @@
       "failedToUnmute": "Échec de la réactivation du son",
       "archived": "Archivé",
       "failedToArchive": "Échec de l'archivage",
-      "openInNewTab": "Ouvrir dans un nouvel onglet"
+      "openInNewTab": "Ouvrir dans un nouvel onglet",
+      "failedToTrustSender": "Échec de la mise en confiance de l'expéditeur",
+      "snoozeFutureDate": "Veuillez choisir une date et une heure futures.",
+      "failedToSelectAll": "Échec de la sélection de tous les emails",
+      "failedToSelectAllConversations": "Échec de la sélection de toutes les conversations",
+      "selectAllConversations": "Sélectionner toutes les conversations",
+      "conversationsSelected": [
+        {
+          "declarations": [
+            "input count",
+            "local countPlural = count: plural"
+          ],
+          "selectors": [
+            "countPlural"
+          ],
+          "match": {
+            "countPlural=one": "# conversation sélectionnée sur cette page.",
+            "countPlural=other": "# conversations sélectionnées sur cette page."
+          }
+        }
+      ]
     },
     "units": {
       "mb": "{amount} Mo"
@@ -412,6 +442,60 @@
       "savingLabel": "Enregistrement de l'étiquette...",
       "failedToSavingLabel": "Échec de l'enregistrement de l'étiquette",
       "saveLabelSuccess": "Étiquette enregistrée avec succès"
+    },
+    "onboarding": {
+      "welcomeTitle": "Bienvenue sur Zero Email !",
+      "welcomeDescription": "Votre nouvelle expérience de messagerie intelligente commence ici.",
+      "chatTitle": "Discutez avec votre boîte de réception",
+      "chatDescription": "Zero vous permet de discuter avec votre boîte de réception et d'agir en votre nom.",
+      "composeTitle": "Rédaction et réponse IA",
+      "composeDescription": "Notre assistant IA vous permet d'écrire des emails qui vous ressemblent.",
+      "labelTitle": "Étiquetez vos emails",
+      "labelDescription": "Zero vous aide à étiqueter vos emails pour vous concentrer sur l'essentiel.",
+      "comingSoonTitle": "Bientôt disponible",
+      "comingSoonDescription": "Nous avons hâte de proposer ces puissantes fonctionnalités à tous les utilisateurs très bientôt !",
+      "readyTitle": "Prêt à commencer ?",
+      "readyDescription": "Cliquez ci-dessous pour débuter votre expérience de messagerie intelligente !",
+      "goBack": "Retour",
+      "getStarted": "Commencer",
+      "next": "Suivant"
+    },
+    "voice": {
+      "micDenied": "Accès au microphone refusé. Veuillez activer les autorisations du microphone.",
+      "startFailed": "Échec du démarrage de la conversation. Veuillez réessayer.",
+      "endFailed": "Échec de la fin de la conversation"
+    },
+    "auth": {
+      "tryingSignup": "Tentative d'inscription avec {email}",
+      "tryingLogin": "Tentative de connexion avec {email}",
+      "signupAttempt": "Tentative d'inscription",
+      "loginAttempt": "Tentative de connexion"
+    },
+    "undoSend": {
+      "emailScheduled": "Email planifié",
+      "scheduleCancelled": "Planification annulée",
+      "emailSent": "Email envoyé",
+      "sendCancelled": "Envoi annulé",
+      "failedToCancel": "Échec de l'annulation",
+      "undo": "Annuler"
+    },
+    "setupPhone": {
+      "codeSent": "Code de vérification envoyé sur votre téléphone",
+      "invalidCode": "Code de vérification invalide",
+      "verified": "Numéro de téléphone vérifié avec succès",
+      "enterValidOtp": "Veuillez saisir un code à usage unique valide",
+      "numberCopied": "Numéro copié dans le presse-papier",
+      "verifyFailed": "Échec de la vérification du numéro de téléphone",
+      "sendFailed": "Échec de l'envoi du code de vérification"
+    },
+    "templates": {
+      "provideName": "Veuillez fournir un nom",
+      "saved": "Modèle enregistré",
+      "failedToSave": "Échec de l'enregistrement du modèle",
+      "deleted": "Modèle supprimé",
+      "failedToDelete": "Échec de la suppression du modèle",
+      "deleteConfirm": "Supprimer le modèle « {name} » ?",
+      "delete": "Supprimer"
     }
   },
   "queue": {
@@ -518,7 +602,14 @@
         "description": "Oups ! La page que vous recherchez n'existe pas ou a été déplacée.",
         "goBack": "Retour"
       },
-      "settingsNotFound": "404 - Page des paramètres non trouvée"
+      "settingsNotFound": "404 - Page des paramètres non trouvée",
+      "boundary": {
+        "oops": "Oups !",
+        "error": "Erreur",
+        "notFoundDetails": "La page demandée est introuvable.",
+        "somethingWentWrong": "Une erreur est survenue !",
+        "seeConsole": "Consultez la console pour plus d'informations."
+      }
     },
     "settings": {
       "general": {
@@ -683,6 +774,15 @@
         "externalImagesDescription": "Autoriser les courriels à afficher des images provenant de sources externes.",
         "trustedSenders": "Expéditeurs de confiance",
         "trustedSendersDescription": "Toujours afficher les images pour ces expéditeurs."
+      },
+      "categories": {
+        "exactlyOneDefault": "Une seule catégorie doit être définie par défaut",
+        "saved": "Catégories enregistrées",
+        "failedToSave": "Échec de l'enregistrement",
+        "cannotDeleteLast": "Impossible de supprimer la dernière catégorie restante",
+        "defaultReassigned": "Catégorie par défaut réattribuée à la première catégorie restante",
+        "resetToDefaults": "Réinitialisé aux valeurs par défaut",
+        "failedToReset": "Échec de la réinitialisation"
       }
     },
     "createEmail": {
@@ -737,7 +837,10 @@
           "label": "Originale",
           "description": "Aucune compression, qualité originale"
         }
-      }
+      },
+      "scheduledTimeInPast": "L'heure planifiée ne peut pas être dans le passé",
+      "failedToLoadDraft": "Échec du chargement du brouillon",
+      "failedToRemoveAttachment": "Échec de la suppression de la pièce jointe"
     }
   },
   "errorMessages": {

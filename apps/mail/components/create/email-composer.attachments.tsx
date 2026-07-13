@@ -1,3 +1,4 @@
+import { m } from '@/paraglide/messages';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { ImageCompressionSettings } from './image-compression-settings';
 import type { ImageQuality } from '@/lib/image-compression';
@@ -122,7 +123,7 @@ export function ComposerAttachments({
                                   await onRemove(index);
                                 } catch (error) {
                                   console.error('Failed to remove attachment:', error);
-                                  toast.error('Failed to remove attachment');
+                                  toast.error(m['pages.createEmail.failedToRemoveAttachment']());
                                 }
                               }}
                               className="focus-visible:ring-ring ml-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-transparent hover:bg-black/5 focus-visible:outline-none focus-visible:ring-2 cursor-pointer"

@@ -1,3 +1,4 @@
+import { m } from '@/paraglide/messages';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Clock, Calendar as CalendarIcon } from 'lucide-react';
 import { format, startOfToday } from 'date-fns';
@@ -55,7 +56,7 @@ export const ScheduleSendPicker: React.FC<ScheduleSendPickerProps> = ({
     combinedDate.setHours(hours, minutes, 0, 0);
 
     if (validate && combinedDate.getTime() < Date.now()) {
-      toast.error('Scheduled time cannot be in the past');
+      toast.error(m['pages.createEmail.scheduledTimeInPast']());
       onValidityChange?.(false);
       return;
     }

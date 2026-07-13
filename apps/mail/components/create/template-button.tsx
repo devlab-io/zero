@@ -12,6 +12,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { toast } from 'sonner';
+import { m } from '@/paraglide/messages';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { FileText, Save, Trash2 } from 'lucide-react';
 import React, { useState, useMemo, useDeferredValue, useCallback } from 'react';
@@ -92,7 +93,7 @@ const TemplateButtonComponent: React.FC<TemplateButtonProps> = ({
   const handleSaveTemplate = async () => {
     if (!editor) return;
     if (!templateName.trim()) {
-      toast.error('Please provide a name');
+      toast.error(m['common.templates.provideName']());
       return;
     }
 
@@ -110,14 +111,14 @@ const TemplateButtonComponent: React.FC<TemplateButtonProps> = ({
       await queryClient.invalidateQueries({
         queryKey: trpc.templates.list.queryKey(),
       });
-      toast.success('Template saved');
+      toast.success(m['common.templates.saved']());
       setTemplateName('');
       setSaveDialogOpen(false);
     } catch (error) {
       if (error instanceof TRPCClientError) {
         toast.error(error.message);
       } else {
-        toast.error('Failed to save template');
+        toast.error(m['common.templates.failedToSave']());
       }
     } finally {
       setIsSaving(false);
@@ -145,12 +146,12 @@ const TemplateButtonComponent: React.FC<TemplateButtonProps> = ({
         await queryClient.invalidateQueries({
           queryKey: trpc.templates.list.queryKey(),
         });
-        toast.success('Template deleted');
+        toast.success(m['common.templates.deleted']());
       } catch (err) {
         if (err instanceof TRPCClientError) {
           toast.error(err.message);
         } else {
-          toast.error('Failed to delete template');
+          toast.error(m['common.templates.failedToDelete']());
         }
       }
     },
@@ -177,10 +178,10 @@ const TemplateButtonComponent: React.FC<TemplateButtonProps> = ({
       if (!templateId) return;
       const template = templatesById.get(templateId);
       const templateName = template?.name ?? 'this template';
-      toast(`Delete template "${templateName}"?`, {
+      toast(m['common.templates.deleteConfirm']({ name: templateName }), {
         duration: 10000,
         action: {
-          label: 'Delete',
+          label: m['common.templates.delete'](),
           onClick: () => handleDeleteTemplate(templateId),
         },
         className: 'pointer-events-auto',

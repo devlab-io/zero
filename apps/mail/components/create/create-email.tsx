@@ -1,4 +1,5 @@
 import { useUndoSend, type EmailData, deserializeFiles } from '@/hooks/use-undo-send';
+import { m } from '@/paraglide/messages';
 import { useActiveConnection } from '@/hooks/use-connections';
 import { Dialog, DialogClose } from '@/components/ui/dialog';
 import { useEmailAliases } from '@/hooks/use-email-aliases';
@@ -80,7 +81,7 @@ export function CreateEmail({
     if (draftError) {
       console.error('Error loading draft:', draftError);
       setIsDraftFailed(true);
-      toast.error('Failed to load draft');
+      toast.error(m['pages.createEmail.failedToLoadDraft']());
     }
   }, [draftError]);
 
