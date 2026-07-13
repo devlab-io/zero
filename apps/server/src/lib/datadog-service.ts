@@ -180,9 +180,7 @@ export class DatadogService {
 
                     // Full request/response data
                     request_payload: log.input,
-                    ...(log.output && {
-                        response_payload: log.output,
-                    }),
+                    ...(log.output ? { response_payload: log.output } : {}),
 
                     // Performance metrics
                     timing: {

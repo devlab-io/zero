@@ -29,7 +29,75 @@ import { getPromptName } from '../pipelines';
 import { env } from 'cloudflare:workers';
 import { Effect } from 'effect';
 
-export type WorkflowFunction = (context: WorkflowContext) => Promise<any>;
+export type WorkflowFunction = (context: WorkflowContext) => Promise<unknown>;
+
+type VectorizedMessage = {
+  id: string;
+  metadata: {
+    connection: string;
+    thread: string;
+    summary: string;
+  };
+  values: number[];
+};
+
+type LabelSuggestion = { name: string; source: string };
+type AccountLabel = { id: string; name: string; description?: string };
+type UserTopic = { name: string; usecase: string };
+
+// Shape returned by each workflow step, keyed by the step id used with
+// `results.set(step.id, …)` in the engine. `context.results` is a
+// `Map<string, unknown>`, so retrievals go through this typed accessor instead of
+// leaking `{}` (the narrowing of `unknown`) at every property access.
+type StepResultMap = {
+  'analyze-email-intent': {
+    isQuestion: boolean;
+    isRequest: boolean;
+    isMeeting: boolean;
+    isUrgent: boolean;
+  };
+  'generate-draft-content': { draftContent: string | null };
+  'find-messages-to-vectorize': {
+    messagesToVectorize: ParsedMessage[];
+    existingMessages: unknown[];
+  };
+  'vectorize-messages': { embeddings: VectorizedMessage[] };
+  'check-existing-summary': {
+    existingSummary: { summary: string; lastMsg: string } | null;
+  };
+  'generate-thread-summary': { summary: string | null };
+  'get-user-labels': { userAccountLabels: AccountLabel[] };
+  'get-user-topics': { userTopics: UserTopic[] };
+  'generate-label-suggestions': {
+    suggestions: LabelSuggestion[];
+    accountLabelsMap: Record<string, AccountLabel>;
+  };
+};
+
+const getStepResult = <K extends keyof StepResultMap>(
+  context: WorkflowContext,
+  key: K,
+): StepResultMap[K] | undefined =>
+  context.results?.get(key) as StepResultMap[K] | undefined;
+
+// `env.AI.run` returns the model output as a string; the label prompt asks for a
+// JSON array. Parse it defensively — the model may return prose or malformed JSON —
+// and fall back to no suggestions, matching the other guards in this file.
+const parseLabelSuggestions = (raw: unknown): LabelSuggestion[] => {
+  let value: unknown = raw;
+  if (typeof value === 'string') {
+    try {
+      value = JSON.parse(value);
+    } catch {
+      return [];
+    }
+  }
+  if (!Array.isArray(value)) return [];
+  return value.filter(
+    (s): s is LabelSuggestion =>
+      !!s && typeof s === 'object' && typeof (s as { name?: unknown }).name === 'string',
+  );
+};
 
 export const workflowFunctions: Record<string, WorkflowFunction> = {
   analyzeEmailIntent: async (context) => {
@@ -62,7 +130,7 @@ export const workflowFunctions: Record<string, WorkflowFunction> = {
   },
 
   validateResponseNeeded: async (context) => {
-    const intentResult = context.results?.get('analyze-email-intent');
+    const intentResult = getStepResult(context, 'analyze-email-intent');
     if (!intentResult) {
       console.log('[WORKFLOW_FUNCTIONS] Email intent analysis not available');
       throw new Error('Email intent analysis not available');
@@ -108,7 +176,7 @@ export const workflowFunctions: Record<string, WorkflowFunction> = {
   },
 
   createDraft: async (context) => {
-    const draftContentResult = context.results?.get('generate-draft-content');
+    const draftContentResult = getStepResult(context, 'generate-draft-content');
     if (!draftContentResult?.draftContent) {
       throw new Error('No draft content available');
     }
@@ -167,7 +235,9 @@ export const workflowFunctions: Record<string, WorkflowFunction> = {
       batches.push(messageIds.slice(i, i + batchSize));
     }
 
-    const getExistingMessagesBatch = (batch: string[]): Effect.Effect<any[], never> =>
+    const getExistingMessagesBatch = (
+      batch: string[],
+    ): Effect.Effect<Array<{ id: string }>, never> =>
       Effect.tryPromise(async () => {
         console.log('[WORKFLOW_FUNCTIONS] Fetching batch of', batch.length, 'message IDs');
         return await env.VECTORIZE_MESSAGE.getByIds(batch);
@@ -189,7 +259,7 @@ export const workflowFunctions: Record<string, WorkflowFunction> = {
 
     const existingMessages = await Effect.runPromise(program);
 
-    const existingMessageIds = new Set(existingMessages.map((message: any) => message.id));
+    const existingMessageIds = new Set(existingMessages.map((message) => message.id));
     const messagesToVectorize = context.thread.messages.filter(
       (message) => !existingMessageIds.has(message.id),
     );
@@ -199,7 +269,7 @@ export const workflowFunctions: Record<string, WorkflowFunction> = {
   },
 
   vectorizeMessages: async (context) => {
-    const vectorizeResult = context.results?.get('find-messages-to-vectorize');
+    const vectorizeResult = getStepResult(context, 'find-messages-to-vectorize');
     if (!vectorizeResult?.messagesToVectorize) {
       console.log('[WORKFLOW_FUNCTIONS] No messages to vectorize, skipping');
       return { embeddings: [] };
@@ -211,16 +281,6 @@ export const workflowFunctions: Record<string, WorkflowFunction> = {
       messagesToVectorize.length,
       'messages',
     );
-
-    type VectorizedMessage = {
-      id: string;
-      metadata: {
-        connection: string;
-        thread: string;
-        summary: string;
-      };
-      values: number[];
-    };
 
     const vectorizeSingleMessage = (
       message: ParsedMessage,
@@ -293,7 +353,7 @@ export const workflowFunctions: Record<string, WorkflowFunction> = {
   },
 
   upsertEmbeddings: async (context) => {
-    const vectorizeResult = context.results?.get('vectorize-messages');
+    const vectorizeResult = getStepResult(context, 'vectorize-messages');
     if (!vectorizeResult?.embeddings || vectorizeResult.embeddings.length === 0) {
       console.log('[WORKFLOW_FUNCTIONS] No embeddings to upsert');
       return { upserted: 0 };
@@ -336,7 +396,7 @@ export const workflowFunctions: Record<string, WorkflowFunction> = {
       return { existingSummary: null };
     }
 
-    const { summary, lastMsg } = metadata as any;
+    const { summary, lastMsg } = metadata as { summary?: unknown; lastMsg?: unknown };
     if (typeof summary !== 'string' || typeof lastMsg !== 'string') {
       console.warn(
         '[WORKFLOW_FUNCTIONS] Metadata missing required string properties (summary, lastMsg), returning null',
@@ -348,7 +408,7 @@ export const workflowFunctions: Record<string, WorkflowFunction> = {
   },
 
   generateThreadSummary: async (context) => {
-    const summaryResult = context.results?.get('check-existing-summary');
+    const summaryResult = getStepResult(context, 'check-existing-summary');
     const existingSummary = summaryResult?.existingSummary;
 
     const newestMessage = context.thread.messages[context.thread.messages.length - 1];
@@ -380,7 +440,7 @@ export const workflowFunctions: Record<string, WorkflowFunction> = {
   },
 
   upsertThreadSummary: async (context) => {
-    const summaryResult = context.results?.get('generate-thread-summary');
+    const summaryResult = getStepResult(context, 'generate-thread-summary');
     if (!summaryResult?.summary) {
       console.log('[WORKFLOW_FUNCTIONS] No summary generated for thread');
       return { upserted: false };
@@ -429,7 +489,7 @@ export const workflowFunctions: Record<string, WorkflowFunction> = {
       const { stub: agent } = await getZeroAgent(context.connectionId);
       const userTopics = await agent.getUserTopics();
       if (userTopics.length > 0) {
-        const formattedTopics = userTopics.map((topic: any) => ({
+        const formattedTopics = userTopics.map((topic: { topic: string; usecase: string }) => ({
           name: topic.topic,
           usecase: topic.usecase,
         }));
@@ -446,9 +506,9 @@ export const workflowFunctions: Record<string, WorkflowFunction> = {
   },
 
   generateLabelSuggestions: async (context) => {
-    const summaryResult = context.results?.get('generate-thread-summary');
-    const userLabelsResult = context.results?.get('get-user-labels');
-    const userTopicsResult = context.results?.get('get-user-topics');
+    const summaryResult = getStepResult(context, 'generate-thread-summary');
+    const userLabelsResult = getStepResult(context, 'get-user-labels');
+    const userTopicsResult = getStepResult(context, 'get-user-topics');
 
     if (!summaryResult?.summary) {
       console.log('[WORKFLOW_FUNCTIONS] No summary available for label generation');
@@ -460,8 +520,8 @@ export const workflowFunctions: Record<string, WorkflowFunction> = {
     const currentThreadLabels = context.thread.labels?.map((l: { name: string }) => l.name) || [];
 
     // Create normalized map for quick lookups
-    const accountLabelsMap: Record<string, any> = {};
-    accountLabels.forEach((label: any) => {
+    const accountLabelsMap: Record<string, AccountLabel> = {};
+    accountLabels.forEach((label) => {
       const key = label.name.toLowerCase().trim();
       accountLabelsMap[key] = label;
     });
@@ -508,18 +568,20 @@ Thread Summary: ${summaryResult.summary}`;
       ],
     });
 
-    const suggestions: { name: string; source: string }[] = labelsResponse.response;
+    // Bug revealed by types: the previous code assigned the raw model string straight
+    // to a typed array, so downstream `for (const s of suggestions)` iterated characters.
+    const suggestions: LabelSuggestion[] = parseLabelSuggestions(labelsResponse.response);
 
     console.log('[WORKFLOW_FUNCTIONS] Generated label suggestions:', suggestions);
     return { suggestions, accountLabelsMap };
   },
 
   syncLabels: async (context) => {
-    const suggestionsResult: {
-      suggestions: { name: string; source: string }[];
-      accountLabelsMap: Record<string, any>;
-    } = context.results?.get('generate-label-suggestions') || { suggestions: [] };
-    const userLabelsResult = context.results?.get('get-user-labels');
+    const suggestionsResult = getStepResult(context, 'generate-label-suggestions') ?? {
+      suggestions: [],
+      accountLabelsMap: {},
+    };
+    const userLabelsResult = getStepResult(context, 'get-user-labels');
 
     if (!suggestionsResult?.suggestions || suggestionsResult.suggestions.length === 0) {
       console.log('[WORKFLOW_FUNCTIONS] No label suggestions to sync');
@@ -531,12 +593,12 @@ Thread Summary: ${summaryResult.summary}`;
 
     console.log('[WORKFLOW_FUNCTIONS] Syncing thread labels:', {
       threadId: context.threadId,
-      suggestions: suggestions.map((s: any) => `${s.name} (${s.source})`),
+      suggestions: suggestions.map((s) => `${s.name} (${s.source})`),
     });
 
     const { stub: agent } = await getZeroAgent(context.connectionId);
     const finalLabelIds: string[] = [];
-    const createdLabels: any[] = [];
+    const createdLabels: AccountLabel[] = [];
 
     // Process each suggestion: create if needed, collect IDs
     for (const suggestion of suggestions) {
@@ -550,9 +612,11 @@ Thread Summary: ${summaryResult.summary}`;
         // Need to create label
         try {
           console.log('[WORKFLOW_FUNCTIONS] Creating new label:', suggestion.name);
+          // agent.createLabel is typed to return void, but the implementation returns
+          // the created Label; assert through unknown to the shape we consume.
           const created = (await agent.createLabel({
             name: suggestion.name,
-          })) as any; // Type assertion since agent interface may return void but implementation returns Label
+          })) as unknown as AccountLabel | undefined;
 
           if (created?.id) {
             finalLabelIds.push(created.id);
@@ -585,7 +649,7 @@ Thread Summary: ${summaryResult.summary}`;
     const labelsToAdd = finalLabelIds.filter((id: string) => !currentLabelIds.includes(id));
 
     // Determine AI-managed labels for removal logic
-    const userTopicsResult = context.results?.get('get-user-topics');
+    const userTopicsResult = getStepResult(context, 'get-user-topics');
     const userTopics = userTopicsResult?.userTopics || [];
 
     const aiManagedLabelNames = new Set([

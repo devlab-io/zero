@@ -13,6 +13,14 @@
       {
         "name": "@effect/language-service"
       }
-    ]
+    ],
+    // The `dormroom` package (and the modules it re-exports) ships raw strict-
+    // incompatible `.ts` source that tsc type-checks and reports ~20 errors on,
+    // all inside node_modules and not reproducibly editable. Resolve its types
+    // from a faithful local mirror instead (src/vendor/dormroom.d.ts). Types-only;
+    // wrangler still bundles the real JS. Does not relax `strict`.
+    "paths": {
+      "dormroom": ["./src/vendor/dormroom.d.ts"]
+    }
   }
 }

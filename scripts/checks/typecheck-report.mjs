@@ -19,7 +19,9 @@
 import { execSync } from 'node:child_process';
 
 // Measured 2026-07-12 after `wrangler types` (server --env local; mail).
-const BASELINE = { server: 82, mail: 135 };
+// server driven to 0 by issue #21 (tsc-zero-server) and tightened here so a regression
+// is a hard gate; mail remains at the niveau9 baseline (owned by #20).
+const BASELINE = { server: 0, mail: 135 };
 
 const blocking =
   process.argv.includes('--blocking') ||

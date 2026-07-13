@@ -29,6 +29,8 @@ export class ToolOrchestrator {
   /**
    * Creates a streaming agent wrapper for tools that should stream responses directly
    */
+  // originalTool is a passthrough AI SDK tool; typing it as ToolSet[string] over-narrows
+  // the wrapper's return union, so keep it loose at this boundary.
   createStreamingAgent(toolName: string, originalTool: any) {
     if (!this.isStreamingTool(toolName)) {
       return originalTool;

@@ -1,5 +1,11 @@
-import { load, type CheerioAPI } from 'cheerio/slim';
-import type { Element } from 'domhandler';
+import { load, contains, type Cheerio, type CheerioAPI } from 'cheerio/slim';
+
+// cheerio does not re-export domhandler's node types, and domhandler is a transitive
+// (non-hoisted) dependency this package can't import by name. Recover them from cheerio's
+// own API so the sanitizer stays fully typed without adding a dependency: `contains`
+// exposes AnyNode, and a selection's `.find()` result carries the concrete Element node.
+type AnyNode = Parameters<typeof contains>[0];
+type Element = ReturnType<Cheerio<AnyNode>['find']> extends Cheerio<infer E> ? E : never;
 
 export type SanitizedMailContent = {
   text: string;

@@ -143,7 +143,7 @@ export const activeDriverProcedure = activeConnectionProcedure.use(async ({ ctx,
 export const createRateLimiterMiddleware = (config: {
   limiter: RatelimitConfig['limiter'];
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  generatePrefix: (ctx: TrpcContext, input: any) => string;
+  generatePrefix: (ctx: TrpcContext, input: unknown) => string;
 }) =>
   t.middleware(async ({ next, ctx, input }) => {
     // Devlab self-host: sans Redis, pas de rate limiting (no-op).

@@ -3,6 +3,8 @@ import type { HonoContext } from '../ctx';
 import { env } from '../env';
 import { Hono } from 'hono';
 
+// Passthrough sanitizer for the autumn customer body; the shape is the provider's
+// AttachParams/CancelParams, so keep it loose and let the caller's types apply.
 const sanitizeCustomerBody = (body: any) => {
   let bodyCopy = { ...body };
   delete bodyCopy.id;

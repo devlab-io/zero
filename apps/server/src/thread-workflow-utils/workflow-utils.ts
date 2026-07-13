@@ -43,10 +43,10 @@ export const messageToXML = async (message: ParsedMessage) => {
     const safeDate = escapeXml(message.receivedOn || '');
 
     const toElements = (message.to || [])
-      .map((r: any) => `<to>${escapeXml(r?.email || '')}</to>`)
+      .map((r: { email?: string }) => `<to>${escapeXml(r?.email || '')}</to>`)
       .join('');
     const ccElements = (message.cc || [])
-      .map((r: any) => `<cc>${escapeXml(r?.email || '')}</cc>`)
+      .map((r: { email?: string }) => `<cc>${escapeXml(r?.email || '')}</cc>`)
       .join('');
 
     return `
@@ -71,7 +71,7 @@ export const messageToXML = async (message: ParsedMessage) => {
 export const getParticipants = (messages: ParsedMessage[]) => {
   const participants = new Map<string, { name?: string; email: string }>();
 
-  const setIfUnset = (sender: any) => {
+  const setIfUnset = (sender: { email?: string; name?: string } | null | undefined) => {
     if (!sender?.email) return;
     if (!participants.has(sender.email)) {
       participants.set(sender.email, {

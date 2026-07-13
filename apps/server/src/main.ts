@@ -28,7 +28,7 @@ import { SyncThreadsWorkflow } from './workflows/sync-threads-workflow';
 import { ShardRegistry, ZeroAgent, ZeroDriver } from './routes/agent';
 import { ThreadSyncWorker } from './routes/agent/sync-worker';
 import { oAuthDiscoveryMetadata } from 'better-auth/plugins';
-import { EProviders, type IEmailSendBatch } from './types';
+import { EProviders, type IEmailSendBatch, type IOutgoingMessage } from './types';
 import { eq, and, desc, asc, inArray } from 'drizzle-orm';
 import { ThinkingMCP } from './lib/sequential-thinking';
 
@@ -934,26 +934,6 @@ const handler = {
   },
 };
 
-// const config: ResolveConfigFn = (env: ZeroEnv) => {
-//   return {
-//     exporter: {
-//       url: env.OTEL_EXPORTER_OTLP_ENDPOINT || 'https://api.axiom.co/v1/traces',
-//       headers: env.OTEL_EXPORTER_OTLP_HEADERS
-//         ? Object.fromEntries(
-//             env.OTEL_EXPORTER_OTLP_HEADERS.split(',').map((header: string) => {
-//               const [key, value] = header.split('=');
-//               return [key.trim(), value.trim()];
-//             }),
-//           )
-//         : {},
-//     },
-//     service: {
-//       name: env.OTEL_SERVICE_NAME || 'zero-email-server',
-//       version: '1.0.0',
-//     },
-//   };
-// };
-
 export default class Entry extends WorkerEntrypoint<ZeroEnv> {
   async fetch(request: Request): Promise<Response> {
     return handler.fetch(request, this.env, this.ctx);
@@ -965,7 +945,7 @@ export default class Entry extends WorkerEntrypoint<ZeroEnv> {
       case batch.queue.startsWith('subscribe-queue'): {
         console.log('batch', batch);
         await Promise.all(
-          batch.messages.map(async (msg: any) => {
+          (batch.messages as unknown as Array<{ body: { connectionId: string; providerId: EProviders } }>).map(async (msg) => {
             const connectionId = msg.body.connectionId;
             const providerId = msg.body.providerId;
             try {
@@ -983,7 +963,7 @@ export default class Entry extends WorkerEntrypoint<ZeroEnv> {
       }
       case batch.queue.startsWith('send-email-queue'): {
         await Promise.all(
-          batch.messages.map(async (msg: any) => {
+          (batch.messages as Array<{ body: IEmailSendBatch }>).map(async (msg) => {
             const { messageId, connectionId, mail } = msg.body;
 
             const { pending_emails_status: statusKV, pending_emails_payload: payloadKV } = this
@@ -1007,8 +987,9 @@ export default class Entry extends WorkerEntrypoint<ZeroEnv> {
 
             const agent = await getZeroAgent(connectionId, this.ctx);
             try {
-              if (Array.isArray((payload as any).attachments)) {
-                const attachments = (payload as any).attachments;
+              const p = payload as Omit<IOutgoingMessage, 'attachments'> & { attachments?: (SerializedAttachment | AttachmentFile)[]; draftId?: string };
+              if (Array.isArray(p.attachments)) {
+                const attachments = p.attachments;
 
                 const processedAttachments = await Promise.all(
                   attachments.map(
@@ -1023,19 +1004,19 @@ export default class Entry extends WorkerEntrypoint<ZeroEnv> {
                   ),
                 );
 
-                const orderedAttachments = Array.from({ length: attachments.length });
+                const orderedAttachments = new Array<AttachmentFile>(attachments.length);
                 processedAttachments.forEach(({ attachment, index }) => {
                   orderedAttachments[index] = attachment;
                 });
 
-                (payload as any).attachments = orderedAttachments;
+                p.attachments = orderedAttachments;
               }
 
-              if ('draftId' in (payload as any) && (payload as any).draftId) {
-                const { draftId, ...rest } = payload as any;
-                await agent.stub.sendDraft(draftId, rest as any);
+              if (p.draftId) {
+                const { draftId, ...rest } = p;
+                await agent.stub.sendDraft(draftId, rest as IOutgoingMessage);
               } else {
-                await agent.stub.create(payload as any);
+                await agent.stub.create(p as IOutgoingMessage);
               }
 
               await statusKV.delete(messageId);
@@ -1054,7 +1035,7 @@ export default class Entry extends WorkerEntrypoint<ZeroEnv> {
         const tracer = initTracing();
 
         await Promise.all(
-          batch.messages.map(async (msg: any) => {
+          (batch.messages as unknown as Array<{ body: { providerId: string; historyId: string; subscriptionName: string } }>).map(async (msg) => {
             const span = tracer.startSpan('thread_queue_processing', {
               attributes: {
                 'provider.id': msg.body.providerId,
