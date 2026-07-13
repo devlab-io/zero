@@ -14,6 +14,7 @@
  * Reuse or distribution of this file requires a license from Zero Email Inc.
  */
 
+import { logger } from '../../lib/logger';
 import {
   appendResponseMessages,
   createDataStreamResponse,
@@ -130,7 +131,7 @@ export class ZeroAgent extends AIChatAgent<ZeroEnv> {
           tools,
           onFinish,
           onError: (error) => {
-            console.error('Error in streamText', error);
+            logger.error('Error in streamText', error);
           },
           system: await getPrompt(getPromptName(connectionId, EPrompts.Chat), AiChatPrompt(), {
             currentThreadId,
@@ -191,7 +192,7 @@ export class ZeroAgent extends AIChatAgent<ZeroEnv> {
       try {
         data = JSON.parse(message) as IncomingMessage;
       } catch (error) {
-        console.warn(error);
+        logger.warn(error);
         // silently ignore invalid messages for now
         // TODO: log errors with log levels
         return;
@@ -241,7 +242,7 @@ export class ZeroAgent extends AIChatAgent<ZeroEnv> {
             if (response) {
               await this.reply(data.id, response);
             } else {
-              console.warn(
+              logger.warn(
                 `[AIChatAgent] onChatMessage returned no response for chatMessageId: ${chatMessageId}`,
               );
               this.broadcastChatMessage(
@@ -359,7 +360,7 @@ export class ZeroAgent extends AIChatAgent<ZeroEnv> {
 
       return data;
     } catch (error) {
-      console.error('[ZeroAgent] Failed to get cached DO state:', error);
+      logger.error('[ZeroAgent] Failed to get cached DO state:', error);
       return null;
     }
   }
@@ -378,7 +379,7 @@ export class ZeroAgent extends AIChatAgent<ZeroEnv> {
       };
       await this.ctx.storage.put('do_state_cache', data);
     } catch (error) {
-      console.error('[ZeroAgent] Failed to cache DO state:', error);
+      logger.error('[ZeroAgent] Failed to cache DO state:', error);
     }
   }
 
@@ -386,7 +387,7 @@ export class ZeroAgent extends AIChatAgent<ZeroEnv> {
     try {
       await this.ctx.storage.delete('do_state_cache');
     } catch (error) {
-      console.error('[ZeroAgent] Failed to invalidate DO state cache:', error);
+      logger.error('[ZeroAgent] Failed to invalidate DO state cache:', error);
     }
   }
 

@@ -14,6 +14,7 @@
  * Reuse or distribution of this file requires a license from Zero Email Inc.
  */
 
+import { logger } from '../../lib/logger';
 import { DateNormalizationError, type ThreadSyncResult } from './errors';
 import type { ZeroDriverInternal } from './internal';
 import migrations from './db/drizzle/migrations';
@@ -29,18 +30,18 @@ export async function syncFolders(self: ZeroDriverInternal) {
   // Skip sync for aggregate instances - they should only mirror primary operations
   // The multi-stub pattern ensures aggregate gets operations in background
   if (self.name.includes('aggregate')) {
-    console.log('[syncFolders] Skipping sync for aggregate instance');
+    logger.info('[syncFolders] Skipping sync for aggregate instance');
     return;
   }
 
   const threadCount = await self.getThreadCount();
   if (threadCount < maxCount) {
-    console.log(
+    logger.info(
       `[syncFolders] Starting folder sync for ${self.name} (threadCount: ${threadCount})`,
     );
     await triggerSyncWorkflow(self, 'inbox');
   } else {
-    console.log(
+    logger.info(
       `[syncFolders] Skipping sync for ${self.name} - threadCount (${threadCount}) >= maxCount (${maxCount})`,
     );
   }
@@ -72,18 +73,18 @@ export async function syncThread(
   { threadId }: { threadId: string },
 ): Promise<ThreadSyncResult> {
   if (self.name === 'general' || self.name.includes('aggregate')) {
-    console.log(`[syncThread] Skipping sync for ${self.name} instance - thread ${threadId}`);
+    logger.info(`[syncThread] Skipping sync for ${self.name} instance - thread ${threadId}`);
     return { success: true, threadId, broadcastSent: false };
   }
 
   if (self.syncThreadsInProgress.has(threadId)) {
-    console.log(`[syncThread] Sync already in progress for thread ${threadId}, skipping...`);
+    logger.info(`[syncThread] Sync already in progress for thread ${threadId}, skipping...`);
     return { success: true, threadId, broadcastSent: false };
   }
 
   return Effect.runPromise(
     Effect.gen(self, function* () {
-      console.log(`[syncThread] Starting sync for thread: ${threadId}`);
+      logger.info(`[syncThread] Starting sync for thread: ${threadId}`);
       if (!this.connection) {
         throw new Error('No connection available');
       }
@@ -104,7 +105,7 @@ export async function syncThread(
 
       if (!latest) {
         this.syncThreadsInProgress.delete(threadId);
-        console.log(`[syncThread] Skipping thread ${threadId} - no latest message`);
+        logger.info(`[syncThread] Skipping thread ${threadId} - no latest message`);
         result.success = false;
         result.reason = 'No latest message';
         return result;
@@ -117,7 +118,7 @@ export async function syncThread(
           new DateNormalizationError(`Failed to normalize date for ${threadId}`, error),
       }).pipe(
         Effect.catchAll((error) => {
-          console.warn(
+          logger.warn(
             `[syncThread] Date normalization failed for ${threadId}, using current date:`,
             error,
           );
@@ -144,13 +145,13 @@ export async function syncThread(
       ).pipe(
         Effect.tap(() =>
           Effect.sync(() => {
-            console.log(`[syncThread] Updated database for ${threadId}`);
+            logger.info(`[syncThread] Updated database for ${threadId}`);
             this.invalidateRecipientCache();
           }),
         ),
         Effect.tap(() => Effect.sync(() => this.reloadFolder('inbox'))),
         Effect.catchAll((error) => {
-          console.error(`[syncThread] Failed to update database for ${threadId}:`, error);
+          logger.error(`[syncThread] Failed to update database for ${threadId}:`, error);
           return Effect.succeed(undefined);
         }),
       );
@@ -166,23 +167,23 @@ export async function syncThread(
           Effect.tap(() =>
             Effect.sync(() => {
               result.broadcastSent = true;
-              console.log(`[syncThread] Broadcasted update for ${threadId}`);
+              logger.info(`[syncThread] Broadcasted update for ${threadId}`);
             }),
           ),
           Effect.catchAll((error) => {
-            console.warn(`[syncThread] Failed to broadcast update for ${threadId}:`, error);
+            logger.warn(`[syncThread] Failed to broadcast update for ${threadId}:`, error);
             return Effect.succeed(undefined);
           }),
         );
       } else {
-        console.log(`[syncThread] No agent available for broadcasting ${threadId}`);
+        logger.info(`[syncThread] No agent available for broadcasting ${threadId}`);
       }
 
       this.syncThreadsInProgress.delete(threadId);
 
       result.success = true;
 
-      console.log(`[syncThread] Completed sync for thread: ${threadId}`, {
+      logger.info(`[syncThread] Completed sync for thread: ${threadId}`, {
         success: result.success,
         broadcastSent: result.broadcastSent,
         hasLatestMessage: !!latest,
@@ -192,7 +193,7 @@ export async function syncThread(
     }).pipe(
       Effect.catchAll((error) => {
         self.syncThreadsInProgress.delete(threadId);
-        console.error(`[syncThread] Critical error syncing thread ${threadId}:`, error);
+        logger.error(`[syncThread] Critical error syncing thread ${threadId}:`, error);
         return Effect.succeed({
           success: false,
           threadId,
@@ -230,9 +231,9 @@ export async function storeThreadInDB(
       labelIds,
     );
     //   await sendDoState(this.name);
-    console.log(`[ZeroDriver] Successfully stored thread ${threadData.id} in database`);
+    logger.info(`[ZeroDriver] Successfully stored thread ${threadData.id} in database`);
   } catch (error) {
-    console.error(`[ZeroDriver] Failed to store thread ${threadData.id} in database:`, error);
+    logger.error(`[ZeroDriver] Failed to store thread ${threadData.id} in database:`, error);
     throw error;
   }
 }
@@ -242,7 +243,7 @@ export async function triggerSyncWorkflow(
   folder: string,
 ): Promise<void> {
   try {
-    console.log(`[ZeroDriver] Triggering sync coordinator workflow for ${self.name}/${folder}`);
+    logger.info(`[ZeroDriver] Triggering sync coordinator workflow for ${self.name}/${folder}`);
 
     const instance = await self.env.SYNC_THREADS_COORDINATOR_WORKFLOW.create({
       params: {
@@ -251,11 +252,11 @@ export async function triggerSyncWorkflow(
       },
     });
 
-    console.log(
+    logger.info(
       `[ZeroDriver] Sync coordinator workflow triggered for ${self.name}/${folder}, instance: ${instance.id}`,
     );
   } catch (error) {
-    console.error(
+    logger.error(
       `[ZeroDriver] Failed to trigger sync coordinator workflow for ${self.name}/${folder}:`,
       error,
     );

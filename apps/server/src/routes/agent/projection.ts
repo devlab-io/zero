@@ -25,6 +25,7 @@
  * projection *content*.
  */
 
+import { logger } from '../../lib/logger';
 import { threadLabels as threadLabelsTable, labels as labelsTable } from './db/schema';
 import { GmailSearchAssistantSystemPrompt } from '../../lib/prompts';
 import type { IGetThreadResponse } from '../../lib/driver/types';
@@ -119,12 +120,12 @@ export function normalizeFolderName(folderName: string) {
 
 export async function inboxRag(self: ZeroDriverInternal, query: string) {
   if (!self.env.AUTORAG_ID) {
-    console.warn('[inboxRag] AUTORAG_ID not configured - RAG search disabled');
+    logger.warn('[inboxRag] AUTORAG_ID not configured - RAG search disabled');
     return { result: 'Not enabled', data: [] };
   }
 
   try {
-    console.log(`[inboxRag] Executing AI search with parameters:`, {
+    logger.info(`[inboxRag] Executing AI search with parameters:`, {
       query,
       max_num_results: 3,
       score_threshold: 0.3,
@@ -148,7 +149,7 @@ export async function inboxRag(self: ZeroDriverInternal, query: string) {
 
     return { result: answer.response, data: answer.data };
   } catch (error) {
-    console.error(`[inboxRag] Search failed for query: "${query}"`, {
+    logger.error(`[inboxRag] Search failed for query: "${query}"`, {
       error: error instanceof Error ? error.message : 'Unknown error',
       stack: error instanceof Error ? error.stack : undefined,
       user: self.name,
@@ -249,7 +250,7 @@ function queryThreads(
     async (): Promise<{ rows: ThreadRow[]; nextPageToken: string | null }> => {
       const { labelIds = [], folder, q, pageToken, maxResults } = params;
 
-      console.log('[queryThreads] params:', { labelIds, folder, q, pageToken, maxResults });
+      logger.info('[queryThreads] params:', { labelIds, folder, q, pageToken, maxResults });
 
       // Slice/heuristic paths derive the cursor from the page; the folder path overrides it
       // with the exact SQL LIMIT+1 token (see heuristicToken doc).
@@ -269,7 +270,7 @@ function queryThreads(
 
       // Case 1: All threads (no filters)
       if (!folder && labelIds.length === 0 && !q && !pageToken) {
-        console.log('[queryThreads] Case: all threads');
+        logger.info('[queryThreads] Case: all threads');
         const threads = await list(self.db);
         return page(threads.map(projectRow));
       }
@@ -279,7 +280,7 @@ function queryThreads(
       // LIMIT+1 token is exact, so consume it directly (no phantom empty page).
       if (folder && labelIds.length === 0 && !q) {
         const folderLabel = folder.toUpperCase();
-        console.log('[queryThreads] Case: folder only', { folderLabel });
+        logger.info('[queryThreads] Case: folder only', { folderLabel });
 
         const result = await findThreadsByFolderWithPagination(self.db, folderLabel, {
           pageToken,
@@ -291,7 +292,7 @@ function queryThreads(
       // Case 3: Single label only
       if (labelIds.length === 1 && !folder && !q) {
         const labelId = labelIds[0];
-        console.log('[queryThreads] Case: single label only', { labelId });
+        logger.info('[queryThreads] Case: single label only', { labelId });
 
         if (pageToken) {
           const result = await findThreadsWithPagination(self.db, {
@@ -308,13 +309,13 @@ function queryThreads(
 
       // Case 4: Text search only
       if (q && !folder && labelIds.length === 0) {
-        console.log('[queryThreads] Case: text search only', { q });
+        logger.info('[queryThreads] Case: text search only', { q });
         const threads = await findThreadsWithTextSearch(self.db, q);
         return page(threads.slice(0, maxResults).map(projectRow));
       }
 
       // Case 5: Complex filtering (folder + labels + search + pagination)
-      console.log('[queryThreads] Case: complex filtering', {
+      logger.info('[queryThreads] Case: complex filtering', {
         folder,
         labelIds,
         q,
@@ -397,7 +398,7 @@ export async function getThreadsFromDB(
     );
     return buildThreadProjection(rows, labelsByThread, nextPageToken);
   } catch (error) {
-    console.error('Failed to get threads from database:', error);
+    logger.error('Failed to get threads from database:', error);
     throw error;
   }
 }
@@ -443,7 +444,7 @@ export async function getThreadFromDB(
       isLatestDraft,
     } satisfies IGetThreadResponse;
   } catch (error) {
-    console.error('Failed to get thread from database:', error);
+    logger.error('Failed to get thread from database:', error);
     throw error;
   }
 }

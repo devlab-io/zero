@@ -14,6 +14,7 @@
  * Reuse or distribution of this file requires a license from Zero Email Inc.
  */
 
+import { logger } from '../../lib/logger';
 import {
   TOPIC_CACHE_KEY,
   TOPIC_CACHE_TTL,
@@ -28,7 +29,7 @@ import { Effect } from 'effect';
 export function getUserTopics(self: ZeroDriverInternal): Promise<UserTopic[]> {
   // Create the Effect with proper types - no external requirements needed
   const topicGenerationEffect = Effect.gen(self, function* () {
-    console.log(`[getUserTopics] Starting topic generation for connection: ${this.name}`);
+    logger.info(`[getUserTopics] Starting topic generation for connection: ${this.name}`);
 
     const result: TopicGenerationResult = {
       topics: [],
@@ -42,10 +43,10 @@ export function getUserTopics(self: ZeroDriverInternal): Promise<UserTopic[]> {
     // Check storage first
     const stored = yield* Effect.tryPromise(() => this.ctx.storage.get(TOPIC_CACHE_KEY)).pipe(
       Effect.tap(() =>
-        Effect.sync(() => console.log(`[getUserTopics] Checking storage for cached topics`)),
+        Effect.sync(() => logger.info(`[getUserTopics] Checking storage for cached topics`)),
       ),
       Effect.catchAll((error) => {
-        console.warn(`[getUserTopics] Failed to get cached topics from storage:`, error);
+        logger.warn(`[getUserTopics] Failed to get cached topics from storage:`, error);
         return Effect.succeed(null);
       }),
     );
@@ -73,7 +74,7 @@ export function getUserTopics(self: ZeroDriverInternal): Promise<UserTopic[]> {
         catch: (error) => new Error(`Invalid cached data: ${error}`),
       }).pipe(
         Effect.catchAll((error) => {
-          console.warn(`[getUserTopics] Invalid cached data, regenerating:`, error);
+          logger.warn(`[getUserTopics] Invalid cached data, regenerating:`, error);
           return Effect.succeed(null);
         }),
       );
@@ -82,7 +83,7 @@ export function getUserTopics(self: ZeroDriverInternal): Promise<UserTopic[]> {
         const cacheAge = Date.now() - cachedTopicsResult.timestamp;
 
         if (cacheAge < TOPIC_CACHE_TTL) {
-          console.log(
+          logger.info(
             `[getUserTopics] Using cached topics (age: ${Math.round(cacheAge / 1000 / 60)} minutes)`,
           );
           result.topics = cachedTopicsResult.topics;
@@ -90,7 +91,7 @@ export function getUserTopics(self: ZeroDriverInternal): Promise<UserTopic[]> {
           result.cacheAge = cacheAge;
           return result;
         } else {
-          console.log(
+          logger.info(
             `[getUserTopics] Cache expired (age: ${Math.round(cacheAge / 1000 / 60)} minutes), regenerating`,
           );
         }
@@ -98,15 +99,15 @@ export function getUserTopics(self: ZeroDriverInternal): Promise<UserTopic[]> {
     }
 
     // Generate new topics
-    console.log(`[getUserTopics] Generating new topics`);
+    logger.info(`[getUserTopics] Generating new topics`);
     const subjects = yield* Effect.tryPromise(() => this.getAllSubjects()).pipe(
       Effect.catchAll((error) => {
-        console.error(`[getUserTopics] Failed to get subjects:`, error);
+        logger.error(`[getUserTopics] Failed to get subjects:`, error);
         return Effect.succeed([]);
       }),
     );
     result.subjectsAnalyzed = subjects.length;
-    console.log(`[getUserTopics] Found ${subjects.length} subjects for analysis`);
+    logger.info(`[getUserTopics] Found ${subjects.length} subjects for analysis`);
 
     let existingLabels: { name: string; id: string }[] = [];
 
@@ -114,11 +115,11 @@ export function getUserTopics(self: ZeroDriverInternal): Promise<UserTopic[]> {
       Effect.tap((labels) =>
         Effect.sync(() => {
           result.existingLabelsCount = labels.length;
-          console.log(`[getUserTopics] Retrieved ${labels.length} existing labels`);
+          logger.info(`[getUserTopics] Retrieved ${labels.length} existing labels`);
         }),
       ),
       Effect.catchAll((error) => {
-        console.warn(
+        logger.warn(
           `[getUserTopics] Failed to get existing labels for topic generation:`,
           error,
         );
@@ -134,20 +135,20 @@ export function getUserTopics(self: ZeroDriverInternal): Promise<UserTopic[]> {
       Effect.tap((topics) =>
         Effect.sync(() => {
           result.topics = topics;
-          console.log(
+          logger.info(
             `[getUserTopics] Generated ${topics.length} topics:`,
             topics.map((t) => t.topic),
           );
         }),
       ),
       Effect.catchAll((error) => {
-        console.error(`[getUserTopics] Failed to generate topics:`, error);
+        logger.error(`[getUserTopics] Failed to generate topics:`, error);
         return Effect.succeed([]);
       }),
     );
 
     if (topics.length > 0) {
-      console.log(`[getUserTopics] Processing ${topics.length} topics`);
+      logger.info(`[getUserTopics] Processing ${topics.length} topics`);
 
       // Ensure labels exist in user account
       yield* Effect.tryPromise(async () => {
@@ -160,7 +161,7 @@ export function getUserTopics(self: ZeroDriverInternal): Promise<UserTopic[]> {
           for (const topic of topics) {
             const topicName = topic.topic.toLowerCase();
             if (!existingLabelNames.has(topicName)) {
-              console.log(`[getUserTopics] Creating label for topic: ${topic.topic}`);
+              logger.info(`[getUserTopics] Creating label for topic: ${topic.topic}`);
               await this.createLabel({
                 name: topic.topic,
               });
@@ -168,14 +169,14 @@ export function getUserTopics(self: ZeroDriverInternal): Promise<UserTopic[]> {
             }
           }
           result.labelsCreated = createdCount;
-          console.log(`[getUserTopics] Created ${createdCount} new labels`);
+          logger.info(`[getUserTopics] Created ${createdCount} new labels`);
         } catch (error) {
-          console.error(`[getUserTopics] Failed to ensure topic labels exist:`, error);
+          logger.error(`[getUserTopics] Failed to ensure topic labels exist:`, error);
           throw error;
         }
       }).pipe(
         Effect.catchAll((error) => {
-          console.error(`[getUserTopics] Error creating labels:`, error);
+          logger.error(`[getUserTopics] Error creating labels:`, error);
           return Effect.succeed(undefined);
         }),
       );
@@ -188,10 +189,10 @@ export function getUserTopics(self: ZeroDriverInternal): Promise<UserTopic[]> {
         }),
       ).pipe(
         Effect.tap(() =>
-          Effect.sync(() => console.log(`[getUserTopics] Stored topics in cache`)),
+          Effect.sync(() => logger.info(`[getUserTopics] Stored topics in cache`)),
         ),
         Effect.catchAll((error) => {
-          console.error(`[getUserTopics] Failed to store topics in cache:`, error);
+          logger.error(`[getUserTopics] Failed to store topics in cache:`, error);
           return Effect.succeed(undefined);
         }),
       );
@@ -206,22 +207,22 @@ export function getUserTopics(self: ZeroDriverInternal): Promise<UserTopic[]> {
           Effect.tap(() =>
             Effect.sync(() => {
               result.broadcastSent = true;
-              console.log(`[getUserTopics] Broadcasted topics update`);
+              logger.info(`[getUserTopics] Broadcasted topics update`);
             }),
           ),
           Effect.catchAll((error) => {
-            console.warn(`[getUserTopics] Failed to broadcast topics update:`, error);
+            logger.warn(`[getUserTopics] Failed to broadcast topics update:`, error);
             return Effect.succeed(undefined);
           }),
         );
       } else {
-        console.log(`[getUserTopics] No agent available for broadcasting`);
+        logger.info(`[getUserTopics] No agent available for broadcasting`);
       }
     } else {
-      console.log(`[getUserTopics] No topics generated`);
+      logger.info(`[getUserTopics] No topics generated`);
     }
 
-    console.log(`[getUserTopics] Completed topic generation for connection: ${this.name}`, {
+    logger.info(`[getUserTopics] Completed topic generation for connection: ${this.name}`, {
       topicsCount: result.topics.length,
       cacheHit: result.cacheHit,
       subjectsAnalyzed: result.subjectsAnalyzed,
@@ -238,7 +239,7 @@ export function getUserTopics(self: ZeroDriverInternal): Promise<UserTopic[]> {
     topicGenerationEffect.pipe(
       Effect.map((result) => result.topics),
       Effect.catchAll((error) => {
-        console.error(`[getUserTopics] Critical error in getUserTopics:`, error);
+        logger.error(`[getUserTopics] Critical error in getUserTopics:`, error);
         return Effect.succeed([]);
       }),
     ),
