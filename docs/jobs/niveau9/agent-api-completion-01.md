@@ -100,6 +100,19 @@ Claude/Codex, comme l'exige le check §7. Le prompt call-service (« ZeroMCP ser
 prose) est pré-existant et hors périmètre (`services/**` non MAY-TOUCH) ; sa formulation
 n'est pas altérée par ce run.
 
+## Bugs corrigés au passage (consignés — ruling orchestrateur)
+
+1. **N+1 sur `listThreads` MCP** — l'ancien handler faisait `rawListThreads` + un
+   `getThread` par ligne (chargement des corps depuis R2 → N+1 + payload lourd).
+   Remplacé par un **appel unique** à la projection `agent.getThreadsFromDB()` (#22/#30),
+   métadonnées compactes sans corps. `mcp.ts` (ancien 333-379 → nouveau `listThreads`).
+2. **Crash « sender undefined » MCP** — déréférencement `loadedThread.latest?.sender.name`
+   qui jetait un `TypeError` quand `sender` était présent-mais-vide. Corrigé par
+   `formatSender()` (mcp-tools.ts) tolérant name/email absents, appliqué à `listThreads`,
+   `getThread` et `getThreadSummary`. Preuve : test `formatSender — safe against the
+   historical "sender undefined" MCP crash` (row thread-2 sans sender → « Unknown sender »,
+   pas de crash).
+
 ## Inventaire des outils MCP (nom → capacité → preuve idempotence)
 
 Snapshot machine : `docs/agent/mcp-schema.snapshot.json` (18 outils, gardé par test).
