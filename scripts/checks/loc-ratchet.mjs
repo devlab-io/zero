@@ -24,18 +24,21 @@ const FRONTIER_MAX = 5; // measured 2026-07-12 — modularity fix is out of scop
 // path -> measured LOC (ceiling). Full list of files > THRESHOLD at baseline.
 const BUDGET = {
   'apps/server/src/routes/agent/index.ts': 2274,
-  'apps/mail/components/context/command-palette-context.tsx': 1913,
+  // re-snapshot orchestrateur 2026-07-13 (ruling #13/#23) : +9 par merges jugés PASS
+  // (typing #20, quick wins perf) ; le fichier appartient à #28 qui le fera fondre.
+  'apps/mail/components/context/command-palette-context.tsx': 1922,
   'apps/mail/components/icons/icons.tsx': 1783,
   'apps/mail/components/mail/mail-display.tsx': 1736,
   'apps/server/src/routes/chat.ts': 1610,
-  'apps/server/src/lib/driver/google.ts': 1487,
+  // google.ts retiré (1487 -> 155, façade — issue #23 mergée) : entrée prunée, 17 -> 16.
   'apps/mail/components/home/HomeContent.tsx': 1332,
   'apps/server/src/lib/driver/microsoft.ts': 1294, // ADR: driver Microsoft
   'apps/server/src/main.ts': 1261,
   'apps/mail/components/create/email-composer.tsx': 1170,
   'apps/mail/components/mail/mail-list.tsx': 1111,
   'apps/mail/components/mail/thread-display.tsx': 1062,
-  'apps/mail/app/(full-width)/contributors.tsx': 1032,
+  // re-snapshot orchestrateur 2026-07-13 : +8 par merges jugés PASS ; appartient à #41.
+  'apps/mail/app/(full-width)/contributors.tsx': 1040,
   'apps/server/src/trpc/routes/mail.ts': 879,
   'apps/server/src/pipelines.ts': 873,
   'apps/mail/components/mail/mail.tsx': 852,
