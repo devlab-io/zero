@@ -280,67 +280,6 @@ const getUserLabels = (connectionId: string) =>
     },
   });
 
-const sendEmail = (connectionId: string) =>
-  tool({
-    description: 'Send a new email',
-    parameters: z.object({
-      to: z.array(
-        z.object({
-          email: z.string().describe('The email address of the recipient'),
-          name: z.string().optional().describe('The name of the recipient'),
-        }),
-      ),
-      subject: z.string().describe('The subject of the email'),
-      message: z.string().describe('The body of the email'),
-      cc: z
-        .array(
-          z.object({
-            email: z.string().describe('The email address of the recipient'),
-            name: z.string().optional().describe('The name of the recipient'),
-          }),
-        )
-        .optional(),
-      bcc: z
-        .array(
-          z.object({
-            email: z.string().describe('The email address of the recipient'),
-            name: z.string().optional().describe('The name of the recipient'),
-          }),
-        )
-        .optional(),
-      threadId: z.string().optional().describe('The ID of the thread to send the email from'),
-      // fromEmail: z.string().optional(),
-      draftId: z.string().optional().describe('The ID of the draft to send'),
-    }),
-    execute: async (data) => {
-      try {
-        const { stub: agent } = await getZeroAgent(connectionId);
-        const { draftId, ...mail } = data;
-
-        if (draftId) {
-          await agent.sendDraft(draftId, {
-            ...mail,
-            attachments: [],
-            headers: {},
-          });
-        } else {
-          await agent.create({
-            ...mail,
-            attachments: [],
-            headers: {},
-          });
-        }
-
-        return { success: true };
-      } catch (error) {
-        console.error('Error sending email:', error);
-        throw new Error(
-          'Failed to send email: ' + (error instanceof Error ? error.message : String(error)),
-        );
-      }
-    },
-  });
-
 const createLabel = (connectionId: string) =>
   tool({
     description: 'Create a new label with custom colors, if it does nto exist already',
@@ -366,21 +305,6 @@ const createLabel = (connectionId: string) =>
     },
   });
 
-const bulkDelete = (connectionId: string) =>
-  tool({
-    description: 'Move multiple emails to trash by adding the TRASH label',
-    parameters: z.object({
-      threadIds: z.array(z.string()).describe('Array of email IDs to move to trash'),
-    }),
-    execute: async ({ threadIds }) => {
-      const { stub: agent } = await getZeroAgent(connectionId);
-      await Promise.all(
-        threadIds.map((threadId) => agent.modifyThreadLabelsInDB(threadId, ['TRASH'], [])),
-      );
-      return { threadIds, success: true };
-    },
-  });
-
 const bulkArchive = (connectionId: string) =>
   tool({
     description: 'Move multiple emails to the archive by removing the INBOX label',
@@ -393,19 +317,6 @@ const bulkArchive = (connectionId: string) =>
         threadIds.map((threadId) => agent.modifyThreadLabelsInDB(threadId, [], ['INBOX'])),
       );
       return { threadIds, success: true };
-    },
-  });
-
-const deleteLabel = (connectionId: string) =>
-  tool({
-    description: "Delete a label from the user's account",
-    parameters: z.object({
-      id: z.string().describe('The ID of the label to delete'),
-    }),
-    execute: async ({ id }) => {
-      const { stub: agent } = await getZeroAgent(connectionId);
-      await agent.deleteLabel(id);
-      return { id, success: true };
     },
   });
 
@@ -488,11 +399,8 @@ export const tools = async (connectionId: string, ragEffect: boolean = false) =>
     [Tools.MarkThreadsUnread]: markAsUnread(connectionId),
     [Tools.ModifyLabels]: modifyLabels(connectionId),
     [Tools.GetUserLabels]: getUserLabels(connectionId),
-    [Tools.SendEmail]: sendEmail(connectionId),
     [Tools.CreateLabel]: createLabel(connectionId),
-    [Tools.BulkDelete]: bulkDelete(connectionId),
     [Tools.BulkArchive]: bulkArchive(connectionId),
-    [Tools.DeleteLabel]: deleteLabel(connectionId),
     [Tools.BuildGmailSearchQuery]: buildGmailSearchQuery(),
     [Tools.GetCurrentDate]: getCurrentDate(),
     [Tools.WebSearch]: webSearch(),

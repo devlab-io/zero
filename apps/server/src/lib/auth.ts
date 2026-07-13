@@ -7,9 +7,10 @@ import {
   SuperSearchEmail,
   WelcomeEmail,
 } from './react-emails/email-sequences';
-import { createAuthMiddleware, phoneNumber, jwt, bearer, mcp } from 'better-auth/plugins';
 import { type Account, betterAuth, type BetterAuthOptions } from 'better-auth';
+import { phoneNumber, jwt, bearer, mcp } from 'better-auth/plugins';
 import { getBrowserTimezone, isValidTimezone } from './timezones';
+import { APIError, createAuthMiddleware } from 'better-auth/api';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import { getZeroDB, resetConnection } from './server-utils';
 import { getSocialProviders } from './auth-providers';
@@ -17,7 +18,6 @@ import { redis, resend, twilio } from './services';
 import { dubAnalytics } from '@dub/better-auth';
 import { defaultUserSettings } from './schemas';
 import { disableBrainFunction } from './brain';
-import { APIError } from 'better-auth/api';
 import { type EProviders } from '../types';
 import { createDriver } from './driver';
 import { Autumn } from 'autumn-js';
@@ -373,10 +373,11 @@ const createAuthConfig = () => {
     session: {
       cookieCache: {
         enabled: true,
-        maxAge: 60 * 60 * 24 * 30, // 30 days
+        // Bound the revocation window: cached sessions are revalidated every five minutes.
+        maxAge: 60 * 5,
       },
-      expiresIn: 60 * 60 * 24 * 30, // 30 days
-      updateAge: 60 * 60 * 24 * 3, // 1 day (every 1 day the session expiration is updated)
+      expiresIn: 60 * 60 * 24 * 7,
+      updateAge: 60 * 60 * 12,
     },
     socialProviders: getSocialProviders(env as unknown as Record<string, string>),
     account: {

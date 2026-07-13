@@ -1,28 +1,58 @@
-name: autofix.ci
+name: quality-and-security
 
 on:
   pull_request:
+  push:
+    branches: [staging]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
-  autofix:
-    timeout-minutes: 10
-    runs-on: ${{ vars.RUNNER_IMAGE || 'ubuntu-latest' }}
+  verify:
+    timeout-minutes: 20
+    runs-on: ubuntu-latest
     steps:
-      - name: Checkout Code 🛎
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup pnpm 🌟
+      - name: Setup pnpm
         uses: pnpm/action-setup@v4
 
-      - name: Setup Node 📦
+      - name: Setup Node
         uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
 
-      - name: Install dependencies 📦
-        run: pnpm install
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile --ignore-scripts
 
-      - name: Lint JS
-        run: pnpm dlx oxlint@latest --deny-warnings
+      - name: Verify agent and OAuth security surface
+        run: node scripts/security/check-agent-surface.mjs
+
+      - name: Reject critical production advisories
+        run: pnpm audit --prod --audit-level critical
+
+      - name: Lint security-critical files
+        run: >-
+          pnpm dlx oxlint@latest --deny-warnings
+          apps/server/src/lib/auth.ts
+          apps/server/src/lib/auth-providers.ts
+          apps/server/src/lib/google-scopes.ts
+          apps/server/src/lib/driver/google.ts
+          apps/server/src/routes/agent/tools.ts
+          apps/server/src/routes/agent/mcp.ts
+          scripts/security/check-agent-surface.mjs
+
+      - name: Build mail frontend
+        run: pnpm --filter @zero/mail build
+
+      - name: Bundle Worker without deploying
+        run: >-
+          pnpm --filter @zero/server exec wrangler deploy --dry-run --env local
+          --outdir /tmp/zero-server-dry-run

@@ -12,6 +12,7 @@ import { mapGoogleLabelColor, mapToGoogleLabelColor } from './google-label-color
 import { parseAddressList, parseFrom, wasSentWithTLS } from '../email-utils';
 import type { IOutgoingMessage, Label, ParsedMessage } from '../../types';
 import { sanitizeTipTapHtml } from '../sanitize-tip-tap-html';
+import { GOOGLE_OAUTH_SCOPE_STRING } from '../google-scopes';
 import type { MailManager, ManagerConfig } from './types';
 import { type gmail_v1, gmail } from '@googleapis/gmail';
 import { OAuth2Client } from 'google-auth-library';
@@ -58,12 +59,7 @@ export class GoogleMailManager implements MailManager {
     this.gmail = gmail({ version: 'v1', auth: this.auth });
   }
   public getScope(): string {
-    return [
-      'https://mail.google.com/',
-      'https://www.googleapis.com/auth/gmail.modify',
-      'https://www.googleapis.com/auth/userinfo.profile',
-      'https://www.googleapis.com/auth/userinfo.email',
-    ].join(' ');
+    return GOOGLE_OAUTH_SCOPE_STRING;
   }
   public async listHistory<T>(historyId: string): Promise<{ history: T[]; historyId: string }> {
     return this.withErrorHandler(

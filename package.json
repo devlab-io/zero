@@ -53,8 +53,18 @@
   },
   "dependencies": {
     "drizzle-kit": "catalog:",
-    "react-router": "^7.6.3",
+    "react-router": "7.18.1",
     "zod": "4.1.1",
     "zod-to-json-schema": "3.24.6"
+  },
+  "pnpm": {
+    "overrides": {
+      "@modelcontextprotocol/sdk": "1.29.0",
+      "form-data": "4.0.6",
+      "happy-dom": "20.10.6",
+      "protobufjs": "7.5.5",
+      "vitest": "3.2.7",
+      "ws": "8.21.0"
+    }
   }
 }

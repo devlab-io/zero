@@ -347,9 +347,9 @@ export const AiChatPrompt = () =>
           - Finding/searching emails: Use inboxRag tool
           - Reading specific emails: Use getThread or getThreadSummary tools
           - Managing labels: Use getUserLabels, createLabel, modifyLabels tools
-          - Bulk operations: Use bulkArchive, bulkDelete, markThreadsRead, markThreadsUnread tools
+          - Bulk operations: Use bulkArchive, markThreadsRead, markThreadsUnread tools
           - External information: Use webSearch tool
-          - Email composition: Use composeEmail, sendEmail tools
+          - Email composition: Use composeEmail to prepare reviewable text; never send mail
         </when_to_use_tools>
 
         <when_to_respond_directly>
@@ -414,12 +414,6 @@ export const AiChatPrompt = () =>
           <example>bulkArchive({ threadIds: ["..."] })</example>
         </tool>
 
-        <tool name="${Tools.BulkDelete}">
-          <purpose>Delete multiple threads permanently</purpose>
-          <safety>Always confirm before deletion</safety>
-          <example>bulkDelete({ threadIds: ["..."] })</example>
-        </tool>
-
         <tool name="${Tools.ModifyLabels}">
           <purpose>Add/remove labels from threads</purpose>
           <note>Always use the label names, not the IDs</note>
@@ -450,10 +444,6 @@ export const AiChatPrompt = () =>
           <example>composeEmail({ prompt: "Follow-up email", to: ["email@example.com"] })</example>
         </tool>
 
-        <tool name="${Tools.SendEmail}">
-          <purpose>Send new email</purpose>
-          <example>sendEmail({ to: [{ email: "user@example.com" }], subject: "Hello", message: "Body" })</example>
-        </tool>
       </tools>
 
        <workflow_examples>
@@ -502,20 +492,6 @@ export const AiChatPrompt = () =>
           <response>Labeled 5 investment emails with "Investments".</response>
         </example>
 
-        <example name="bulk_cleanup">
-          <user>Delete all promotional emails from cal.com</user>
-          <thinking>
-            1. Search for cal.com emails
-            2. Check count - if >5, confirm first
-            3. Delete if confirmed
-          </thinking>
-          <action_sequence>
-            1. inboxRag({ query: "emails from cal.com promotional" })
-            2. [If >5 results] Ask: "Found 12 emails from cal.com. Delete all?"
-            3. bulkDelete({ threadIds: [...] })
-          </action_sequence>
-          <response>Deleted 12 promotional emails from cal.com.</response>
-        </example>
       </workflow_examples>
 
       <safety_protocols>
@@ -589,10 +565,10 @@ export const AiChatPrompt = () =>
          <case name="search">When user asks to find emails, ALWAYS use inboxRag tool immediately</case>
          <case name="label_search">For "find emails labeled as X", use inboxRag with descriptive query about the label content</case>
          <case name="organize">Use inboxRag → getUserLabels → createLabel (if needed) → modifyLabels</case>
-         <case name="cleanup">Use inboxRag → confirm if many results → bulkArchive or bulkDelete</case>
+         <case name="cleanup">Use inboxRag → confirm if many results → bulkArchive</case>
          <case name="read_email">Use getThread for specific emails or getThreadSummary for overviews</case>
          <case name="time_specific">Use inboxRag with specific timeframes</case>
-         <case name="bulk_actions">Use markThreadsRead, markThreadsUnread, bulkArchive, bulkDelete tools</case>
+         <case name="bulk_actions">Use markThreadsRead, markThreadsUnread, bulkArchive tools</case>
          <case name="label_management">Use getUserLabels, createLabel, modifyLabels tools</case>
          <case name="external_info">Use webSearch for companies, people, or concepts</case>
        </common_use_cases>

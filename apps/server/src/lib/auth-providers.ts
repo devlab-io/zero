@@ -1,3 +1,5 @@
+import { GOOGLE_OAUTH_SCOPES } from './google-scopes';
+
 export interface EnvVarInfo {
   name: string;
   source: string;
@@ -38,12 +40,7 @@ export const authProviders = (env: Record<string, string>): ProviderConfig[] => 
     config: {
       prompt: env.FORCE_GOOGLE_AUTH ? 'consent' : undefined,
       accessType: 'offline',
-      scope: [
-        'https://mail.google.com/',
-        'https://www.googleapis.com/auth/gmail.modify',
-        'https://www.googleapis.com/auth/userinfo.profile',
-        'https://www.googleapis.com/auth/userinfo.email',
-      ],
+      scope: [...GOOGLE_OAUTH_SCOPES],
       clientId: env.GOOGLE_CLIENT_ID,
       clientSecret: env.GOOGLE_CLIENT_SECRET,
     },
