@@ -60,3 +60,4 @@ worker-configuration.d.ts
 tsx-0/
 
 tools.json.architect/
+.gstack/
