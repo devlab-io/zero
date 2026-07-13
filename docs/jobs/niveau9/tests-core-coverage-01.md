@@ -74,6 +74,41 @@ Couverture 100 % du registre livrée par #32 : `apps/mail/lib/hotkeys/keyboard-p
 
 ## Coverage (verbatim — `vitest --coverage --coverage.provider=v8`)
 
+### Reproduction EXACTE (juge froid — échafaudage de mesure accepté, ruling PHASE 0)
+
+Prérequis (depuis la racine du worktree) : `pnpm install --frozen-lockfile --ignore-scripts` puis générer les types (dont paraglide, requis à la résolution du hook test) :
+```
+pnpm --filter @zero/server run types
+pnpm --filter @zero/mail run types
+pnpm --filter @zero/mail exec react-router typegen   # génère aussi apps/mail/paraglide/**
+```
+Symlink du provider coverage (node_modules gitignoré — ni lockfile ni config touchés ; fix durable = #37) :
+```
+mkdir -p node_modules/@vitest
+ln -sfn "$(pwd)/node_modules/.pnpm/@vitest+coverage-v8@3.2.7_vitest@3.2.7/node_modules/@vitest/coverage-v8" \
+        node_modules/@vitest/coverage-v8
+```
+Mesure server (cibles) :
+```
+cd apps/server && pnpm exec vitest run --coverage --coverage.provider=v8 \
+  --coverage.include='src/lib/driver/google-transport.ts' \
+  --coverage.include='src/lib/driver/gmail-batch.ts' \
+  --coverage.include='src/lib/driver/gmail-backoff.ts' \
+  --coverage.include='src/trpc/routes/mail.ts' \
+  --coverage.include='src/lib/google-scopes.ts' \
+  --coverage.include='src/lib/auth-providers.ts' \
+  --coverage.include='src/env-schema.ts' \
+  --coverage.reporter=text
+```
+Mesure mail (cibles) :
+```
+cd apps/mail && pnpm exec vitest run --coverage --coverage.provider=v8 \
+  --coverage.include='store/optimistic-updates.ts' \
+  --coverage.include='lib/optimistic-actions-manager.ts' \
+  --coverage.include='hooks/use-optimistic-actions.ts' \
+  --coverage.reporter=text
+```
+
 Server (cibles) :
 ```
 File               | % Stmts | % Branch | % Funcs | % Lines | Uncovered
