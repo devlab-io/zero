@@ -262,6 +262,8 @@ manifeste `NAV_SEQUENCE_ACTIONS`.
 
 **Gates vague 2 (RC natifs) :** tsc `server 0 / mail 0` (blocking, RC 0) · **41/41 tests**
 (ajouts : send-and-archive 4, label-move-picker.logic 3, + assertion coverage) · build `✓ 10.78s` ·
+*(Note orchestrateur post-rebase sur 4da0ee2e : totaux re-mesurés natifs = mail 51/51,
+server 70/70 — le delta vient des tests #30/#33/#31 mergés dans la factory, TEST_RC=0.)*
 loc/console/type ratchets PASSED (aucun ajout `any`/`console`,
 aucun fichier > 800 LOC). Coverage `keyboard-parity` : `g s`/`l`/`v`/`sendAndArchive`
 résolvent tous vers un handler via le manifeste, ET un test assert **100 % de la table gelée**
