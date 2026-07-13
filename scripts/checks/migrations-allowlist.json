@@ -1,0 +1,24 @@
+{
+  "_comment": "Documented allowlist for migrations-consistency.mjs. Pre-filled with the CURRENT niveau9 migration drift so the check passes today while still failing on any NEW inconsistency. Issue #19 repairs the drift (removes orphan SQL, de-duplicates prefixes) and empties these arrays. Keys are migration directories relative to repo root.",
+  "allow": {
+    "apps/server/src/db/migrations": {
+      "orphanSqlFiles": [
+        "0025_far_echo",
+        "0029_thin_triathlon",
+        "0032_smiling_raider"
+      ],
+      "missingJournalFiles": [],
+      "duplicatePrefixes": [
+        "0025",
+        "0029",
+        "0032",
+        "0035"
+      ]
+    },
+    "apps/server/src/routes/agent/db/drizzle": {
+      "orphanSqlFiles": [],
+      "missingJournalFiles": [],
+      "duplicatePrefixes": []
+    }
+  }
+}

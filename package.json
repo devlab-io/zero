@@ -8,7 +8,6 @@
     "prepare": "husky",
     "nizzy": "tsx ./packages/cli/src/cli.ts",
     "postinstall": "pnpm nizzy sync",
-    "precommit": "pnpm dlx oxlint@latest --deny-warnings",
     "dev": "turbo run dev",
     "build": "turbo run build",
     "build:frontend": "pnpm run --filter=@zero/mail build",
@@ -19,7 +18,6 @@
     "format": "prettier --write apps/**/*.{ts,tsx} --log-level silent",
     "check": "pnpm run check:format && pnpm run lint",
     "check:format": "prettier . --check",
-    "lint-staged": "prettier --write --ignore-unknown",
     "docker:db:up": "docker compose -f docker-compose.db.yaml up -d",
     "docker:db:stop": "docker compose -f docker-compose.db.yaml stop",
     "docker:db:down": "docker compose -f docker-compose.db.yaml down",
@@ -34,6 +32,15 @@
     "test:e2e": "pnpm --filter=@zero/testing test:e2e",
     "eval": "dotenv -- pnpm --filter=@zero/server run eval",
     "eval:dev": "dotenv -- pnpm --filter=@zero/server run eval:dev"
+  },
+  "lint-staged": {
+    "*.{ts,tsx}": [
+      "pnpm dlx oxlint@1.9.0 --deny-warnings",
+      "prettier --write"
+    ],
+    "*.{js,jsx,mjs,cjs,json,jsonc,md,mdx,css,html,yml,yaml}": [
+      "prettier --write"
+    ]
   },
   "devDependencies": {
     "@types/node": "24.3.0",
