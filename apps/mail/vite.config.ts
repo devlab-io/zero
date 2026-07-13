@@ -100,6 +100,33 @@ export default defineConfig({
   },
   build: {
     sourcemap: false,
+    rollupOptions: {
+      output: {
+        // w2cd (client weight): reasoned vendor split into dedicated, long-term-cacheable,
+        // attributable chunks for the two libraries that dominate this job's surface.
+        // Both REMAIN critical — anchored by importers outside this job's scope:
+        //   • posthog-js  — hooks/use-optimistic-actions.ts, components/mail/reply-composer
+        //   • motion      — components/mail/** (thread-display, rows page) + mail/layout
+        // Isolating them costs no net critical bytes (measured: total critical is within
+        // ~2 KiB of the un-split build, i.e. rollup reshuffle noise) but gives each a
+        // deterministic, named boundary so its weight is attributable build-over-build.
+        //
+        // @sentry/react is deliberately NOT given a manual chunk: with no
+        // VITE_PUBLIC_SENTRY_DSN at build time it is fully dead-code-eliminated (opt-in
+        // telemetry), so a rule would only emit an empty stub.
+        manualChunks(id) {
+          if (!id.includes('/node_modules/')) return;
+          if (id.includes('/node_modules/posthog-js/')) return 'posthog';
+          if (
+            id.includes('/node_modules/motion/') ||
+            id.includes('/node_modules/motion-dom/') ||
+            id.includes('/node_modules/motion-utils/') ||
+            id.includes('/node_modules/framer-motion/')
+          )
+            return 'motion';
+        },
+      },
+    },
   },
   resolve: {
     alias: {

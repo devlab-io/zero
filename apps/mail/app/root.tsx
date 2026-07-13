@@ -21,9 +21,20 @@ import type { Route } from './+types/root';
 import { AlertCircle } from 'lucide-react';
 import { m } from '@/paraglide/messages';
 import { ArrowLeft } from 'lucide-react';
-import * as Sentry from '@sentry/react';
+import { Loader2 } from 'lucide-react';
 import superjson from 'superjson';
 import './globals.css';
+
+// w2cd (client weight): @sentry/react is loaded via dynamic import() so it stays out
+// of the critical inbox bundle. Error reporting only fires when telemetry is enabled
+// (VITE_PUBLIC_SENTRY_DSN set) and the Sentry client has been initialized.
+function captureToSentry(error: unknown, context: Record<string, unknown>) {
+  if (!import.meta.env.VITE_PUBLIC_SENTRY_DSN) return;
+  void import('@sentry/react').then((Sentry) => {
+    if (!Sentry.getClient()) return;
+    Sentry.captureException(error instanceof Error ? error : new Error(String(error)), context);
+  });
+}
 
 const getUrl = () => import.meta.env.VITE_PUBLIC_BACKEND_URL + '/api/trpc';
 
@@ -80,13 +91,17 @@ export function Layout({ children }: PropsWithChildren) {
   );
 }
 
-// export function HydrateFallback() {
-//   return (
-//     <div className="flex h-screen w-full items-center justify-center">
-//       <Loader2 className="h-10 w-10 animate-spin" />
-//     </div>
-//   );
-// }
+// w2cd (client weight): reactivated as the neutral prerendered shell. With ssr:false +
+// prerender:['/'], this is the HTML painted before hydration for the landing AND — via
+// the Cloudflare SPA not_found_handling — for deep-links (e.g. /mail/inbox). It carries
+// no route-specific (landing) markup, so a deep-link is never shown landing content.
+export function HydrateFallback() {
+  return (
+    <div className="flex h-screen w-full items-center justify-center">
+      <Loader2 className="h-10 w-10 animate-spin" />
+    </div>
+  );
+}
 
 export default function App() {
   return <Outlet />;
@@ -113,9 +128,9 @@ export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {
     console.error(error);
     console.error({ message, details, stack });
 
-    // Report error to Sentry
+    // Report error to Sentry (lazy — see captureToSentry above)
     if (isRouteErrorResponse(error)) {
-      Sentry.captureException(new Error(`Route Error ${error.status}: ${error.statusText}`), {
+      captureToSentry(new Error(`Route Error ${error.status}: ${error.statusText}`), {
         tags: {
           type: 'route_error',
           status: error.status,
@@ -126,13 +141,13 @@ export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {
         },
       });
     } else if (error instanceof Error) {
-      Sentry.captureException(error, {
+      captureToSentry(error, {
         tags: {
           type: 'app_error',
         },
       });
     } else {
-      Sentry.captureException(new Error('Unknown error occurred'), {
+      captureToSentry(new Error('Unknown error occurred'), {
         tags: {
           type: 'unknown_error',
         },
