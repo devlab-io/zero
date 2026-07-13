@@ -14,6 +14,7 @@
  * Reuse or distribution of this file requires a license from Zero Email Inc.
  */
 
+import { logger } from '../../lib/logger';
 import {
   countThreads,
   countThreadsByLabels,
@@ -430,7 +431,7 @@ export class ZeroDriver extends DurableObject<ZeroEnv> {
         await Promise.all(keyNames.map((k: string) => this.env.snoozed_emails.delete(k)));
       }
     } catch (error) {
-      console.error('[AGENT][unsnoozeThreadsHandler] Failed', { connectionId, threadIds, error });
+      logger.error('[AGENT][unsnoozeThreadsHandler] Failed', { connectionId, threadIds, error });
       throw error;
     }
   }

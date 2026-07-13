@@ -14,6 +14,7 @@
  * Reuse or distribution of this file requires a license from Zero Email Inc.
  */
 
+import { logger } from '../../lib/logger';
 import type { ZeroDriverInternal } from './internal';
 import { desc, isNotNull } from 'drizzle-orm';
 import { threads } from './db/schema';
@@ -23,7 +24,7 @@ export function parseMalformedSender(rawData: string): { email: string; name?: s
 
   if (emailRegex.test(rawData.trim())) {
     const email = rawData.trim();
-    console.warn('[SuggestRecipients] Used fallback parsing for plain email:', email);
+    logger.warn('[SuggestRecipients] Used fallback parsing for plain email:', email);
     return { email, name: undefined };
   }
 
@@ -55,7 +56,7 @@ export function parseMalformedSender(rawData: string): { email: string; name?: s
     }
   }
 
-  console.warn('[SuggestRecipients] Extracted from malformed data:', { email, name });
+  logger.warn('[SuggestRecipients] Extracted from malformed data:', { email, name });
   return { email, name };
 }
 
@@ -107,7 +108,7 @@ export async function suggestRecipients(
         }
 
         if (!sender) {
-          console.error(
+          logger.error(
             '[SuggestRecipients] Failed to parse latest_sender, no fallback possible. Raw data:',
             row.latest_sender,
           );
@@ -116,7 +117,7 @@ export async function suggestRecipients(
       } catch (error) {
         sender = parseMalformedSender(String(row.latest_sender));
         if (!sender) {
-          console.error(
+          logger.error(
             '[SuggestRecipients] Failed to parse latest_sender, no fallback possible:',
             error,
             'Raw data:',

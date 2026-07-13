@@ -14,6 +14,7 @@
  * Reuse or distribution of this file requires a license from Zero Email Inc.
  */
 
+import { logger } from '../../lib/logger';
 import { getThreadLabels, modifyThreadLabels } from './db';
 import type { ZeroDriverInternal } from './internal';
 import { OutgoingMessageType } from './types';
@@ -43,7 +44,7 @@ export async function modifyThreadLabelsByName(
       if (labelId) {
         addLabelIds.push(labelId);
       } else {
-        console.warn(`Label "${labelName}" not found in user labels`);
+        logger.warn(`Label "${labelName}" not found in user labels`);
       }
     }
 
@@ -53,14 +54,14 @@ export async function modifyThreadLabelsByName(
       if (labelId) {
         removeLabelIds.push(labelId);
       } else {
-        console.warn(`Label "${labelName}" not found in user labels`);
+        logger.warn(`Label "${labelName}" not found in user labels`);
       }
     }
 
     // Call the existing function with IDs
     return await modifyThreadLabelsInDB(self, threadId, addLabelIds, removeLabelIds);
   } catch (error) {
-    console.error('Failed to modify thread labels by name:', error);
+    logger.error('Failed to modify thread labels by name:', error);
     throw error;
   }
 }
@@ -93,7 +94,7 @@ export async function modifyThreadLabelsInDB(
       removedLabels: result.removedLabels,
     };
   } catch (error) {
-    console.error('Failed to modify thread labels in database:', error);
+    logger.error('Failed to modify thread labels in database:', error);
     throw error;
   }
 }

@@ -1,3 +1,4 @@
+import { logger } from '../../lib/logger';
 import { streamText, tool, type DataStreamWriter, type ToolSet } from 'ai';
 import { perplexity } from '@ai-sdk/perplexity';
 
@@ -62,7 +63,7 @@ export class ToolOrchestrator {
             // Return a placeholder result since the actual streaming happens above
             return { type: 'streaming_response', toolName, toolCallId };
           } catch (error) {
-            console.error('Error searching the web:', error);
+            logger.error('Error searching the web:', error);
             throw new Error('Failed to search the web');
           }
         },

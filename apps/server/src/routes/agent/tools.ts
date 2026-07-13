@@ -1,3 +1,4 @@
+import { logger } from '../../lib/logger';
 import { getCurrentDateContext, GmailSearchAssistantSystemPrompt } from '../../lib/prompts';
 import { getThread, getZeroAgent } from '../../lib/server-utils';
 import type { IGetThreadResponse } from '../../lib/driver/types';
@@ -36,7 +37,7 @@ export const getEmbeddingVector = async (
     const embeddingVector = embeddingResponse.data[0];
     return embeddingVector ?? null;
   } catch (error) {
-    console.log('[getEmbeddingVector] failed', error);
+    logger.info('[getEmbeddingVector] failed', error);
     return null;
   }
 };
@@ -138,7 +139,7 @@ const getThreadSummary = (connectionId: string) =>
         const { result } = await getThread(connectionId, id);
         thread = result;
       } catch (error) {
-        console.error('Error getting thread', error);
+        logger.error('Error getting thread', error);
         return { error: 'Thread not found' };
       }
       if (response.length && response?.[0]?.metadata?.['summary'] && thread?.latest?.subject) {
@@ -327,7 +328,7 @@ const buildGmailSearchQuery = () =>
       query: z.string().describe('The search query to build, provided in natural language'),
     }),
     execute: async (params) => {
-      console.log('[DEBUG] buildGmailSearchQuery', params);
+      logger.debug('[DEBUG] buildGmailSearchQuery', params);
 
       const result = await generateText({
         model: openai(env.OPENAI_MODEL || 'gpt-4o'),
@@ -350,7 +351,7 @@ const getCurrentDate = () =>
     description: 'Get the current date',
     parameters: z.object({}).default({}),
     execute: async () => {
-      console.log('[DEBUG] getCurrentDate');
+      logger.debug('[DEBUG] getCurrentDate');
 
       return {
         content: [
@@ -384,7 +385,7 @@ export const webSearch = () =>
 
         return response.text;
       } catch (error) {
-        console.error('Error searching the web:', error);
+        logger.error('Error searching the web:', error);
         throw new Error('Failed to search the web');
       }
     },
