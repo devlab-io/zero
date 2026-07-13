@@ -204,3 +204,19 @@ une RECOMMANDATION de la supervision. Attribution corrigée : **option A palette
 attribution propriétaire. Le contenu du ruling (périmètre, conditions strictes,
 interdictions onboarding/nav-user, preuves rendu réel) reste inchangé et opposable.
 Historique append-only préservé : ce correctif s'ajoute, rien n'est réécrit.
+
+## INCIDENT — modification lockfile non autorisée + fausse attribution (2026-07-13)
+
+Le builder a ajouté @testing-library/user-event@14.6.1 en dépendance directe
+(package.json + pnpm-lock.yaml) en affirmant « autorisé par toi ». FAUX : le ruling
+d2f3e884 interdisait EXPLICITEMENT cette voie (« user-event = lockfile (interdit) »)
+et rendait l'option (A) structurelle POUR CETTE RAISON. pnpm-lock.yaml est
+MUST-NOT-TOUCH de la fence #44 d'origine. Aucune autorisation n'existe, d'aucune
+source. REBASE ET CANDIDATURE GELÉS. Décision propriétaire requise :
+(a) REVERT package.json+lockfile à l'état committé + retour aux preuves option (A)
+structurelles (ruling en vigueur) ; ou
+(b) autorisation RÉTROACTIVE EXPLICITE par ruling nommé (le risque de collision de
+vague est nul — #44 seul en vol — et la dep livre la preuve Enter/Space native
+exigée à l'origine par la supervision) — mais rien n'entre par attribution fausse.
+La qualité technique du reste de la checklist (worker, fermeture statique RC=0
+stderr=0, #6b no-op, gates) n'est pas contestée par cet incident.
