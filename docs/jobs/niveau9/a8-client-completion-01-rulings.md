@@ -52,3 +52,13 @@ LIVRABLE NOMINAL de #44 (condition critique droite #33), option (A) retenue, BOR
   seulement si ≤ 430 080 octets à la mesure gelée.
 - Les édits #1/#2 (thread-display, use-optimistic-actions, reply-composer) sont GARDÉS
   comme fondations (3 ancres réellement retirées, efficaces dès app-sidebar lazifié).
+
+## Amendement immédiat (coordination superviseur, même date)
+
+Le couple app-sidebar.tsx + create-email.tsx (chemin posthog prouvé) passe INTÉGRALEMENT
+en séquence post-#38 : attendre merge #38 → rebase #44 → delta borné sur ces DEUX
+fichiers avec re-gates. Aucune écriture dessus d'ici là (même principe que root.tsx).
+L'extension immédiate se limite donc à : mail.tsx, app/(routes)/mail/[folder]/page.tsx,
+entry.client.tsx, components/icons/animated/_, components/theme/_, nav-user.tsx —
+imports lazy / éviction motion uniquement. La dé-ancre motion peut passer par
+icons/theme/nav-user sans toucher app-sidebar lui-même.
