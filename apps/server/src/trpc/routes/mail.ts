@@ -250,10 +250,6 @@ export const mailRouter = router({
       const { stub: agent } = await getZeroAgent(activeConnection.id, executionCtx);
       const { threadId, addLabels, removeLabels } = input;
 
-      console.log(`Server: updateThreadLabels called for thread ${threadId}`);
-      console.log(`Adding labels: ${addLabels.join(', ')}`);
-      console.log(`Removing labels: ${removeLabels.join(', ')}`);
-
       const result = await agent.normalizeIds(threadId);
       const { threadIds } = result;
 
@@ -266,7 +262,6 @@ export const mailRouter = router({
         return { success: true };
       }
 
-      console.log('Server: No label changes specified');
       return { success: false, error: 'No label changes specified' };
     }),
 
@@ -609,8 +604,6 @@ export const mailRouter = router({
         await agent.stub.create(mailWithAttachments);
       }
 
-      console.log('[send] input.threadId:', input);
-
       if (input.threadId)
         ctx.c.executionCtx.waitUntil(reSyncThread(activeConnection.id, input.threadId));
       ctx.c.executionCtx.waitUntil(afterTask());
@@ -864,12 +857,10 @@ export const mailRouter = router({
         const { activeConnection } = ctx;
         const { stub: agent } = await getZeroAgent(activeConnection.id);
 
-        console.log(`[VERIFY_EMAIL] Getting raw email for message ID: ${input.id}`);
         const rawEmail = await agent.getRawEmail(input.id);
 
         const { verify } = await import('../../lib/email-verification');
         const result = await verify(rawEmail);
-        console.log(`[VERIFY_EMAIL] Verification result for message ID ${input.id}:`, result);
         return result;
       } catch (error) {
         console.error('Email verification error:', error);

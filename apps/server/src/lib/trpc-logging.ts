@@ -83,58 +83,58 @@ export const createLoggingMiddleware = () => {
                 });
             }
 
-            // Sanitize output to remove non-serializable objects
-            const sanitizeOutput = (obj: any): any => {
-                if (obj === null || obj === undefined) return obj;
-                if (typeof obj !== 'object') return obj;
-                if (Array.isArray(obj)) return obj.map(sanitizeOutput);
-
-                const sanitized: any = {};
-                for (const [key, value] of Object.entries(obj)) {
-                    // Skip known non-serializable fields
-                    if (key === 'ctx' && value && typeof value === 'object') {
-                        continue;
-                    }
-
-                    try {
-                        structuredClone(value);
-                        sanitized[key] = sanitizeOutput(value);
-                    } catch (err) {
-                        // If it can't be serialized, replace with a description
-                        console.log('[TRACE DEBUG] Non-serializable value:', err);
-                        sanitized[key] = `[Non-serializable: ${value?.constructor?.name || typeof value}]`;
-                    }
-                }
-                return sanitized;
-            };
-
-            // Log successful call
-            const callData: TRPCCallLog = {
-                id: crypto.randomUUID(),
-                timestamp: startTime,
-                userId: userId || 'anonymous',
-                sessionId,
-                procedure: opts.path,
-                input: opts.input,
-                output: sanitizeOutput(output),
-                duration: Date.now() - startTime,
-                metadata: {
-                    method: opts.type,
-                    userAgent: c.req.header('User-Agent'),
-                    ip: hashIpAddress(c.req.header('CF-Connecting-IP') || c.req.header('X-Forwarded-For')),
-                    referer: c.req.header('Referer'),
-                    origin: c.req.header('Origin'),
-                    acceptLanguage: c.req.header('Accept-Language'),
-                    acceptEncoding: c.req.header('Accept-Encoding'),
-                    requestId: c.req.header('X-Request-Id') || crypto.randomUUID(),
-                    timestamp: new Date().toISOString(),
-                    startTime,
-                    endTime: Date.now(),
-                },
-            };
-
             // Log using the new logging service
             if (loggingService) {
+                // Sanitize output to remove non-serializable objects — deep clone,
+                // only worth paying when a logging service is actually exporting.
+                const sanitizeOutput = (obj: any): any => {
+                    if (obj === null || obj === undefined) return obj;
+                    if (typeof obj !== 'object') return obj;
+                    if (Array.isArray(obj)) return obj.map(sanitizeOutput);
+
+                    const sanitized: any = {};
+                    for (const [key, value] of Object.entries(obj)) {
+                        // Skip known non-serializable fields
+                        if (key === 'ctx' && value && typeof value === 'object') {
+                            continue;
+                        }
+
+                        try {
+                            structuredClone(value);
+                            sanitized[key] = sanitizeOutput(value);
+                        } catch {
+                            // If it can't be serialized, replace with a description
+                            sanitized[key] = `[Non-serializable: ${value?.constructor?.name || typeof value}]`;
+                        }
+                    }
+                    return sanitized;
+                };
+
+                // Log successful call
+                const callData: TRPCCallLog = {
+                    id: crypto.randomUUID(),
+                    timestamp: startTime,
+                    userId: userId || 'anonymous',
+                    sessionId,
+                    procedure: opts.path,
+                    input: opts.input,
+                    output: sanitizeOutput(output),
+                    duration: Date.now() - startTime,
+                    metadata: {
+                        method: opts.type,
+                        userAgent: c.req.header('User-Agent'),
+                        ip: hashIpAddress(c.req.header('CF-Connecting-IP') || c.req.header('X-Forwarded-For')),
+                        referer: c.req.header('Referer'),
+                        origin: c.req.header('Origin'),
+                        acceptLanguage: c.req.header('Accept-Language'),
+                        acceptEncoding: c.req.header('Accept-Encoding'),
+                        requestId: c.req.header('X-Request-Id') || crypto.randomUUID(),
+                        timestamp: new Date().toISOString(),
+                        startTime,
+                        endTime: Date.now(),
+                    },
+                };
+
                 const { getRequestTrace } = await import('./trace-context');
 
                 // Get the complete trace for this request
@@ -179,33 +179,33 @@ export const createLoggingMiddleware = () => {
                 }, error);
             }
 
-            // Log failed call
-            const callData: TRPCCallLog = {
-                id: crypto.randomUUID(),
-                timestamp: startTime,
-                userId: userId || 'anonymous',
-                sessionId,
-                procedure: opts.path,
-                input: opts.input,
-                error,
-                duration: Date.now() - startTime,
-                metadata: {
-                    method: opts.type,
-                    userAgent: c.req.header('User-Agent'),
-                    ip: hashIpAddress(c.req.header('CF-Connecting-IP') || c.req.header('X-Forwarded-For')),
-                    referer: c.req.header('Referer'),
-                    origin: c.req.header('Origin'),
-                    acceptLanguage: c.req.header('Accept-Language'),
-                    acceptEncoding: c.req.header('Accept-Encoding'),
-                    requestId: c.req.header('X-Request-Id') || crypto.randomUUID(),
-                    timestamp: new Date().toISOString(),
-                    startTime,
-                    endTime: Date.now(),
-                },
-            };
-
             // Log error using the new logging service
             if (loggingService) {
+                // Log failed call
+                const callData: TRPCCallLog = {
+                    id: crypto.randomUUID(),
+                    timestamp: startTime,
+                    userId: userId || 'anonymous',
+                    sessionId,
+                    procedure: opts.path,
+                    input: opts.input,
+                    error,
+                    duration: Date.now() - startTime,
+                    metadata: {
+                        method: opts.type,
+                        userAgent: c.req.header('User-Agent'),
+                        ip: hashIpAddress(c.req.header('CF-Connecting-IP') || c.req.header('X-Forwarded-For')),
+                        referer: c.req.header('Referer'),
+                        origin: c.req.header('Origin'),
+                        acceptLanguage: c.req.header('Accept-Language'),
+                        acceptEncoding: c.req.header('Accept-Encoding'),
+                        requestId: c.req.header('X-Request-Id') || crypto.randomUUID(),
+                        timestamp: new Date().toISOString(),
+                        startTime,
+                        endTime: Date.now(),
+                    },
+                };
+
                 const { getRequestTrace } = await import('./trace-context');
 
                 // Get the complete trace for this request

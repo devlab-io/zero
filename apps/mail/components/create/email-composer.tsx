@@ -537,7 +537,6 @@ export function EmailComposer({
     if (!hasUnsavedChanges) return;
 
     const autoSaveTimer = setTimeout(() => {
-      console.log('timeout set');
       saveDraft();
     }, 3000);
 
