@@ -213,3 +213,24 @@ Tous mes livrables verts : `@zero/types` (tsc 0) · 5 imports relatifs → 0 (fr
 ---
 
 STATUS: COMPLETE_WITH_CONCERNS — périmètre #25 entièrement livré et vert sur la base rebasée c6a4d0ca (package @zero/types, frontière relative 0 + ESLint prouvé, FRONTIER_MAX 5→0, server tsc 0, apps/mail tsc 0, tests, build, typecheck-report, check-agent-surface) ; gate `tsc mail=0` retiré (→ #43, 17 résiduels 100 % ../server/src). SEUL concern, hors périmètre : `loc-ratchet` rouge sur `apps/server/src/pipelines.ts` 874>873 — croissance PASS-mergée de #29 (déjà rouge au factory head c6a4d0ca), borne non re-snapshotée ; handoff orchestrateur (re-snapshot 873→874), non élargie par moi.
+
+---
+
+## Addendum orchestrateur — base f360e301 (supersede la section « Re-mesure post-rebase (base c6a4d0ca) »)
+
+L'analyse loc-ratchet de la section précédente est **SUPERSEDED** : la branche a été
+re-rebasée sur `f360e301`, qui corrige le blocker en AMONT par un micro-commit non
+fonctionnel (`pipelines.ts` 874→873, fusion des deux imports `./types` — la croissance
+venait d'un import logger net de #29). **La borne 873 n'a PAS été élargie** — la
+recommandation « re-snapshot 873→874 » de la section précédente est caduque et n'a pas
+été suivie (élargir eût été illégal, le builder avait raison de ne pas le faire lui-même).
+
+État re-vérifié sur la base f360e301 (checkrun `f15b92b4`, juge froid) :
+- `node scripts/checks/loc-ratchet.mjs` → **PASSED** (10/10 budget, frontier 0/0).
+- Tous les autres gates inchangés et verts (tsc server 0, apps/mail 0 propre,
+  17 résiduels 100 % ../server/src → gate #43 par freeze v4, tests, build,
+  dry-run ×2, ESLint prouvé, check-agent-surface).
+
+STATUS: COMPLETE — périmètre #25 entièrement livré et vert sur base f360e301,
+conforme freeze/niveau9-v4 (gate `tsc mail = 0 TOTAL` transféré nominalement à #43 ;
+BASELINE.mail 17 maintenu). Aucun concern résiduel.
