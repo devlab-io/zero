@@ -1,9 +1,9 @@
 # Checkrun: agent-api-completion-01-checkrun
-generated: 2026-07-13T18:52:37Z  runner: sh  config: /Users/thomasverdenne/cc/zero/.architect/checkrun-agent-api-01.json
-check_file: docs/checks/niveau8/agent-api.md  freeze_sha: 5331ac6a7aa916b7ff1f68edb72dc57226a2def2
+generated: 2026-07-13T19:02:34Z  runner: sh  config: /Users/thomasverdenne/cc/zero/.architect/checkrun-agent-api-01.json
+check_file: docs/checks/niveau8/agent-api.md  freeze_sha: 47e19e6d1c94b3d459ba984db17f8c7ef4f75ce5
 executor_config: bash
-integrity: check_file_matches_freeze=true head=01f2d030bd7f0fc733770364927a0a5498866ad1
-changed_files: 12 listed below; docs_checks_touched=false
+integrity: check_file_matches_freeze=true head=57b90b68fdb224ef40ffeae23c771bd9ec0628a0
+changed_files: 13 listed below; docs_checks_touched=false
 apps/server/src/routes/agent/mcp-tools.test.ts
 apps/server/src/routes/agent/mcp-tools.ts
 apps/server/src/routes/agent/mcp.ts
@@ -14,5 +14,6 @@ docs/agent/codex-setup.md
 docs/agent/mcp-schema.snapshot.json
 docs/agent/mcp-smoke.evidence.json
 docs/agent/mcp-smoke.md
+docs/jobs/niveau9/agent-api-completion-01-checkrun.md
 docs/jobs/niveau9/agent-api-completion-01.md
 scripts/security/check-agent-surface.mjs
