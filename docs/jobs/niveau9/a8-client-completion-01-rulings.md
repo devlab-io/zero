@@ -81,3 +81,15 @@ et `components/theme/`.
   imports lazy / éviction motion uniquement.
 - POST-#38 (merge + rebase + delta borné re-gaté) : `components/create/create-email.tsx`,
   `components/ui/nav-user.tsx`.
+
+## Ruling #6b lazy-IA (orchestrateur, 2026-07-13)
+
+Faisabilité vérifiée par le builder (7 fichiers, conversions function-scoped sûres) MAIS
+bénéfice non mesurable au harnais R10 prescrit (warm ≈ 0 grâce à #31 ; dry-run total
+inchangé — les warmups du protocole masquent par construction le démarrage froid).
+DÉCISION : pas de churn sans preuve. #6b n'est livré QUE si un protocole de mesure
+COLD BOOT le justifie : ≥5 démarrages frais de wrangler dev, temps au premier
+byte de la première requête, médiane avant/après. Si delta ~0 → NE PAS convertir ;
+documenter « verified-no-op » (faisabilité + absence de gain mesurable) et router
+l'affinage du protocole à #40 (bench M1). #6a (wrapper 60s, mesuré 2756,17→2743,25 KiB)
+reste acquis. Jurisprudence : verify-don't-build (#34 D1).
