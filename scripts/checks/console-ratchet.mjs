@@ -16,12 +16,13 @@ import { execSync } from 'node:child_process';
 // Measured with the frozen commands. `server` lowered 462 → 132 by V3.4
 // server-runtime-guardrails (#29) — perimeter (all of apps/server/src except
 // routes/agent/** and lib/driver/**) swept onto lib/logger.ts — then 132 → 87 by V5.6
-// server-console-sweep (#42): lib/driver 45 → 0. The 87 residual is routes/agent (81,
-// owned by the #42 -02 pass after #36, toward the ≤20 palier) + lib/logger.ts's
-// intentional sinks (6). Re-snapshot ordered by the right-critic at #42 merge so the
-// gain is non-regainable. `front` left at its niveau9 baseline (owned by apps/mail
-// jobs). NON-GROWING — never widen.
-const BUDGET = { server: 87, front: 143 };
+// server-console-sweep (#42): lib/driver 45 → 0, then 87 → 8 by the #42 -02 pass
+// (routes/agent 78 sites → logger after #36 unblocked the zone). The 8 residual is
+// lib/logger.ts only (4 intentional sinks + 2 header comments) + 2 fully-commented
+// dead lines in routes/agent/sync.ts. A5 ≤20 palier REACHED. Re-snapshots ordered by
+// the right-critic at each #42 merge so gains are non-regainable. `front` left at its
+// niveau9 baseline (owned by apps/mail jobs). NON-GROWING — never widen.
+const BUDGET = { server: 8, front: 143 };
 
 const SERVER_CMD =
   "grep -rE \"console\\.\" apps/server/src --include='*.ts' --exclude='*.test.*' --exclude='*.d.ts' | wc -l";
