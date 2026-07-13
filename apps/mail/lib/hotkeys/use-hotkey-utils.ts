@@ -3,7 +3,7 @@ import { type Shortcut, keyboardShortcuts, enhancedKeyboardShortcuts } from '@/c
 import { keyboardLayoutMapper, type KeyboardLayout } from '@/utils/keyboard-layout-map';
 import { getKeyCodeFromKey } from '@/utils/keyboard-utils';
 import { useHotkeys } from 'react-hotkeys-hook';
-import { useCallback, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { isMac } from '@/lib/platform';
 
 export const useShortcutCache = () => {
@@ -270,31 +270,42 @@ export function useShortcut(
   );
 }
 
+/**
+ * True when the event target is somewhere single-key shortcuts must never fire:
+ * a text input / textarea / select, a contenteditable node (this is what TipTap /
+ * ProseMirror render), or anywhere inside an open dialog. Pure and exported so the
+ * keyboard-parity check can unit-test the exclusion rule directly.
+ */
+export function isTypingOrModalTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  return (
+    target.isContentEditable ||
+    ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName) ||
+    !!target.closest('[contenteditable="true"], [role="dialog"]')
+  );
+}
+
 export function useShortcuts(
   shortcuts: Shortcut[],
   handlers: { [key: string]: () => void },
   options: Partial<HotkeyOptions> = {},
 ) {
+  // Sequences are driven separately (useShortcutSequences); the react-hotkeys-hook
+  // binder only owns single keys and modifier chords.
   const shortcutMap = useMemo(() => {
     return shortcuts.reduce<Record<string, Shortcut>>((acc, shortcut) => {
-      if (handlers[shortcut.action]) {
+      if (shortcut.type !== 'sequence' && handlers[shortcut.action]) {
         acc[shortcut.action] = shortcut;
       }
       return acc;
     }, {});
-  }, [shortcuts]);
+  }, [shortcuts, handlers]);
 
   const shortcutString = useMemo(() => {
-    return Object.entries(shortcutMap)
-      .map(([action, shortcut]) => {
-        if (handlers[action]) {
-          return formatKeys(shortcut.keys);
-        }
-        return null;
-      })
+    return [...new Set(Object.values(shortcutMap).map((shortcut) => formatKeys(shortcut.keys)))]
       .filter(Boolean)
       .join(',');
-  }, [shortcutMap, handlers]);
+  }, [shortcutMap]);
 
   useHotkeys(
     shortcutString,
@@ -319,6 +330,11 @@ export function useShortcuts(
 
       if (matchingEntry) {
         const [action, shortcut] = matchingEntry;
+        // A bare key must never fire while typing or inside a dialog. Modifier chords
+        // (mod+…) are safe there and stay live (e.g. ⌘K to dismiss the palette).
+        if (shortcut.type === 'single' && isTypingOrModalTarget(event.target)) {
+          return;
+        }
         const handlerFn = handlers[action];
         if (handlerFn) {
           if (shortcut.preventDefault || options.preventDefault) {
@@ -332,9 +348,56 @@ export function useShortcuts(
       ...options,
       scopes: options.scope ? [options.scope] : undefined,
       preventDefault: false, // We'll handle preventDefault per-shortcut
+      enableOnContentEditable: false,
+      enableOnFormTags: false,
       keyup: false,
       keydown: true,
     },
     [shortcutMap, handlers, options],
   );
+}
+
+/**
+ * Timed two-key sequences (`g` then a letter). A press starts a window; a second key
+ * within `timeoutMs` fires the matching sequence. Never a simultaneous chord, and
+ * inert while typing, inside a dialog, or when a modifier is held.
+ */
+export function useShortcutSequences(
+  shortcuts: Shortcut[],
+  handlers: Record<string, () => void>,
+  timeoutMs = 800,
+) {
+  const pending = useRef<{ key: string; startedAt: number } | null>(null);
+  const sequenceShortcuts = useMemo(
+    () => shortcuts.filter((shortcut) => shortcut.type === 'sequence' && handlers[shortcut.action]),
+    [shortcuts, handlers],
+  );
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return;
+      if (isTypingOrModalTarget(event.target)) return;
+
+      const key = event.key.toLowerCase();
+      const now = performance.now();
+      const current = pending.current;
+
+      if (current && now - current.startedAt <= timeoutMs) {
+        const match = sequenceShortcuts.find(
+          (shortcut) => shortcut.keys[0] === current.key && shortcut.keys[1] === key,
+        );
+        pending.current = null;
+        if (!match) return;
+        event.preventDefault();
+        handlers[match.action]?.();
+        return;
+      }
+
+      const startsSequence = sequenceShortcuts.some((shortcut) => shortcut.keys[0] === key);
+      pending.current = startsSequence ? { key, startedAt: now } : null;
+    };
+
+    window.addEventListener('keydown', handleKeyDown, { capture: true });
+    return () => window.removeEventListener('keydown', handleKeyDown, { capture: true });
+  }, [handlers, sequenceShortcuts, timeoutMs]);
 }

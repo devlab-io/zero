@@ -1,17 +1,20 @@
 import type { ParsedMessage, Sender } from '@/types';
 
-// reply-recipients — pure, testable derivation of reply / reply-all recipients.
+// reply-recipients — pure, testable derivation of reply / reply-all recipients
+// and the reply/forward subject.
 //
-// Extracted verbatim (behaviour-identical) from the recipient block that used to
-// live inline in `reply-composer.tsx`. It is the seam issue #32 (keyboard-parity)
-// plugs into: #32 wires the returned `to`/`cc` into the composer's `initialTo` /
-// `initialCc` to fix the empty «To» field. Kept pure here so that fix is unit
-// testable; this module deliberately does NOT wire anything and does NOT fix the
-// bug — reply-composer still initialises the composer from the draft only.
+// `deriveReplyRecipients` was extracted verbatim (behaviour-identical) from the
+// recipient block that used to live inline in `reply-composer.tsx`. It is the
+// seam issue #32 (keyboard-parity) plugs into: #32 now wires the returned
+// `to`/`cc` into the composer's `initialTo` / `initialCc` to fix the empty «To»
+// field, and `deriveReplySubject` into `initialSubject`. Kept pure here so both
+// are unit testable.
 //
-// Faithful to the validated base: no subject derivation (the base has none) and
-// no extra case-insensitive de-duplication beyond the original `to.includes`
-// check. Comparisons are lower-cased; the ORIGINAL-case address is pushed.
+// `deriveReplyRecipients` stays faithful to the validated base: comparisons are
+// lower-cased and the ORIGINAL-case address is pushed; the only de-duplication is
+// the original `to.includes` check. `deriveReplySubject` is the #32 extension —
+// it mirrors the niveau8 wave's Re:/Fwd: prefixing (idempotent for an already
+// prefixed subject), and is the single source the composer reads for the subject.
 
 export type ReplyMode = 'reply' | 'replyAll' | 'forward';
 
@@ -74,4 +77,29 @@ export function deriveReplyRecipients({
 
   // forward / other: start with empty recipients.
   return { to, cc };
+}
+
+export interface DeriveReplySubjectArgs {
+  /** The composer mode: 'reply' | 'replyAll' | 'forward' (any other value → subject unchanged). */
+  mode: string;
+  /** The subject of the message being replied to / forwarded. */
+  subject?: string | null;
+}
+
+/**
+ * Derive the composer subject for reply / reply-all / forward.
+ *
+ * `reply`/`replyAll` prefix `Re:`, `forward` prefixes `Fwd:`. The prefix is
+ * idempotent: a subject that already starts with `Re:` or `Fwd:` (any case) is
+ * returned unchanged, so threading a long conversation never stacks prefixes.
+ * An unknown mode returns the trimmed original untouched.
+ */
+export function deriveReplySubject({ mode, subject }: DeriveReplySubjectArgs): string {
+  const original = (subject ?? '').trim();
+
+  if (mode !== 'reply' && mode !== 'replyAll' && mode !== 'forward') return original;
+  if (/^(re|fwd):/i.test(original)) return original;
+
+  const prefix = mode === 'forward' ? 'Fwd:' : 'Re:';
+  return `${prefix} ${original}`.trim();
 }
