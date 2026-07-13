@@ -31,17 +31,21 @@ const BUDGET = {
   // (typing #20, quick wins perf) ; le fichier appartient à #28 qui le fera fondre.
   'apps/mail/components/context/command-palette-context.tsx': 1922,
   // icons.tsx (1783 -> 10, barrel de familles — issue #41 mergée) : entrée prunée.
-  'apps/mail/components/mail/mail-display.tsx': 1736,
+  // mail-display.tsx (1736 -> 774, découpé par responsabilité : print / attachments /
+  // research / labels / parts — issue #27 refactor-thread-composer) : entrée prunée.
   // chat.ts (supprimé, code mort — issue #24 mergée) : entrée prunée.
   // google.ts retiré (1487 -> 155, façade — issue #23 mergée) : entrée prunée.
   'apps/mail/components/home/HomeContent.tsx': 1332,
   'apps/server/src/lib/driver/microsoft.ts': 1294, // ADR: driver Microsoft
   // main.ts (1261 -> 333, montages — issue #24 mergée) : entrée prunée.
-  'apps/mail/components/create/email-composer.tsx': 1170,
+  // email-composer.tsx (1170 -> 729, découpé : types / content-preview / fields /
+  // attachments / dialogs — issue #27 refactor-thread-composer) : entrée prunée.
   // mail-list.tsx (1111 -> 247, découpe présentation/data-layer/sélection — issue #26) :
   // entrée prunée. Modules dérivés (mail-list-thread ≤451, -draft, -labels, -actions,
   // use-mail-list-data, use-mail-selection) tous < THRESHOLD, aucun budget requis.
-  'apps/mail/components/mail/thread-display.tsx': 1062,
+  // thread-display.tsx (1062 -> 530, découpé : print / demo / action-button /
+  // message-list — issue #27 refactor-thread-composer) : entrée prunée.
+  // union orchestrateur post-rebase (STOP base stale) : prunes #26 + #27 cumulées.
   // contributors.tsx (1040 -> 756, données+fetch extraits vers contributors-data.ts —
   // issue #41 mergée) : entrée prunée.
   'apps/server/src/trpc/routes/mail.ts': 879,

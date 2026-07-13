@@ -53,60 +53,11 @@ export default function ReplyCompose({ messageId }: ReplyComposeProps) {
   const replyToMessage =
     (messageId && emailData?.messages.find((msg) => msg.id === messageId)) || emailData?.latest;
 
-  // Initialize recipients and subject when mode changes
-  useEffect(() => {
-    if (!replyToMessage || !mode || !activeConnection?.email) return;
-
-    const userEmail = activeConnection.email.toLowerCase();
-    const senderEmail = replyToMessage.sender.email.toLowerCase();
-
-    // Set subject based on mode
-
-    if (mode === 'reply') {
-      // Reply to sender
-      const to: string[] = [];
-
-      // If the sender is not the current user, add them to the recipients
-      if (senderEmail !== userEmail) {
-        to.push(replyToMessage.sender.email);
-      } else if (replyToMessage.to && replyToMessage.to.length > 0 && replyToMessage.to[0]?.email) {
-        // If we're replying to our own email, reply to the first recipient
-        to.push(replyToMessage.to[0].email);
-      }
-
-      // Initialize email composer with these recipients
-      // Note: The actual initialization happens in the EmailComposer component
-    } else if (mode === 'replyAll') {
-      const to: string[] = [];
-      const cc: string[] = [];
-
-      // Add original sender if not current user
-      if (senderEmail !== userEmail) {
-        to.push(replyToMessage.sender.email);
-      }
-
-      // Add original recipients from To field
-      replyToMessage.to?.forEach((recipient) => {
-        const recipientEmail = recipient.email.toLowerCase();
-        if (recipientEmail !== userEmail && recipientEmail !== senderEmail) {
-          to.push(recipient.email);
-        }
-      });
-
-      // Add CC recipients
-      replyToMessage.cc?.forEach((recipient) => {
-        const recipientEmail = recipient.email.toLowerCase();
-        if (recipientEmail !== userEmail && !to.includes(recipient.email)) {
-          cc.push(recipient.email);
-        }
-      });
-
-      // Initialize email composer with these recipients
-    } else if (mode === 'forward') {
-      // For forward, we start with empty recipients
-      // Just set the subject and include the original message
-    }
-  }, [mode, replyToMessage, activeConnection?.email]);
+  // Reply / reply-all recipient derivation now lives in a pure, tested seam:
+  // `deriveReplyRecipients` (./reply-recipients). It is intentionally NOT wired
+  // here — the composer is still initialised from the draft only (see initialTo
+  // below), so behaviour is unchanged. Issue #32 (keyboard-parity) wires that
+  // seam into initialTo/initialCc to fix the empty «To» field.
 
   const handleSendEmail = async (data: {
     to: string[];
