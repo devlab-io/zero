@@ -42,7 +42,12 @@ même protocole. Artefacts : `docs/runs/niveau9/baseline-grading.md` et `final-g
 
 ## A8 — Performance structurelle
 - Palier 7 : 0 N+1 par ligne sur le chemin initial inbox (network log : 1 requête liste + ≤1 body) ; payload liste ≤120 KiB compressé / 50 lignes ; aucun GIF >1 MB dans public/.
-- Palier 9 : `docs/checks/niveau8/performance.md` satisfait sur les budgets absolus (JS critique ≤420 KiB gz, latences p75 mesurées 10 itérations) ; batch Gmail ≤100 appels/cycle de sync prouvé par compteur loggé ; concurrence bornée + backoff expo testés unit ; cold start −1 s mesuré avant/après ; public/ allégé d'au moins 50 MB vs baseline. Comparatif Shortwave : BLOCKED ≠ échec (AS du run).
+- Amendement (RULING critique droit #33, 2026-07-13 — re-gel freeze/niveau9-v5) : le gate
+  « JS critique ≤420 KiB gz » est transféré NOMMÉMENT à l'issue #44 (a8-client-completion),
+  mesure gelée = `python3 scripts/checks/measure-critical.py .` (union modulepreload des
+  routes /mail/inbox, état au transfert : 622,4 KiB — libellé honnête obligatoire, jamais
+  « poids OK » tant que >420). Le palier A8 final du barème reste dû au jugement final.
+- Palier 9 : `docs/checks/niveau8/performance.md` satisfait sur les budgets absolus (JS critique ≤420 KiB gz — porteur nominal #44, latences p75 mesurées 10 itérations) ; batch Gmail ≤100 appels/cycle de sync prouvé par compteur loggé ; concurrence bornée + backoff expo testés unit ; cold start −1 s mesuré avant/après ; public/ allégé d'au moins 50 MB vs baseline. Comparatif Shortwave : BLOCKED ≠ échec (AS du run).
 
 ## A9 — Robustesse
 - Palier 7 : inbox, recherche, thread, outbox distinguent loading/empty/stale/error ; un échec de lecture n'affiche jamais « boîte vide » ni skeleton infini.
