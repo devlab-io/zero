@@ -1,28 +1,33 @@
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
+import { useState, useEffect, type ReactNode } from 'react';
 import { Button } from '@/components/ui/button';
-import { useState, useEffect } from 'react';
 import confetti from 'canvas-confetti';
 
-const steps = [
+const steps: {
+  title: string;
+  description: ReactNode;
+  video?: string;
+  image?: string;
+}[] = [
   {
     title: 'Welcome to Zero Email!',
     description: 'Your new intelligent email experience starts here.',
-    video: 'https://assets.0.email/get-started.png',
+    image: '/onboarding/get-started.webp',
   },
   {
     title: 'Chat with your inbox',
     description: 'Zero allows you to chat with your inbox, and take actions on your behalf.',
-    video: 'https://assets.0.email/step2.gif',
+    video: '/onboarding/step2.mp4',
   },
   {
     title: 'AI Compose & Reply',
     description: 'Our AI assistant allows you to write emails that sound like you.',
-    video: 'https://assets.0.email/step1.gif',
+    video: '/onboarding/step1.mp4',
   },
   {
     title: 'Label your emails',
     description: 'Zero helps you label your emails to focus on what matters.',
-    video: 'https://assets.0.email/step3.gif',
+    video: '/onboarding/step3.mp4',
   },
   {
     title: 'Coming Soon',
@@ -33,12 +38,12 @@ const steps = [
         </span>
       </>
     ),
-    video: 'https://assets.0.email/coming-soon.png',
+    image: '/onboarding/coming-soon.webp',
   },
   {
     title: 'Ready to start?',
     description: 'Click below to begin your intelligent email experience!',
-    video: 'https://assets.0.email/ready.png',
+    image: '/onboarding/ready.webp',
   },
 ];
 
@@ -77,26 +82,40 @@ export function OnboardingDialog({
         className="bg-panelLight mx-auto w-full max-w-[90%] rounded-xl border p-0 sm:max-w-[690px] dark:bg-[#111111]"
       >
         <div className="flex flex-col gap-4 p-4">
-          {steps[currentStep] && steps[currentStep].video && (
+          {steps[currentStep] && (steps[currentStep].video || steps[currentStep].image) && (
             <div className="relative flex items-center justify-center">
               <div className="bg-muted aspect-video w-full max-w-4xl overflow-hidden rounded-lg">
                 {steps.map(
                   (step, index) =>
-                    step.video && (
+                    (step.video || step.image) && (
                       <div
                         key={step.title}
                         className={`absolute inset-0 transition-opacity duration-300 ${
                           index === currentStep ? 'opacity-100' : 'opacity-0'
                         }`}
                       >
-                        <img
-                          loading="eager"
-                          width={500}
-                          height={500}
-                          src={step.video}
-                          alt={step.title}
-                          className="h-full w-full rounded-lg border object-cover"
-                        />
+                        {step.video ? (
+                          <video
+                            autoPlay
+                            muted
+                            loop
+                            playsInline
+                            width={500}
+                            height={500}
+                            src={step.video}
+                            aria-label={step.title}
+                            className="h-full w-full rounded-lg border object-cover"
+                          />
+                        ) : (
+                          <img
+                            loading="eager"
+                            width={500}
+                            height={500}
+                            src={step.image}
+                            alt={step.title}
+                            className="h-full w-full rounded-lg border object-cover"
+                          />
+                        )}
                       </div>
                     ),
                 )}

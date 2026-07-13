@@ -354,17 +354,14 @@ export function MailLayout() {
 
   useEffect(() => {
     if (threadId) {
-      console.log('Enabling thread-display scope, disabling mail-list');
       enableScope('thread-display');
       disableScope('mail-list');
     } else {
-      console.log('Enabling mail-list scope, disabling thread-display');
       enableScope('mail-list');
       disableScope('thread-display');
     }
 
     return () => {
-      console.log('Cleaning up mail/thread scopes');
       disableScope('thread-display');
       disableScope('mail-list');
     };

@@ -181,7 +181,7 @@ export default function PricingCard() {
         <div className={cn(PRICING_CONSTANTS.CARD_STYLES.base, PRICING_CONSTANTS.CARD_STYLES.pro)}>
           <div className="absolute inset-0 z-0 h-full w-full overflow-hidden">
             <img
-              src="/pricing-gradient.png"
+              src="/pricing-gradient.webp"
               alt=""
               className="absolute -right-0 -top-52 h-auto w-full"
               height={535}

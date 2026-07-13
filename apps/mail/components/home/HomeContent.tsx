@@ -454,7 +454,7 @@ export default function HomeContent() {
                       height={250}
                       width={250}
                       className="h-6 w-6 rounded-full object-cover"
-                      src="/nizzy.jpg"
+                      src="/nizzy.webp"
                     />
                     <div className="inline-flex h-7 flex-1 flex-col items-start justify-start gap-2">
                       <div className="inline-flex items-start justify-start gap-2 self-stretch">
