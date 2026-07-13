@@ -49,18 +49,22 @@ Datadog). Router ~314 `console.*` généraux dessus est inadapté. → J'introdu
 justifié par **ADR 0004**. logging-service reste la télémétrie tRPC→Datadog.
 
 **D6 — tracing.ts n'est PAS un stub mort ; décision par ADR 0003.**
+[Corrigé post-verdict surface de contrôle — aligné ADR 0003/0005 ; la version antérieure
+attribuait à tort au SDK @sentry/cloudflare l'activation des spans OTel : le SDK n'est PAS
+utilisé (ADR 0005, client enveloppe minimal), et le client enveloppe ne transporte que les
+EXCEPTIONS, pas les spans.]
 `initTracing()`/`tracer.startSpan()` ont 4 appelants vivants (main.ts queue thread-queue,
 routes/index.ts webhook a8n_notify, pipelines.ts workflow_main, workflow-engine.ts
-workflow_execution). Les spans sont no-op tant qu'aucun provider OTel n'est enregistré
-(seul `@opentelemetry/api` est installé ; `@microlabs/otel-cf-workers` présent en deps mais
-NON câblé dans src — vérifié). MAIS : `@sentry/cloudflare` (mon init serveur) enregistre par
-défaut un trace-provider OpenTelemetry-compatible (`skipOpenTelemetrySetup: false`,
-client.d.ts) — donc les spans de tracing.ts deviennent RÉELS (capturés Sentry) dès que le
-DSN est configuré. Le chemin tRPC a par ailleurs déjà un tracing réel via `trace-context.ts`
-(câblé dans `trpc-logging.ts` → Datadog).
-→ Décision (ADR 0003) : KEEP tracing.ts comme façade OTel documentée, no-op-safe et réelle
-sous Sentry ; suppression du seul export mort `createSpan` (0 appelant) ; pas de changement
-lockfile, pas de restructuration de pipelines.ts (#31).
+workflow_execution). Les spans passent par la façade `@opentelemetry/api` et restent
+**async-inertes (no-op-safe) tant qu'aucun exporter/provider OTel n'est enregistré** —
+aucun ne l'est aujourd'hui (`@microlabs/otel-cf-workers` présent en deps mais NON câblé
+dans src — vérifié). Le chemin tRPC a, lui, un tracing RÉEL et indépendant via
+`trace-context.ts` (câblé dans `trpc-logging.ts` → Datadog). Le client Sentry enveloppe
+(ADR 0005) capture les exceptions uniquement — il ne rend aucun span réel.
+→ Décision (ADR 0003) : KEEP tracing.ts comme façade OTel documentée, prête à recevoir un
+exporter (Sentry SDK ou otel-cf-workers) le jour où l'alignement workers-types le permet ;
+suppression du seul export mort `createSpan` (0 appelant) ; pas de changement lockfile,
+pas de restructuration de pipelines.ts (#31).
 
 ### Inventaire catch-swallow — MON PÉRIMÈTRE (apps/server/src hors routes/agent/** + lib/driver/**)
 
