@@ -93,3 +93,17 @@ byte de la première requête, médiane avant/après. Si delta ~0 → NE PAS con
 documenter « verified-no-op » (faisabilité + absence de gain mesurable) et router
 l'affinage du protocole à #40 (bench M1). #6a (wrapper 60s, mesuré 2756,17→2743,25 KiB)
 reste acquis. Jurisprudence : verify-don't-build (#34 D1).
+
+## Ruling anti-gaming préchargement (superviseur, 2026-07-13)
+
+Les useEffect de préchargement AU MONTAGE (AppSidebar, ThreadDisplay) font sortir les
+chunks de la fermeture statique mesurée par measure-critical.py tout en déclenchant
+IMMÉDIATEMENT leurs téléchargements : la métrique baisse sans réduire les octets réseau
+du chargement initial — metric gaming involontaire. EXIGENCE : préchargement sur
+INTENTION UTILISATEUR EXPLICITE (pointerenter/focus/compose-open/reply-intent) ou
+deferral idle JUSTIFIÉ — jamais au mount immédiat. PREUVE OBLIGATOIRE (builder, puis
+re-vérifiée par le juge #44 ; résidu tracé au bench #40) : trace réseau navigateur d'un
+chargement froid /mail/inbox SANS interaction → AUCUNE requête de chunk create-email,
+posthog, motion transition, reply-composer ; puis interaction → chargement + fonctionnel
+correct. Le gate A8 se juge sur les octets réseau initiaux réels, pas seulement sur la
+fermeture du manifest.
