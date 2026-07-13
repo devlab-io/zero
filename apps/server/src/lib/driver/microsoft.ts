@@ -14,7 +14,7 @@ import type {
 import type { IOutgoingMessage, Label, ParsedMessage } from '../../types';
 import { sanitizeTipTapHtml } from '../sanitize-tip-tap-html';
 import { Client } from '@microsoft/microsoft-graph-client';
-import type { MailManager, ManagerConfig } from './types';
+import type { MailManager, ManagerConfig, ParsedDraft } from './types';
 import { getContext } from 'hono/context-storage';
 import type { CreateDraftData } from '../schemas';
 import type { HonoContext } from '../../ctx';
@@ -74,6 +74,9 @@ export class OutlookMailManager implements MailManager {
       { messageId, attachmentId },
     );
   }
+  // MailManager methods the Gmail driver implements but the Outlook driver does not (yet).
+  public getRawEmail(_id: string): Promise<string> { return Promise.reject(new Error('getRawEmail not implemented for Outlook driver')); }
+  public getMessageAttachments(_id: string): ReturnType<MailManager['getMessageAttachments']> { return Promise.reject(new Error('getMessageAttachments not implemented for Outlook driver')); }
   public getEmailAliases() {
     return this.withErrorHandler('getEmailAliases', async () => {
       const user: User = await this.graphClient.api('/me').select('mail,userPrincipalName').get();
@@ -698,9 +701,7 @@ export class OutlookMailManager implements MailManager {
         if (data.attachments && data.attachments.length > 0) {
           const regularAttachments = await Promise.all(
             data.attachments.map(async (file) => {
-              const arrayBuffer = await file.arrayBuffer();
-              const buffer = Buffer.from(arrayBuffer);
-              const base64Content = buffer.toString('base64');
+              const base64Content = file.base64; // already-serialized base64 (no Blob.arrayBuffer)
 
               return {
                 '@odata.type': '#microsoft.graph.fileAttachment',
@@ -1182,9 +1183,7 @@ export class OutlookMailManager implements MailManager {
     if (attachments?.length > 0) {
       const regularAttachments = await Promise.all(
         attachments.map(async (file) => {
-          const arrayBuffer = await file.arrayBuffer();
-          const buffer = Buffer.from(arrayBuffer);
-          const base64Content = buffer.toString('base64');
+          const base64Content = file.base64; // already-serialized base64 (no Blob.arrayBuffer)
 
           return {
             '@odata.type': '#microsoft.graph.fileAttachment',
@@ -1203,7 +1202,7 @@ export class OutlookMailManager implements MailManager {
 
     return outlookMessage;
   }
-  private parseOutlookDraft(draftMessage: Message) {
+  private parseOutlookDraft(draftMessage: Message): ParsedDraft | null {
     if (!draftMessage) return null;
 
     const to =
@@ -1233,7 +1232,7 @@ export class OutlookMailManager implements MailManager {
       bcc,
       subject: subject ? he.decode(subject).trim() : '',
       content,
-      rawMessage: draftMessage, // Include raw Graph message
+      rawMessage: draftMessage as unknown as ParsedDraft['rawMessage'], // raw Graph message
     };
   }
   private async withErrorHandler<T>(

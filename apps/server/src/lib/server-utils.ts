@@ -23,7 +23,7 @@ export const getZeroDB = async (userId: string) => {
 };
 
 class MockExecutionContext implements ExecutionContext {
-  async waitUntil(promise: Promise<any>) {
+  async waitUntil(promise: Promise<unknown>) {
     try {
       await promise;
     } catch (error) {
@@ -31,7 +31,7 @@ class MockExecutionContext implements ExecutionContext {
     }
   }
   passThroughOnException(): void { }
-  props: any;
+  props: unknown;
 }
 
 const getRegistryClient = async (connectionId: string) => {
@@ -600,7 +600,7 @@ export const verifyToken = async (token: string) => {
     throw new Error(`Failed to verify token: ${await response.text()}`);
   }
 
-  const data = (await response.json()) as any;
+  const data = await response.json();
   return !!data;
 };
 

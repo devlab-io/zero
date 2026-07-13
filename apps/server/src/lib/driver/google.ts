@@ -261,7 +261,7 @@ export class GoogleMailManager implements MailManager {
           catch: (error) => ({ _tag: 'ArchiveFetchFailed' as const, error }),
         });
 
-        const processLabelEffect = (label: any) =>
+        const processLabelEffect = (label: gmail_v1.Schema$Label) =>
           Effect.tryPromise({
             try: () =>
               this.gmail.users.labels.get({
@@ -730,11 +730,10 @@ export class GoogleMailManager implements MailManager {
         if (data.attachments && data.attachments?.length > 0) {
           for (const attachment of data.attachments) {
             let base64Data: string | undefined;
-
-            if (typeof (attachment as any)?.base64 === 'string') {
-              base64Data = (attachment as any).base64;
-            } else if (typeof (attachment as any)?.arrayBuffer === 'function') {
-              const buffer = Buffer.from(await (attachment as any).arrayBuffer());
+            const att = attachment as { base64?: unknown; arrayBuffer?: () => Promise<ArrayBuffer> };
+            if (typeof att.base64 === 'string') base64Data = att.base64;
+            else if (typeof att.arrayBuffer === 'function') {
+              const buffer = Buffer.from(await att.arrayBuffer());
               base64Data = buffer.toString('base64');
             }
 
@@ -984,8 +983,9 @@ export class GoogleMailManager implements MailManager {
             });
             return { threadId, status: 'fulfilled' as const, value: response.data };
           },
-          catch: (error: any) => {
-            const errorMessage = error?.errors?.[0]?.message || error.message || error;
+          catch: (error) => {
+            const err = error as { errors?: Array<{ message?: string }>; message?: string };
+            const errorMessage = err?.errors?.[0]?.message || err.message || error;
             return { threadId, status: 'rejected' as const, reason: { error: errorMessage } };
           },
         }),
@@ -1273,10 +1273,10 @@ export class GoogleMailManager implements MailManager {
       for (const file of attachments) {
         let base64Content: string | undefined;
 
-        if (typeof (file as any)?.base64 === 'string') {
-          base64Content = (file as any).base64;
-        } else if (typeof (file as any)?.arrayBuffer === 'function') {
-          const buffer = Buffer.from(await (file as any).arrayBuffer());
+        const f = file as { base64?: unknown; arrayBuffer?: () => Promise<ArrayBuffer> };
+        if (typeof f.base64 === 'string') base64Content = f.base64;
+        else if (typeof f.arrayBuffer === 'function') {
+          const buffer = Buffer.from(await f.arrayBuffer());
           base64Content = buffer.toString('base64');
         }
 
@@ -1387,21 +1387,21 @@ export class GoogleMailManager implements MailManager {
   ): Promise<T> {
     try {
       return await Promise.resolve(fn());
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    } catch (error: any) {
-      const isFatal = FatalErrors.includes(error.message);
+    } catch (error) {
+      const err = error as Error & { code: string };
+      const isFatal = FatalErrors.includes(err.message);
       console.error(
         `[${isFatal ? 'FATAL_ERROR' : 'ERROR'}] [Gmail Driver] Operation: ${operation}`,
         {
-          error: error.message,
-          code: error.code,
+          error: err.message,
+          code: err.code,
           context: sanitizeContext(context),
-          stack: error.stack,
+          stack: err.stack,
           isFatal,
         },
       );
       if (isFatal) await deleteActiveConnection();
-      throw new StandardizedError(error, operation, context);
+      throw new StandardizedError(err, operation, context);
     }
   }
   private withSyncErrorHandler<T>(
@@ -1411,18 +1411,18 @@ export class GoogleMailManager implements MailManager {
   ): T {
     try {
       return fn();
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    } catch (error: any) {
-      const isFatal = FatalErrors.includes(error.message);
+    } catch (error) {
+      const err = error as Error & { code: string };
+      const isFatal = FatalErrors.includes(err.message);
       console.error(`[Gmail Driver Error] Operation: ${operation}`, {
-        error: error.message,
-        code: error.code,
+        error: err.message,
+        code: err.code,
         context: sanitizeContext(context),
-        stack: error.stack,
+        stack: err.stack,
         isFatal,
       });
       if (isFatal) void deleteActiveConnection();
-      throw new StandardizedError(error, operation, context);
+      throw new StandardizedError(err, operation, context);
     }
   }
 

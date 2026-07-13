@@ -90,7 +90,7 @@ export class SyncThreadsCoordinatorWorkflow extends WorkflowEntrypoint<
     const { maxCount, shouldLoop, foundConnection } = setupResult as {
       maxCount: number;
       shouldLoop: boolean;
-      foundConnection: any;
+      foundConnection: Parameters<typeof connectionToDriver>[0];
     };
     const driver = connectionToDriver(foundConnection);
 
@@ -168,7 +168,13 @@ export class SyncThreadsCoordinatorWorkflow extends WorkflowEntrypoint<
 
       // Update result with this page's data
       if (pageResult?.result) {
-        const workflowResult = pageResult.result as any;
+        const workflowResult = pageResult.result as {
+          synced?: number;
+          totalThreads?: number;
+          successfulSyncs?: number;
+          failedSyncs?: number;
+          nextPageToken?: string | null;
+        };
         result.pageWorkflowResults.push({
           pageNumber,
           workflowId: pageResult.workflowId,

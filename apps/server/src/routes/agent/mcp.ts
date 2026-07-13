@@ -360,7 +360,7 @@ export class ZeroMCP extends McpAgent<typeof env, Record<string, unknown>, { use
               },
               {
                 type: 'text' as const,
-                text: `Latest Message Sender: ${thread.latest?.sender.name} <${thread.latest?.sender.email}>`,
+                text: `Latest Message Sender: ${loadedThread.latest?.sender.name} <${loadedThread.latest?.sender.email}>`,
               },
             ];
           }),

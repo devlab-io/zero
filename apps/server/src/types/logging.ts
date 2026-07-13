@@ -16,8 +16,8 @@ export interface TRPCCallLog {
     userId: string;
     sessionId: string;
     procedure: string;
-    input: any;
-    output?: any;
+    input: unknown;
+    output?: unknown;
     error?: string;
     duration: number;
     metadata: {

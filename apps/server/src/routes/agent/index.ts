@@ -41,6 +41,7 @@ import {
   type IOutgoingMessage,
   type ISnoozeBatch,
   type ParsedMessage,
+  type Sender,
 } from '../../types';
 import type {
   IGetThreadResponse,
@@ -461,8 +462,8 @@ export class ZeroDriver extends DurableObject<ZeroEnv> {
             data !== null &&
             'topics' in data &&
             'timestamp' in data &&
-            Array.isArray((data as any).topics) &&
-            typeof (data as any).timestamp === 'number'
+            Array.isArray((data as Record<string, unknown>).topics) &&
+            typeof (data as Record<string, unknown>).timestamp === 'number'
           );
         };
 
@@ -696,6 +697,11 @@ export class ZeroDriver extends DurableObject<ZeroEnv> {
       throw new Error('No driver available');
     }
     return await this.driver.getMessageAttachments(messageId);
+  }
+
+  async getRawEmail(messageId: string) {
+    if (!this.driver) throw new Error('No driver available');
+    return await this.driver.getRawEmail(messageId);
   }
 
   private dropTables() {
@@ -964,7 +970,9 @@ export class ZeroDriver extends DurableObject<ZeroEnv> {
     maxResults?: number;
     labelIds?: string[];
     pageToken?: string;
-  }): Promise<IGetThreadsResponse> {
+    // Serializable return: IGetThreadsResponse's `$raw?: unknown` is not Rpc.Serializable,
+    // so the DO stub otherwise collapses this method's return to `never`. Runtime unchanged.
+  }): Promise<{ threads: { id: string; historyId: string | null }[]; nextPageToken: string | null }> {
     if (!this.driver) {
       throw new Error('No driver available');
     }
@@ -977,26 +985,6 @@ export class ZeroDriver extends DurableObject<ZeroEnv> {
     }
     return await this.getThreadFromDB(threadId, includeDrafts);
   }
-
-  //   async markThreadsRead(threadIds: string[]) {
-  //     if (!this.driver) {
-  //       throw new Error('No driver available');
-  //     }
-  //     return await this.driver.modifyLabels(threadIds, {
-  //       addLabels: [],
-  //       removeLabels: ['UNREAD'],
-  //     });
-  //   }
-
-  //   async markThreadsUnread(threadIds: string[]) {
-  //     if (!this.driver) {
-  //       throw new Error('No driver available');
-  //     }
-  //     return await this.driver.modifyLabels(threadIds, {
-  //       addLabels: ['UNREAD'],
-  //       removeLabels: [],
-  //     });
-  //   }
 
   async modifyLabels(threadIds: string[], addLabelIds: string[], removeLabelIds: string[]) {
     if (!this.driver) {
@@ -1426,7 +1414,7 @@ export class ZeroDriver extends DurableObject<ZeroEnv> {
       if (!folder && labelIds.length === 0 && !q && !pageToken) {
         console.log('[queryThreads] Case: all threads');
         const threads = await list(this.db);
-        return threads.map((thread: any) => ({
+        return threads.map((thread) => ({
           id: thread.id,
           latest_received_on: thread.latestReceivedOn,
         }));
@@ -1442,13 +1430,13 @@ export class ZeroDriver extends DurableObject<ZeroEnv> {
             pageToken,
             maxResults,
           });
-          return result.threads.map((thread: any) => ({
+          return result.threads.map((thread) => ({
             id: thread.id,
             latest_received_on: thread.latestReceivedOn,
           }));
         } else {
           const threads = await findThreadsByFolder(this.db, folderLabel);
-          return threads.slice(0, maxResults).map((thread: any) => ({
+          return threads.slice(0, maxResults).map((thread) => ({
             id: thread.id,
             latest_received_on: thread.latestReceivedOn,
           }));
@@ -1466,13 +1454,13 @@ export class ZeroDriver extends DurableObject<ZeroEnv> {
             pageToken,
             maxResults,
           });
-          return result.threads.map((thread: any) => ({
+          return result.threads.map((thread) => ({
             id: thread.id,
             latest_received_on: thread.latestReceivedOn,
           }));
         } else {
           const threads = await findThreadsWithAnyLabels(this.db, [labelId]);
-          return threads.slice(0, maxResults).map((thread: any) => ({
+          return threads.slice(0, maxResults).map((thread) => ({
             id: thread.id,
             latest_received_on: thread.latestReceivedOn,
           }));
@@ -1483,7 +1471,7 @@ export class ZeroDriver extends DurableObject<ZeroEnv> {
       if (q && !folder && labelIds.length === 0) {
         console.log('[queryThreads] Case: text search only', { q });
         const threads = await findThreadsWithTextSearch(this.db, q);
-        return threads.slice(0, maxResults).map((thread: any) => ({
+        return threads.slice(0, maxResults).map((thread) => ({
           id: thread.id,
           latest_received_on: thread.latestReceivedOn,
         }));
@@ -1510,7 +1498,7 @@ export class ZeroDriver extends DurableObject<ZeroEnv> {
         requireAllLabels: true, // Require all labels to be present
       });
 
-      return result.threads.map((thread: any) => ({
+      return result.threads.map((thread) => ({
         id: thread.id,
         latest_received_on: thread.latestReceivedOn,
       }));
@@ -1856,7 +1844,7 @@ export class ZeroDriver extends DurableObject<ZeroEnv> {
       id: string;
       threadId: string;
       providerId: string;
-      latestSender: any;
+      latestSender: Sender;
       latestReceivedOn: string;
       latestSubject: string;
     },
@@ -2221,7 +2209,7 @@ export class ZeroAgent extends AIChatAgent<ZeroEnv> {
       const cached = await this.ctx.storage.get('do_state_cache');
       if (!cached) return null;
 
-      const data = cached as any;
+      const data = cached as { storageSize: number; counts: { label: string; count: number }[]; shards: number; timestamp: number };
       const now = Date.now();
       const CACHE_TTL = 5 * 60 * 1000;
 

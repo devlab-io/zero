@@ -93,10 +93,9 @@ export class SyncThreadsWorkflow extends WorkflowEntrypoint<ZeroEnv, SyncThreads
     });
 
     const { maxCount, foundConnection } = setupResult as {
-      driver: any;
       maxCount: number;
       shouldLoop: boolean;
-      foundConnection: any;
+      foundConnection: Parameters<typeof connectionToDriver>[0];
     };
     const driver = connectionToDriver(foundConnection);
 

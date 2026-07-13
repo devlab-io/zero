@@ -106,5 +106,8 @@ export type ZeroEnv = {
   DD_SITE: string;
 };
 
-const env = _env as ZeroEnv;
+// `_env` is the wrangler-generated `Cloudflare.Env` (broad string types); `ZeroEnv`
+// is this app's typed view with narrowed literals for a few vars. The two are
+// deliberately different shapes, so assert through `unknown` (TS-suggested form).
+const env = _env as unknown as ZeroEnv;
 export { env };

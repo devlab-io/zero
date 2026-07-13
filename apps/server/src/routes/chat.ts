@@ -302,7 +302,7 @@ export class AgentRpcDO extends RpcTarget {
   }
 }
 
-const shouldDropTables = env.DROP_AGENT_TABLES === 'true';
+const shouldDropTables = (env.DROP_AGENT_TABLES as string) === 'true'; // typed literal '"false"' by wrangler
 const maxCount = parseInt(env.THREAD_SYNC_MAX_COUNT || '40', 10);
 const shouldLoop = env.THREAD_SYNC_LOOP !== 'false';
 
@@ -356,7 +356,7 @@ export class ZeroAgent extends AIChatAgent<typeof env> {
             throw new Error('Unauthorized no driver or connectionId [2]');
           }
         }
-        const tools = { ...authTools(this.driver, connectionId), buildGmailSearchQuery };
+        const tools = { ...(await authTools(connectionId)), buildGmailSearchQuery };
         const processedMessages = await processToolCalls(
           {
             messages: this.messages,
@@ -373,7 +373,7 @@ export class ZeroAgent extends AIChatAgent<typeof env> {
           onFinish,
           system: await getPrompt(
             getPromptName(connectionId, EPrompts.Chat),
-            AiChatPrompt('', '', ''),
+            AiChatPrompt(),
           ),
         });
 
@@ -1094,8 +1094,8 @@ export class ZeroAgent extends AIChatAgent<typeof env> {
         }
       }
 
-      const threads = result.map((row: any) => ({
-        id: row.id,
+      const threads = result.map((row) => ({
+        id: String(row.id),
         historyId: null,
       }));
 
@@ -1144,7 +1144,7 @@ export class ZeroAgent extends AIChatAgent<typeof env> {
         } satisfies IGetThreadResponse;
       }
 
-      const row = result[0] as any;
+      const row = result[0] as { latest_label_ids?: string };
       const storedMessages = await env.THREADS_BUCKET.get(this.getThreadKey(id));
       const latestLabelIds = JSON.parse(row.latest_label_ids || '[]');
 

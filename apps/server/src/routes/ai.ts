@@ -63,9 +63,12 @@ aiRouter.post('/do/:action', async (c) => {
       messages: [],
     });
     return c.json({ success: true, result });
-  } catch (error: any) {
+  } catch (error) {
     console.error(`Error executing tool '${c.req.param('action')}':`, error);
-    return c.json({ success: false, error: error.message }, 400);
+    return c.json(
+      { success: false, error: error instanceof Error ? error.message : String(error) },
+      400,
+    );
   }
 });
 

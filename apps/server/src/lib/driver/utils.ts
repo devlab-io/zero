@@ -27,8 +27,7 @@ export const fromBase64Url = (str: string) => str.replace(/-/g, '+').replace(/_/
 export const fromBinary = (str: string) =>
   new TextDecoder().decode(toByteArray(str.replace(/-/g, '+').replace(/_/g, '/')));
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export const findHtmlBody = (parts: any[]): string => {
+export const findHtmlBody = (parts: gmail_v1.Schema$MessagePart[]): string => {
   for (const part of parts) {
     if (part.mimeType === 'text/html' && part.body?.data) {
       return part.body.data;

@@ -32,6 +32,8 @@ export const createLoggingMiddleware = () => {
     return async (opts: {
         path: string;
         type: 'query' | 'mutation' | 'subscription';
+        // tRPC's MiddlewareBuilder passes concrete generics here; these stay loose to
+        // remain assignable to that contract (the internal sanitizer below is typed).
         next: () => Promise<any>;
         input: any;
         ctx: any;
@@ -55,6 +57,8 @@ export const createLoggingMiddleware = () => {
             }
         }
 
+        // Holds the tRPC `next()` result; kept loose so the middleware return type stays
+        // assignable to tRPC's MiddlewareBuilder contract.
         let output: any;
         let error: string | undefined;
 
@@ -84,12 +88,12 @@ export const createLoggingMiddleware = () => {
             }
 
             // Sanitize output to remove non-serializable objects
-            const sanitizeOutput = (obj: any): any => {
+            const sanitizeOutput = (obj: unknown): unknown => {
                 if (obj === null || obj === undefined) return obj;
                 if (typeof obj !== 'object') return obj;
                 if (Array.isArray(obj)) return obj.map(sanitizeOutput);
 
-                const sanitized: any = {};
+                const sanitized: Record<string, unknown> = {};
                 for (const [key, value] of Object.entries(obj)) {
                     // Skip known non-serializable fields
                     if (key === 'ctx' && value && typeof value === 'object') {
