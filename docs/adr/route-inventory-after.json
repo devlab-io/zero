@@ -1,0 +1,223 @@
+{
+  "generatedBy": "scripts/checks/route-inventory.mjs",
+  "layers": {
+    "hono": {
+      "routeCount": 23,
+      "mountCount": 7,
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/",
+          "local": "/",
+          "file": "apps/server/src/routes/index.ts"
+        },
+        {
+          "method": "GET",
+          "path": "/.well-known/oauth-authorization-server",
+          "local": ".well-known/oauth-authorization-server",
+          "file": "apps/server/src/routes/index.ts"
+        },
+        {
+          "method": "POST",
+          "path": "/a8n/notify/:providerId",
+          "local": "/a8n/notify/:providerId",
+          "file": "apps/server/src/routes/index.ts"
+        },
+        {
+          "method": "GET",
+          "path": "/api/ai",
+          "local": "/",
+          "file": "apps/server/src/routes/ai.ts"
+        },
+        {
+          "method": "POST",
+          "path": "/api/ai/call",
+          "local": "/call",
+          "file": "apps/server/src/routes/ai.ts"
+        },
+        {
+          "method": "POST",
+          "path": "/api/ai/do/:action",
+          "local": "/do/:action",
+          "file": "apps/server/src/routes/ai.ts"
+        },
+        {
+          "method": "GET",
+          "path": "/api/auth/*",
+          "local": "/auth/*",
+          "file": "apps/server/src/routes/index.ts"
+        },
+        {
+          "method": "OPTIONS",
+          "path": "/api/auth/*",
+          "local": "/auth/*",
+          "file": "apps/server/src/routes/index.ts"
+        },
+        {
+          "method": "POST",
+          "path": "/api/auth/*",
+          "local": "/auth/*",
+          "file": "apps/server/src/routes/index.ts"
+        },
+        {
+          "method": "POST",
+          "path": "/api/autumn/attach",
+          "local": "/attach",
+          "file": "apps/server/src/routes/autumn.ts"
+        },
+        {
+          "method": "POST",
+          "path": "/api/autumn/billing_portal",
+          "local": "/billing_portal",
+          "file": "apps/server/src/routes/autumn.ts"
+        },
+        {
+          "method": "POST",
+          "path": "/api/autumn/cancel",
+          "local": "/cancel",
+          "file": "apps/server/src/routes/autumn.ts"
+        },
+        {
+          "method": "POST",
+          "path": "/api/autumn/check",
+          "local": "/check",
+          "file": "apps/server/src/routes/autumn.ts"
+        },
+        {
+          "method": "GET",
+          "path": "/api/autumn/components/pricing_table",
+          "local": "/components/pricing_table",
+          "file": "apps/server/src/routes/autumn.ts"
+        },
+        {
+          "method": "POST",
+          "path": "/api/autumn/customers",
+          "local": "/customers",
+          "file": "apps/server/src/routes/autumn.ts"
+        },
+        {
+          "method": "POST",
+          "path": "/api/autumn/entities",
+          "local": "/entities",
+          "file": "apps/server/src/routes/autumn.ts"
+        },
+        {
+          "method": "DELETE",
+          "path": "/api/autumn/entities/:entityId",
+          "local": "/entities/:entityId",
+          "file": "apps/server/src/routes/autumn.ts"
+        },
+        {
+          "method": "GET",
+          "path": "/api/autumn/entities/:entityId",
+          "local": "/entities/:entityId",
+          "file": "apps/server/src/routes/autumn.ts"
+        },
+        {
+          "method": "POST",
+          "path": "/api/autumn/openBillingPortal",
+          "local": "/openBillingPortal",
+          "file": "apps/server/src/routes/autumn.ts"
+        },
+        {
+          "method": "POST",
+          "path": "/api/autumn/track",
+          "local": "/track",
+          "file": "apps/server/src/routes/autumn.ts"
+        },
+        {
+          "method": "GET",
+          "path": "/api/public/providers",
+          "local": "/providers",
+          "file": "apps/server/src/routes/auth.ts"
+        },
+        {
+          "method": "GET",
+          "path": "/health",
+          "local": "/health",
+          "file": "apps/server/src/routes/index.ts"
+        },
+        {
+          "method": "POST",
+          "path": "/monitoring/sentry",
+          "local": "/monitoring/sentry",
+          "file": "apps/server/src/routes/index.ts"
+        }
+      ],
+      "mounts": [
+        {
+          "kind": "route",
+          "prefix": "/api",
+          "file": "apps/server/src/routes/index.ts"
+        },
+        {
+          "kind": "route",
+          "prefix": "/api/ai",
+          "file": "apps/server/src/routes/index.ts"
+        },
+        {
+          "kind": "route",
+          "prefix": "/api/autumn",
+          "file": "apps/server/src/routes/index.ts"
+        },
+        {
+          "kind": "route",
+          "prefix": "/api/public",
+          "file": "apps/server/src/routes/index.ts"
+        },
+        {
+          "kind": "mount",
+          "prefix": "/mcp",
+          "file": "apps/server/src/routes/index.ts"
+        },
+        {
+          "kind": "mount",
+          "prefix": "/mcp/thinking/sse",
+          "file": "apps/server/src/routes/index.ts"
+        },
+        {
+          "kind": "mount",
+          "prefix": "/sse",
+          "file": "apps/server/src/routes/index.ts"
+        }
+      ]
+    },
+    "trpc": {
+      "namespaceCount": 17,
+      "procedureCount": 80,
+      "namespaces": [
+        "ai",
+        "bimi",
+        "brain",
+        "categories",
+        "connections",
+        "cookiePreferences",
+        "drafts",
+        "labels",
+        "logging",
+        "mail",
+        "meet",
+        "notes",
+        "outbox",
+        "settings",
+        "shortcut",
+        "templates",
+        "user"
+      ],
+      "aiProcedures": [
+        "compose",
+        "generateEmailSubject",
+        "generateSearchQuery",
+        "webSearch"
+      ]
+    }
+  },
+  "duplication": {
+    "functionalDuplicates": 0,
+    "honoPathDuplicates": [],
+    "duplicateExportedClasses": [],
+    "crossLayerNamespaceOverlap": [
+      "ai"
+    ]
+  }
+}
