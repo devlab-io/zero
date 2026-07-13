@@ -48,7 +48,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const { data: pendingQueueItems } = useQuery(
     trpc.outbox.list.queryOptions(
       { status: 'draft_ready' },
-      { enabled: !!session?.user.id, staleTime: 15_000 },
+      { enabled: !!session?.user?.id, staleTime: 15_000 },
     ),
   );
   const pendingQueueCount = pendingQueueItems?.length ?? 0;

@@ -744,5 +744,25 @@
     "required_scopes_missing": "We're missing the permissions needed to craft your full experience. Please sign in again and allow the requested access.",
     "early_access_required": "Early access is required to log in",
     "unauthorized": "Zero could not load your data from the 3rd party provider. Please try again."
+  },
+  "states": {
+    "sending": "Sending…",
+    "retry": "Retry",
+    "actionFailed": "Action failed",
+    "mailList": {
+      "errorTitle": "Couldn't load your inbox",
+      "errorDescription": "We couldn't reach the server. Check your connection and try again.",
+      "offlineNotice": "You're offline — showing your saved emails.",
+      "staleNotice": "Couldn't refresh — showing your saved emails.",
+      "emptyTitle": "It's empty here",
+      "emptyDescription": "Search for another email or",
+      "clearFilters": "clear filters"
+    },
+    "thread": {
+      "errorTitle": "Couldn't open this conversation",
+      "errorDescription": "We couldn't reach the server. Check your connection and try again.",
+      "retry": "Try again",
+      "back": "Back to inbox"
+    }
   }
 }

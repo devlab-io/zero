@@ -9,6 +9,7 @@ import { createTRPCClient, httpBatchLink } from '@trpc/client';
 import { useMemo, type PropsWithChildren } from 'react';
 import type { AppRouter } from '@zero/server/trpc';
 import { CACHE_BURST_KEY } from '@/lib/constants';
+import { readRetryDelay, shouldRetryRead } from '@/lib/query-retry';
 import { signOut } from '@/lib/auth-client';
 import { get, set, del } from 'idb-keyval';
 import superjson from 'superjson';
@@ -50,12 +51,17 @@ export const makeQueryClient = (connectionId: string | null) =>
     }),
     defaultOptions: {
       queries: {
-        retry: false,
+        // Reads (idempotent) retry at most twice with capped exponential jitter
+        // (issue #34, check point 4). Mutations are non-idempotent and keep the
+        // react-query default of zero retries — see `mutations` below.
+        retry: shouldRetryRead,
+        retryDelay: readRetryDelay,
         refetchOnWindowFocus: false,
         queryKeyHashFn: (queryKey) => hashKey([{ connectionId }, ...queryKey]),
         gcTime: 1000 * 60 * 60 * 24, // 24 hours,
       },
       mutations: {
+        // No `retry` here on purpose: non-idempotent mutations must not auto-retry.
         onError: (err) => console.error(err.message),
       },
     },

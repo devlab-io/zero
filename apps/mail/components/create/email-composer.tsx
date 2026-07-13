@@ -43,6 +43,7 @@ import {
 // keymap, so it is bound here with useHotkeys and archives the open thread after send.
 import { useOptimisticActions } from '@/hooks/use-optimistic-actions';
 import { computeArchiveAfterSend } from './send-and-archive';
+import { useComposerDraftPersistence } from '@/hooks/use-composer-draft-persistence';
 import { useHotkeys } from 'react-hotkeys-hook';
 import { useParams } from 'react-router';
 
@@ -92,6 +93,18 @@ export function EmailComposer({
   );
   const [activeReplyId] = useQueryState('activeReplyId');
   const [toggleToolbar, setToggleToolbar] = useState(false);
+  // Durable local draft persistence (issue #34, check point 5): survives unmount,
+  // pagehide/reload and a failed server autosave; restored on mount. The callbacks
+  // are key-stable, so the persist effect only fires on real content changes.
+  const {
+    restored: restoredDraft,
+    update: persistDraftSnapshot,
+    clear: clearDraftSnapshot,
+  } = useComposerDraftPersistence({
+    threadId,
+    draftId,
+    replyId: activeReplyId,
+  });
   const processAndSetAttachments = async (
     filesToProcess: File[],
     quality: ImageQuality,
@@ -178,11 +191,11 @@ export function EmailComposer({
   const form = useForm<z.infer<typeof schema>>({
     resolver: zodResolver(schema),
     defaultValues: {
-      to: initialTo,
-      cc: initialCc,
-      bcc: initialBcc,
-      subject: initialSubject,
-      message: initialMessage,
+      to: restoredDraft?.to ?? initialTo,
+      cc: restoredDraft?.cc ?? initialCc,
+      bcc: restoredDraft?.bcc ?? initialBcc,
+      subject: restoredDraft?.subject ?? initialSubject,
+      message: restoredDraft?.message ?? initialMessage,
       attachments: initialAttachments,
       fromEmail:
         settings?.settings?.defaultEmailAlias ||
@@ -216,7 +229,7 @@ export function EmailComposer({
   };
 
   const editor = useComposeEditor({
-    initialValue: initialMessage,
+    initialValue: restoredDraft?.message ?? initialMessage,
     isReadOnly: isLoading,
     onLengthChange: (length) => {
       setHasUnsavedChanges(true);
@@ -325,6 +338,7 @@ export function EmailComposer({
       setHasUnsavedChanges(false);
       editor.commands.clearContent(true);
       form.reset();
+      clearDraftSnapshot();
       setIsComposeOpen(null);
 
       // Send-and-archive (mod+shift+Enter): the send succeeded — archive the open thread.
@@ -470,6 +484,7 @@ export function EmailComposer({
 
   const confirmLeave = () => {
     setShowLeaveConfirmation(false);
+    clearDraftSnapshot();
     onClose?.();
   };
 
@@ -477,18 +492,26 @@ export function EmailComposer({
     setShowLeaveConfirmation(false);
   };
 
-  // Component unmount protection
+  // Persist the latest composer state locally on every change (issue #34, check
+  // point 5). The persistence hook flushes this on pagehide/visibility-hidden/unmount,
+  // so a draft survives teardown, reload and a failed server autosave.
   useEffect(() => {
-    return () => {
-      // This cleanup runs when component is about to unmount
-      const hasContent = editor?.getText()?.trim().length > 0;
-      if (hasContent && !showLeaveConfirmation) {
-        // If we have content and haven't shown confirmation, it means
-        // the component is being unmounted unexpectedly
-        console.warn('Email composer unmounting with unsaved content');
-      }
-    };
-  }, [editor, showLeaveConfirmation]);
+    if (!editor) return;
+    persistDraftSnapshot({
+      to: toEmails,
+      cc: ccEmails ?? [],
+      bcc: bccEmails ?? [],
+      subject: subjectInput,
+      message: editor.getHTML(),
+      savedAt: Date.now(),
+    });
+  }, [toEmails, ccEmails, bccEmails, subjectInput, messageLength, editor, persistDraftSnapshot]);
+
+  // A restored draft that carried cc/bcc reveals those rows so they are not silently dropped.
+  useEffect(() => {
+    if (restoredDraft?.cc?.length) setShowCc(true);
+    if (restoredDraft?.bcc?.length) setShowBcc(true);
+  }, [restoredDraft]);
 
   useEffect(() => {
     if (!hasUnsavedChanges) return;

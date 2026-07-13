@@ -744,5 +744,25 @@
     "required_scopes_missing": "Il nous manque les autorisations nécessaires pour créer votre expérience complète. Veuillez vous reconnecter et autoriser l'accès demandé.",
     "early_access_required": "L'accès anticipé est requis pour se connecter",
     "unauthorized": "Zero n'a pas pu charger vos données depuis le fournisseur tiers. Veuillez réessayer."
+  },
+  "states": {
+    "sending": "Envoi…",
+    "retry": "Réessayer",
+    "actionFailed": "Action échouée",
+    "mailList": {
+      "errorTitle": "Chargement de la boîte impossible",
+      "errorDescription": "Le serveur est injoignable. Vérifiez votre connexion et réessayez.",
+      "offlineNotice": "Vous êtes hors ligne — emails enregistrés affichés.",
+      "staleNotice": "Actualisation impossible — emails enregistrés affichés.",
+      "emptyTitle": "C'est vide ici",
+      "emptyDescription": "Cherchez un autre email ou",
+      "clearFilters": "réinitialisez les filtres"
+    },
+    "thread": {
+      "errorTitle": "Ouverture de la conversation impossible",
+      "errorDescription": "Le serveur est injoignable. Vérifiez votre connexion et réessayez.",
+      "retry": "Réessayer",
+      "back": "Retour à la boîte"
+    }
   }
 }
