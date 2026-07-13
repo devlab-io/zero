@@ -16,3 +16,22 @@ Fichier append-only, propriété orchestrateur.
    jamais modifié. La spec du run interdit toute surface send/suppression
    définitive/spam/réglages : c'est testé par check-agent-surface.mjs, que tu peux
    ÉTENDRE (assertions nouvelles) mais jamais affaiblir.
+
+## Rulings PHASE 0 (orchestrateur, 2026-07-13)
+
+- **D1 APPROUVÉ** — retrait des 4 outils de mutation hors-whitelist (markThreadsRead/
+  Unread, modifyLabels, createLabel) de la surface MCP. Distinction explicite avec le
+  précédent #32 : là-bas la capacité était DANS la table gelée (retrait = amputation
+  check-vert, refusé) ; ici les capacités sont HORS du whitelist gelé §7 (« create
+  draft + reviewable outbox create/inspect/cancel/retry ») — le retrait APPLIQUE le
+  contrat de sécurité draft-only gelé. La surface in-app (tools.ts) reste intouchée
+  (frontière de confiance distincte). check-agent-surface : extension d'assertions
+  couvrant l'absence des 4.
+- **D2 APPROUVÉ** — mcp-tools.ts source unique (schémas+descriptions+handlers purs DI)
+  consommée par mcp.ts et le dump de schéma : réalisation fidèle de l'Option B #26 vu
+  l'incompatibilité de forme SDK MCP vs AI-SDK. Aucune duplication driver/state-machine.
+- **D3 APPROUVÉ** — smoke local à dépendances réelles injectées + snapshot tools/list
+  reproductible ; la portion session-live reste un blocker documenté, non contourné
+  (précédent #28) ; la dette smoke authentifié end-to-end demeure NOMINALEMENT à #40.
+- Réécriture listThreads via projection : tue aussi le N+1 MCP et le crash sender
+  undefined — consigner les deux au rapport comme bugs corrigés.

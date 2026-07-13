@@ -15,3 +15,17 @@ Fichier append-only, propriété orchestrateur.
    `trpc/routes/mail.ts`, config auth, schéma env.
 3. `keyboard-parity`/raccourcis : couverture déjà livrée par #32 (11 tests plein-tableau)
    — hors périmètre #35, ne pas dupliquer.
+
+## Rulings PHASE 0 (orchestrateur, 2026-07-13)
+
+- **Friction 1 (coverage-v8) STATUÉE** — le symlink store→node_modules est accepté comme
+  échafaudage de MESURE pour l'évidence de CE job, À CONDITION que le rapport documente
+  la commande de reproduction exacte (le juge froid doit pouvoir la rejouer). Le fix
+  durable (devDependency @vitest/coverage-v8@3.2.7) est ROUTÉ à #37 (seul toucheur
+  lockfile, adaptation listée dans son mandat -02). La couverture CI reproductible
+  arrive donc par le merge de #37.
+- **Frictions 2–4 APPROUVÉES** — mocks de couture déclarés (./utils, ../trpc builder
+  fidèle, hook sans renderer) : trade-offs honnêtes compatibles avec la fence
+  tests-only ; la non-couverture du middleware trpc.ts est hors des 5 cibles, ne pas
+  compenser. Caveats à reporter tels quels dans l'inventaire final.
+- Co-localisation serveur du test mail.ts : conforme.

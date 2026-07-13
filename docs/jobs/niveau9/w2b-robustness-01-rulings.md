@@ -20,3 +20,23 @@ trois modules optimistes (`store/optimistic-updates.test.ts`,
 envoi optimiste, autosave/restore) vivent dans des fichiers de test nommés d'après SES
 coutures (composer, query-provider, états). Zéro collision de fichier dans la vague.
 Celui de #34/#35 qui merge en second rebase et re-prouve (discipline stale-base standard).
+
+## Rulings PHASE 0 (orchestrateur, 2026-07-13)
+
+- **D1 APPROUVÉ** — verify-don't-build sur l'idempotence outbox : évidence citée
+  (onConflictDoNothing idempotencyKey, UPDATE gardé par statut, tests state-machine
+  existants). Serveur intouché, aucune attente de ruling.
+- **D2 STATUÉ** — `use-threads.ts:82` CONFIRMÉ in-scope (data-layer thread, porte l'état
+  honnête du point 3). `use-drafts.ts:11` : may-touch ÉTENDU à #34 (ruling 3) — même
+  guard une-ligne que use-settings, aucun autre job V5 ne touche les hooks mail,
+  zéro collision. Les trois guards jumeaux vivent dans la même livraison.
+- **D3 APPROUVÉ** — le check gelé robustness.md (arbitre binaire) exige « recovery
+  action + reconciles cache state », PAS la fermeture-avant-await littérale (formule
+  de la spec W2-H, pas du check). La variante sûre est retenue : retrait de l'await
+  refetch() bloquant (le gain mesuré), état « Envoi… », fermeture sans attente réseau
+  dans le chemin de fermeture au-delà de la résolution du send, cycle de vie éditeur
+  préservé. Si la latence du send nu se révèle visible au soak, le détachement via la
+  couture composer-flush est la suite naturelle — non exigé cette vague.
+- **D4/D5 APPROUVÉS** — coutures pures sous contrainte LOC ; soak automatisé
+  déterministe conforme au libellé du check (« automated OR browser fault injection »),
+  log conservé exigé.
