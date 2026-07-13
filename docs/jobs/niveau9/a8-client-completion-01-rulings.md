@@ -132,3 +132,27 @@ NIVEAU BARÈME (hors builder) : la re-définition éventuelle de la mesure (octe
 initiaux réels plutôt que fermeture statique) ou l'amendement du gate est une décision
 critique droite / propriétaire — jurisprudence #20→#25→#43 (amendement nommé + re-gel).
 Remontée faite au superviseur ; AUCUN amendement par le builder.
+
+## Correction de conclusion rows + extension connection/add (superviseur, 2026-07-13)
+
+CORRECTION du ruling « plancher légitime » : « toujours monté » ne signifie PAS « tout
+le module nécessaire ». thread-display.tsx:255+ branche explicitement sur threadState
+(no-selection puis loading/error/active) — le cold inbox sans threadId n'a besoin QUE
+de la branche no-selection. VOIE LÉGITIME À ESSAYER (ou à réfuter par mesure/risque,
+jamais par le seul fait que le parent monte) :
+
+- Extraction d'un ThreadEmptyState PARTAGÉ, rendu EAGER, même DOM et mêmes actions
+  « Zero chat / Send email » ; import dynamique du lecteur actif UNIQUEMENT si threadId.
+  Ce n'est pas un React.lazy au mount — c'est une éviction comportement-preserving.
+- PricingDialog : ne rend rien tant que la query pricingDialog est inactive — trigger
+  externe conservé, module chargé conditionnellement sur query active, fallback visible.
+  Rows ne sera déclaré « zéro gisement » qu'après prototype MESURÉ de ces deux découpes.
+
+GARDE AddConnectionDialog : rendu dès le mount pour les comptes isPro, DEUX FOIS dans
+nav-user ; un simple React.lazy y téléchargerait connection/add + motion au cold load
+(gaming identique), et le composant possède son propre DialogTrigger sans prop open —
+un placeholder lazy risque de casser le PREMIER clic tactile. VOIES PROPRES (au choix,
+prouvé) : (a) MAY-TOUCH ÉTENDU BORNÉ à components/connection/add.tsx pour remplacer ses
+SEULS motion.div par du CSS équivalent ; ou (b) vrai split contrôlé avec PREUVE que le
+premier clic clavier/tactile ouvre sans second clic. IRRECEVABLES : lazy-at-mount,
+preuve hover-only. Puis correction manualChunks React/motion et mesure.
