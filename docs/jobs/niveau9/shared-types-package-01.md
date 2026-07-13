@@ -152,4 +152,64 @@ Aucun commit effectué. Fichiers hors périmètre non touchés (`trpc/routes/**`
 
 ---
 
-STATUS: BLOCKED — @zero/types + frontière des 5 imports relatifs (grep 0) + règle ESLint (prouvée) + FRONTIER_MAX 5→0 + server tsc 0 / tests / build / dry-run ×2 / agent-surface : TOUS livrés et verts ; le gate dur `tsc mail = 0 TOTAL` est hors périmètre (17 tirés indépendamment par `@zero/server/trpc` ET `@zero/server/auth` via `env.ts→main.ts/routes-agent` ; émission `.d.ts` impossible TS2742 zod-v4/better-auth) → ruling orchestrateur requis (ADR 0004).
+STATUS (pré-rebase, base 13911b6b — superseded par le ruling freeze/niveau9-v4 : gate `tsc mail=0` transféré à l'issue #43 ; voir section « Re-mesure post-rebase » ci-dessous pour le STATUS final) : BLOCKED — @zero/types + frontière des 5 imports relatifs (grep 0) + règle ESLint (prouvée) + FRONTIER_MAX 5→0 + server tsc 0 / tests / build / dry-run ×2 / agent-surface : TOUS livrés et verts ; le gate dur `tsc mail = 0 TOTAL` est hors périmètre (17 tirés indépendamment par `@zero/server/trpc` ET `@zero/server/auth` via `env.ts→main.ts/routes-agent` ; émission `.d.ts` impossible TS2742 zod-v4/better-auth) → ruling orchestrateur requis (ADR 0004).
+
+---
+
+## Re-mesure post-rebase (base c6a4d0ca)
+
+Ruling **freeze/niveau9-v4** : le gate `tsc mail = 0 TOTAL` m'est officiellement **retiré** — transféré à l'issue corrective **#43 trpc-type-boundary** (preuves : ADR 0004 + contre-preuve #29 « découplage env.ts non viable, 0→76 : `sync.ts:99`/`pipelines.ts` exigent les types DO concrets »). `BASELINE.mail` reste à **17**. Je suis jugé sur mon périmètre livré.
+
+Branche rebasée sur `c6a4d0ca` (factory head : #22 agent 12 modules, #24 main 333/chat supprimé, #29 guardrails env-zod/logger, #41 loc-outliers). Mon travail est committé : `18b7d5bf` (git status propre). Re-mesure sur base rebasée, séquence complète (`pnpm install --frozen-lockfile` + `wrangler types --env local`/`wrangler types` + `react-router typegen`) :
+
+```
+# (1) pnpm --filter @zero/mail exec tsc --noEmit  → 17 erreurs
+#     ventilation : apps/mail = 0 · ../server/src = 17 (le résidu #43, inchangé en nombre)
+#     par fichier serveur :
+        8  ../server/src/thread-workflow-utils/workflow-functions.ts
+        4  ../server/src/lib/bulk-delete.ts
+        3  ../server/src/routes/agent/mcp.ts
+        1  ../server/src/routes/agent/db/drizzle/migrations.js
+        1  ../server/src/routes/agent/chat-agent.ts
+#     (glissement vs pré-rebase : l'unique erreur agent/index.ts:2175 est désormais dans
+#      agent/chat-agent.ts — #22 a éclaté index.ts en 12 modules. Total identique = 17.)
+
+# (2) pnpm --filter @zero/server exec tsc --noEmit  → 0
+# (2b) pnpm --filter @zero/types exec tsc --noEmit  → 0
+
+# (3) pnpm test
+#     @zero/mail   : Test Files 1 passed, Tests 2 passed
+#     @zero/server : Test Files 5 passed, Tests 23 passed   (#29 a ajouté des tests)
+
+# (4) pnpm --filter @zero/mail build (react-router build)  → ✓ built in 10.62s
+
+# (5a) node scripts/checks/typecheck-report.mjs   (BLOQUANT) → OK
+      typecheck-report [mode=report]
+        server: 0 errors (baseline 0)
+        mail:   17 errors (baseline 17)
+      typecheck-report OK — no regression above baseline.
+
+# (5b) node scripts/checks/loc-ratchet.mjs         (BLOQUANT) → FAILED (1)
+      loc-ratchet: files > 800 LOC = 10 (budget entries 10)
+      loc-ratchet: cross-app frontier imports = 0 (max 0)
+      loc-ratchet FAILED (1):
+        - GREW past budget: apps/server/src/pipelines.ts = 874 LOC > budget 873
+
+# (6) grep -rnE "(\.\./)+server/src" apps/mail --include='*.ts' --include='*.tsx' | wc -l  → 0
+
+# (7) node scripts/security/check-agent-surface.mjs  → Security surface check passed (exit 0)
+```
+
+### Analyse du seul rouge — `loc-ratchet` (hors périmètre #25, non causé par ce job)
+
+- `apps/server/src/pipelines.ts` = **874 LOC** > borne **873**. Ce fichier n'est **pas** dans mes fichiers édités ; mon commit `18b7d5bf` (22 fichiers) ne le touche pas.
+- Dernier auteur : **#29** (`063fd425` guardrails — logger/taxonomie erreurs/tracing OTel ont ajouté la ligne). Preuve : au factory head `c6a4d0ca` (avant mon commit), `pipelines.ts` mesure déjà **874** alors que la borne y est **873** → **loc-ratchet échoue déjà à `c6a4d0ca`, sans moi**.
+- Cause : dérive de borne d'intégration — le re-snapshot LOC de l'orchestrateur (`4b577c2d` « prune bornes ») a pruné agent/index, chat, main (#22/#24/#41) mais n'a pas monté `pipelines.ts` 873→874 pour la croissance PASS-mergée de #29.
+- Je **ne corrige pas** : monter la borne serait l'**élargir** (interdit : « bornes jamais élargies »), et `pipelines.ts` n'est pas dans mon périmètre. **Handoff orchestrateur** : re-snapshot `pipelines.ts` 873→874 (croissance de #29, jugé PASS), comme pour les autres bornes montées par merges PASS.
+
+### Bilan périmètre #25 (rebasé)
+Tous mes livrables verts : `@zero/types` (tsc 0) · 5 imports relatifs → 0 (frontière grep 0) · règle ESLint active · `FRONTIER_MAX 5→0` (part frontière loc-ratchet = 0/0) · `tsc server = 0` · `tsc mail` : **0 dans apps/mail** (17 résiduels 100 % `../server/src` = gate #43) · tests · build · typecheck-report · check-agent-surface. Aucun fichier de #29/#22/#24 touché. Pas de commit (l'orchestrateur committera).
+
+---
+
+STATUS: COMPLETE_WITH_CONCERNS — périmètre #25 entièrement livré et vert sur la base rebasée c6a4d0ca (package @zero/types, frontière relative 0 + ESLint prouvé, FRONTIER_MAX 5→0, server tsc 0, apps/mail tsc 0, tests, build, typecheck-report, check-agent-surface) ; gate `tsc mail=0` retiré (→ #43, 17 résiduels 100 % ../server/src). SEUL concern, hors périmètre : `loc-ratchet` rouge sur `apps/server/src/pipelines.ts` 874>873 — croissance PASS-mergée de #29 (déjà rouge au factory head c6a4d0ca), borne non re-snapshotée ; handoff orchestrateur (re-snapshot 873→874), non élargie par moi.
