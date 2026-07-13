@@ -19,7 +19,10 @@
 import { execSync } from 'node:child_process';
 
 const THRESHOLD = 800; // palier-9 line; every source file above it must be budgeted
-const FRONTIER_MAX = 5; // measured 2026-07-12 — modularity fix is out of scope (other issue)
+// V2.4 shared-types-package (issue #25) : les 5 imports relatifs `../server/src` ont
+// été remplacés par `@zero/types` (contrats partagés). Borne resserrée 5 -> 0 ;
+// toute réapparition d'un import de source serveur en relatif dans apps/mail = rouge.
+const FRONTIER_MAX = 0;
 
 // path -> measured LOC (ceiling). Full list of files > THRESHOLD at baseline.
 const BUDGET = {

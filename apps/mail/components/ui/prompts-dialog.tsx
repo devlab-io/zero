@@ -6,11 +6,7 @@ import {
   SendIcon,
   RotateCcwIcon,
 } from 'lucide-react';
-import {
-  SummarizeMessage,
-  SummarizeThread,
-  ReSummarizeThread,
-} from '../../../server/src/lib/brain.fallback.prompts';
+import { SummarizeMessage, SummarizeThread, ReSummarizeThread } from '@zero/types';
 import {
   Dialog,
   DialogContent,
@@ -24,7 +20,7 @@ import { AiChatPrompt, StyledEmailAssistantSystemPrompt } from '@/lib/prompts';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './tabs';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTRPC } from '@/providers/query-provider';
-import { EPrompts } from '../../../server/src/types';
+import { EPrompts } from '@zero/types';
 import { useMutation } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { useForm } from 'react-hook-form';
