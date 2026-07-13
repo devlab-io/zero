@@ -20,3 +20,9 @@
   vers l issue de complétion A8 (fan-in vague 4). Offre de « patch
   #30-ready » DÉCLINÉE — discipline de propriété.
 - eslint auth.ts:42 (react as any) : préexistant hors diff, non imputable.
+
+## RULING 2026-07-13 (post-verdict — divergence R2)
+Divergence mineure du juge (R2 gaté sur latest) : correction EXIGÉE et livrée
+— put R2 inconditionnel dès thread récupéré (fidélité stricte pré-slice),
+summary DB gaté latest inchangé, helper env-free persistSyncedThread
+('synced' | 'r2-only' + failureCount++ comme le pré-slice), 4 tests dédiés.

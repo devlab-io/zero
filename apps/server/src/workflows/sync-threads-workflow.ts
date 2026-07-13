@@ -18,6 +18,7 @@ import { getZeroAgent, connectionToDriver } from '../lib/server-utils';
 import { WorkflowEntrypoint, WorkflowStep } from 'cloudflare:workers';
 import type { WorkflowEvent } from 'cloudflare:workers';
 import { GoogleMailManager } from '../lib/driver/google';
+import { persistSyncedThread } from '../lib/driver/gmail-sync-persist';
 import type { ParsedMessage } from '../types';
 import { connection } from '../db/schema';
 import type { ZeroEnv } from '../env';
@@ -172,21 +173,30 @@ export class SyncThreadsWorkflow extends WorkflowEntrypoint<ZeroEnv, SyncThreads
             listResult.threads.map(async (thread) => {
               try {
                 const full = fetched.get(thread.id);
-                const latest = full?.latest;
-                if (!full || !latest) {
+                if (!full) {
                   pageProcessingResult.failureCount++;
                   return;
                 }
-                // Réplique fidèle de ThreadSyncWorker.syncThread (routes/agent, MUST-NOT-TOUCH) :
-                // persistance R2 du thread complet, mêmes clé et metadata.
-                await this.env.THREADS_BUCKET.put(
-                  `${foundConnection.id}/${thread.id}.json`,
-                  JSON.stringify(full),
-                  { customMetadata: { threadId: thread.id } },
-                );
-                await storeSummary(thread.id, latest);
-                pageProcessingResult.processedCount++;
-                pageProcessingResult.successCount++;
+                // Réplique FIDÈLE de ThreadSyncWorker.syncThread (routes/agent, MUST-NOT-TOUCH) :
+                // R2 écrit INCONDITIONNELLEMENT (même clé/metadata) dès que le thread est
+                // récupéré, PUIS résumé DB seulement si `latest` existe. Un thread 100 %
+                // brouillons persiste donc quand même en R2 (fidélité stricte au pré-slice).
+                const outcome = await persistSyncedThread(thread.id, full, {
+                  putR2: (id, data) =>
+                    this.env.THREADS_BUCKET.put(
+                      `${foundConnection.id}/${id}.json`,
+                      JSON.stringify(data),
+                      { customMetadata: { threadId: id } },
+                    ).then(() => undefined),
+                  storeSummary,
+                });
+                if (outcome === 'synced') {
+                  pageProcessingResult.processedCount++;
+                  pageProcessingResult.successCount++;
+                } else {
+                  // r2-only : R2 écrit, résumé DB sauté (comme le pré-slice quand latest absent).
+                  pageProcessingResult.failureCount++;
+                }
               } catch (error) {
                 logger.error(`[SyncThreadsWorkflow] Failed to sync thread ${thread.id}:`, error);
                 pageProcessingResult.failureCount++;
