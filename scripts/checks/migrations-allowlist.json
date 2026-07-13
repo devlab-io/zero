@@ -1,24 +1,24 @@
 {
-  "_comment": "Documented allowlist for migrations-consistency.mjs. Pre-filled with the CURRENT niveau9 migration drift so the check passes today while still failing on any NEW inconsistency. Issue #19 repairs the drift (removes orphan SQL, de-duplicates prefixes) and empties these arrays. Keys are migration directories relative to repo root.",
+  "_comment": "Documented allowlist for migrations-consistency.mjs. Each exception is DURABLE (issue #19): the absolute rule forbids deleting orphan .sql or renumbering duplicate prefixes, so this drift is permanent and cannot be emptied — only reduced to documented exceptions. Every entry maps to an anchored section of docs/solutions/migrations-drift.md; the check FAILS if a reference does not resolve (missing file or missing anchor). Referenced form: { name: 'path/to/doc.md#anchor' }. The legacy array form (names only, no reference) is still parsed for back-compat but an active exception without a resolvable reference fails. Keys under 'allow' are migration directories relative to repo root.",
   "allow": {
     "apps/server/src/db/migrations": {
-      "orphanSqlFiles": [
-        "0025_far_echo",
-        "0029_thin_triathlon",
-        "0032_smiling_raider"
-      ],
-      "missingJournalFiles": [],
-      "duplicatePrefixes": [
-        "0025",
-        "0029",
-        "0032",
-        "0035"
-      ]
+      "orphanSqlFiles": {
+        "0025_far_echo": "docs/solutions/migrations-drift.md#orphan-0025_far_echo",
+        "0029_thin_triathlon": "docs/solutions/migrations-drift.md#orphan-0029_thin_triathlon",
+        "0032_smiling_raider": "docs/solutions/migrations-drift.md#orphan-0032_smiling_raider"
+      },
+      "missingJournalFiles": {},
+      "duplicatePrefixes": {
+        "0025": "docs/solutions/migrations-drift.md#prefix-0025",
+        "0029": "docs/solutions/migrations-drift.md#prefix-0029",
+        "0032": "docs/solutions/migrations-drift.md#prefix-0032",
+        "0035": "docs/solutions/migrations-drift.md#prefix-0035"
+      }
     },
     "apps/server/src/routes/agent/db/drizzle": {
-      "orphanSqlFiles": [],
-      "missingJournalFiles": [],
-      "duplicatePrefixes": []
+      "orphanSqlFiles": {},
+      "missingJournalFiles": {},
+      "duplicatePrefixes": {}
     }
   }
 }
