@@ -13,6 +13,7 @@
  *
  * Reuse or distribution of this file requires a license from Zero Email Inc.
  */
+import { logger } from '../lib/logger';
 import { WorkflowEntrypoint, WorkflowStep } from 'cloudflare:workers';
 import { connectionToDriver } from '../lib/server-utils';
 import type { WorkflowEvent } from 'cloudflare:workers';
@@ -53,7 +54,7 @@ export class SyncThreadsCoordinatorWorkflow extends WorkflowEntrypoint<
   ): Promise<SyncThreadsCoordinatorResult> {
     const { connectionId, folder } = event.payload;
 
-    console.info(
+    logger.info(
       `[SyncThreadsCoordinatorWorkflow] Starting coordination for connection ${connectionId}, folder ${folder}`,
     );
 
@@ -95,7 +96,7 @@ export class SyncThreadsCoordinatorWorkflow extends WorkflowEntrypoint<
     const driver = connectionToDriver(foundConnection);
 
     if (connectionId.includes('aggregate')) {
-      console.info(
+      logger.info(
         `[SyncThreadsCoordinatorWorkflow] Skipping sync for aggregate instance - folder ${folder}`,
       );
       result.message = 'Skipped aggregate instance';
@@ -103,7 +104,7 @@ export class SyncThreadsCoordinatorWorkflow extends WorkflowEntrypoint<
     }
 
     if (!driver) {
-      console.warn(`[SyncThreadsCoordinatorWorkflow] No driver available for folder ${folder}`);
+      logger.warn(`[SyncThreadsCoordinatorWorkflow] No driver available for folder ${folder}`);
       result.message = 'No driver available';
       return result;
     }
@@ -119,7 +120,7 @@ export class SyncThreadsCoordinatorWorkflow extends WorkflowEntrypoint<
       const pageResult = await step.do(
         `process-page-${pageNumber}-${folder}-${connectionId}`,
         async () => {
-          console.info(
+          logger.info(
             `[SyncThreadsCoordinatorWorkflow] Processing page ${pageNumber} for ${folder}`,
           );
 
@@ -135,7 +136,7 @@ export class SyncThreadsCoordinatorWorkflow extends WorkflowEntrypoint<
             },
           });
 
-          console.info(
+          logger.info(
             `[SyncThreadsCoordinatorWorkflow] Created workflow ${instance.id} for page ${pageNumber}`,
           );
 
@@ -197,12 +198,12 @@ export class SyncThreadsCoordinatorWorkflow extends WorkflowEntrypoint<
 
       // If no more pages, stop
       if (!currentPageToken) {
-        console.info(`[SyncThreadsCoordinatorWorkflow] No more pages for ${folder}`);
+        logger.info(`[SyncThreadsCoordinatorWorkflow] No more pages for ${folder}`);
         break;
       }
     } while (currentPageToken && shouldLoop);
 
-    console.info(
+    logger.info(
       `[SyncThreadsCoordinatorWorkflow] Completed ${folder}: ${result.totalSynced} synced across ${result.totalPagesProcessed} pages`,
     );
 

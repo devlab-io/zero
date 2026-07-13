@@ -1,3 +1,4 @@
+import { logger } from '../../lib/logger';
 import { createRateLimiterMiddleware, privateProcedure, publicProcedure, router } from '../trpc';
 import { defaultUserSettings, userSettingsSchema, type UserSettings } from '../../lib/schemas';
 import { getZeroDB } from '../../lib/server-utils';
@@ -24,7 +25,7 @@ export const settingsRouter = router({
       const settingsRes = userSettingsSchema.safeParse(result.settings);
       if (!settingsRes.success) {
         ctx.c.executionCtx.waitUntil(db.updateUserSettings(defaultUserSettings));
-        console.log('returning default settings');
+        logger.info('returning default settings');
         return { settings: defaultUserSettings };
       }
 

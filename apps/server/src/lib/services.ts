@@ -1,3 +1,4 @@
+import { logger } from './logger';
 import { env } from '../env';
 import { Redis } from '@upstash/redis';
 import { Resend } from 'resend';
@@ -5,7 +6,7 @@ import { Resend } from 'resend';
 export const resend = () =>
   env.RESEND_API_KEY
     ? new Resend(env.RESEND_API_KEY)
-    : { emails: { send: async (...args: unknown[]) => console.log(args) } };
+    : { emails: { send: async (...args: unknown[]) => logger.info(args) } };
 
 export const redis = () => new Redis({ url: env.REDIS_URL, token: env.REDIS_TOKEN });
 
@@ -14,7 +15,7 @@ export const twilio = () => {
   //     return {
   //       messages: {
   //         send: async (to: string, body: string) =>
-  //           console.log(`[TWILIO:MOCK] Sending message to ${to}: ${body}`),
+  //           logger.info(`[TWILIO:MOCK] Sending message to ${to}: ${body}`),
   //       },
   //     };
   //   }
@@ -25,7 +26,7 @@ export const twilio = () => {
     return {
       messages: {
         send: async (to: string, body: string) =>
-          console.log(`[TWILIO:MOCK] Would send SMS to ${to}: ${body}`),
+          logger.info(`[TWILIO:MOCK] Would send SMS to ${to}: ${body}`),
       },
     };
   }

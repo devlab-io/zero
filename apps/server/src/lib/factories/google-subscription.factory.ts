@@ -1,3 +1,4 @@
+import { logger } from '../logger';
 import { BaseSubscriptionFactory, type SubscriptionData } from './base-subscription.factory';
 import { c, getNotificationsUrl } from '../../lib/utils';
 import { resetConnection } from '../server-utils';
@@ -28,7 +29,7 @@ export const getServiceAccount = (): GoogleServiceAccount => {
   try {
     return JSON.parse(serviceAccountJson) as GoogleServiceAccount;
   } catch (error) {
-    console.error('Invalid GOOGLE_S_ACCOUNT JSON format', serviceAccountJson, error);
+    logger.error('Invalid GOOGLE_S_ACCOUNT JSON format', serviceAccountJson, error);
     throw new Error('Invalid GOOGLE_S_ACCOUNT JSON format');
   }
 };
@@ -224,10 +225,10 @@ class GoogleSubscriptionFactory extends BaseSubscriptionFactory {
     const accessToken = credentials.access_token || auth.credentials.access_token;
     const serviceAccount = getServiceAccount();
 
-    console.log(
+    logger.info(
       `[SUBSCRIPTION] Setting up Gmail watch for connection: ${connectionData.id} ${topicName} projects/${serviceAccount.project_id}/topics/${topicName}`,
     );
-    console.log(`[SUBSCRIPTION] Service Account: ${serviceAccount.client_email}`, serviceAccount);
+    logger.info(`[SUBSCRIPTION] Service Account: ${serviceAccount.client_email}`, serviceAccount);
 
     const response = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/watch', {
       method: 'POST',
@@ -254,30 +255,30 @@ class GoogleSubscriptionFactory extends BaseSubscriptionFactory {
     }
 
     try {
-      console.log(`[SUBSCRIPTION] Getting connection data for: ${connectionId}`);
+      logger.info(`[SUBSCRIPTION] Getting connection data for: ${connectionId}`);
       const connectionData = await this.getConnectionFromDb(connectionId);
       if (!connectionData) {
-        console.log(`[SUBSCRIPTION] Connection not found: ${connectionId}`);
+        logger.info(`[SUBSCRIPTION] Connection not found: ${connectionId}`);
         return c.json({ error: 'connection not found' }, { status: 400 });
       }
 
       const pubSubName = `notifications__${connectionData.id}`;
       const pushEndpoint = getNotificationsUrl(EProviders.google);
-      console.log(`[SUBSCRIPTION] Generated PubSub name: ${pubSubName}`);
-      console.log(`[SUBSCRIPTION] Using push endpoint: ${pushEndpoint}`);
+      logger.info(`[SUBSCRIPTION] Generated PubSub name: ${pubSubName}`);
+      logger.info(`[SUBSCRIPTION] Using push endpoint: ${pushEndpoint}`);
 
       try {
-        console.log(`[SUBSCRIPTION] Setting up PubSub topic: ${pubSubName}`);
+        logger.info(`[SUBSCRIPTION] Setting up PubSub topic: ${pubSubName}`);
         await this.setupPubSubTopic(pubSubName);
 
-        console.log(`[SUBSCRIPTION] Creating PubSub subscription for endpoint: ${pushEndpoint}`);
+        logger.info(`[SUBSCRIPTION] Creating PubSub subscription for endpoint: ${pushEndpoint}`);
         await this.createPubSubSubscription(pubSubName, pushEndpoint);
 
-        console.log(
+        logger.info(
           `[SUBSCRIPTION] Setting up Gmail watch for connection: ${connectionData.id} ${pubSubName}`,
         );
         await this.setupGmailWatch(connectionData, pubSubName).catch(async (error) => {
-          console.error('[SUBSCRIPTION] Error setting up Gmail watch:', { error });
+          logger.error('[SUBSCRIPTION] Error setting up Gmail watch:', { error });
           await resetConnection(connectionData.id);
           throw error;
         });
@@ -287,26 +288,26 @@ class GoogleSubscriptionFactory extends BaseSubscriptionFactory {
           new Date().toISOString(),
         );
 
-        console.log(`[SUBSCRIPTION] Initializing labels for connection: ${connectionId}`);
+        logger.info(`[SUBSCRIPTION] Initializing labels for connection: ${connectionId}`);
         await this.initializeConnectionLabels(connectionId);
 
-        console.log(`[SUBSCRIPTION] Setup completed successfully for connection: ${connectionId}`);
+        logger.info(`[SUBSCRIPTION] Setup completed successfully for connection: ${connectionId}`);
         return c.json({});
       } catch (error) {
-        console.error('[SUBSCRIPTION] Setup failed:', error);
+        logger.error('[SUBSCRIPTION] Setup failed:', error);
 
         // Clean up on failure using base class method
         // await this.cleanupOnFailure(connectionId, env);
 
         if (error instanceof Error && error.message.includes('Already Exists')) {
-          console.log('Resource already exists, continuing...');
+          logger.info('Resource already exists, continuing...');
           return c.json({});
         }
 
         throw error;
       }
     } catch (error) {
-      console.error('[SUBSCRIPTION] Error:', error);
+      logger.error('[SUBSCRIPTION] Error:', error);
 
       // Clean up on error using base class method
       //   await this.cleanupOnFailure(connectionId, env);
@@ -346,6 +347,7 @@ class GoogleSubscriptionFactory extends BaseSubscriptionFactory {
       const data = await response.json();
       return !!data;
     } catch {
+      logger.debug('Google id_token verification failed');
       return false;
     }
   }

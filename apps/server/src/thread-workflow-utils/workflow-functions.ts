@@ -13,6 +13,7 @@
  *
  * Reuse or distribution of this file requires a license from Zero Email Inc.
  */
+import { logger } from '../lib/logger';
 import {
   SummarizeMessage,
   ReSummarizeThread,
@@ -89,6 +90,7 @@ const parseLabelSuggestions = (raw: unknown): LabelSuggestion[] => {
     try {
       value = JSON.parse(value);
     } catch {
+      logger.debug('parseLabelSuggestions: model output was not valid JSON');
       return [];
     }
   }
@@ -107,7 +109,7 @@ export const workflowFunctions: Record<string, WorkflowFunction> = {
     const latestMessage = context.thread.latest!;
 
     if (latestMessage.tags.some((tag) => tag.name.toLowerCase() === 'spam')) {
-      console.log('[WORKFLOW_FUNCTIONS] Skipping analysis for spam message');
+      logger.info('[WORKFLOW_FUNCTIONS] Skipping analysis for spam message');
       return {
         isQuestion: false,
         isRequest: false,
@@ -118,7 +120,7 @@ export const workflowFunctions: Record<string, WorkflowFunction> = {
 
     const emailIntent = analyzeEmailIntent(latestMessage);
 
-    console.log('[WORKFLOW_FUNCTIONS] Analyzed email intent:', {
+    logger.info('[WORKFLOW_FUNCTIONS] Analyzed email intent:', {
       threadId: context.threadId,
       isQuestion: emailIntent.isQuestion,
       isRequest: emailIntent.isRequest,
@@ -132,7 +134,7 @@ export const workflowFunctions: Record<string, WorkflowFunction> = {
   validateResponseNeeded: async (context) => {
     const intentResult = getStepResult(context, 'analyze-email-intent');
     if (!intentResult) {
-      console.log('[WORKFLOW_FUNCTIONS] Email intent analysis not available');
+      logger.info('[WORKFLOW_FUNCTIONS] Email intent analysis not available');
       throw new Error('Email intent analysis not available');
     }
 
@@ -143,21 +145,21 @@ export const workflowFunctions: Record<string, WorkflowFunction> = {
       intentResult.isUrgent;
 
     if (!requiresResponse) {
-      console.log(
+      logger.info(
         '[WORKFLOW_FUNCTIONS] Email does not require a response, skipping draft generation',
       );
       return { requiresResponse: false };
     }
 
-    console.log('[WORKFLOW_FUNCTIONS] Email requires a response, continuing with draft generation');
+    logger.info('[WORKFLOW_FUNCTIONS] Email requires a response, continuing with draft generation');
 
     return { requiresResponse: true };
   },
 
   generateAutomaticDraft: async (context) => {
-    console.log('[WORKFLOW_FUNCTIONS] Generating automatic draft for thread:', context.threadId);
-    console.log('[WORKFLOW_FUNCTIONS] Thread has', context.thread.messages.length, 'messages');
-    console.log(
+    logger.info('[WORKFLOW_FUNCTIONS] Generating automatic draft for thread:', context.threadId);
+    logger.info('[WORKFLOW_FUNCTIONS] Thread has', context.thread.messages.length, 'messages');
+    logger.info(
       '[WORKFLOW_FUNCTIONS] Latest message from:',
       context.thread.messages[context.thread.messages.length - 1]?.sender?.email,
     );
@@ -210,7 +212,7 @@ export const workflowFunctions: Record<string, WorkflowFunction> = {
 
     const { stub: agent } = await getZeroAgent(context.connectionId);
     const createdDraft = await agent.createDraft(draftData);
-    console.log('[WORKFLOW_FUNCTIONS] Created automatic draft:', {
+    logger.info('[WORKFLOW_FUNCTIONS] Created automatic draft:', {
       threadId: context.threadId,
       draftId: createdDraft?.id,
     });
@@ -219,15 +221,15 @@ export const workflowFunctions: Record<string, WorkflowFunction> = {
     await socketAgent.queue('_reSyncThread', { threadId: context.threadId });
 
     const result = await agent.syncThread({ threadId: context.threadId });
-    console.log('[WORKFLOW_FUNCTIONS] Synced thread:', result);
+    logger.info('[WORKFLOW_FUNCTIONS] Synced thread:', result);
 
     return { draftId: createdDraft?.id || null };
   },
 
   findMessagesToVectorize: async (context) => {
-    console.log('[WORKFLOW_FUNCTIONS] Finding messages to vectorize');
+    logger.info('[WORKFLOW_FUNCTIONS] Finding messages to vectorize');
     const messageIds = context.thread.messages.map((message) => message.id);
-    console.log('[WORKFLOW_FUNCTIONS] Found message IDs:', messageIds);
+    logger.info('[WORKFLOW_FUNCTIONS] Found message IDs:', messageIds);
 
     const batchSize = 20;
     const batches = [];
@@ -239,11 +241,11 @@ export const workflowFunctions: Record<string, WorkflowFunction> = {
       batch: string[],
     ): Effect.Effect<Array<{ id: string }>, never> =>
       Effect.tryPromise(async () => {
-        console.log('[WORKFLOW_FUNCTIONS] Fetching batch of', batch.length, 'message IDs');
+        logger.info('[WORKFLOW_FUNCTIONS] Fetching batch of', batch.length, 'message IDs');
         return await env.VECTORIZE_MESSAGE.getByIds(batch);
       }).pipe(
         Effect.catchAll((error) => {
-          console.log('[WORKFLOW_FUNCTIONS] Failed to fetch batch:', error);
+          logger.info('[WORKFLOW_FUNCTIONS] Failed to fetch batch:', error);
           return Effect.succeed([]);
         }),
       );
@@ -252,7 +254,7 @@ export const workflowFunctions: Record<string, WorkflowFunction> = {
     const program = Effect.all(batchEffects, { concurrency: 3 }).pipe(
       Effect.map((results) => {
         const allExistingMessages = results.flat();
-        console.log('[WORKFLOW_FUNCTIONS] Found existing messages:', allExistingMessages.length);
+        logger.info('[WORKFLOW_FUNCTIONS] Found existing messages:', allExistingMessages.length);
         return allExistingMessages;
       }),
     );
@@ -264,19 +266,19 @@ export const workflowFunctions: Record<string, WorkflowFunction> = {
       (message) => !existingMessageIds.has(message.id),
     );
 
-    console.log('[WORKFLOW_FUNCTIONS] Messages to vectorize:', messagesToVectorize.length);
+    logger.info('[WORKFLOW_FUNCTIONS] Messages to vectorize:', messagesToVectorize.length);
     return { messagesToVectorize, existingMessages };
   },
 
   vectorizeMessages: async (context) => {
     const vectorizeResult = getStepResult(context, 'find-messages-to-vectorize');
     if (!vectorizeResult?.messagesToVectorize) {
-      console.log('[WORKFLOW_FUNCTIONS] No messages to vectorize, skipping');
+      logger.info('[WORKFLOW_FUNCTIONS] No messages to vectorize, skipping');
       return { embeddings: [] };
     }
 
     const messagesToVectorize = vectorizeResult.messagesToVectorize;
-    console.log(
+    logger.info(
       '[WORKFLOW_FUNCTIONS] Starting message vectorization for',
       messagesToVectorize.length,
       'messages',
@@ -286,10 +288,10 @@ export const workflowFunctions: Record<string, WorkflowFunction> = {
       message: ParsedMessage,
     ): Effect.Effect<VectorizedMessage | null, never> =>
       Effect.tryPromise(async (): Promise<VectorizedMessage | null> => {
-        console.log('[WORKFLOW_FUNCTIONS] Converting message to XML:', message.id);
+        logger.info('[WORKFLOW_FUNCTIONS] Converting message to XML:', message.id);
         const prompt = await messageToXML(message);
         if (!prompt) {
-          console.log('[WORKFLOW_FUNCTIONS] Message has no prompt, skipping:', message.id);
+          logger.info('[WORKFLOW_FUNCTIONS] Message has no prompt, skipping:', message.id);
           return null;
         }
 
@@ -328,7 +330,7 @@ export const workflowFunctions: Record<string, WorkflowFunction> = {
         };
       }).pipe(
         Effect.catchAll((error) => {
-          console.log('[WORKFLOW_FUNCTIONS] Failed to vectorize message:', {
+          logger.info('[WORKFLOW_FUNCTIONS] Failed to vectorize message:', {
             messageId: message.id,
             error: error instanceof Error ? error.message : String(error),
           });
@@ -344,7 +346,7 @@ export const workflowFunctions: Record<string, WorkflowFunction> = {
         const validResults = results.filter(
           (result): result is VectorizedMessage => result !== null,
         );
-        console.log('[WORKFLOW_FUNCTIONS] Successfully vectorized messages:', validResults.length);
+        logger.info('[WORKFLOW_FUNCTIONS] Successfully vectorized messages:', validResults.length);
         return { embeddings: validResults };
       }),
     );
@@ -355,16 +357,16 @@ export const workflowFunctions: Record<string, WorkflowFunction> = {
   upsertEmbeddings: async (context) => {
     const vectorizeResult = getStepResult(context, 'vectorize-messages');
     if (!vectorizeResult?.embeddings || vectorizeResult.embeddings.length === 0) {
-      console.log('[WORKFLOW_FUNCTIONS] No embeddings to upsert');
+      logger.info('[WORKFLOW_FUNCTIONS] No embeddings to upsert');
       return { upserted: 0 };
     }
 
-    console.log(
+    logger.info(
       '[WORKFLOW_FUNCTIONS] Upserting message vectors:',
       vectorizeResult.embeddings.length,
     );
     await env.VECTORIZE_MESSAGE.upsert(vectorizeResult.embeddings);
-    console.log('[WORKFLOW_FUNCTIONS] Successfully upserted message vectors');
+    logger.info('[WORKFLOW_FUNCTIONS] Successfully upserted message vectors');
 
     return { upserted: vectorizeResult.embeddings.length };
   },
@@ -372,7 +374,7 @@ export const workflowFunctions: Record<string, WorkflowFunction> = {
   cleanupWorkflowExecution: async (context) => {
     const workflowKey = `workflow_${context.threadId}`;
     const result = await bulkDeleteKeys([workflowKey]);
-    console.log(
+    logger.info(
       '[WORKFLOW_FUNCTIONS] Cleaned up workflow execution tracking for thread:',
       context.threadId,
       'Result:',
@@ -382,23 +384,23 @@ export const workflowFunctions: Record<string, WorkflowFunction> = {
   },
 
   checkExistingSummary: async (context) => {
-    console.log('[WORKFLOW_FUNCTIONS] Getting existing thread summary for:', context.threadId);
+    logger.info('[WORKFLOW_FUNCTIONS] Getting existing thread summary for:', context.threadId);
     const threadSummary = await env.VECTORIZE.getByIds([context.threadId.toString()]);
     if (!threadSummary.length) {
-      console.log('[WORKFLOW_FUNCTIONS] No existing thread summary found');
+      logger.info('[WORKFLOW_FUNCTIONS] No existing thread summary found');
       return { existingSummary: null };
     }
-    console.log('[WORKFLOW_FUNCTIONS] Found existing thread summary');
+    logger.info('[WORKFLOW_FUNCTIONS] Found existing thread summary');
 
     const metadata = threadSummary[0].metadata;
     if (!metadata || typeof metadata !== 'object') {
-      console.warn('[WORKFLOW_FUNCTIONS] Invalid metadata structure, returning null');
+      logger.warn('[WORKFLOW_FUNCTIONS] Invalid metadata structure, returning null');
       return { existingSummary: null };
     }
 
     const { summary, lastMsg } = metadata as { summary?: unknown; lastMsg?: unknown };
     if (typeof summary !== 'string' || typeof lastMsg !== 'string') {
-      console.warn(
+      logger.warn(
         '[WORKFLOW_FUNCTIONS] Metadata missing required string properties (summary, lastMsg), returning null',
       );
       return { existingSummary: null };
@@ -413,15 +415,15 @@ export const workflowFunctions: Record<string, WorkflowFunction> = {
 
     const newestMessage = context.thread.messages[context.thread.messages.length - 1];
     if (existingSummary && existingSummary.lastMsg === newestMessage?.id) {
-      console.log(
+      logger.info(
         '[WORKFLOW_FUNCTIONS] No new messages since last processing, skipping AI processing',
       );
       return { summary: existingSummary.summary };
     }
 
-    console.log('[WORKFLOW_FUNCTIONS] Generating final thread summary');
+    logger.info('[WORKFLOW_FUNCTIONS] Generating final thread summary');
     if (existingSummary) {
-      console.log('[WORKFLOW_FUNCTIONS] Using existing summary as context');
+      logger.info('[WORKFLOW_FUNCTIONS] Using existing summary as context');
       const summary = await summarizeThread(
         context.connectionId,
         context.thread.messages,
@@ -429,7 +431,7 @@ export const workflowFunctions: Record<string, WorkflowFunction> = {
       );
       return { summary };
     } else {
-      console.log('[WORKFLOW_FUNCTIONS] Generating new summary without context');
+      logger.info('[WORKFLOW_FUNCTIONS] Generating new summary without context');
       const summary = await summarizeThread(
         context.connectionId,
         context.thread.messages,
@@ -442,17 +444,17 @@ export const workflowFunctions: Record<string, WorkflowFunction> = {
   upsertThreadSummary: async (context) => {
     const summaryResult = getStepResult(context, 'generate-thread-summary');
     if (!summaryResult?.summary) {
-      console.log('[WORKFLOW_FUNCTIONS] No summary generated for thread');
+      logger.info('[WORKFLOW_FUNCTIONS] No summary generated for thread');
       return { upserted: false };
     }
 
     const embeddingVector = await getEmbeddingVector(summaryResult.summary);
     if (!embeddingVector) {
-      console.log('[WORKFLOW_FUNCTIONS] Thread Embedding vector is null, skipping vector upsert');
+      logger.info('[WORKFLOW_FUNCTIONS] Thread Embedding vector is null, skipping vector upsert');
       return { upserted: false };
     }
 
-    console.log('[WORKFLOW_FUNCTIONS] Upserting thread vector');
+    logger.info('[WORKFLOW_FUNCTIONS] Upserting thread vector');
     const newestMessage = context.thread.messages[context.thread.messages.length - 1];
     await env.VECTORIZE.upsert([
       {
@@ -466,25 +468,25 @@ export const workflowFunctions: Record<string, WorkflowFunction> = {
         values: embeddingVector,
       },
     ]);
-    console.log('[WORKFLOW_FUNCTIONS] Successfully upserted thread vector');
+    logger.info('[WORKFLOW_FUNCTIONS] Successfully upserted thread vector');
 
     return { upserted: true };
   },
 
   getUserLabels: async (context) => {
     try {
-      console.log('[WORKFLOW_FUNCTIONS] Getting user labels for connection:', context.results);
+      logger.info('[WORKFLOW_FUNCTIONS] Getting user labels for connection:', context.results);
       const { stub: agent } = await getZeroAgent(context.connectionId);
       const userAccountLabels = await agent.getUserLabels();
       return { userAccountLabels };
     } catch (error) {
-      console.error('[WORKFLOW_FUNCTIONS] Error in getUserLabels:', error);
+      logger.error('[WORKFLOW_FUNCTIONS] Error in getUserLabels:', error);
       return { userAccountLabels: [] };
     }
   },
 
   getUserTopics: async (context) => {
-    console.log('[WORKFLOW_FUNCTIONS] Getting user topics for connection:', context.connectionId);
+    logger.info('[WORKFLOW_FUNCTIONS] Getting user topics for connection:', context.connectionId);
     try {
       const { stub: agent } = await getZeroAgent(context.connectionId);
       const userTopics = await agent.getUserTopics();
@@ -493,14 +495,14 @@ export const workflowFunctions: Record<string, WorkflowFunction> = {
           name: topic.topic,
           usecase: topic.usecase,
         }));
-        console.log('[WORKFLOW_FUNCTIONS] Using user topics:', formattedTopics);
+        logger.info('[WORKFLOW_FUNCTIONS] Using user topics:', formattedTopics);
         return { userTopics: formattedTopics };
       } else {
-        console.log('[WORKFLOW_FUNCTIONS] No user topics found, using defaults');
+        logger.info('[WORKFLOW_FUNCTIONS] No user topics found, using defaults');
         return { userTopics: defaultLabels };
       }
     } catch (error) {
-      console.log('[WORKFLOW_FUNCTIONS] Failed to get user topics, using defaults:', error);
+      logger.info('[WORKFLOW_FUNCTIONS] Failed to get user topics, using defaults:', error);
       return { userTopics: defaultLabels };
     }
   },
@@ -511,7 +513,7 @@ export const workflowFunctions: Record<string, WorkflowFunction> = {
     const userTopicsResult = getStepResult(context, 'get-user-topics');
 
     if (!summaryResult?.summary) {
-      console.log('[WORKFLOW_FUNCTIONS] No summary available for label generation');
+      logger.info('[WORKFLOW_FUNCTIONS] No summary available for label generation');
       return { suggestions: [], accountLabelsMap: {} };
     }
 
@@ -526,7 +528,7 @@ export const workflowFunctions: Record<string, WorkflowFunction> = {
       accountLabelsMap[key] = label;
     });
 
-    console.log('[WORKFLOW_FUNCTIONS] Generating label suggestions for thread:', {
+    logger.info('[WORKFLOW_FUNCTIONS] Generating label suggestions for thread:', {
       threadId: context.threadId,
       accountLabelsCount: accountLabels.length,
       userTopicsCount: userTopics.length,
@@ -572,7 +574,7 @@ Thread Summary: ${summaryResult.summary}`;
     // to a typed array, so downstream `for (const s of suggestions)` iterated characters.
     const suggestions: LabelSuggestion[] = parseLabelSuggestions(labelsResponse.response);
 
-    console.log('[WORKFLOW_FUNCTIONS] Generated label suggestions:', suggestions);
+    logger.info('[WORKFLOW_FUNCTIONS] Generated label suggestions:', suggestions);
     return { suggestions, accountLabelsMap };
   },
 
@@ -584,14 +586,14 @@ Thread Summary: ${summaryResult.summary}`;
     const userLabelsResult = getStepResult(context, 'get-user-labels');
 
     if (!suggestionsResult?.suggestions || suggestionsResult.suggestions.length === 0) {
-      console.log('[WORKFLOW_FUNCTIONS] No label suggestions to sync');
+      logger.info('[WORKFLOW_FUNCTIONS] No label suggestions to sync');
       return { applied: false };
     }
 
     const { suggestions, accountLabelsMap } = suggestionsResult;
     const userAccountLabels = userLabelsResult?.userAccountLabels || [];
 
-    console.log('[WORKFLOW_FUNCTIONS] Syncing thread labels:', {
+    logger.info('[WORKFLOW_FUNCTIONS] Syncing thread labels:', {
       threadId: context.threadId,
       suggestions: suggestions.map((s) => `${s.name} (${s.source})`),
     });
@@ -607,11 +609,11 @@ Thread Summary: ${summaryResult.summary}`;
       if (accountLabelsMap[normalizedName]) {
         // Label already exists
         finalLabelIds.push(accountLabelsMap[normalizedName].id);
-        console.log('[WORKFLOW_FUNCTIONS] Using existing label:', suggestion.name);
+        logger.info('[WORKFLOW_FUNCTIONS] Using existing label:', suggestion.name);
       } else {
         // Need to create label
         try {
-          console.log('[WORKFLOW_FUNCTIONS] Creating new label:', suggestion.name);
+          logger.info('[WORKFLOW_FUNCTIONS] Creating new label:', suggestion.name);
           // agent.createLabel is typed to return void, but the implementation returns
           // the created Label; assert through unknown to the shape we consume.
           const created = (await agent.createLabel({
@@ -623,15 +625,15 @@ Thread Summary: ${summaryResult.summary}`;
             createdLabels.push(created);
             // Update accountLabelsMap for subsequent lookups
             accountLabelsMap[normalizedName] = created;
-            console.log('[WORKFLOW_FUNCTIONS] Successfully created label:', created);
+            logger.info('[WORKFLOW_FUNCTIONS] Successfully created label:', created);
           } else {
-            console.log(
+            logger.info(
               '[WORKFLOW_FUNCTIONS] Failed to create label - no ID returned for:',
               suggestion.name,
             );
           }
         } catch (error) {
-          console.error('[WORKFLOW_FUNCTIONS] Error creating label:', {
+          logger.error('[WORKFLOW_FUNCTIONS] Error creating label:', {
             name: suggestion.name,
             error: error instanceof Error ? error.message : String(error),
           });
@@ -640,7 +642,7 @@ Thread Summary: ${summaryResult.summary}`;
     }
 
     if (finalLabelIds.length === 0) {
-      console.log('[WORKFLOW_FUNCTIONS] No valid label IDs to apply');
+      logger.info('[WORKFLOW_FUNCTIONS] No valid label IDs to apply');
       return { applied: false, created: createdLabels.length };
     }
 
@@ -669,7 +671,7 @@ Thread Summary: ${summaryResult.summary}`;
 
     // Apply changes if needed
     if (labelsToAdd.length > 0 || labelsToRemove.length > 0) {
-      console.log('[WORKFLOW_FUNCTIONS] Applying label changes:', {
+      logger.info('[WORKFLOW_FUNCTIONS] Applying label changes:', {
         add: labelsToAdd,
         remove: labelsToRemove,
         created: createdLabels.length,
@@ -682,7 +684,7 @@ Thread Summary: ${summaryResult.summary}`;
         labelsToRemove,
       );
 
-      console.log('[WORKFLOW_FUNCTIONS] Successfully synced thread labels');
+      logger.info('[WORKFLOW_FUNCTIONS] Successfully synced thread labels');
       return {
         applied: true,
         added: labelsToAdd.length,
@@ -690,7 +692,7 @@ Thread Summary: ${summaryResult.summary}`;
         created: createdLabels.length,
       };
     } else {
-      console.log('[WORKFLOW_FUNCTIONS] No label changes needed - labels already match');
+      logger.info('[WORKFLOW_FUNCTIONS] No label changes needed - labels already match');
       return { applied: false, created: createdLabels.length };
     }
   },
@@ -704,18 +706,18 @@ const summarizeThread = async (
 ): Promise<string | null> => {
   try {
     if (!messages || !Array.isArray(messages) || messages.length === 0) {
-      console.log('[SUMMARIZE_THREAD] No messages provided for summarization');
+      logger.info('[SUMMARIZE_THREAD] No messages provided for summarization');
       return null;
     }
 
     if (!connectionId || typeof connectionId !== 'string') {
-      console.log('[SUMMARIZE_THREAD] Invalid connection ID provided');
+      logger.info('[SUMMARIZE_THREAD] Invalid connection ID provided');
       return null;
     }
 
     const prompt = await threadToXML(messages, existingSummary);
     if (!prompt) {
-      console.log('[SUMMARIZE_THREAD] Failed to generate thread XML');
+      logger.info('[SUMMARIZE_THREAD] Failed to generate thread XML');
       return null;
     }
 
@@ -755,7 +757,7 @@ const summarizeThread = async (
       return typeof summary === 'string' ? summary : null;
     }
   } catch (error) {
-    console.log('[SUMMARIZE_THREAD] Failed to summarize thread:', {
+    logger.info('[SUMMARIZE_THREAD] Failed to summarize thread:', {
       connectionId,
       messageCount: messages?.length || 0,
       hasExistingSummary: !!existingSummary,

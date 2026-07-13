@@ -1,3 +1,4 @@
+import { logger } from './logger';
 import {
   AIWritingAssistantEmail,
   AutoLabelingEmail,
@@ -90,7 +91,7 @@ const scheduleCampaign = (userInfo: { address: string; name: string }) =>
 
 const connectionHandlerHook = async (account: Account) => {
   if (!account.accessToken || !account.refreshToken) {
-    console.error('Missing Access/Refresh Tokens', { account });
+    logger.error('Missing Access/Refresh Tokens', { account });
     throw new APIError('EXPECTATION_FAILED', {
       message: 'Missing Access/Refresh Tokens, contact us on Discord for support',
     });
@@ -122,7 +123,7 @@ const connectionHandlerHook = async (account: Account) => {
       );
       await resetConnection(account.id);
     } catch (error) {
-      console.error('Failed to revoke tokens:', error);
+      logger.error('Failed to revoke tokens:', error);
     }
     throw new Response(null, { status: 303, headers: { Location: '/' } });
   }
@@ -175,7 +176,7 @@ export const createAuth = () => {
           await twilioClient.messages
             .send(phoneNumber, `Your verification code is: ${code}, do not share it with anyone.`)
             .catch((error) => {
-              console.error('Failed to send OTP', error);
+              logger.error('Failed to send OTP', error);
               throw new APIError('INTERNAL_SERVER_ERROR', {
                 message: `Failed to send OTP, ${error.message}`,
               });
@@ -208,7 +209,7 @@ export const createAuth = () => {
           try {
             await autumn.customers.delete(user.id);
           } catch (error) {
-            console.error('Failed to delete Autumn customer:', error);
+            logger.error('Failed to delete Autumn customer:', error);
             // Continue with deletion process despite Autumn failure
           }
 
@@ -240,7 +241,7 @@ export const createAuth = () => {
           });
 
           if (revokedAccounts.every((value) => !!value)) {
-            console.log('Failed to revoke some accounts');
+            logger.info('Failed to revoke some accounts');
           }
 
           await db.deleteUser();
@@ -389,7 +390,7 @@ const createAuthConfig = () => {
     },
     onAPIError: {
       onError: (error) => {
-        console.error('API Error', error);
+        logger.error('API Error', error);
       },
       errorURL: `${env.VITE_PUBLIC_APP_URL}/login`,
       throw: true,

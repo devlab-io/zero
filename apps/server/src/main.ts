@@ -1,3 +1,4 @@
+import { logger } from './lib/logger';
 import {
   toAttachmentFiles,
   type SerializedAttachment,
@@ -15,7 +16,8 @@ import { enableBrainFunction } from './lib/brain';
 import { ZeroMCP } from './routes/agent/mcp';
 import { WorkflowRunner } from './pipelines';
 import { initTracing } from './lib/tracing';
-import { env, type ZeroEnv } from './env';
+import { bootEnv, env, type ZeroEnv } from './env';
+import { captureServerException } from './lib/sentry';
 import { createDb } from './db';
 import { app } from './routes';
 
@@ -27,14 +29,25 @@ const handler = {
 
 export default class Entry extends WorkerEntrypoint<ZeroEnv> {
   async fetch(request: Request): Promise<Response> {
-    return handler.fetch(request, this.env, this.ctx);
+    bootEnv(this.env as unknown as Record<string, unknown>);
+    try {
+      return await handler.fetch(request, this.env, this.ctx);
+    } catch (err) {
+      this.ctx.waitUntil(
+        captureServerException(err, this.env, {
+          transaction: `${request.method} ${new URL(request.url).pathname}`,
+        }),
+      );
+      throw err;
+    }
   }
   async queue(
     batch: MessageBatch<unknown> | { queue: string; messages: Array<{ body: IEmailSendBatch }> },
   ) {
+    bootEnv(this.env as unknown as Record<string, unknown>);
     switch (true) {
       case batch.queue.startsWith('subscribe-queue'): {
-        console.log('batch', batch);
+        logger.info('batch', batch);
         await Promise.all(
           (batch.messages as unknown as Array<{ body: { connectionId: string; providerId: EProviders } }>).map(async (msg) => {
             const connectionId = msg.body.connectionId;
@@ -42,14 +55,14 @@ export default class Entry extends WorkerEntrypoint<ZeroEnv> {
             try {
               await enableBrainFunction({ id: connectionId, providerId });
             } catch (error) {
-              console.error(
+              logger.error(
                 `Failed to enable brain function for connection ${connectionId}:`,
                 error,
               );
             }
           }),
         );
-        console.log('[SUBSCRIBE_QUEUE] batch done');
+        logger.info('[SUBSCRIBE_QUEUE] batch done');
         return;
       }
       case batch.queue.startsWith('send-email-queue'): {
@@ -62,7 +75,7 @@ export default class Entry extends WorkerEntrypoint<ZeroEnv> {
 
             const status = await statusKV.get(messageId);
             if (status === 'cancelled') {
-              console.log(`Email ${messageId} cancelled – skipping send.`);
+              logger.info(`Email ${messageId} cancelled – skipping send.`);
               return;
             }
 
@@ -70,7 +83,7 @@ export default class Entry extends WorkerEntrypoint<ZeroEnv> {
             if (!payload) {
               const stored = await payloadKV.get(messageId);
               if (!stored) {
-                console.error(`No payload found for scheduled email ${messageId}`);
+                logger.error(`No payload found for scheduled email ${messageId}`);
                 return;
               }
               payload = JSON.parse(stored);
@@ -112,9 +125,9 @@ export default class Entry extends WorkerEntrypoint<ZeroEnv> {
 
               await statusKV.delete(messageId);
               await payloadKV.delete(messageId);
-              console.log(`Email ${messageId} sent successfully`);
+              logger.info(`Email ${messageId} sent successfully`);
             } catch (error) {
-              console.error(`Failed to send scheduled email ${messageId}:`, error);
+              logger.error(`Failed to send scheduled email ${messageId}:`, error);
               await statusKV.delete(messageId);
               await payloadKV.delete(messageId);
             }
@@ -147,13 +160,13 @@ export default class Entry extends WorkerEntrypoint<ZeroEnv> {
                 historyId,
                 subscriptionName,
               });
-              console.log('[THREAD_QUEUE] result', result);
+              logger.info('[THREAD_QUEUE] result', result);
               span.setAttributes({
                 'workflow.result': typeof result === 'string' ? result : JSON.stringify(result),
                 'workflow.success': true,
               });
             } catch (error) {
-              console.error('Error running workflow', error);
+              logger.error('Error running workflow', error);
               span.recordException(error as Error);
               span.setStatus({ code: 2, message: (error as Error).message });
             } finally {
@@ -166,7 +179,8 @@ export default class Entry extends WorkerEntrypoint<ZeroEnv> {
     }
   }
   async scheduled() {
-    console.log('Running scheduled tasks...');
+    bootEnv(this.env as unknown as Record<string, unknown>);
+    logger.info('Running scheduled tasks...');
 
     await this.processScheduledEmails();
 
@@ -174,7 +188,7 @@ export default class Entry extends WorkerEntrypoint<ZeroEnv> {
   }
 
   private async processScheduledEmails() {
-    console.log('Checking for scheduled emails ready to be queued...');
+    logger.info('Checking for scheduled emails ready to be queued...');
     const { scheduled_emails: scheduledKV, send_email_queue } = this.env as {
       scheduled_emails: KVNamespace;
       send_email_queue: Queue<IEmailSendBatch>;
@@ -204,7 +218,7 @@ export default class Entry extends WorkerEntrypoint<ZeroEnv> {
             if (sendAt <= twelveHoursFromNow) {
               const delaySeconds = Math.max(0, Math.floor((sendAt - now) / 1000));
 
-              console.log(`Queueing scheduled email ${messageId} with ${delaySeconds}s delay`);
+              logger.info(`Queueing scheduled email ${messageId} with ${delaySeconds}s delay`);
 
               const queueBody: IEmailSendBatch = {
                 messageId,
@@ -215,27 +229,27 @@ export default class Entry extends WorkerEntrypoint<ZeroEnv> {
               await send_email_queue.send(queueBody, { delaySeconds });
               await scheduledKV.delete(key.name);
 
-              console.log(`Successfully queued scheduled email ${messageId}`);
+              logger.info(`Successfully queued scheduled email ${messageId}`);
             }
           } catch (error) {
-            console.error('Failed to process scheduled email key', key.name, error);
+            logger.error('Failed to process scheduled email key', key.name, error);
           }
         }
       } while (cursor);
     } catch (error) {
-      console.error('Error processing scheduled emails:', error);
+      logger.error('Error processing scheduled emails:', error);
     }
   }
 
   private async processExpiredSubscriptions() {
-    console.log('[SCHEDULED] Checking for expired subscriptions...');
+    logger.info('[SCHEDULED] Checking for expired subscriptions...');
     const { db, conn } = createDb(this.env.HYPERDRIVE.connectionString);
     const allAccounts = await db.query.connection.findMany({
       where: (fields, { isNotNull, and }) =>
         and(isNotNull(fields.accessToken), isNotNull(fields.refreshToken)),
     });
     await conn.end();
-    console.log('[SCHEDULED] allAccounts', allAccounts.length);
+    logger.info('[SCHEDULED] allAccounts', allAccounts.length);
     const now = new Date();
     const fiveDaysAgo = new Date(now.getTime() - 5 * 24 * 60 * 60 * 1000);
 
@@ -269,7 +283,7 @@ export default class Entry extends WorkerEntrypoint<ZeroEnv> {
           unsnoozeMap[connectionId].threadIds.push(threadId);
           unsnoozeMap[connectionId].keyNames.push(key.name);
         } catch (error) {
-          console.error('Failed to prepare unsnooze for key', key.name, error);
+          logger.error('Failed to prepare unsnooze for key', key.name, error);
         }
       }
     } while (cursor);
@@ -280,7 +294,7 @@ export default class Entry extends WorkerEntrypoint<ZeroEnv> {
     //       const { stub: agent } = await getZeroAgent(connectionId, this.ctx);
     //       await agent.queue('unsnoozeThreadsHandler', { connectionId, threadIds, keyNames });
     //     } catch (error) {
-    //       console.error('Failed to enqueue unsnooze tasks', { connectionId, threadIds, error });
+    //       logger.error('Failed to enqueue unsnooze tasks', { connectionId, threadIds, error });
     //     }
     //   }),
     // );
@@ -292,7 +306,7 @@ export default class Entry extends WorkerEntrypoint<ZeroEnv> {
         if (lastSubscribed) {
           const subscriptionDate = new Date(lastSubscribed);
           if (subscriptionDate < fiveDaysAgo) {
-            console.log(`[SCHEDULED] Found expired Google subscription for connection: ${id}`);
+            logger.info(`[SCHEDULED] Found expired Google subscription for connection: ${id}`);
             expiredSubscriptions.push({ connectionId: id, providerId: providerId as EProviders });
           }
         } else {
@@ -303,7 +317,7 @@ export default class Entry extends WorkerEntrypoint<ZeroEnv> {
 
     // Send expired subscriptions to queue for renewal
     if (expiredSubscriptions.length > 0) {
-      console.log(
+      logger.info(
         `[SCHEDULED] Sending ${expiredSubscriptions.length} expired subscriptions to renewal queue`,
       );
       await Promise.all(
@@ -313,7 +327,7 @@ export default class Entry extends WorkerEntrypoint<ZeroEnv> {
       );
     }
 
-    console.log(
+    logger.info(
       `[SCHEDULED] Processed ${allAccounts.keys.length} accounts, found ${expiredSubscriptions.length} expired subscriptions`,
     );
   }

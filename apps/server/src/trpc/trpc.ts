@@ -1,3 +1,4 @@
+import { logger } from '../lib/logger';
 import { getActiveConnection, getZeroDB } from '../lib/server-utils';
 import { Ratelimit, type RatelimitConfig } from '@upstash/ratelimit';
 import type { HonoContext, HonoVariables } from '../ctx';
@@ -163,7 +164,7 @@ export const createRateLimiterMiddleware = (config: {
     ctx.c.res.headers.append('X-RateLimit-Reset', reset.toString());
 
     if (!success) {
-      console.log(`Rate limit exceeded for IP ${finalIp}.`);
+      logger.info(`Rate limit exceeded for IP ${finalIp}.`);
       throw new TRPCError({
         code: 'TOO_MANY_REQUESTS',
         message: 'Too many requests. Please try again later.',

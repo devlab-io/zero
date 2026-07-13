@@ -1,3 +1,4 @@
+import { logger } from './logger';
 import { client, v2 } from '@datadog/datadog-api-client';
 import type { TRPCCallLog } from '../types/logging';
 import type { ZeroEnv } from '../env';
@@ -198,7 +199,7 @@ export class DatadogService {
             await this.apiInstance.submitLog({ body: [logEntry] });
 
         } catch (error) {
-            console.error('❌ Failed to log TRPC call to Datadog:', error);
+            logger.error('❌ Failed to log TRPC call to Datadog:', error);
         }
     }
 } 

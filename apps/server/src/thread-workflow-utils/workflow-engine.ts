@@ -14,6 +14,7 @@
  * Reuse or distribution of this file requires a license from Zero Email Inc.
  */
 
+import { logger } from '../lib/logger';
 import type { IGetThreadResponse } from '../lib/driver/types';
 import { workflowFunctions } from './workflow-functions';
 import { shouldGenerateDraft } from './index';
@@ -82,7 +83,7 @@ export class WorkflowEngine {
     try {
       for (const step of workflow.steps) {
         if (!step.enabled) {
-          console.log(`[WORKFLOW_ENGINE] Skipping disabled step: ${step.name}`);
+          logger.info(`[WORKFLOW_ENGINE] Skipping disabled step: ${step.name}`);
           continue;
         }
 
@@ -98,21 +99,21 @@ export class WorkflowEngine {
         try {
           const shouldExecute = step.condition ? await step.condition({ ...context, results }) : true;
           if (!shouldExecute) {
-            console.log(`[WORKFLOW_ENGINE] Condition not met for step: ${step.name}`);
+            logger.info(`[WORKFLOW_ENGINE] Condition not met for step: ${step.name}`);
             stepSpan.setAttributes({ 'step.condition_met': false });
             stepSpan.end();
             break;
           }
 
           stepSpan.setAttributes({ 'step.condition_met': true });
-          console.log(`[WORKFLOW_ENGINE] Executing step: ${step.name}`);
+          logger.info(`[WORKFLOW_ENGINE] Executing step: ${step.name}`);
           const result = await step.action({ ...context, results });
           results.set(step.id, result);
-          console.log(`[WORKFLOW_ENGINE] Completed step: ${step.name}`, result);
+          logger.info(`[WORKFLOW_ENGINE] Completed step: ${step.name}`, result);
           stepSpan.setAttributes({ 'step.success': true });
         } catch (error) {
           const errorObj = error instanceof Error ? error : new Error(String(error));
-          console.error(`[WORKFLOW_ENGINE] Error in step ${step.name}:`, errorObj);
+          logger.error(`[WORKFLOW_ENGINE] Error in step ${step.name}:`, errorObj);
           
           stepSpan.recordException(errorObj);
           stepSpan.setStatus({ code: 2, message: errorObj.message });
@@ -147,7 +148,7 @@ export class WorkflowEngine {
     const allErrors = new Map<string, Error>();
 
     for (const workflowName of workflowNames) {
-      console.log(`[WORKFLOW_ENGINE] Executing workflow in chain: ${workflowName}`);
+      logger.info(`[WORKFLOW_ENGINE] Executing workflow in chain: ${workflowName}`);
       try {
         const { results, errors } = await this.executeWorkflow(
           workflowName,
@@ -165,12 +166,12 @@ export class WorkflowEngine {
           allErrors.set(key, error);
         }
 
-        console.log(
+        logger.info(
           `[WORKFLOW_ENGINE] Completed workflow: ${workflowName}, total results: ${sharedResults.size}`,
         );
       } catch (error) {
         const errorObj = error instanceof Error ? error : new Error(String(error));
-        console.error(`[WORKFLOW_ENGINE] Failed to execute workflow ${workflowName}:`, errorObj);
+        logger.error(`[WORKFLOW_ENGINE] Failed to execute workflow ${workflowName}:`, errorObj);
         allErrors.set(workflowName, errorObj);
       }
     }
@@ -182,7 +183,7 @@ export class WorkflowEngine {
     if (context.results) {
       context.results.clear();
     }
-    console.log('[WORKFLOW_ENGINE] Context cleared');
+    logger.info('[WORKFLOW_ENGINE] Context cleared');
   }
 }
 
@@ -201,7 +202,7 @@ export const createDefaultWorkflows = (): WorkflowEngine => {
         errorHandling: 'fail',
         condition: async (context) => {
           const shouldGenerate = await shouldGenerateDraft(context.thread, context.foundConnection);
-          console.log('[WORKFLOW_ENGINE] Draft eligibility check', {
+          logger.info('[WORKFLOW_ENGINE] Draft eligibility check', {
             threadId: context.threadId,
             connectionId: context.connectionId,
             shouldGenerate,

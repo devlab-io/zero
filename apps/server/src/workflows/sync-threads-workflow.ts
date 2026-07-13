@@ -13,6 +13,7 @@
  *
  * Reuse or distribution of this file requires a license from Zero Email Inc.
  */
+import { logger } from '../lib/logger';
 import { getZeroAgent, connectionToDriver } from '../lib/server-utils';
 import { WorkflowEntrypoint, WorkflowStep } from 'cloudflare:workers';
 import type { WorkflowEvent } from 'cloudflare:workers';
@@ -57,7 +58,7 @@ export class SyncThreadsWorkflow extends WorkflowEntrypoint<ZeroEnv, SyncThreads
   ): Promise<SyncThreadsResult> {
     const { connectionId, folder } = event.payload;
 
-    console.info(
+    logger.info(
       `[SyncThreadsWorkflow] Starting sync for connection ${connectionId}, folder ${folder}`,
     );
 
@@ -100,13 +101,13 @@ export class SyncThreadsWorkflow extends WorkflowEntrypoint<ZeroEnv, SyncThreads
     const driver = connectionToDriver(foundConnection);
 
     if (connectionId.includes('aggregate')) {
-      console.info(`[SyncThreadsWorkflow] Skipping sync for aggregate instance - folder ${folder}`);
+      logger.info(`[SyncThreadsWorkflow] Skipping sync for aggregate instance - folder ${folder}`);
       result.message = 'Skipped aggregate instance';
       return result;
     }
 
     if (!driver) {
-      console.warn(`[SyncThreadsWorkflow] No driver available for folder ${folder}`);
+      logger.warn(`[SyncThreadsWorkflow] No driver available for folder ${folder}`);
       result.message = 'No driver available';
       return result;
     }
@@ -114,12 +115,12 @@ export class SyncThreadsWorkflow extends WorkflowEntrypoint<ZeroEnv, SyncThreads
     const { pageNumber = 1, pageToken, maxCount: paramMaxCount } = event.payload;
     const effectiveMaxCount = paramMaxCount || maxCount;
 
-    console.info(`[SyncThreadsWorkflow] Running in single-page mode for page ${pageNumber}`);
+    logger.info(`[SyncThreadsWorkflow] Running in single-page mode for page ${pageNumber}`);
 
     const pageResult = await step.do(
       `process-single-page-${pageNumber}-${folder}-${connectionId}`,
       async () => {
-        console.info(
+        logger.info(
           `[SyncThreadsWorkflow] Processing single page ${pageNumber} for folder ${folder}`,
         );
 
@@ -162,15 +163,15 @@ export class SyncThreadsWorkflow extends WorkflowEntrypoint<ZeroEnv, SyncThreads
 
               pageProcessingResult.processedCount++;
               pageProcessingResult.successCount++;
-              console.log(`[SyncThreadsWorkflow] Successfully synced thread ${thread.id}`);
+              logger.info(`[SyncThreadsWorkflow] Successfully synced thread ${thread.id}`);
             } else {
-              console.info(
+              logger.info(
                 `[SyncThreadsWorkflow] Skipping thread ${thread.id} - no latest message`,
               );
               pageProcessingResult.failureCount++;
             }
           } catch (error) {
-            console.error(`[SyncThreadsWorkflow] Failed to sync thread ${thread.id}:`, error);
+            logger.error(`[SyncThreadsWorkflow] Failed to sync thread ${thread.id}:`, error);
             pageProcessingResult.failureCount++;
           }
         };
@@ -182,7 +183,7 @@ export class SyncThreadsWorkflow extends WorkflowEntrypoint<ZeroEnv, SyncThreads
         // await sendDoState(connectionId);
         await agent.reloadFolder(folder);
 
-        console.log(`[SyncThreadsWorkflow] Completed single page ${pageNumber}`);
+        logger.info(`[SyncThreadsWorkflow] Completed single page ${pageNumber}`);
         return pageProcessingResult;
       },
     );
@@ -195,7 +196,7 @@ export class SyncThreadsWorkflow extends WorkflowEntrypoint<ZeroEnv, SyncThreads
     result.failedSyncs = typedPageResult.failureCount;
     result.nextPageToken = typedPageResult.nextPageToken;
 
-    console.info(
+    logger.info(
       `[SyncThreadsWorkflow] Single-page workflow completed for ${connectionId}/${folder}:`,
       result,
     );

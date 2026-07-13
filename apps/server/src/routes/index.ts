@@ -4,6 +4,7 @@
 // /public sub-routers + tRPC at /api/trpc) and the root `app` (CORS, OAuth
 // discovery, MCP/SSE mounts, agents websocket middleware, health, Sentry
 // tunnel and provider webhooks). Frontier rationale: docs/adr/0001-routing-hono-vs-trpc.md.
+import { logger } from '../lib/logger';
 import { oAuthDiscoveryMetadata } from 'better-auth/plugins';
 import { contextStorage } from 'hono/context-storage';
 import { getZeroDB, verifyToken } from '../lib/server-utils';
@@ -181,13 +182,13 @@ export const api = new Hono<HonoContext>()
       },
       allowMethodOverride: true,
       onError: (opts) => {
-        console.error('Error in TRPC handler:', opts.error);
+        logger.error('Error in TRPC handler:', opts.error);
       },
     }),
   )
   .onError(async (err, c) => {
     if (err instanceof Response) return err;
-    console.error('Error in Hono handler:', err);
+    logger.error('Error in Hono handler:', err);
     return c.json(
       {
         error: 'Internal Server Error',
@@ -207,6 +208,7 @@ export const app = new Hono<HonoContext>()
         try {
           hostname = new URL(origin).hostname;
         } catch {
+          logger.debug('CORS origin parse failed', { origin });
           return null;
         }
         const cookieDomain = env.COOKIE_DOMAIN;
@@ -230,13 +232,13 @@ export const app = new Hono<HonoContext>()
     async (request, env, ctx) => {
       const authBearer = request.headers.get('Authorization');
       if (!authBearer) {
-        console.log('No auth provided');
+        logger.info('No auth provided');
         return new Response('Unauthorized', { status: 401 });
       }
       const auth = createAuth();
       const session = await auth.api.getMcpSession({ headers: request.headers });
       if (!session) {
-        console.log('Invalid auth provided', Array.from(request.headers.entries()));
+        logger.info('Invalid auth provided', Array.from(request.headers.entries()));
         return new Response('Unauthorized', { status: 401 });
       }
       ctx.props = {
@@ -267,7 +269,7 @@ export const app = new Hono<HonoContext>()
       const auth = createAuth();
       const session = await auth.api.getMcpSession({ headers: request.headers });
       if (!session) {
-        console.log('Invalid auth provided', Array.from(request.headers.entries()));
+        logger.info('Invalid auth provided', Array.from(request.headers.entries()));
         return new Response('Unauthorized', { status: 401 });
       }
       ctx.props = {
@@ -317,7 +319,7 @@ export const app = new Hono<HonoContext>()
 
       return c.json({}, { status: 200 });
     } catch (e) {
-      console.error('error tunneling to sentry', e);
+      logger.error('error tunneling to sentry', e);
       return c.json({ error: 'error tunneling to sentry' }, { status: 500 });
     }
   })
@@ -352,13 +354,13 @@ export const app = new Hono<HonoContext>()
         });
 
         if (!subHeader) {
-          console.log('[GOOGLE] no subscription header', body);
+          logger.info('[GOOGLE] no subscription header', body);
           span.setAttributes({ 'error.type': 'missing_subscription_header' });
           return c.json({}, { status: 200 });
         }
         const isValid = await verifyToken(c.req.header('Authorization')!.split(' ')[1]);
         if (!isValid) {
-          console.log('[GOOGLE] invalid request', body);
+          logger.info('[GOOGLE] invalid request', body);
           span.setAttributes({ 'auth.status': 'invalid' });
           return c.json({}, { status: 200 });
         }
@@ -373,7 +375,7 @@ export const app = new Hono<HonoContext>()
           });
           span.setAttributes({ 'queue.message_sent': true });
         } catch (error) {
-          console.error('Error sending to thread queue', error, {
+          logger.error('Error sending to thread queue', error, {
             providerId,
             historyId: body.historyId,
             subscriptionName: subHeader,

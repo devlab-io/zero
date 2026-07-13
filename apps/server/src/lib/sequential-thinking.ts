@@ -1,3 +1,4 @@
+import { logger } from './logger';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { env } from 'cloudflare:workers';
 import { McpAgent } from 'agents/mcp';
@@ -118,7 +119,7 @@ export class SequentialThinkingProcessor {
 
       if (!this.disableThoughtLogging) {
         const formattedThought = this.formatThought(validatedInput);
-        console.log(formattedThought); // Use console.log instead of console.error
+        logger.info(formattedThought);
       }
 
       return {
