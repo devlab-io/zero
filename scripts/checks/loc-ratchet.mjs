@@ -38,7 +38,9 @@ const BUDGET = {
   'apps/server/src/lib/driver/microsoft.ts': 1294, // ADR: driver Microsoft
   // main.ts (1261 -> 333, montages — issue #24 mergée) : entrée prunée.
   'apps/mail/components/create/email-composer.tsx': 1170,
-  'apps/mail/components/mail/mail-list.tsx': 1111,
+  // mail-list.tsx (1111 -> 247, découpe présentation/data-layer/sélection — issue #26) :
+  // entrée prunée. Modules dérivés (mail-list-thread ≤451, -draft, -labels, -actions,
+  // use-mail-list-data, use-mail-selection) tous < THRESHOLD, aucun budget requis.
   'apps/mail/components/mail/thread-display.tsx': 1062,
   // contributors.tsx (1040 -> 756, données+fetch extraits vers contributors-data.ts —
   // issue #41 mergée) : entrée prunée.
