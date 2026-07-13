@@ -62,3 +62,22 @@ L'extension immédiate se limite donc à : mail.tsx, app/(routes)/mail/[folder]/
 entry.client.tsx, components/icons/animated/_, components/theme/_, nav-user.tsx —
 imports lazy / éviction motion uniquement. La dé-ancre motion peut passer par
 icons/theme/nav-user sans toucher app-sidebar lui-même.
+
+## Correctif collision 2 (superviseur, même date)
+
+AUDIT git status #38 : `components/ui/nav-user.tsx` est AUSSI modifié en vol par #38 —
+il REJOINT la clause EXCEPTION COLLISION : interdit à #44 avant merge #38 + rebase,
+puis delta borné re-gaté (avec create-email.tsx). EN REVANCHE `components/ui/app-sidebar.tsx`
+n'est PAS dans le batch #38 (fichier #34, interdit à #38) : il REPASSE en extension
+immédiate. Clarification de chemins (le rendu markdown avait avalé les astérisques) :
+« icons/animated » et « theme » désignent les DOSSIERS COMPLETS `components/icons/animated/`
+et `components/theme/`.
+
+État consolidé du may-touch étendu #44 :
+
+- IMMÉDIAT : `components/ui/app-sidebar.tsx`, `components/mail/mail.tsx`,
+  `app/(routes)/mail/[folder]/page.tsx`, `app/entry.client.tsx`,
+  `components/icons/animated/` (dossier), `components/theme/` (dossier) —
+  imports lazy / éviction motion uniquement.
+- POST-#38 (merge + rebase + delta borné re-gaté) : `components/create/create-email.tsx`,
+  `components/ui/nav-user.tsx`.
