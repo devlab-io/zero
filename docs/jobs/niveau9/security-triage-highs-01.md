@@ -49,12 +49,62 @@ Ce qui MANQUE (la raison d'être du process violé deux fois) : mapping advisory
 
 ## DÛ PAR -03 (strictement borné — ne PAS réécrire ce qui précède)
 
-- [ ] PHASE 0 : `pnpm audit --prod` du jour verbatim (RC natif), plan.
-- [ ] `docs/research/niveau9/audit-triage.md` : une entrée par advisory high+moderate
-      (package, chemin pnpm why, reachability, mitigation, owner) ; lows en tableau ;
-      inclure l'entrée js-cookie@2.2.1 (ligne non couverte par l'override @3).
-- [ ] Mapping advisory→override pour les 11 overrides du snapshot (justification une à une).
-- [ ] Preuves post-bump : install, séquence types, tsc 0/0, pnpm test 121, tests
-      auth/scopes, build mail, dry-run ×2 — RC natifs non masqués.
-- [ ] Gitleaks HISTORIQUE branche (mode git), log conservé, RC natif.
-- [ ] MIRROR: ORCHESTRATOR + STATUS final.
+Rempli par le builder -03 (exécutif). **Intégrité snapshot vérifiée au préalable** :
+HEAD `79a41839`, branche `job/niveau9/security-triage-highs-01`, exactement 4 fichiers
+modifiés (apps/mail/package.json, apps/server/package.json, package.json, pnpm-lock.yaml),
+`git diff | shasum -a 256` = `93c31791958ed690…1d973c2d5a` — **identique** au snapshot -02
+validé. Aucun des 4 fichiers touché ; **aucun override ajouté/retiré/modifié**.
+Toolchain : node v22.22.3, pnpm 10.15.0.
+
+- [x] **PHASE 0 — `pnpm audit --prod`** (RC natif). Install préalable
+      `pnpm install --frozen-lockfile --ignore-scripts` → **RC=0** (lockfile modifié
+      cohérent, pas de fallback non-frozen requis). `pnpm audit --prod` → **RC=1**
+      (126 chemins = 122 advisories dédup : **48 high / 61 moderate / 13 low**).
+      Logs : `.architect/tmp/{install-frozen,audit-prod}.log`, JSON `audit-prod.json`.
+      Plan exécuté : mesure AVANT (worktree jetable détaché HEAD, sans les ajouts) →
+      diff mesuré → triage reachability → preuves → gitleaks.
+- [x] **`docs/research/niveau9/audit-triage.md`** créé : modèle de surface déployée,
+      synthèse reachability par package, **une entrée par advisory high+moderate**
+      (package, chemin `pnpm why`, reachability Workers avec fichier cité, mitigation,
+      owner), lows en tableau compact, **entrée dédiée js-cookie@2.2.1** (§4 : chemin
+      `apps/mail > react-use > js-cookie@2.2.1`, GHSA-qjx8-664m-686j, NOT-REACHABLE car
+      `react-use` importé uniquement en ligne commentée, owner mail).
+- [x] **Mapping advisory→override (11 overrides)** — preuve **mesurée AVANT→APRÈS**
+      (`.architect/tmp/diff-before-after.txt`) : **21 advisories fermés (15 high,
+      6 moderate), 0 régression**. Détail une-à-une en §5 du fichier de recherche.
+      **9 overrides ferment effectivement** ; **2 patchs défensifs ne ferment aucun
+      advisory mesurable → SIGNALÉS, non retirés** (décision propriétaire) :
+      **jws@4 4.0.1** (0 advisory ligne 4.x) et **js-cookie@3 3.0.8** (la CVE js-cookie
+      subsiste sur la ligne 2.2.1 hors scope `@3`). Le plus notable des fermés :
+      **jws@3 3.2.3 → GHSA-869p-cjfg-cm3x** (vérification HMAC défaillante, sécurité auth),
+      ligne 3.x que le -01 avait manquée et que le -02 a couverte.
+- [x] **Preuves post-snapshot** (RC natifs bruts, séquentiels) : - install `--frozen-lockfile --ignore-scripts` → **RC=0** - `pnpm --filter @zero/server types` (wrangler types --env local) → **RC=0** - `pnpm --filter @zero/mail types` (wrangler types) → **RC=0** - `pnpm --filter @zero/mail exec react-router typegen` → **RC=0** - `tsc --noEmit` server → **RC=0, 0 erreur** · mail → **RC=0, 0 erreur** (**0/0**) - `pnpm test` (turbo→vitest) → **RC=0**, **121 tests** (mail 51/51 + server 70/70) - **scopes** : `apps/server/src/lib/google-scopes.ts` n'accorde que
+      `gmail.modify`, `gmail.compose`, `userinfo.profile`, `userinfo.email` ;
+      `mail.google.com` **absent des scopes** (unique occurrence = commentaire ligne 5
+      documentant son exclusion volontaire). Pas de fichier de test scopes dédié ; la
+      suite (121) inclut `mail-sanitize` et les drivers gmail, tous verts. - `pnpm --filter @zero/mail build` (react-router build) → **RC=0** (built 11.30s) - dry-run wrangler **server** (`--env local`, `--outdir …/dryrun-server`) → **RC=0** - dry-run wrangler **mail** (`--outdir …/dryrun-mail`) → **RC=0** - **better-auth** résolu = **1.6.23** (dans le gel 1.6.x, via `catalog:`), intact.
+      Logs : `.architect/tmp/p{1..9}-*.log`.
+- [x] **Gitleaks HISTORIQUE** (mode git). ⚠ La commande **verbatim** échoue en faux
+      négatif dans ce worktree : le `.git` est un fichier pointant hors du mount docker
+      (`gitdir: …/.git/worktrees/…`) → _« not a git repository »_, **0 commit scanné**
+      (log `gitleaks-history-verbatim.log`, RC=0 trompeur). **Adaptation** (montage du
+      `.git` réel à son chemin absolu) → scan réel de **3376 commits**, **RC=1**,
+      **6 findings** (logs `gitleaks-history-A.log`, `gitleaks-findings.json`).
+      Qualification (redigés) : **aucun** ne provient du snapshot ni des commits
+      security-triage. 3 partagés avec `staging` (baseline amont Zero 2025, auteurs
+      Adam/Aj Wazzan : `CLOUDFLARE_API_TOKEN` env.ts/wrangler.jsonc, `perplexity` — valeurs
+      **vidées dans le HEAD courant**) ; 3 branch-uniques faux positifs (Thomas 2026-07-13 :
+      `freeze_sha:` = SHA git ×2 pris pour clé générique ; `.dev.vars.example` = placeholders
+      **tous vides**). Working tree courant : **propre**.
+- [x] **MIRROR: ORCHESTRATOR** · **STATUS: COMPLETE_WITH_CONCERNS**.
+
+### Concerns (surface pour arbitrage — hors action -03)
+
+1. **Gitleaks historique non vide** : 6 findings (RC=1), tous qualifiés bénins/hérités/faux
+   positifs et hors périmètre de ce job. La commande verbatim du mandat est inopérante en
+   worktree (montage docker) et a dû être adaptée — signalé pour correction du checkrun.
+2. **Advisories runtime résiduels REACHABLE non fermés par le snapshot** (owners assignés,
+   bumps hors périmètre -03) : **dompurify** (mail, sanitisation HTML email — prioritaire),
+   **effect** (server, contexte AsyncLocalStorage/RPC), **agents** (server/mail),
+   - traîne REACHABLE-LOW. **defu** (high) reste ouvert car gelé better-auth 1.6.x
+     (override retiré à dessein par le -02). Aucun n'autorise un bump par -03.
