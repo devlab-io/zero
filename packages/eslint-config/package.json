@@ -6,7 +6,7 @@
     ".": "./config.ts"
   },
   "devDependencies": {
-    "eslint": "^9.27.0",
+    "eslint": "catalog:",
     "eslint-plugin-import": "^2.31.0",
     "eslint-plugin-react": "^7.37.5",
     "eslint-plugin-react-hooks": "6.0.0-rc.1",
