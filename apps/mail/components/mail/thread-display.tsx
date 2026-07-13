@@ -12,6 +12,8 @@ import {
   Trash,
   X,
 } from '../icons/icons';
+// #32 label/move picker — self-contained, driven by the `picker` query-state (l/v shortcuts).
+import { LabelMovePicker } from './label-move-picker';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -521,6 +523,7 @@ export function ThreadDisplay() {
                     <ReplyCompose messageId={activeReplyId} />
                   </div>
                 )}
+              <LabelMovePicker />
             </div>
           </>
         )}

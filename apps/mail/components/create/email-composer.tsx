@@ -39,6 +39,12 @@ import {
   type EmailComposerProps,
   type ThreadContent,
 } from './email-composer.types';
+// Issue #32 — send-and-archive (mod+shift+Enter): the editor has no Mod-Shift-Enter
+// keymap, so it is bound here with useHotkeys and archives the open thread after send.
+import { useOptimisticActions } from '@/hooks/use-optimistic-actions';
+import { computeArchiveAfterSend } from './send-and-archive';
+import { useHotkeys } from 'react-hotkeys-hook';
+import { useParams } from 'react-router';
 
 const shortcodeRegex = /:([a-zA-Z0-9_+-]+):/g;
 
@@ -68,6 +74,10 @@ export function EmailComposer({
   const [threadId] = useQueryState('threadId');
   const [isComposeOpen, setIsComposeOpen] = useQueryState('isComposeOpen');
   const { data: emailData } = useThread(threadId ?? null);
+  const params = useParams<{ folder: string }>();
+  const { optimisticMoveThreadsTo } = useOptimisticActions();
+  // Set by the send-and-archive handler; consumed once in proceedWithSend on success.
+  const archiveAfterSendRef = useRef(false);
   const [draftId, setDraftId] = useQueryState('draftId');
   const [aiGeneratedMessage, setAiGeneratedMessage] = useState<string | null>(null);
   const [aiIsLoading, setAiIsLoading] = useState(false);
@@ -279,6 +289,11 @@ export function EmailComposer({
     try {
       if (isLoading || isSavingDraft) return;
 
+      // Consume the send-and-archive intent once, before any early return, so a plain
+      // send never inherits a stale flag.
+      const shouldArchiveAfterSend = archiveAfterSendRef.current;
+      archiveAfterSendRef.current = false;
+
       const values = getValues();
 
       // Validate recipient field
@@ -311,6 +326,14 @@ export function EmailComposer({
       editor.commands.clearContent(true);
       form.reset();
       setIsComposeOpen(null);
+
+      // Send-and-archive (mod+shift+Enter): the send succeeded — archive the open thread.
+      if (shouldArchiveAfterSend) {
+        const target = computeArchiveAfterSend({ threadId, folder: params.folder });
+        if (target) {
+          optimisticMoveThreadsTo(target.threadIds, target.currentFolder, target.destination);
+        }
+      }
     } catch (error) {
       console.error('Error sending email:', error);
       toast.error('Failed to send email');
@@ -334,6 +357,18 @@ export function EmailComposer({
 
     await proceedWithSend();
   };
+
+  // mod+shift+Enter — send, then archive the open thread ("send and done"). The editor
+  // owns Mod-Enter (plain send); this chord has no editor keymap so it is bound here.
+  useHotkeys(
+    'mod+shift+enter',
+    () => {
+      archiveAfterSendRef.current = true;
+      void handleSend();
+    },
+    { enableOnContentEditable: true, enableOnFormTags: true, preventDefault: true },
+    [handleSend],
+  );
 
   const threadContent: ThreadContent = useMemo(() => buildThreadContent(emailData), [emailData]);
 

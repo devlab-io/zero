@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { deriveReplyRecipients } from './reply-recipients';
+import { deriveReplyRecipients, deriveReplySubject } from './reply-recipients';
 import type { Sender } from '@/types';
 
 const s = (email: string, name?: string): Sender => ({ email, name });
@@ -111,5 +111,49 @@ describe('deriveReplyRecipients', () => {
       });
       expect(result).toEqual({ to: [], cc: [] });
     });
+  });
+});
+
+describe('deriveReplySubject', () => {
+  it('prefixes Re: for reply', () => {
+    expect(deriveReplySubject({ mode: 'reply', subject: 'Lunch on Friday' })).toBe(
+      'Re: Lunch on Friday',
+    );
+  });
+
+  it('prefixes Re: for reply-all', () => {
+    expect(deriveReplySubject({ mode: 'replyAll', subject: 'Lunch on Friday' })).toBe(
+      'Re: Lunch on Friday',
+    );
+  });
+
+  it('prefixes Fwd: for forward', () => {
+    expect(deriveReplySubject({ mode: 'forward', subject: 'Lunch on Friday' })).toBe(
+      'Fwd: Lunch on Friday',
+    );
+  });
+
+  it('is idempotent when the subject is already an Re: prefix (any case)', () => {
+    expect(deriveReplySubject({ mode: 'reply', subject: 'RE: Lunch on Friday' })).toBe(
+      'RE: Lunch on Friday',
+    );
+    expect(deriveReplySubject({ mode: 'replyAll', subject: 're: Lunch' })).toBe('re: Lunch');
+  });
+
+  it('keeps an existing Fwd: prefix rather than stacking a Re:', () => {
+    expect(deriveReplySubject({ mode: 'reply', subject: 'Fwd: Deck' })).toBe('Fwd: Deck');
+  });
+
+  it('trims and prefixes an empty or missing subject to the bare prefix', () => {
+    expect(deriveReplySubject({ mode: 'reply', subject: '' })).toBe('Re:');
+    expect(deriveReplySubject({ mode: 'reply', subject: null })).toBe('Re:');
+    expect(deriveReplySubject({ mode: 'reply', subject: undefined })).toBe('Re:');
+    expect(deriveReplySubject({ mode: 'forward', subject: '   ' })).toBe('Fwd:');
+  });
+
+  it('leaves the subject untouched for an unknown mode', () => {
+    expect(deriveReplySubject({ mode: 'draft', subject: 'Lunch on Friday' })).toBe(
+      'Lunch on Friday',
+    );
   });
 });

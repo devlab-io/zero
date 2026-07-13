@@ -10,11 +10,12 @@ import { useSettings } from '@/hooks/use-settings';
 import { useThread } from '@/hooks/use-threads';
 import { useSession } from '@/lib/auth-client';
 import { serializeFiles } from '@/lib/schemas';
+import { deriveReplyRecipients, deriveReplySubject } from './reply-recipients';
 import { useDraft } from '@/hooks/use-drafts';
 import { m } from '@/paraglide/messages';
 import type { Sender } from '@/types';
 import { useQueryState } from 'nuqs';
-import { lazy, Suspense, useEffect } from 'react';
+import { lazy, Suspense, useEffect, useMemo } from 'react';
 import posthog from 'posthog-js';
 import { toast } from 'sonner';
 
@@ -53,11 +54,23 @@ export default function ReplyCompose({ messageId }: ReplyComposeProps) {
   const replyToMessage =
     (messageId && emailData?.messages.find((msg) => msg.id === messageId)) || emailData?.latest;
 
-  // Reply / reply-all recipient derivation now lives in a pure, tested seam:
-  // `deriveReplyRecipients` (./reply-recipients). It is intentionally NOT wired
-  // here — the composer is still initialised from the draft only (see initialTo
-  // below), so behaviour is unchanged. Issue #32 (keyboard-parity) wires that
-  // seam into initialTo/initialCc to fix the empty «To» field.
+  // Issue #32 (keyboard-parity): the reply / reply-all recipient + subject
+  // defaults are derived from the pure, tested seam (./reply-recipients) and
+  // wired into initialTo/initialCc/initialSubject below. This is the fix for the
+  // empty «To» field: reply and reply-all now open pre-populated. A concrete
+  // draft (a resumed compose) still wins so we never clobber a saved draft.
+  const replyDefaults = useMemo(() => {
+    if (!replyToMessage || !mode || !activeConnection?.email) {
+      return { to: [] as string[], cc: [] as string[], subject: '' };
+    }
+    const { to, cc } = deriveReplyRecipients({
+      mode,
+      message: replyToMessage,
+      userEmail: activeConnection.email,
+    });
+    const subject = deriveReplySubject({ mode, subject: replyToMessage.subject });
+    return { to, cc, subject };
+  }, [activeConnection?.email, mode, replyToMessage]);
 
   const handleSendEmail = async (data: {
     to: string[];
@@ -234,10 +247,10 @@ export default function ReplyCompose({ messageId }: ReplyComposeProps) {
           setActiveReplyId(null);
         }}
         initialMessage={draft?.content ?? latestDraft?.decodedBody}
-        initialTo={ensureEmailArray(draft?.to)}
-        initialCc={ensureEmailArray(draft?.cc)}
+        initialTo={draft ? ensureEmailArray(draft.to) : replyDefaults.to}
+        initialCc={draft ? ensureEmailArray(draft.cc) : replyDefaults.cc}
         initialBcc={ensureEmailArray(draft?.bcc)}
-        initialSubject={draft?.subject}
+        initialSubject={draft?.subject ?? replyDefaults.subject}
         autofocus={true}
         settingsLoading={settingsLoading}
         replyingTo={replyToMessage?.sender.email}
