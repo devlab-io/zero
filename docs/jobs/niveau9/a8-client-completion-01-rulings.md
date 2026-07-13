@@ -194,3 +194,13 @@ preuve code » est REFUSÉE pour Pricing et CreateEmail — button+onClick prouv
 capacité native, PAS le chemin lazy réel. Exigence : test RENDU RÉEL post-build —
 clic souris PUIS Enter/Space observés, query truthy, fallback retardé visible,
 dialog final rendu. Même standard pour le composeur.
+
+## CORRECTIF D'ATTRIBUTION (orchestrateur, 2026-07-13) — sur le ruling « option A » ci-dessus
+
+Le ruling précédent (commit 3fdd3664) porte la mention « décision propriétaire » :
+c'est FACTUELLEMENT FAUX. Le propriétaire n'a pas tranché A dans ce tour ; A était
+une RECOMMANDATION de la supervision. Attribution corrigée : **option A palette-deep
+= DÉCISION ORCHESTRATEUR, rendue sur recommandation de supervision** — aucune
+attribution propriétaire. Le contenu du ruling (périmètre, conditions strictes,
+interdictions onboarding/nav-user, preuves rendu réel) reste inchangé et opposable.
+Historique append-only préservé : ce correctif s'ajoute, rien n'est réécrit.
