@@ -25,7 +25,7 @@ import useComposeEditor from '@/hooks/use-compose-editor';
 import { CurvedArrow, Sparkles, X } from '../icons/icons';
 import { getGitHubEmojis } from '@/lib/emoji-data';
 import { AnimatePresence, motion } from 'motion/react';
-import { zodResolver } from '@hookform/resolvers/zod';
+import { zodResolver } from '@/lib/zod-resolver';
 
 import { useTRPC } from '@/providers/query-provider';
 import { useMutation } from '@tanstack/react-query';

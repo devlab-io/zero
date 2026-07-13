@@ -21,9 +21,9 @@ const RE = ':\\s*any\\b|as any|<any>|\\bany\\[\\]';
 const EXCLUDES = "--include='*.ts' --include='*.tsx' --exclude='*.d.ts' --exclude='*.test.*'";
 
 // Measured 2026-07-12 with the frozen command.
-// server tightened to the palier-9 target (<=15) by issue #21 (tsc-zero-server); the
-// real post-job count is 14. mail/total remain at the niveau9 baseline (owned by #20).
-const BUDGET = { mail: 79, server: 15, total: 170 };
+// union orchestrateur (ruling 2026-07-13) : mail resserré par #20 (79->23),
+// server par #21 (91->15) ; total = somme des cibles. Réel post-jobs : 23 + 14.
+const BUDGET = { mail: 23, server: 15, total: 38 };
 
 function countAny(dirs) {
   const cmd = `grep -rE "${RE}" ${dirs} ${EXCLUDES} | wc -l`;

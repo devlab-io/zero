@@ -227,10 +227,13 @@ export function CommandPalette({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (threads && Array.isArray(threads)) {
       const emails = new Set<string>();
+      // NOTE: useThreads yields a minimal thread shape ({ id, historyId }); the
+      // `from`/`to` reads below resolve to undefined at runtime (pre-existing —
+      // see job report "bugs réels"). Kept `any` to preserve that behaviour.
       threads.forEach((thread: any) => {
         if (thread?.from?.email) emails.add(thread.from.email);
         if (thread?.to && Array.isArray(thread.to)) {
-          thread.to.forEach((recipient: any) => {
+          thread.to.forEach((recipient: { email?: string } | null) => {
             if (recipient?.email) emails.add(recipient.email);
           });
         }
@@ -974,7 +977,13 @@ export function CommandPalette({ children }: { children: React.ReactNode }) {
 
           {quickSearchResults.length > 0 && (
             <CommandGroup heading="Quick Results">
-              {quickSearchResults.map((thread: any) => (
+              {quickSearchResults.map(
+                (thread: {
+                  id?: string;
+                  subject?: string;
+                  from?: { name?: string; email?: string } | null;
+                  snippet?: string;
+                }) => (
                 <CommandItem
                   key={thread.id || `thread-${Math.random()}`}
                   onSelect={() => {

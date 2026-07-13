@@ -597,15 +597,16 @@ export const withExponentialBackoff = async <T>(
   while (true) {
     try {
       return await operation();
-    } catch (error: any) {
+    } catch (error) {
       if (retries >= maxRetries) {
         throw error;
       }
 
+      const apiError = error as { code?: number; errors?: { reason?: string }[] };
       const isRateLimit =
-        error?.code === 429 ||
-        error?.errors?.[0]?.reason === 'rateLimitExceeded' ||
-        error?.errors?.[0]?.reason === 'userRateLimitExceeded';
+        apiError?.code === 429 ||
+        apiError?.errors?.[0]?.reason === 'rateLimitExceeded' ||
+        apiError?.errors?.[0]?.reason === 'userRateLimitExceeded';
 
       if (!isRateLimit) {
         throw error;

@@ -25,7 +25,7 @@ import { useState, useEffect, useMemo, memo } from 'react';
 import { userSettingsSchema } from '@zero/server/schemas';
 import { locales } from '@/project.inlang/settings.json';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { zodResolver } from '@hookform/resolvers/zod';
+import { zodResolver } from '@/lib/zod-resolver';
 import { useTRPC } from '@/providers/query-provider';
 import { getBrowserTimezone } from '@/lib/timezones';
 
@@ -142,7 +142,7 @@ export default function GeneralPage() {
   useEffect(() => {
     if (data?.settings) {
       form.reset(data.settings);
-      setLocale(data.settings.language as any);
+      setLocale(data.settings.language as Parameters<typeof setLocale>[0]);
     }
   }, [form, data?.settings]);
 
@@ -181,7 +181,7 @@ export default function GeneralPage() {
   }
 
   const renderAnimationsField = useCallback(
-    ({ field }: { field: any }) => (
+    ({ field }: { field: ControllerRenderProps<z.infer<typeof userSettingsSchema>, 'animations'> }) => (
       <FormItem className="flex max-w-xl flex-row items-center justify-between rounded-lg border p-3 shadow-sm">
         <div className="space-y-0.5">
           <FormLabel>{m['pages.settings.general.animations']()}</FormLabel>
@@ -196,7 +196,7 @@ export default function GeneralPage() {
   );
 
   const renderLanguageField = useCallback(
-    ({ field }: { field: any }) => (
+    ({ field }: { field: ControllerRenderProps<z.infer<typeof userSettingsSchema>, 'language'> }) => (
       <FormItem className="w-full md:w-[200px]">
         <FormLabel className="text-sm font-medium">
           {m['pages.settings.general.language']()}
@@ -222,7 +222,7 @@ export default function GeneralPage() {
   );
 
   const renderTimezoneField = useCallback(
-    ({ field }: { field: any }) => (
+    ({ field }: { field: ControllerRenderProps<z.infer<typeof userSettingsSchema>, 'timezone'> }) => (
       <FormItem className="w-full md:w-[200px] self-start">
         <FormLabel className="text-sm font-medium">
           {m['pages.settings.general.timezone']()}
@@ -234,7 +234,11 @@ export default function GeneralPage() {
   );
 
   const renderDefaultEmailAliasField = useCallback(
-    ({ field }: { field: any }) => (
+    ({
+      field,
+    }: {
+      field: ControllerRenderProps<z.infer<typeof userSettingsSchema>, 'defaultEmailAlias'>;
+    }) => (
       <FormItem className="w-full md:w-[280px]">
         <FormLabel className="mb-1! flex flex-row items-center gap-1 text-sm font-medium">
           {m['pages.settings.general.defaultEmailAlias']()}{' '}
@@ -273,7 +277,7 @@ export default function GeneralPage() {
   );
 
   const renderZeroSignatureField = useCallback(
-    ({ field }: { field: any }) => (
+    ({ field }: { field: ControllerRenderProps<z.infer<typeof userSettingsSchema>, 'zeroSignature'> }) => (
       <FormItem className="flex max-w-xl flex-row items-center justify-between rounded-lg border px-4 py-2">
         <div className="space-y-0.5">
           <FormLabel>{m['pages.settings.general.zeroSignature']()}</FormLabel>
@@ -288,7 +292,7 @@ export default function GeneralPage() {
   );
 
   const renderAutoReadField = useCallback(
-    ({ field }: { field: any }) => (
+    ({ field }: { field: ControllerRenderProps<z.infer<typeof userSettingsSchema>, 'autoRead'> }) => (
       <FormItem className="flex max-w-xl flex-row items-center justify-between rounded-lg border p-3 shadow-sm">
         <div className="space-y-0.5">
           <FormLabel>{m['pages.settings.general.autoRead']()}</FormLabel>
@@ -303,7 +307,11 @@ export default function GeneralPage() {
   );
 
   const renderUndoSendEnabledField = useCallback(
-    ({ field }: { field: any }) => (
+    ({
+      field,
+    }: {
+      field: ControllerRenderProps<z.infer<typeof userSettingsSchema>, 'undoSendEnabled'>;
+    }) => (
       <FormItem className="flex max-w-xl flex-row items-center justify-between rounded-lg border p-3 shadow-sm">
         <div className="space-y-0.5">
           <FormLabel>{m['pages.settings.general.undoSendEnabled']()}</FormLabel>

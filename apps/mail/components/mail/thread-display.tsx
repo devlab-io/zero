@@ -61,7 +61,7 @@ const cleanNameDisplay = (name?: string) => {
 };
 
 interface ThreadDisplayProps {
-  threadParam?: any;
+  threadParam?: unknown;
   onClose?: () => void;
   isMobile?: boolean;
   messages?: ParsedMessage[];

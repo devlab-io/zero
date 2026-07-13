@@ -196,7 +196,7 @@ function AISidebar({ className }: AISidebarProps) {
   const { labels } = useSearchLabels();
 
   const onMessage = useCallback(
-    (message: any) => {
+    (message: { data: string }) => {
       try {
         const parsedData = JSON.parse(message.data);
         const { type } = parsedData;
