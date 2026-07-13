@@ -40,3 +40,16 @@ Celui de #34/#35 qui merge en second rebase et re-prouve (discipline stale-base 
 - **D4/D5 APPROUVÉS** — coutures pures sous contrainte LOC ; soak automatisé
   déterministe conforme au libellé du check (« automated OR browser fault injection »),
   log conservé exigé.
+
+## Ruling extension 3 (orchestrateur, 2026-07-13) — clôture de la classe session?.user
+
+Le builder a identifié 3 siblings du crash `session?.user.id` non gardé HORS may-touch :
+`app/page.tsx:8` (chemin boot login), `components/ui/app-sidebar.tsx:51`,
+`hooks/use-attachments.ts:11`. Même classe que use-settings (ruling 1) et
+use-drafts/use-threads (ruling D2). Décision : may-touch ÉTENDU aux 3 fichiers pour
+guards UNE-LIGNE UNIQUEMENT (`session?.user?.id` + état géré si trivialement
+nécessaire) — aucun autre changement dans ces fichiers ; tout besoin au-delà d'une
+ligne = signalement, pas de modification. Aucun job V5 en vol ne possède ces
+fichiers (vérifié : #35 tests-only, #36 mergé, #37 lockfile, #42-02 routes/agent).
+La classe A9 « session transitoire better-auth 1.6 » est ainsi close en UNE
+livraison, auditée par un seul juge : 6 guards au total, listés au rapport.
