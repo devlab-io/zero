@@ -283,6 +283,9 @@ importers:
       '@zero/server':
         specifier: workspace:*
         version: link:../server
+      '@zero/types':
+        specifier: workspace:*
+        version: link:../../packages/types
       accept-language-parser:
         specifier: ^1.5.0
         version: 1.5.0
@@ -638,6 +641,9 @@ importers:
       '@upstash/redis':
         specifier: ^1.34.9
         version: 1.35.0
+      '@zero/types':
+        specifier: workspace:*
+        version: link:../../packages/types
       agents:
         specifier: 'catalog:'
         version: 0.0.106(@cloudflare/workers-types@4.20250628.0)(react@19.1.0)
@@ -894,6 +900,22 @@ importers:
         version: 3.2.7(@types/debug@4.1.12)(@types/node@24.3.0)(@vitest/ui@3.2.7)(happy-dom@20.10.6)(jiti@2.4.2)(jsdom@23.2.0)(lightningcss@1.30.1)(msw@2.10.4(@types/node@24.3.0)(typescript@5.8.3))(tsx@4.20.5)(yaml@2.8.0)
 
   packages/tsconfig: {}
+
+  packages/types:
+    dependencies:
+      dedent:
+        specifier: 'catalog:'
+        version: 1.6.0
+      zod:
+        specifier: 'catalog:'
+        version: 3.25.67
+    devDependencies:
+      '@zero/tsconfig':
+        specifier: workspace:*
+        version: link:../tsconfig
+      typescript:
+        specifier: 'catalog:'
+        version: 5.8.3
 
 packages:
 

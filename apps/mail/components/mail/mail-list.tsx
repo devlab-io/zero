@@ -20,7 +20,7 @@ import { focusedIndexAtom, useMailNavigation } from '@/hooks/use-mail-navigation
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useIsFetching, type UseQueryResult } from '@tanstack/react-query';
 import type { MailSelectMode, ParsedMessage, ThreadProps } from '@/types';
-import type { ParsedDraft } from '../../../server/src/lib/driver/types';
+import type { ParsedDraft } from '@zero/types';
 import { ThreadContextMenu } from '@/components/context/thread-context';
 import { useOptimisticActions } from '@/hooks/use-optimistic-actions';
 import { useMail, type Config } from '@/components/mail/use-mail';
