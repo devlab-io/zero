@@ -1,0 +1,20 @@
+{
+  // Declaration-emit project for the apps/mail type boundary (issue devlab-io/zero#43).
+  // Emits the declaration of `src/trpc/index.ts` (the `AppRouter` definition) so the
+  // generator (scripts/gen-trpc-boundary.mjs) can commit a self-contained boundary
+  // `.d.ts`. Inherits the app's strict settings; only turns emit on. `serverTrpc` (now in
+  // ./server-caller) and `createAuth` (via ctx) are non-portable and surface as emit
+  // errors, but they do NOT block `index.d.ts` (serverTrpc is only re-exported here — a
+  // re-export does not force naming the type) — the generator verifies its output rather
+  // than the exit code. See ADR 0006.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "declaration": true,
+    "emitDeclarationOnly": true,
+    "incremental": false,
+    "rootDir": "src",
+    "outDir": "node_modules/.cache/trpc-boundary"
+  },
+  "include": ["src/trpc/index.ts", "worker-configuration.d.ts", "src/overrides.d.ts"]
+}
