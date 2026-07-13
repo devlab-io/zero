@@ -27,7 +27,7 @@ const BUDGET = {
   // re-snapshot orchestrateur 2026-07-13 (ruling #13/#23) : +9 par merges jugés PASS
   // (typing #20, quick wins perf) ; le fichier appartient à #28 qui le fera fondre.
   'apps/mail/components/context/command-palette-context.tsx': 1922,
-  'apps/mail/components/icons/icons.tsx': 1783,
+  // icons.tsx (1783 -> 10, barrel de familles — issue #41 mergée) : entrée prunée.
   'apps/mail/components/mail/mail-display.tsx': 1736,
   'apps/server/src/routes/chat.ts': 1610,
   // google.ts retiré (1487 -> 155, façade — issue #23 mergée) : entrée prunée, 17 -> 16.
@@ -37,12 +37,12 @@ const BUDGET = {
   'apps/mail/components/create/email-composer.tsx': 1170,
   'apps/mail/components/mail/mail-list.tsx': 1111,
   'apps/mail/components/mail/thread-display.tsx': 1062,
-  // re-snapshot orchestrateur 2026-07-13 : +8 par merges jugés PASS ; appartient à #41.
-  'apps/mail/app/(full-width)/contributors.tsx': 1040,
+  // contributors.tsx (1040 -> 756, données+fetch extraits vers contributors-data.ts —
+  // issue #41 mergée) : entrée prunée.
   'apps/server/src/trpc/routes/mail.ts': 879,
   'apps/server/src/pipelines.ts': 873,
   'apps/mail/components/mail/mail.tsx': 852,
-  'apps/mail/components/mail/note-panel.tsx': 829,
+  // note-panel.tsx (829 -> 399, vue/logique séparées — issue #41 mergée) : entrée prunée.
 };
 
 const LOC_CMD =
