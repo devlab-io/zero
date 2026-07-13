@@ -68,7 +68,7 @@ Couverture 100 % du registre livrée par #32 : `apps/mail/lib/hotkeys/keyboard-p
 
 2. **`apps/mail/paraglide/**` — artefact i18n généré, requis à la résolution.** `hooks/use-optimistic-actions.ts` importe statiquement `@/paraglide/messages` (compilé par le plugin vite paraglide / `react-router typegen`). Il n'existe pas après un `pnpm install` nu, n'est pas gitignoré (oversight repo), et n'est PAS régénéré par la tâche `test` de turbo. Le hook test s'exécute donc uniquement si paraglide a été généré — ce que produit l'étape de setup MANDATÉE par le tool-guidance (`pnpm --filter @zero/mail exec react-router typegen`, vérifié : elle logge « [paraglide-js] Compilation complete »). Le `vi.mock('@/paraglide/messages')` du test rend le CONTENU de paraglide non pertinent — seule la RÉSOLUTION du chemin compte. **Proposition précise** : (a) ajouter `apps/mail/paraglide/` à `.gitignore` (comme `.react-router`) ; (b) rendre le hook test reproductible sous `pnpm test` nu via SOIT un alias `apps/mail/vitest.config.ts` `@/paraglide/messages`→stub, SOIT un `dependsOn: ["paraglide#compile"]` sur la tâche `test` de `turbo.json`. Les deux sont config, HORS périmètre — non modifiés.
 
-3. **Quirk produit relevé (non bloquant, testé contre l'état ACTUEL — RULING 1).** Dans `use-optimistic-actions.ts` → `createPendingAction.doAction`, `typeActions` est capturé PUIS vidé avant le test `typeActions?.size === 1` → dans le flux d'une action unique, `refreshData()` + `removeOptimisticAction(optimisticId)` du chemin SUCCÈS ne s'exécutent jamais (le `removeOptimisticAction` du chemin ERREUR, lui, s'exécute). Le test reflète ce comportement actuel ; si #34 le corrige, le second à merger rebase (RULING 1).
+3. **Quirk produit relevé — RÉSOLU par #34 (voir delta ci-dessous).** Le refresh du chemin succès d'une action unique était mort (`typeActions.size===1` évalué après vidage). #34 a livré `lib/optimistic-recovery.ts::isLastPendingOfType` (capture de la taille AVANT suppression) qui restaure ce refresh. Mon test reflète désormais le comportement corrigé. Concern clos.
 
 **Aucun code produit modifié** : `git diff --stat` (fichiers suivis) est VIDE. La couture driver (`./utils` mocké) et la couture mail (`../trpc` mocké) sont des mocks test-only, pas des modifications produit.
 
@@ -120,24 +120,36 @@ File               | % Stmts | % Branch | % Funcs | % Lines | Uncovered
  src/lib/driver/google-transport 90.5 | 83.33 | 83.33 | 90.5 | 143-168
  src/trpc/routes/mail.ts   94.86|  87.28  |   100   |  94.86 |
 ```
-Mail (cibles) :
+Mail (cibles) — **post-#34** (état gelé fd4056d1) :
 ```
 File                              | % Lines | % Branch | % Funcs
  store/optimistic-updates.ts        100    |   100    |   100
  lib/optimistic-actions-manager.ts  100    |   100    |   100
- hooks/use-optimistic-actions.ts    88.05  |  69.47   |  76.74
+ hooks/use-optimistic-actions.ts    89.45  |   71     |  64.15
+ (All zone optimiste)               90.25  |  74.56   |  66.66
 ```
-Toutes les cibles du check §3 sont **≥ 50 % lignes** (min mesuré : 88,05 % sur le hook). Palier A3 8,5 satisfait avec marge.
+Toutes les cibles du check §3 sont **≥ 50 % lignes** (min mesuré : 89,45 % sur le hook). Palier A3 8,5 satisfait avec marge. (Pré-#34 : hook 88,05 % ; la refonte du catch + le fix du refresh l'ont légèrement augmenté.)
 
-## 3× `pnpm test` (RC natifs — état FINAL)
+## Delta — séquence gelée (rebase sur #34, HEAD fd4056d1)
+
+Après merge de #34 et rebase de ma branche, `pnpm --filter @zero/mail exec vitest run` a signalé **1 failed | 112 passed** : mon test du chemin d'erreur décrivait l'ANCIEN comportement (honoré RULING 1 pré-#34). #34 a refondu `use-optimistic-actions.ts`. J'ai mis à jour **UNIQUEMENT 2 tests devenus mensongers** dans `hooks/use-optimistic-actions.test.ts` (aucun autre fichier, aucun code produit). #34 a livré son test frère `apps/mail/lib/optimistic-recovery.test.ts` (fonctions pures `buildOptimisticFailureToast`/`isLastPendingOfType`) — je NE le duplique PAS : mes tests couvrent l'INTÉGRATION dans le hook.
+
+| Test | Ancien comportement (pré-#34) | Nouveau comportement (post-#34, testé) |
+|---|---|---|
+| `markAsRead silent … nettoie` | refresh du chemin succès mort (`size===1` évalué après delete) → je n'assertais PAS refetch/remove | `isLastPendingOfType(size AVANT delete)` → l'action unique EST la dernière → `refetchQueries` + `removeOptimisticAction('opt-1')` s'exécutent : je les asserte |
+| `chemin d'erreur` (le rouge) | `toast.error('Action failed')` nu + `removeOptimisticAction` direct | `undo()` (retire l'optimiste + vide bg-queue), `reconcileFailedAction` (`invalidateQueries` sur listThreads), `toast.error(message, { action: Retry, duration })` via `buildOptimisticFailureToast` ; j'asserte aussi que le clic Retry ré-applique l'intention (nouvelle action READ) |
+
+Tests non tautologiques (échouables) : le test d'erreur casserait si `undo`/`reconcile`/l'action Retry disparaissaient ; le test succès casserait si le refresh régressait à nouveau.
+
+## 3× `pnpm test` (RC natifs — état FINAL post-#34)
 
 ```
-RC_FINAL_1=0   mail 80 passed | server 168 passed | Tasks: 2 successful, 2 total
-RC_FINAL_2=0   mail 80 passed | server 168 passed | Tasks: 2 successful, 2 total
-RC_FINAL_3=0   mail 80 passed | server 168 passed | Tasks: 2 successful, 2 total
+RC_1=0   mail 113 passed | server 188 passed | Tasks: 2 successful, 2 total
+RC_2=0   mail 113 passed | server 188 passed | Tasks: 2 successful, 2 total
+RC_3=0   mail 113 passed | server 188 passed | Tasks: 2 successful, 2 total
 ```
-Total monorepo par run : **248** (≥120 requis). Déterministe sur 3 runs consécutifs.
-tsc `--noEmit` : **0 erreur** sur `@zero/server` ET `@zero/mail` (baseline 0/0 préservée ; mes tests compilent sous le tsc de chaque package).
+Total monorepo par run : **301** (compte stable ×3 ; hausse vs 248 = tests des autres jobs V5 mergés au rebase). Déterministe. ≥120 requis : OK.
+tsc `--noEmit` : **0 erreur** sur `@zero/server` ET `@zero/mail` (séquence types complète rejouée : server types, mail types, react-router typegen ; baseline 0/0 préservée).
 
 ## MIRROR: ORCHESTRATOR
 
@@ -148,6 +160,7 @@ tsc `--noEmit` : **0 erreur** sur `@zero/server` ET `@zero/mail` (baseline 0/0 p
 
 ## STATUS
 
-**COMPLETE_WITH_CONCERNS**
+**COMPLETE_WITH_CONCERNS** (post-#34, HEAD fd4056d1)
 
-Les 5 zones du check §V5.2 sont couvertes (127 tests ajoutés, 248 total ≥120), coverage ≥50 % sur toutes les cibles (min 88 %), 3× `pnpm test` verts (RC 0/0/0) déterministes, tsc 0/0, zéro code produit modifié. **Concerns** (env/config hors périmètre, non bloquants dans un env correctement setup) : (1) `@vitest/coverage-v8` absent du lockfile — mesure via symlink node_modules ; (2) `apps/mail/paraglide/**` généré non gitignoré et non produit par `pnpm test` nu — requis à la résolution du hook test, produit par le setup mandaté (`react-router typegen`). Propositions précises fournies pour les deux.
+Les 5 zones du check §V5.2 sont couvertes (127 tests ajoutés ; **301** total monorepo ≥120), coverage ≥50 % sur toutes les cibles (min 89,45 % sur le hook post-#34), 3× `pnpm test` verts (RC 0/0/0) déterministes (compte stable ×3), tsc 0/0 (server+mail), **zéro code produit modifié** (`git diff --stat` vide ; seul `hooks/use-optimistic-actions.test.ts` mis à jour pour le comportement post-#34). Delta #34 traité : 2 tests réalignés sur le comportement réel, sans duplication du test frère de #34.
+**Concerns restants** (env, hors périmètre) : `apps/mail/paraglide/**` généré non gitignoré, requis à la résolution du hook test — produit par le setup mandaté `react-router typegen`. **Résolus/routés** : concern #1 (`@vitest/coverage-v8` lockfile) routé à #37 par l'orchestrateur ; concern #3 (quirk refresh) corrigé par #34.

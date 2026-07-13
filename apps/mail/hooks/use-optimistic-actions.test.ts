@@ -136,19 +136,36 @@ describe('useOptimisticActions — markAsRead (silent = exécution directe)', ()
     await flush();
     expect(h.mutationSpies['mail.markAsRead']).toHaveBeenCalledWith({ ids: ['t1'] });
     expect(h.capture).toHaveBeenCalledWith('email_marked_read');
-    // Comportement ACTUEL : `typeActions` est capturé PUIS vidé, donc `size === 1` est faux
-    // au moment du test → pas de refetch dans ce chemin (quirk produit ; #34 peut le changer).
+    // Post-#34 : `isLastPendingOfType` capture la taille du set AVANT la suppression → une
+    // action unique EST la dernière de son type → le refresh du chemin succès s'exécute
+    // (bug détecté par #35, fix livré par #34, cf. lib/optimistic-recovery.ts). Avant #34
+    // cette branche était morte.
+    expect(h.refetchQueries).toHaveBeenCalled();
+    expect(h.removeOptimisticAction).toHaveBeenCalledWith('opt-1');
     expect(optimisticActionsManager.pendingActions.size).toBe(0);
   });
 
-  it('chemin d’erreur : mutation rejette → toast.error + nettoyage', async () => {
+  it('chemin d’erreur (post-#34) : undo + réconciliation liste + toast.error avec action Retry', async () => {
     h.mutationSpies['mail.markAsRead'] = vi.fn().mockRejectedValue(new Error('net'));
     const a = hook();
-    a.optimisticMarkAsRead(['t1'], true);
+    a.optimisticMarkAsRead(['t1'], true); // silent → doAction() direct
     await flush();
-    expect(h.toast.error).toHaveBeenCalledWith('Action failed');
+    // undo() du chemin READ retire l'action optimiste (au lieu de l'ancien appel direct)
     expect(h.removeOptimisticAction).toHaveBeenCalledWith('opt-1');
+    // réconciliation « failure-only » : invalidation de la liste des fils (issue #34)
+    expect(h.invalidateQueries).toHaveBeenCalled();
+    // toast d'échec porteur d'une action de récupération (Retry) — plus l'ancien 'Action failed' nu
+    expect(h.toast.error).toHaveBeenCalledTimes(1);
+    const [msg, opts] = (h.toast.error as any).mock.calls[0];
+    expect(typeof msg).toBe('string');
+    expect(opts.action).toMatchObject({ label: expect.any(String), onClick: expect.any(Function) });
+    expect(opts.duration).toBeGreaterThan(0);
     expect(optimisticActionsManager.pendingActions.size).toBe(0);
+    // Retry ré-applique l'intention → une nouvelle action optimiste READ est créée
+    h.addOptimisticAction.mockClear();
+    opts.action.onClick();
+    expect(h.addOptimisticAction).toHaveBeenCalledWith({ type: 'READ', threadIds: ['t1'], read: true });
+    await flush(); // laisse retomber le doAction de la nouvelle tentative (échoue aussi)
   });
 });
 
