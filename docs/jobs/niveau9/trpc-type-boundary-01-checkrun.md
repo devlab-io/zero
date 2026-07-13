@@ -1,17 +1,32 @@
 # Checkrun: trpc-type-boundary-01-checkrun
-generated: 2026-07-13T15:32:46Z  runner: sh  config: /Users/thomasverdenne/cc/zero/.architect/checkrun-trpc-type-boundary-01.json
+generated: 2026-07-13T15:49:16Z  runner: sh  config: /Users/thomasverdenne/cc/zero/.architect/checkrun-trpc-type-boundary-01.json
 check_file: docs/checks/niveau9/typecheck.md  freeze_sha: 85451f71
 Executor: bash
 executor_config: bash
-integrity: check_file_matches_freeze=true head=7668948e3963a18d102808361e741e309288dd32
-changed_files: 128 listed below; docs_checks_touched=false
+integrity: check_file_matches_freeze=true head=b9c3b67f7a219888243e478faad5d51be385f2aa
+changed_files: 147 listed below; docs_checks_touched=false
 .gitignore
+apps/mail/app/(routes)/mail/layout.tsx
+apps/mail/components/context/command-palette-context.tsx
+apps/mail/components/context/command-palette-filter-view.tsx
+apps/mail/components/context/command-palette-storage.ts
+apps/mail/components/context/command-palette-views.tsx
+apps/mail/components/context/command-registry.test.ts
+apps/mail/components/context/command-registry.ts
 apps/mail/components/create/email-composer.attachments.tsx
 apps/mail/components/create/email-composer.content-preview.tsx
 apps/mail/components/create/email-composer.dialogs.tsx
 apps/mail/components/create/email-composer.fields.tsx
 apps/mail/components/create/email-composer.tsx
 apps/mail/components/create/email-composer.types.ts
+apps/mail/components/home/HomeContent.tsx
+apps/mail/components/home/sections/feature-card-interface.tsx
+apps/mail/components/home/sections/feature-card-search.tsx
+apps/mail/components/home/sections/feature-card-summaries.tsx
+apps/mail/components/home/sections/home-chat-section.tsx
+apps/mail/components/home/sections/home-feature-cards.tsx
+apps/mail/components/home/sections/home-hero.tsx
+apps/mail/components/home/sections/home-reply-mockup.tsx
 apps/mail/components/mail/mail-display.attachments.tsx
 apps/mail/components/mail/mail-display.labels.tsx
 apps/mail/components/mail/mail-display.parts.tsx
@@ -109,6 +124,9 @@ docs/adr/0006-trpc-type-boundary.md
 docs/jobs/niveau9/refactor-mail-list-data-01-checkrun.md
 docs/jobs/niveau9/refactor-mail-list-data-01-rulings.md
 docs/jobs/niveau9/refactor-mail-list-data-01.md
+docs/jobs/niveau9/refactor-shell-palette-01-checkrun.md
+docs/jobs/niveau9/refactor-shell-palette-01-rulings.md
+docs/jobs/niveau9/refactor-shell-palette-01.md
 docs/jobs/niveau9/refactor-thread-composer-01-checkrun.md
 docs/jobs/niveau9/refactor-thread-composer-01-rulings.md
 docs/jobs/niveau9/refactor-thread-composer-01.md
@@ -119,6 +137,7 @@ docs/jobs/niveau9/shared-types-package-01-checkrun-structure.md
 docs/jobs/niveau9/shared-types-package-01-checkrun.md
 docs/jobs/niveau9/shared-types-package-01-rulings.md
 docs/jobs/niveau9/shared-types-package-01.md
+docs/jobs/niveau9/trpc-type-boundary-01-checkrun.md
 docs/jobs/niveau9/trpc-type-boundary-01-rulings.md
 docs/jobs/niveau9/trpc-type-boundary-01.md
 packages/eslint-config/config.ts
@@ -136,18 +155,18 @@ scripts/checks/typecheck-report.mjs
 
 ## RUN (mécanique — check-runner ; l'app hors périmètre de l'issue est informative) line 28
 $ pnpm --filter @zero/mail exec tsc --noEmit 2>&1 | tail -5
-exit: 0  ms: 5933  bytes: 0
+exit: 0  ms: 5207  bytes: 0
 
 ## RUN (mécanique — check-runner ; l'app hors périmètre de l'issue est informative) line 29
 $ pnpm --filter @zero/server exec tsc --noEmit 2>&1 | tail -5
-exit: 0  ms: 3963  bytes: 0
+exit: 0  ms: 3712  bytes: 0
 
 ## RUN (mécanique — check-runner ; l'app hors périmètre de l'issue est informative) line 30
 $ grep -rE ":\s*any\b|as any|<any>|\bany\[\]" apps/mail/app apps/mail/components apps/mail/lib apps/mail/hooks apps/mail/store apps/server/src --include='*.ts' --include='*.tsx' --exclude='*.d.ts' --exclude='*.test.*' | wc -l
-exit: 0  ms: 75  bytes: 9
+exit: 0  ms: 99  bytes: 9
       37
 
 ## RUN (mécanique — check-runner ; l'app hors périmètre de l'issue est informative) line 31
 $ grep -rn "@ts-nocheck" apps/mail apps/server --include='*.ts' --include='*.tsx' --exclude='*.d.ts' | wc -l
-exit: 0  ms: 51  bytes: 9
+exit: 0  ms: 48  bytes: 9
        0
