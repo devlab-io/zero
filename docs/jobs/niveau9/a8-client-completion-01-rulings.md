@@ -21,3 +21,12 @@ Fichier append-only, propriété orchestrateur.
    AUCUN deploy.
 6. Procédure fin de job : après le message STATUS final, STAND-DOWN ABSOLU — plus
    aucune écriture sans ACK orchestrateur. Toute retouche post-rapport = incident.
+
+## Ruling coordination root.tsx (orchestrateur, 2026-07-13)
+
+#38 a identifié 5 littéraux ErrorBoundary dans app/root.tsx (ton fichier). Il livre
+les clés en/fr SEULEMENT (mapping littéral→clé à son rapport) ; TOI SEUL touches
+root.tsx. Après le merge de #38 et ton rebase dessus, tu consommes ces clés dans
+root.tsx en delta borné re-gaté (annonce-le en PHASE mise à jour de ton rapport).
+Si tu n'as finalement pas besoin d'éditer root.tsx, signale-le : le delta de
+consommation revient à l'orchestrateur. Aucun partage de fichier en parallèle.

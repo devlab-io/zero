@@ -18,3 +18,16 @@ Fichier append-only, propriété orchestrateur.
 4. Procédure fin de job (leçon des 3 courses de la vague) : après le message STATUS
    final, STAND-DOWN ABSOLU — plus aucune écriture, même documentaire, sans ACK
    explicite de l'orchestrateur. Toute retouche post-rapport = incident.
+
+## Ruling coordination root.tsx (orchestrateur, 2026-07-13)
+
+Constat #38 (PHASE 0) : l'unique ErrorBoundary user-facing restant vit dans
+app/root.tsx — fichier fenced à #44 — avec 5 littéraux. DÉCISION : la disjonction ne
+se casse PAS. #38 possède UNIQUEMENT les nouvelles clés en/fr correspondantes
+(messages/\*\*, nommage cohérent, documentées au rapport avec le mapping littéral→clé
+pour consommation aval) et NE TOUCHE PAS root.tsx. #44 consommera ces clés dans
+root.tsx APRÈS merge de #38 + rebase, via un delta borné re-gaté. Si #44 n'a
+finalement pas à éditer root.tsx pour ses propres besoins, le delta de consommation
+est routé EXPLICITEMENT à l'orchestrateur — aucun job ne contourne la localisation ni
+ne partage le même fichier en parallèle. Le reste de #38 continue (onboarding +
+~58 toasts hors fence).
