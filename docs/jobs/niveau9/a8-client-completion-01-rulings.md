@@ -173,3 +173,24 @@ Reste-à-faire QUANTIFIÉ par propriétaire au rapport (palette-deep design esqu
 onboarding, nav-user-content, et la part infra React/RR7-core/query non réductible).
 Candidature en COMPLETE_WITH_CONCERNS après la checklist 3f32f9b6 (preuves worker,
 traces réseau, gates, rebase final). « Gate atteint » : jamais.
+
+## SUPERSEDED — ruling propriétaire : option A palette-deep (2026-07-13)
+
+Le « Ruling final plancher (option B) » ci-dessus est SUPERSEDED par décision
+propriétaire : OPTION A retenue — palette-deep vaut ses 15 KiB (gain légitime
+in-boundary, utile même à plancher ~435). CONDITIONS STRICTES :
+
+- Refactor BORNÉ : provider LÉGER eager (activeFilters/clearAllFilters + listener ⌘K)
+  - dialog LOURD lazy SEULEMENT quand open. STOP IMMÉDIAT si le split impose du
+    lazy-at-mount ou casse un contrat.
+- TESTS EXPLICITES : Cmd/Ctrl+K (ouverture), sync filtres, clearAllFilters,
+  storage-init, consommateurs mail/nav-main.
+- MESURE gelée + TRACE réseau après.
+- Onboarding et nav-user restent HORS boundary (supersède toute note antérieure).
+  Puis documentation SANS AMBIGUÏTÉ : « gate 420 non atteint dans la boundary ».
+
+ADDENDUM preuves comportement (propriétaire) : la clôture « 3 blockers fermés sur
+preuve code » est REFUSÉE pour Pricing et CreateEmail — button+onClick prouve la
+capacité native, PAS le chemin lazy réel. Exigence : test RENDU RÉEL post-build —
+clic souris PUIS Enter/Space observés, query truthy, fallback retardé visible,
+dialog final rendu. Même standard pour le composeur.
