@@ -1,5 +1,6 @@
 import type { GmailTransport } from './google-transport';
 import { people } from '@googleapis/people';
+import { logger } from '../logger';
 
 export class GmailAccount {
   constructor(private readonly t: GmailTransport) {}
@@ -76,7 +77,7 @@ export class GmailAccount {
       await this.t.auth.revokeToken(token);
       return true;
     } catch (error: unknown) {
-      console.error('Failed to revoke Google token:', (error as Error).message);
+      logger.error('Failed to revoke Google token:', (error as Error).message);
       return false;
     }
   }

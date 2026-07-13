@@ -6,6 +6,7 @@ import type { GmailLabels } from './google-labels';
 import type { ParsedMessage } from '../../types';
 import type { gmail_v1 } from '@googleapis/gmail';
 import { cleanSearchValue } from '../utils';
+import { logger } from '../logger';
 import * as he from 'he';
 
 export function normalizeSearch(folder: string, q: string) {
@@ -211,7 +212,13 @@ export class GmailThreads {
                         `data:${part.mimeType};base64,${imageData}`,
                       );
                     }
-                  } catch {}
+                  } catch (error) {
+                    logger.debug('Failed to inline Gmail image attachment', {
+                      messageId: message.id,
+                      attachmentId: part.body?.attachmentId,
+                      error,
+                    });
+                  }
                 }
               }
             }

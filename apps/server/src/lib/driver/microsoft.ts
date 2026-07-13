@@ -5,6 +5,7 @@ import {
   sanitizeContext,
   StandardizedError,
 } from './utils';
+import { logger } from '../logger';
 import type {
   OutlookCategory as Category,
   MailFolder,
@@ -123,7 +124,7 @@ export class OutlookMailManager implements MailManager {
     try {
       await this.graphClient.api('/$batch').post({ requests: batchRequests });
     } catch (error) {
-      console.error('Error during batch update of message read status:', error);
+      logger.error('Error during batch update of message read status:', error);
       throw error;
     }
   }
@@ -140,7 +141,7 @@ export class OutlookMailManager implements MailManager {
         try {
           // Requires separate fetching logic
         } catch (error: unknown) {
-          console.warn(
+          logger.warn(
             'Could not fetch user photo:',
             error instanceof Error ? error.message : 'Unknown error',
           );
@@ -214,7 +215,7 @@ export class OutlookMailManager implements MailManager {
                 count: count ?? undefined,
               };
             } catch (error) {
-              console.error(`Error getting counts for folder ${folder.id}:`, error);
+              logger.error(`Error getting counts for folder ${folder.id}:`, error);
               return {
                 label: folder.displayName || folder.id || '',
                 count: undefined,
@@ -256,7 +257,7 @@ export class OutlookMailManager implements MailManager {
       request = request.top(maxResults);
     }
     if (pageToken) {
-      console.warn(
+      logger.warn(
         'Outlook pagination typically uses @odata.nextLink (full URL). pageToken needs to be handled accordingly.',
       );
     }
@@ -267,8 +268,6 @@ export class OutlookMailManager implements MailManager {
       'list',
       async () => {
         const res = await request.get();
-
-        // console.log(JSON.stringify(res, null, 4));
 
         const messages: Message[] = res.value;
         const nextPageLink: string | undefined = res['@odata.nextLink'];
@@ -290,7 +289,7 @@ export class OutlookMailManager implements MailManager {
                 decodedBody: fullMessage.latest.decodedBody || '',
               };
             } catch (error) {
-              console.error(`Failed to fetch full message for ${msg.id}:`, error);
+              logger.error(`Failed to fetch full message for ${msg.id}:`, error);
               // If get fails, fall back to basic message info
               return {
                 ...parsedMessages[index],
@@ -485,20 +484,20 @@ export class OutlookMailManager implements MailManager {
       const patchBody = {};
 
       if (addItems.length > 0 || removeItems.length > 0) {
-        console.warn(
+        logger.warn(
           `Modifying categories (${addItems.join(',')}, ${removeItems.join(',')}) on message ${id} is not fully implemented.`,
         );
       }
 
       if (!addItems[0]) {
-        console.warn('No addItems');
+        logger.warn('No addItems');
         return;
       }
 
       let moveToFolderId: string | undefined;
       if (addItems.length > 0 && this.getOutlookFolderId(addItems[0])) {
         moveToFolderId = this.getOutlookFolderId(addItems[0]) || addItems[0];
-        console.warn(
+        logger.warn(
           `Attempting to move message ${id} to folder ${moveToFolderId}. This is a move operation, not adding a label.`,
         );
         return {
@@ -523,14 +522,14 @@ export class OutlookMailManager implements MailManager {
       .filter((req) => Object.keys(req.body).length > 0 || req.method === 'POST');
 
     if (validBatchRequests.length === 0) {
-      console.warn('No valid batch requests generated for modifyMessageLabelsOrFolders.');
+      logger.warn('No valid batch requests generated for modifyMessageLabelsOrFolders.');
       return;
     }
 
     try {
       await this.graphClient.api('/$batch').post({ requests: validBatchRequests });
     } catch (error) {
-      console.error('Error during batch modification of messages:', error);
+      logger.error('Error during batch modification of messages:', error);
       throw error;
     }
   }
@@ -593,7 +592,7 @@ export class OutlookMailManager implements MailManager {
         request = request.top(maxResults);
 
         if (pageToken) {
-          console.warn(
+          logger.warn(
             'Outlook pagination typically uses @odata.nextLink (full URL). pageToken needs to be handled accordingly.',
           );
         }
@@ -615,7 +614,7 @@ export class OutlookMailManager implements MailManager {
                 receivedOn: message.receivedDateTime || new Date().toISOString(),
               };
             } catch (error) {
-              console.error('Error parsing draft message:', error);
+              logger.error('Error parsing draft message:', error);
               return null;
             }
           }),
@@ -726,11 +725,11 @@ export class OutlookMailManager implements MailManager {
               .api(`/me/mailfolders/drafts/messages/${data.id}`)
               .patch(outlookMessage);
           } catch (error) {
-            console.warn(`Failed to update draft ${data.id}, creating a new one`, error);
+            logger.warn(`Failed to update draft ${data.id}, creating a new one`, error);
             try {
               await this.graphClient.api(`/me/mailfolders/drafts/messages/${data.id}`).delete();
             } catch (deleteError) {
-              console.error(`Failed to delete draft ${data.id}`, deleteError);
+              logger.error(`Failed to delete draft ${data.id}`, deleteError);
             }
 
             res = await this.graphClient
@@ -775,12 +774,12 @@ export class OutlookMailManager implements MailManager {
         systemFolderNames,
       );
 
-      console.log('Microsoft labels with hierarchy:', processedFolders);
+      logger.info('Microsoft labels with hierarchy:', processedFolders);
       return processedFolders;
     } catch (error) {
-      console.error('Error fetching Outlook categories or folders:', error);
+      logger.error('Error fetching Outlook categories or folders:', error);
       if (error instanceof Error) {
-        console.error('Error details:', error.message, error.stack);
+        logger.error('Error details:', error.message, error.stack);
       }
       return [];
     }
@@ -833,14 +832,14 @@ export class OutlookMailManager implements MailManager {
 
         result.push(label);
       } catch (error) {
-        console.error(`Error processing folder ${folder.displayName || folder.id}:`, error);
+        logger.error(`Error processing folder ${folder.displayName || folder.id}:`, error);
       }
     }
 
     return result;
   }
   public async getLabel(labelId: string): Promise<Label> {
-    console.warn('getLabel needs to differentiate between Category ID and Mail Folder ID.');
+    logger.warn('getLabel needs to differentiate between Category ID and Mail Folder ID.');
 
     try {
       const folder: MailFolder = await this.graphClient.api(`/me/mailfolders/${labelId}`).get();
@@ -862,7 +861,7 @@ export class OutlookMailManager implements MailManager {
           color: { backgroundColor: category.color || '', textColor: '' },
         };
       } catch (categoryError) {
-        console.error(
+        logger.error(
           `Label or folder with id ${labelId} not found as Folder or Category:`,
           folderError,
           categoryError,
@@ -875,7 +874,7 @@ export class OutlookMailManager implements MailManager {
     name: string;
     color?: { backgroundColor: string; textColor: string };
   }) {
-    console.warn(
+    logger.warn(
       'createLabel defaults to creating a Mail Folder. Creating a Category uses a different API.',
     );
 
@@ -884,37 +883,36 @@ export class OutlookMailManager implements MailManager {
         displayName: label.name,
         // parentFolderId: 'inbox', // Optional: Create under a specific parent folder
       });
-      console.log('Mail Folder created:', newFolder);
+      logger.info('Mail Folder created:', newFolder);
 
       // create a Category:
       // const newCategory: Category = await this.graphClient.api('/me/outlook/masterCategories').post({
       //     displayName: label.name,
       //      color: 'presetColorEnum' // Graph category color is a string enum
       // });
-      // console.log('Category created:', newCategory);
     } catch (error) {
-      console.error('Error creating Outlook Mail Folder:', error);
+      logger.error('Error creating Outlook Mail Folder:', error);
       throw error;
     }
   }
   public async updateLabel(id: string, label: Label) {
-    console.warn('updateLabel needs to differentiate between Category and Mail Folder updates.');
+    logger.warn('updateLabel needs to differentiate between Category and Mail Folder updates.');
 
     try {
       await this.graphClient.api(`/me/mailfolders/${id}`).patch({
         displayName: label.name,
         // Folder colors are not updateable via Graph API
       });
-      console.log(`Mail Folder ${id} updated.`);
+      logger.info(`Mail Folder ${id} updated.`);
     } catch (folderError) {
       try {
         await this.graphClient.api(`/me/outlook/masterCategories/${id}`).patch({
           displayName: label.name,
           // color: label.color?.backgroundColor, // Requires mapping hex to Graph color enum
         });
-        console.log(`Category ${id} updated.`);
+        logger.info(`Category ${id} updated.`);
       } catch (categoryError) {
-        console.error(
+        logger.error(
           `Could not update label or folder with id ${id} as Folder or Category:`,
           folderError,
           categoryError,
@@ -930,12 +928,12 @@ export class OutlookMailManager implements MailManager {
     if (!token) return false;
 
     try {
-      console.warn(
+      logger.warn(
         'Revoking Microsoft refresh tokens requires MSAL or specific Azure AD endpoints, not a direct Graph API call. This method is a placeholder.',
       );
       return false;
     } catch (error: unknown) {
-      console.error(
+      logger.error(
         'Failed to revoke Microsoft token:',
         error instanceof Error ? error.message : 'Unknown error',
       );
@@ -944,7 +942,7 @@ export class OutlookMailManager implements MailManager {
   }
 
   public deleteAllSpam() {
-    console.warn('deleteAllSpam is not implemented for Microsoft');
+    logger.warn('deleteAllSpam is not implemented for Microsoft');
     return Promise.resolve({
       success: false,
       message: 'Not implemented',
@@ -956,7 +954,7 @@ export class OutlookMailManager implements MailManager {
     // This normalization logic is based on Gmail's search syntax and folder mapping.
     // For Outlook/Graph, you need to translate to OData $filter or $search syntax
     // and map folder names to Outlook folder IDs.
-    console.warn(
+    logger.warn(
       'normalizeSearch is based on Gmail syntax. Needs translation to OData $filter or $search.',
     );
 
@@ -1114,7 +1112,7 @@ export class OutlookMailManager implements MailManager {
     bcc,
   }: IOutgoingMessage): Promise<Message> {
     // Outlook Graph API expects a Message object structure for sending/creating drafts
-    console.log(to);
+    logger.info(to);
     const { html: processedMessage, inlineImages } = await sanitizeTipTapHtml(message.trim());
     const outlookMessage: Message = {
       subject: subject,
@@ -1153,7 +1151,7 @@ export class OutlookMailManager implements MailManager {
       // Graph API doesn't have a direct 'headers' property for sending
       // Custom headers are usually not added this way.
       // Some headers like Reply-To can be set as properties, but not general headers.
-      console.warn(
+      logger.warn(
         'Custom headers from IOutgoingMessage are not directly applied when sending via Microsoft Graph API.',
       );
       // If you need to set specific headers like In-Reply-To or References for threading replies:
@@ -1248,7 +1246,7 @@ export class OutlookMailManager implements MailManager {
       const isFatal =
         FatalErrors.includes(error.message) ||
         (error.statusCode >= 400 && error.statusCode < 500 && error.statusCode !== 429); // Consider 4xx errors other than 429 as potentially fatal depending on the error
-      console.error(
+      logger.error(
         `[${isFatal ? 'FATAL_ERROR' : 'ERROR'}] [Outlook Driver] Operation: ${operation}`,
         {
           error: error.message,
@@ -1275,7 +1273,7 @@ export class OutlookMailManager implements MailManager {
       const isFatal =
         FatalErrors.includes(error.message) ||
         (error.statusCode >= 400 && error.statusCode < 500 && error.statusCode !== 429);
-      console.error(`[Outlook Driver Error] Operation: ${operation}`, {
+      logger.error(`[Outlook Driver Error] Operation: ${operation}`, {
         error: error.message,
         code: error.code,
         statusCode: error.statusCode,

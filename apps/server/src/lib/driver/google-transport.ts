@@ -242,7 +242,7 @@ export class GmailTransport {
     } catch (error) {
       const err = error as Error & { code: string };
       const isFatal = FatalErrors.includes(err.message);
-      console.error(
+      logger.error(
         `[${isFatal ? 'FATAL_ERROR' : 'ERROR'}] [Gmail Driver] Operation: ${operation}`,
         {
           error: err.message,
@@ -267,7 +267,7 @@ export class GmailTransport {
     } catch (error) {
       const err = error as Error & { code: string };
       const isFatal = FatalErrors.includes(err.message);
-      console.error(`[Gmail Driver Error] Operation: ${operation}`, {
+      logger.error(`[Gmail Driver Error] Operation: ${operation}`, {
         error: err.message,
         code: err.code,
         context: sanitizeContext(context),
