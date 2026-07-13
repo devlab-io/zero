@@ -1,10 +1,10 @@
 # Checkrun: shared-types-package-01-checkrun
-generated: 2026-07-13T14:05:27Z  runner: sh  config: /Users/thomasverdenne/cc/zero/.architect/checkrun-shared-types-typecheck.json
+generated: 2026-07-13T14:14:00Z  runner: sh  config: /Users/thomasverdenne/cc/zero/.architect/checkrun-shared-types-typecheck.json
 check_file: docs/checks/niveau9/typecheck.md  freeze_sha: 85451f71
 Executor: bash
 executor_config: bash
-integrity: check_file_matches_freeze=true head=0f5548d767e64734106453459aa52b39bc485f55
-changed_files: 78 listed below; docs_checks_touched=false
+integrity: check_file_matches_freeze=true head=ec8511e3cfb84bdd25ea832373993ce7fa133973
+changed_files: 80 listed below; docs_checks_touched=false
 .gitignore
 apps/mail/components/mail/mail-list.tsx
 apps/mail/components/ui/ai-sidebar.tsx
@@ -70,6 +70,8 @@ docs/adr/0005-server-sentry.md
 docs/jobs/niveau9/server-runtime-guardrails-01-checkrun.md
 docs/jobs/niveau9/server-runtime-guardrails-01-rulings.md
 docs/jobs/niveau9/server-runtime-guardrails-01.md
+docs/jobs/niveau9/shared-types-package-01-checkrun-structure.md
+docs/jobs/niveau9/shared-types-package-01-checkrun.md
 docs/jobs/niveau9/shared-types-package-01-rulings.md
 docs/jobs/niveau9/shared-types-package-01.md
 packages/eslint-config/config.ts
@@ -86,23 +88,23 @@ scripts/checks/loc-ratchet.mjs
 
 ## RUN (mécanique — check-runner ; l'app hors périmètre de l'issue est informative) line 28
 $ pnpm --filter @zero/mail exec tsc --noEmit 2>&1 | tail -5
-exit: 0  ms: 13442  bytes: 434
+exit: 0  ms: 6372  bytes: 434
 ../server/src/thread-workflow-utils/workflow-functions.ts(736,34): error TS2339: Property 'AI' does not exist on type 'Env'.
 ../server/src/thread-workflow-utils/workflow-functions.ts(753,34): error TS2339: Property 'AI' does not exist on type 'Env'.
 undefined
 /Users/thomasverdenne/cc/zero/.architect/wt/niveau9/shared-types-package-01/apps/mail:
- ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL  Command failed with exit code 2: tsc --noEmit
+ ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL  Command failed with exit code 1: tsc --noEmit
 
 ## RUN (mécanique — check-runner ; l'app hors périmètre de l'issue est informative) line 29
 $ pnpm --filter @zero/server exec tsc --noEmit 2>&1 | tail -5
-exit: 0  ms: 5633  bytes: 0
+exit: 0  ms: 2843  bytes: 0
 
 ## RUN (mécanique — check-runner ; l'app hors périmètre de l'issue est informative) line 30
 $ grep -rE ":\s*any\b|as any|<any>|\bany\[\]" apps/mail/app apps/mail/components apps/mail/lib apps/mail/hooks apps/mail/store apps/server/src --include='*.ts' --include='*.tsx' --exclude='*.d.ts' --exclude='*.test.*' | wc -l
-exit: 0  ms: 77  bytes: 9
+exit: 0  ms: 83  bytes: 9
       37
 
 ## RUN (mécanique — check-runner ; l'app hors périmètre de l'issue est informative) line 31
 $ grep -rn "@ts-nocheck" apps/mail apps/server --include='*.ts' --include='*.tsx' --exclude='*.d.ts' | wc -l
-exit: 0  ms: 47  bytes: 9
+exit: 0  ms: 50  bytes: 9
        0
