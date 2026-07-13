@@ -156,3 +156,20 @@ prouvé) : (a) MAY-TOUCH ÉTENDU BORNÉ à components/connection/add.tsx pour re
 SEULS motion.div par du CSS équivalent ; ou (b) vrai split contrôlé avec PREUVE que le
 premier clic clavier/tactile ouvre sans second clic. IRRECEVABLES : lazy-at-mount,
 preuve hover-only. Puis correction manualChunks React/motion et mesure.
+
+## Ruling final plancher (orchestrateur, 2026-07-13)
+
+Mesure 450,7 KiB gz (−177,5 vs 628,2), tout évincé légitimement (zéro preload-au-mount).
+Arithmétique de clôture : même en exécutant TOUTES les surfaces conditionnelles
+restantes autorisées — palette-deep ~−15 (in-boundary, refactor risqué sur une surface
+couverte par le check keyboard-parity gelé), onboarding ~−7 (HORS fence :
+OnboardingWrapper monté par mail/layout.tsx), contenu AddConnectionDialog via nav-user
+(débloqué post-#38 mais voie gardée 104774fa, quelques Ko) — le total atterrit à
+~425-428 > 420. Le gate est MATHÉMATIQUEMENT hors d'atteinte dans le périmètre
+légitime. DÉCISION (B) : plancher acté à la mesure gelée finale (~450,7, chiffre
+définitif sur l'arbre rebasé final), AUCUN refactor palette-deep (risque > bénéfice :
+−15 n'atteint pas le gate et met en danger une surface sous check gelé #32).
+Reste-à-faire QUANTIFIÉ par propriétaire au rapport (palette-deep design esquissé,
+onboarding, nav-user-content, et la part infra React/RR7-core/query non réductible).
+Candidature en COMPLETE_WITH_CONCERNS après la checklist 3f32f9b6 (preuves worker,
+traces réseau, gates, rebase final). « Gate atteint » : jamais.
