@@ -10,12 +10,14 @@ export class GmailMessages {
     return this.t.withErrorHandler(
       'getAttachment',
       async () => {
-        const response = await this.t.execute((gmail) =>
-          gmail.users.messages.attachments.get({
-            userId: 'me',
-            messageId,
-            id: attachmentId,
-          }),
+        const response = await this.t.execute(
+          (gmail) =>
+            gmail.users.messages.attachments.get({
+              userId: 'me',
+              messageId,
+              id: attachmentId,
+            }),
+          { retry: true },
         );
 
         const attachmentData = response.data.data || '';
@@ -32,44 +34,39 @@ export class GmailMessages {
     return this.t.withErrorHandler(
       'getMessageAttachments',
       async () => {
-        const res = await this.t.execute((gmail) =>
-          gmail.users.messages.get({
-            userId: 'me',
-            id: messageId,
-          }),
+        const res = await this.t.execute(
+          (gmail) =>
+            gmail.users.messages.get({
+              userId: 'me',
+              id: messageId,
+            }),
+          { retry: true },
         );
-        const attachmentParts = res.data.payload?.parts
-          ? findAttachments(res.data.payload.parts)
-          : [];
+        const attachmentParts = (
+          res.data.payload?.parts ? findAttachments(res.data.payload.parts) : []
+        ).filter((part) => !!part.body?.attachmentId);
 
-        const attachments = await Promise.all(
-          attachmentParts.map(async (part) => {
-            const attachmentId = part.body?.attachmentId;
-            if (!attachmentId) {
-              return null;
-            }
+        // Un seul round-trip batch pour toutes les pièces jointes du message (issue #31),
+        // au lieu d'un `messages.attachments.get` par pièce. `attachmentParts` est pré-filtré
+        // sur `attachmentId` défini, donc le `?? ''` est un garde de typage jamais atteint.
+        // `batchAttachmentsGet` renvoie un tableau COMPLET (ordre préservé) ou lève sur échec
+        // — aucune PJ perdue en silence.
+        const datas = await this.t.batchAttachmentsGet(
+          attachmentParts.map((part) => ({ messageId, attachmentId: part.body?.attachmentId ?? '' })),
+        );
 
-            try {
-              const attachmentData = await this.getAttachment(messageId, attachmentId);
-              return {
-                filename: part.filename || '',
-                mimeType: part.mimeType || '',
-                size: Number(part.body?.size || 0),
-                attachmentId: attachmentId,
-                headers:
-                  part.headers?.map((h) => ({
-                    name: h.name ?? '',
-                    value: h.value ?? '',
-                  })) ?? [],
-                body: attachmentData ?? '',
-              };
-            } catch {
-              return null;
-            }
-          }),
-        ).then((attachments) => attachments.filter((a): a is NonNullable<typeof a> => a !== null));
-
-        return attachments;
+        return attachmentParts.map((part, i) => ({
+          filename: part.filename || '',
+          mimeType: part.mimeType || '',
+          size: Number(part.body?.size || 0),
+          attachmentId: part.body?.attachmentId || '',
+          headers:
+            part.headers?.map((h) => ({
+              name: h.name ?? '',
+              value: h.value ?? '',
+            })) ?? [],
+          body: fromBase64Url(datas[i]),
+        }));
       },
       { messageId },
     );
@@ -112,13 +109,15 @@ export class GmailMessages {
     return this.t.withErrorHandler(
       'getRawEmail',
       async () => {
-        const res = await this.t.execute((gmail) =>
-          gmail.users.messages.get({
-            userId: 'me',
-            id: messageId,
-            format: 'raw',
-            quotaUser: this.t.config.auth?.email,
-          }),
+        const res = await this.t.execute(
+          (gmail) =>
+            gmail.users.messages.get({
+              userId: 'me',
+              id: messageId,
+              format: 'raw',
+              quotaUser: this.t.config.auth?.email,
+            }),
+          { retry: true },
         );
 
         if (!res.data.raw) {

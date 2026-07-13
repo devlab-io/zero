@@ -140,12 +140,21 @@ export class SyncThreadsCoordinatorWorkflow extends WorkflowEntrypoint<
             `[SyncThreadsCoordinatorWorkflow] Created workflow ${instance.id} for page ${pageNumber}`,
           );
 
-          // Simple polling to wait for completion
-          let attempts = 0;
-          const maxAttempts = 60; // 5 minutes
+          // Poll avec backoff exponentiel (issue #31) : plus de plancher plat de 5 s/page.
+          // Une page qui se termine vite rend la main en <1 s au lieu d'attendre 5 s ;
+          // l'intervalle croît 250 ms → 5 s (plafond), budget total ~5 min inchangé.
+          const pollBaseMs = 250;
+          const pollMaxMs = 5000;
+          const pollFactor = 1.6;
+          const deadline = Date.now() + 5 * 60 * 1000; // 5 minutes budget (préservé)
+          let pollAttempt = 0;
 
-          while (attempts < maxAttempts) {
-            await new Promise((resolve) => setTimeout(resolve, 5000));
+          while (Date.now() < deadline) {
+            const delayMs = Math.min(
+              pollMaxMs,
+              Math.round(pollBaseMs * Math.pow(pollFactor, pollAttempt)),
+            );
+            await new Promise((resolve) => setTimeout(resolve, delayMs));
 
             try {
               const status = await instance.status();
@@ -155,12 +164,12 @@ export class SyncThreadsCoordinatorWorkflow extends WorkflowEntrypoint<
                 throw new Error(`Workflow ${instance.id} failed`);
               }
             } catch (error) {
-              if (attempts === maxAttempts - 1) {
+              if (Date.now() >= deadline) {
                 throw error;
               }
             }
 
-            attempts++;
+            pollAttempt++;
           }
 
           throw new Error(`Workflow ${instance.id} timed out`);

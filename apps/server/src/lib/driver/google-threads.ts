@@ -4,6 +4,7 @@ import type { GmailTransport } from './google-transport';
 import type { GmailMessages } from './google-messages';
 import type { GmailLabels } from './google-labels';
 import type { ParsedMessage } from '../../types';
+import type { gmail_v1 } from '@googleapis/gmail';
 import { cleanSearchValue } from '../utils';
 import * as he from 'he';
 
@@ -42,11 +43,13 @@ export class GmailThreads {
     return this.t.withErrorHandler(
       'listHistory',
       async () => {
-        const response = await this.t.execute((gmail) =>
-          gmail.users.history.list({
-            userId: 'me',
-            startHistoryId: historyId,
-          }),
+        const response = await this.t.execute(
+          (gmail) =>
+            gmail.users.history.list({
+              userId: 'me',
+              startHistoryId: historyId,
+            }),
+          { retry: true },
         );
 
         const history = response.data.history || [];
@@ -73,15 +76,17 @@ export class GmailThreads {
         const labelIds = [..._labelIds];
         if (normalizedFolder) labelIds.push(normalizedFolder.toUpperCase());
 
-        const res = await this.t.execute((gmail) =>
-          gmail.users.threads.list({
-            userId: 'me',
-            q: normalizedQ ? normalizedQ : undefined,
-            labelIds: folder === 'inbox' ? labelIds : [],
-            maxResults,
-            pageToken: pageToken ? pageToken : undefined,
-            quotaUser: this.t.getQuotaUser(),
-          }),
+        const res = await this.t.execute(
+          (gmail) =>
+            gmail.users.threads.list({
+              userId: 'me',
+              q: normalizedQ ? normalizedQ : undefined,
+              labelIds: folder === 'inbox' ? labelIds : [],
+              maxResults,
+              pageToken: pageToken ? pageToken : undefined,
+              quotaUser: this.t.getQuotaUser(),
+            }),
+          { retry: true },
         );
 
         const threads = res.data.threads ?? [];
@@ -106,27 +111,55 @@ export class GmailThreads {
     return this.t.withErrorHandler(
       'get',
       async () => {
-        const res = await this.t.execute((gmail) =>
-          gmail.users.threads.get({
-            userId: 'me',
-            id,
-            format: 'full',
-            quotaUser: this.t.getQuotaUser(),
-          }),
+        const res = await this.t.execute(
+          (gmail) =>
+            gmail.users.threads.get({
+              userId: 'me',
+              id,
+              format: 'full',
+              quotaUser: this.t.getQuotaUser(),
+            }),
+          { retry: true },
         );
 
-        if (!res.data.messages)
-          return {
-            messages: [],
-            latest: undefined,
-            hasUnread: false,
-            totalReplies: 0,
-            labels: [],
-          };
-        let hasUnread = false;
-        const labels = new Set<string>();
-        const messages: ParsedMessage[] = await Promise.all(
-          res.data.messages.map(async (message) => {
+        return this.parseThread(res.data);
+      },
+      { id, email: this.t.config.auth?.email },
+    );
+  }
+
+  /**
+   * Récupère et parse N threads (format full) en UN batch (⌈N/50⌉ round-trips au lieu de N
+   * `threads.get`, issue #31). C'est le chemin chaud de sync : le workflow de page (mon
+   * territoire) l'utilise via un driver PARTAGÉ, donc les round-trips sont coalescés et le
+   * compteur du transport agrège le cycle. `batchThreadsGet` échoue explicitement plutôt que
+   * de rendre un sous-ensemble silencieux. Clé = threadId, valeur = thread parsé.
+   */
+  public async getMany(ids: string[]): Promise<Map<string, Awaited<ReturnType<typeof this.parseThread>>>> {
+    const raw = await this.t.batchThreadsGet(ids, 'full');
+    const out = new Map<string, Awaited<ReturnType<typeof this.parseThread>>>();
+    await Promise.all(
+      ids.map(async (id) => {
+        const data = raw.get(id);
+        if (data) out.set(id, await this.parseThread(data));
+      }),
+    );
+    return out;
+  }
+
+  private async parseThread(data: gmail_v1.Schema$Thread) {
+    if (!data.messages)
+      return {
+        messages: [] as ParsedMessage[],
+        latest: undefined as ParsedMessage | undefined,
+        hasUnread: false,
+        totalReplies: 0,
+        labels: [] as { id: string; name: string }[],
+      };
+    let hasUnread = false;
+    const labels = new Set<string>();
+    const messages: ParsedMessage[] = await Promise.all(
+      data.messages.map(async (message) => {
             const bodyData =
               message.payload?.body?.data ||
               (message.payload?.parts ? findHtmlBody(message.payload.parts) : '') ||
@@ -226,33 +259,20 @@ export class GmailThreads {
           }),
         );
 
-        return {
-          labels: Array.from(labels).map((id) => ({ id, name: id })),
-          messages,
-          latest: messages.findLast((e) => e.isDraft !== true),
-          hasUnread,
-          totalReplies: messages.filter((e) => !e.isDraft).length,
-        };
-      },
-      { id, email: this.t.config.auth?.email },
-    );
+    return {
+      labels: Array.from(labels).map((id) => ({ id, name: id })),
+      messages,
+      latest: messages.findLast((e) => e.isDraft !== true),
+      hasUnread,
+      totalReplies: messages.filter((e) => !e.isDraft).length,
+    };
   }
 
   public markAsRead(threadIds: string[]) {
     return this.t.withErrorHandler(
       'markAsRead',
       async () => {
-        const finalIds = (
-          await Promise.all(
-            threadIds.map(async (id) => {
-              const threadMetadata = await this.getThreadMetadata(id);
-              return threadMetadata.messages
-                .filter((msg) => msg.labelIds && msg.labelIds.includes('UNREAD'))
-                .map((msg) => msg.id);
-            }),
-          ).then((idArrays) => [...new Set(idArrays.flat())])
-        ).filter((id): id is string => id !== undefined);
-
+        const finalIds = await this.collectMessageIdsByUnread(threadIds, true);
         await this.labels.modifyThreadLabels(finalIds, { removeLabelIds: ['UNREAD'] });
       },
       { threadIds },
@@ -263,20 +283,34 @@ export class GmailThreads {
     return this.t.withErrorHandler(
       'markAsUnread',
       async () => {
-        const finalIds = (
-          await Promise.all(
-            threadIds.map(async (id) => {
-              const threadMetadata = await this.getThreadMetadata(id);
-              return threadMetadata.messages
-                .filter((msg) => msg.labelIds && !msg.labelIds.includes('UNREAD'))
-                .map((msg) => msg.id);
-            }),
-          ).then((idArrays) => [...new Set(idArrays.flat())])
-        ).filter((id): id is string => id !== undefined);
+        const finalIds = await this.collectMessageIdsByUnread(threadIds, false);
         await this.labels.modifyThreadLabels(finalIds, { addLabelIds: ['UNREAD'] });
       },
       { threadIds },
     );
+  }
+
+  /**
+   * Récupère la métadonnée des threads en UN batch (⌈N/50⌉ round-trips au lieu de N
+   * `threads.get` unitaires, issue #31) puis extrait les messageIds selon l'état UNREAD :
+   * `wantUnread=true` → messages UNREAD (à marquer lus) ; `false` → messages lus (à marquer
+   * non lus). Dédupliqué, sans undefined.
+   */
+  private async collectMessageIdsByUnread(
+    threadIds: string[],
+    wantUnread: boolean,
+  ): Promise<string[]> {
+    const metaByThread = await this.t.batchThreadsGet(threadIds, 'metadata');
+    const ids = threadIds.flatMap((id) => {
+      const messages = metaByThread.get(id)?.messages ?? [];
+      return messages
+        .filter((msg) => {
+          const isUnread = !!msg.labelIds?.includes('UNREAD');
+          return wantUnread ? isUnread : !isUnread;
+        })
+        .map((msg) => msg.id);
+    });
+    return [...new Set(ids)].filter((id): id is string => id != null);
   }
 
   public normalizeIds(ids: string[]) {
@@ -333,31 +367,6 @@ export class GmailThreads {
         };
       },
       { email: this.t.config.auth?.email },
-    );
-  }
-
-  private async getThreadMetadata(threadId: string) {
-    return this.t.withErrorHandler(
-      'getThreadMetadata',
-      async () => {
-        const res = await this.t.execute((gmail) =>
-          gmail.users.threads.get({
-            userId: 'me',
-            id: threadId,
-            format: 'metadata', // Fetch only metadata,
-            quotaUser: this.t.getQuotaUser(),
-          }),
-        );
-        // Process res.data.messages to extract id and labelIds
-        return {
-          messages:
-            res.data.messages?.map((msg) => ({
-              id: msg.id,
-              labelIds: msg.labelIds,
-            })) || [],
-        };
-      },
-      { threadId, email: this.t.config.auth?.email },
     );
   }
 }

@@ -158,6 +158,14 @@ const connectionHandlerHook = async (account: Account) => {
   }
 };
 
+// NOTE (issue #31, revue) : createAuth N'EST PAS mémoïsé, à dessein. better-auth capture
+// une connexion postgres-js (`createAuthConfig` → `createDb(env.HYPERDRIVE.connectionString)`
+// → `postgres(url)`) au moment de la construction. Cloudflare Workers interdit de réutiliser
+// un objet I/O (socket) entre deux invocations ; un singleton per-isolate rejouerait le socket
+// ouvert lors de la requête 1 dans la requête 2 → « Cannot perform I/O on behalf of a different
+// request ». De plus le flux réel n'appelle createAuth qu'UNE fois par requête (middleware /api
+// OU un mount /mcp|/sse|discovery — jamais cumulés), donc « multiple par requête » est faux.
+// Une connexion neuve par requête est le contrat correct en Workers. Voir rapport #31.
 export const createAuth = () => {
   const twilioClient = twilio();
 

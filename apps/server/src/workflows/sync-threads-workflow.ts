@@ -17,6 +17,8 @@ import { logger } from '../lib/logger';
 import { getZeroAgent, connectionToDriver } from '../lib/server-utils';
 import { WorkflowEntrypoint, WorkflowStep } from 'cloudflare:workers';
 import type { WorkflowEvent } from 'cloudflare:workers';
+import { GoogleMailManager } from '../lib/driver/google';
+import type { ParsedMessage } from '../types';
 import { connection } from '../db/schema';
 import type { ZeroEnv } from '../env';
 import { eq } from 'drizzle-orm';
@@ -140,47 +142,80 @@ export class SyncThreadsWorkflow extends WorkflowEntrypoint<ZeroEnv, SyncThreads
 
         const { stub: agent } = await getZeroAgent(connectionId);
 
-        const syncSingleThread = async (thread: { id: string; historyId: string | null }) => {
-          try {
-            const latest = await this.env.THREAD_SYNC_WORKER.get(
-              this.env.THREAD_SYNC_WORKER.newUniqueId(),
-            ).syncThread(foundConnection, thread.id);
-
-            if (latest) {
-              const normalizedReceivedOn = new Date(latest.receivedOn).toISOString();
-
-              await agent.storeThreadInDB(
-                {
-                  id: thread.id,
-                  threadId: thread.id,
-                  providerId: 'google',
-                  latestSender: latest.sender,
-                  latestReceivedOn: normalizedReceivedOn,
-                  latestSubject: latest.subject,
-                },
-                latest.tags.map((tag) => tag.id),
-              );
-
-              pageProcessingResult.processedCount++;
-              pageProcessingResult.successCount++;
-              logger.info(`[SyncThreadsWorkflow] Successfully synced thread ${thread.id}`);
-            } else {
-              logger.info(
-                `[SyncThreadsWorkflow] Skipping thread ${thread.id} - no latest message`,
-              );
-              pageProcessingResult.failureCount++;
-            }
-          } catch (error) {
-            logger.error(`[SyncThreadsWorkflow] Failed to sync thread ${thread.id}:`, error);
-            pageProcessingResult.failureCount++;
-          }
+        const storeSummary = async (threadId: string, latest: ParsedMessage) => {
+          await agent.storeThreadInDB(
+            {
+              id: threadId,
+              threadId,
+              providerId: 'google',
+              latestSender: latest.sender,
+              latestReceivedOn: new Date(latest.receivedOn).toISOString(),
+              latestSubject: latest.subject,
+            },
+            latest.tags.map((tag) => tag.id),
+          );
         };
 
-        const syncEffects = listResult.threads.map(syncSingleThread);
-        await Promise.allSettled(syncEffects);
+        if (driver instanceof GoogleMailManager) {
+          // Chemin chaud batché (issue #31) : UN batch coalesce les ~maxCount `threads.get`
+          // de la page via un driver PARTAGÉ (round-trips ⌈N/50⌉ au lieu de N), compteur
+          // Gmail loggé par cycle, en bypassant le wrapper flat-60s du DO per-thread.
+          const ids = listResult.threads.map((t) => t.id);
+          let fetched: Awaited<ReturnType<GoogleMailManager['getMany']>>;
+          try {
+            fetched = await driver.getMany(ids);
+          } finally {
+            driver.logSyncCycleCalls(`sync-page-${pageNumber}-${folder}`);
+          }
 
-        // await agent.invalidateDoStateCache();
-        // await sendDoState(connectionId);
+          await Promise.allSettled(
+            listResult.threads.map(async (thread) => {
+              try {
+                const full = fetched.get(thread.id);
+                const latest = full?.latest;
+                if (!full || !latest) {
+                  pageProcessingResult.failureCount++;
+                  return;
+                }
+                // Réplique fidèle de ThreadSyncWorker.syncThread (routes/agent, MUST-NOT-TOUCH) :
+                // persistance R2 du thread complet, mêmes clé et metadata.
+                await this.env.THREADS_BUCKET.put(
+                  `${foundConnection.id}/${thread.id}.json`,
+                  JSON.stringify(full),
+                  { customMetadata: { threadId: thread.id } },
+                );
+                await storeSummary(thread.id, latest);
+                pageProcessingResult.processedCount++;
+                pageProcessingResult.successCount++;
+              } catch (error) {
+                logger.error(`[SyncThreadsWorkflow] Failed to sync thread ${thread.id}:`, error);
+                pageProcessingResult.failureCount++;
+              }
+            }),
+          );
+        } else {
+          // Fallback per-thread DO (providers non-Gmail : pas de batch HTTP Gmail).
+          const syncSingleThread = async (thread: { id: string; historyId: string | null }) => {
+            try {
+              const latest = await this.env.THREAD_SYNC_WORKER.get(
+                this.env.THREAD_SYNC_WORKER.newUniqueId(),
+              ).syncThread(foundConnection, thread.id);
+
+              if (latest) {
+                await storeSummary(thread.id, latest);
+                pageProcessingResult.processedCount++;
+                pageProcessingResult.successCount++;
+              } else {
+                pageProcessingResult.failureCount++;
+              }
+            } catch (error) {
+              logger.error(`[SyncThreadsWorkflow] Failed to sync thread ${thread.id}:`, error);
+              pageProcessingResult.failureCount++;
+            }
+          };
+          await Promise.allSettled(listResult.threads.map(syncSingleThread));
+        }
+
         await agent.reloadFolder(folder);
 
         logger.info(`[SyncThreadsWorkflow] Completed single page ${pageNumber}`);
