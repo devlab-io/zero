@@ -18,12 +18,12 @@
 
 import { execSync } from 'node:child_process';
 
-// Measured 2026-07-12 after `wrangler types` (server --env local; mail).
-// union orchestrateur (ruling 2026-07-13) : server porté à 0 par #21 (gate dure) ;
-// mail resserré 135->119 par #20 (0 erreur locale ; le résidu sous séquence wrangler-only
-// = 47 stubs générés régénérables par `react-router typegen` — le flip de sortie de
-// vague ajoute typegen à la séquence et resserre mail -> 0).
-const BASELINE = { server: 0, mail: 119 };
+// Flip sortie de vague 1 (ruling #13, freeze/niveau9-v3) : server porté à 0 par #21
+// (gate dure) ; mail mesuré à 17 sous la séquence complète (wrangler types + react-router
+// typegen), 0 erreur sous apps/mail — résidu 100 % ../server/src via l'import AppRouter ;
+// le gate « mail 0 TOTAL » est transféré à #25, qui abaissera cette baseline à 0.
+// Ne jamais élargir.
+const BASELINE = { server: 0, mail: 17 };
 
 const blocking =
   process.argv.includes('--blocking') ||

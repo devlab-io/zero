@@ -45,9 +45,12 @@ jobs:
         run: |
           pnpm --filter @zero/server types
           pnpm --filter @zero/mail types
+          pnpm --filter @zero/mail exec react-router typegen
 
-      - name: Typecheck (report mode + non-growing ratchet)
-        run: node scripts/checks/typecheck-report.mjs
+      # Sortie de vague 1 (ruling #13, freeze/niveau9-v3) : bloquant, deux compteurs.
+      # server strict = 0 ; mail ratchet <=17 (résidu inter-app ../server — gate 0 total -> #25).
+      - name: Typecheck — server strict 0 (bloquant) · mail ratchet ≤17 (→ #25)
+        run: TYPECHECK_BLOCKING=1 node scripts/checks/typecheck-report.mjs
 
       - name: Run unit tests
         run: pnpm test

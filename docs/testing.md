@@ -69,15 +69,20 @@ retries and `forbidOnly`.
 (`permissions: contents: read`). Steps, in order:
 
 1. **Install** — `pnpm install --frozen-lockfile --ignore-scripts`.
-2. **Generate Cloudflare Worker types** — `pnpm --filter @zero/server types`
-   (`wrangler types --env local`) + `pnpm --filter @zero/mail types`. Must run
-   before typecheck: `worker-configuration.d.ts` is what `tsc` resolves bindings
-   against.
-3. **Typecheck** — `node scripts/checks/typecheck-report.mjs`. Runs `tsc --noEmit`
-   for both apps in **report mode** (never fails the build) and compares the
-   error count to a frozen baseline (server 82, mail 135 at niveau9). The
-   workflow env `TYPECHECK_BLOCKING` is the switch: flip it to `"true"` to make a
-   regression above baseline a hard gate (orchestrator decision, end of wave 1).
+2. **Generate types** — `pnpm --filter @zero/server types`
+   (`wrangler types --env local`) + `pnpm --filter @zero/mail types` +
+   `pnpm --filter @zero/mail exec react-router typegen` (also compiles the
+   paraglide i18n stubs). All three must run before typecheck:
+   `worker-configuration.d.ts` and the generated route/i18n stubs are what
+   `tsc` resolves against.
+3. **Typecheck** — `TYPECHECK_BLOCKING=1 node scripts/checks/typecheck-report.mjs`,
+   **blocking since wave-1 exit** (ruling #13): server strict = 0; mail ratchet
+   ≤17 — the residual is 100 % `../server/src` errors surfaced through the
+   AppRouter source import (inter-app Env collision), owned by issue #25 whose
+   gate is mail = 0 TOTAL. Never describe this step as "typecheck green" while
+   mail ≠ 0 total. `TYPECHECK_BLOCKING` remains the switch: unset = report-only
+   (counters printed, never fails) ; `1`/`true`/`--blocking` = hard gate on any
+   count above baseline (state since wave-1 exit, orchestrator ruling #13).
 4. **Tests (blocking)** — `pnpm test` (turbo → server + mail vitest).
 5. **Lint security-critical files** — `oxlint@1.9.0` (pinned to the same version
    as `.husky/pre-commit`; no `@latest` anywhere).
