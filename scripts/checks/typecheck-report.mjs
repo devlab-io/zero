@@ -20,10 +20,12 @@ import { execSync } from 'node:child_process';
 
 // Flip sortie de vague 1 (ruling #13, freeze/niveau9-v3) : server porté à 0 par #21
 // (gate dure) ; mail mesuré à 17 sous la séquence complète (wrangler types + react-router
-// typegen), 0 erreur sous apps/mail — résidu 100 % ../server/src via l'import AppRouter ;
-// le gate « mail 0 TOTAL » est transféré à #25, qui abaissera cette baseline à 0.
-// Ne jamais élargir.
-const BASELINE = { server: 0, mail: 17 };
+// typegen). Le gate « mail 0 TOTAL » a été transféré à #43 (trpc-type-boundary) et est
+// désormais ATTEINT : apps/mail consomme `@zero/server/{trpc,auth}` depuis une frontière de
+// types self-contained (app-router.boundary.d.ts + lib/auth.boundary.d.ts, redirigées par
+// tsconfig `paths`), donc son programme tsc ne compile plus les sources serveur. Baseline
+// abaissée 17 -> 0. Ne jamais élargir. Voir docs/adr/0006-trpc-type-boundary.md.
+const BASELINE = { server: 0, mail: 0 };
 
 const blocking =
   process.argv.includes('--blocking') ||
