@@ -1,9 +1,9 @@
 # Checkrun: w2b-robustness-01-checkrun
-generated: 2026-07-13T19:27:22Z  runner: sh  config: /Users/thomasverdenne/cc/zero/.architect/checkrun-w2b-01.json
-check_file: docs/checks/niveau8/robustness.md  freeze_sha: 5331ac6a7aa916b7ff1f68edb72dc57226a2def2
+generated: 2026-07-13T19:46:30Z  runner: sh  config: /Users/thomasverdenne/cc/zero/.architect/checkrun-w2b-01.json
+check_file: docs/checks/niveau8/robustness.md  freeze_sha: 8496d918f6ac2e8876b4cc5274d6200c7a24c855
 executor_config: bash
-integrity: check_file_matches_freeze=true head=faffcc13efa23f7692203ac5dcf061ee5af669e1
-changed_files: 31 listed below; docs_checks_touched=false
+integrity: check_file_matches_freeze=true head=aa7c066c5e0e0cbd9fddb72fd7e2663322374668
+changed_files: 32 listed below; docs_checks_touched=false
 apps/mail/app/page.tsx
 apps/mail/components/create/email-composer.tsx
 apps/mail/components/mail/mail-list.tsx
@@ -34,4 +34,5 @@ apps/mail/messages/fr.json
 apps/mail/providers/query-provider.tsx
 apps/mail/scripts/soak-robustness.ts
 apps/mail/vitest.soak.config.ts
+docs/jobs/niveau9/w2b-robustness-01-checkrun.md
 docs/jobs/niveau9/w2b-robustness-01.md
