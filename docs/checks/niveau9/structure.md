@@ -1,4 +1,10 @@
-# Check — refactors structurels (V2.1-V2.4, V3.1-V3.3)
+# Check — refactors structurels (V2.1-V2.4, V3.1-V3.3, V3.5 loc-outliers)
+
+Executor: bash
+
+## RUN (mécanique — check-runner)
+- RUN: `grep -rnE "(\.\./)+server/src" apps/mail --include='*.ts' --include='*.tsx' | wc -l` -> 0 après V2.4 (informatif avant)
+- RUN: `find apps/mail/app apps/mail/components apps/mail/lib apps/mail/hooks apps/mail/store apps/server/src \( -name '*.ts' -o -name '*.tsx' \) ! -name '*.d.ts' ! -name '*.test.*' -exec wc -l {} + | sort -rn | head -15` -> les fichiers du périmètre de l'issue sont sous leur borne
 
 Gates PASS-only pour toute issue étiquetée *structurel*. L'inspection de code seule est
 insuffisante : chaque gate exige une preuve exécutée.
@@ -15,7 +21,7 @@ insuffisante : chaque gate exige une preuve exécutée.
    SQLite inchangés — diff vide sur ces surfaces.
 5. **Licence** : tout module dérivé d'un fichier portant l'en-tête « Zero Email Inc. » porte le
    même en-tête. Vérif : `grep -rL "Zero Email Inc" <modules dérivés>` vide.
-6. **Frontières** (V2.4) : `grep -rn '\.\./\.\./\.\?\.\?/server' apps/mail` = 0 résultat ;
+6. **Frontières** (V2.4) : `grep -rnE "(\.\./)+server/src" apps/mail --include='*.ts' --include='*.tsx'` = 0 résultat ;
    `no-restricted-imports` présent dans la config ESLint et violé = CI rouge (preuve : run local
    de la règle sur un import factice, puis retrait).
 7. **Ratchet LOC** : `scripts/checks/loc-ratchet` (créé en V0.2) passe avec la nouvelle borne ;

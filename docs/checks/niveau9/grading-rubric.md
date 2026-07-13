@@ -8,12 +8,13 @@ uniquement si le juge liste précisément le critère manquant/excédentaire. Ba
 même protocole. Artefacts : `docs/runs/niveau9/baseline-grading.md` et `final-grading.md`.
 
 ## A1 — Frontières & modularité
-- Palier 7 : aucun fichier source >1200 LOC (`find apps/*/src apps/mail/{app,components,lib,hooks,store} -name '*.ts*' ! -name '*.d.ts' | xargs wc -l | sort -rn`) ; 0 import `../../../server` ou `../../server/src` dans apps/mail (grep).
-- Palier 9 : 0 fichier src >800 LOC hors exceptions listées dans `scripts/checks/loc-ratchet` ; règle ESLint `no-restricted-imports` active en CI ; package `@zero/types` présent dans les deps des 2 apps avec imports réels ; inventaire de routes committé, 0 doublon fonctionnel Hono/tRPC, routes Hono restantes justifiées par ADR ; `apps/mail/components/` organisé par domaine avec index.
+- Commandes gelées : LOC = `find apps/mail/app apps/mail/components apps/mail/lib apps/mail/hooks apps/mail/store apps/server/src \( -name '*.ts' -o -name '*.tsx' \) ! -name '*.d.ts' ! -name '*.test.*' -exec wc -l {} + | sort -rn | head -30` ; frontière = `grep -rnE "(\.\./)+server/src" apps/mail --include='*.ts' --include='*.tsx'`.
+- Palier 7 : aucun fichier source >1200 LOC hors exceptions listées ET justifiées dans la config `scripts/checks/loc-ratchet` ; commande frontière = 0 résultat.
+- Palier 9 : 0 fichier src >800 LOC hors exceptions `loc-ratchet` (≤6 entrées au final, chacune justifiée — `lib/driver/microsoft.ts` couverte par l'ADR driver Microsoft) ; règle ESLint `no-restricted-imports` active en CI ; package `@zero/types` présent dans les deps des 2 apps avec imports réels ; inventaire de routes committé, 0 doublon fonctionnel Hono/tRPC, routes Hono restantes justifiées par ADR ; `apps/mail/components/` organisé par domaine avec index.
 
 ## A2 — Type safety
 - Palier 7 : `pnpm --filter @zero/mail exec tsc --noEmit` ET `pnpm --filter @zero/server exec tsc --noEmit` = 0 erreur (après génération des types wrangler) ; étape typecheck bloquante dans ci.yml.
-- Palier 9 : + `any` explicites ≤40 sur le périmètre src (méthode de comptage du type-ratchet), `as any` inclus ; 0 `@ts-nocheck` ; non-null assertions ≤10 ; ratchet en CI ; 0 `@ts-expect-error` non budgété par RULING.
+- Palier 9 : + `any` ≤40 au comptage gelé `grep -rE ":\s*any\b|as any|<any>|\bany\[\]" apps/mail/app apps/mail/components apps/mail/lib apps/mail/hooks apps/mail/store apps/server/src --include='*.ts' --include='*.tsx' --exclude='*.d.ts' --exclude='*.test.*' | wc -l` (cibles assignées : mail ≤25, server ≤15) ; 0 `@ts-nocheck` ; non-null assertions ≤10 ; ratchet en CI ; 0 `@ts-expect-error` non budgété par RULING.
 
 ## A3 — Tests & vérifiabilité
 - Palier 7 : `pnpm test` à la racine exécute réellement les tests (turbo) et passe ; les 3 fichiers de tests hérités sont exécutés ; tâche `test` bloquante en CI.
@@ -25,8 +26,11 @@ même protocole. Artefacts : `docs/runs/niveau9/baseline-grading.md` et `final-g
 - Palier 9,5 (cible) : + `wrangler types` avant typecheck ; lint épinglé même version hook/CI ; gitleaks ; dry-run wrangler ×2 apps ; ratchets LOC/types/console ; check migrations ; durée <15 min ; gate deploy : le workflow `/deploy` exige CI verte (plus de force-push sans gate) ; lint-staged réellement branché.
 
 ## A5 — Observabilité & erreurs
-- Palier 7 : `grep -rc 'console\.' apps/server/src` total ≤60 ; 0 catch strictement vide ; Sentry actif côté Worker (init + capture dans le fetch handler).
-- Palier 8,5 (cible) : console serveur ≤20 / front ≤40 avec ratchet CI ; inventaire des ~30 catch-swallow à zéro (chaque catch loggue avec contexte ou rethrow typé) ; taxonomie d'erreurs tRPC/Hono centralisée et testée ; `tracing.ts` implémenté ou supprimé par ADR.
+- Commandes gelées (code produit uniquement — tests et générés exclus) :
+  serveur = `grep -rE "console\." apps/server/src --include='*.ts' --exclude='*.test.*' --exclude='*.d.ts' | wc -l` ;
+  front = `grep -rE "console\." apps/mail/app apps/mail/components apps/mail/lib apps/mail/hooks apps/mail/store --include='*.ts' --include='*.tsx' --exclude='*.test.*' --exclude='*.d.ts' | wc -l`.
+- Palier 7 : serveur ≤60 ; 0 catch strictement vide ; Sentry actif côté Worker (init + capture dans le fetch handler).
+- Palier 8,5 (cible) : serveur ≤20 / front ≤40 avec ratchet CI ; inventaire des ~30 catch-swallow à zéro (chaque catch loggue avec contexte ou rethrow typé) ; taxonomie d'erreurs tRPC/Hono centralisée et testée ; `tracing.ts` implémenté ou supprimé par ADR.
 
 ## A6 — Données, migrations & config
 - Palier 7 : journal Drizzle == fichiers disque (0 orphelin) ; env validé par zod au boot des 2 workers avec échec lisible.

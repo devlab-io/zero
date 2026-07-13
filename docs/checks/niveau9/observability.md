@@ -1,8 +1,17 @@
-# Check — observabilité et gestion d'erreurs (V3.4 server-runtime-guardrails)
+# Check — observabilité et gestion d'erreurs (V3.4 server-runtime-guardrails, V5.6 server-console-sweep)
+
+Executor: bash
+
+## RUN (mécanique — check-runner)
+- RUN: `grep -rE "console\." apps/server/src --include='*.ts' --exclude='*.test.*' --exclude='*.d.ts' | wc -l` -> ≤20 au final (V3.4 : ≤146 = 465 − 319 adressables ; V5.6 : ≤20)
+- RUN: `grep -rE "console\." apps/mail/app apps/mail/components apps/mail/lib apps/mail/hooks apps/mail/store --include='*.ts' --include='*.tsx' --exclude='*.test.*' --exclude='*.d.ts' | wc -l` -> ≤40 au final
+- RUN: `grep -rnE "catch\s*(\([^)]*\))?\s*\{\s*\}" apps/server/src --include='*.ts' | wc -l` -> 0
 
 1. **Logger structuré** : les chemins serveur passent par le logger (logging-service ou
-   remplaçant justifié) ; `console.*` dans apps/server/src ≤20 occurrences (baseline 443),
-   liste résiduelle justifiée site par site dans le rapport ; front ≤40 (baseline 146).
+   remplaçant justifié), aux commandes gelées du barème A5 (tests et générés exclus).
+   V3.4 traite tout apps/server/src HORS `routes/agent/**` et `lib/driver/**` (ces zones
+   appartiennent à V5.6 server-console-sweep) ; au final serveur ≤20 (baseline 465), front ≤40
+   (baseline ~143), liste résiduelle justifiée site par site dans le rapport.
 2. **Catch-swallow zéro** : l'inventaire des catch silencieux (établi au dispatch dans l'issue)
    est traité à 100 % — chaque catch loggue avec contexte (opération, identifiants non sensibles)
    ou rethrow une erreur typée. 0 `catch {}` vide (grep).

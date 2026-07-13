@@ -1,5 +1,11 @@
 # Check — migrations et cohérence des données (V1.4 migrations-repair)
 
+Executor: bash
+
+## RUN (mécanique — check-runner)
+- RUN: `node scripts/checks/migrations-consistency.mjs` -> exit 0
+- RUN: `ls apps/server/src/db/migrations/*.sql | wc -l` -> cohérent avec le journal (42 attendus, 0 orphelin non statué)
+
 Règle de sécurité absolue : ne JAMAIS renuméroter, réécrire ou supprimer un fichier SQL de
 migration potentiellement appliqué à une base réelle. On répare le journal et on documente ;
 diff sur les `.sql` existants = vide (seuls méta/journal/docs bougent). Violation = FAIL.

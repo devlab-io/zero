@@ -1,5 +1,10 @@
 # Check — harnais et couverture de tests (V0.1 test-harness, V5.2 tests-core-coverage)
 
+Executor: bash
+
+## RUN (mécanique — check-runner)
+- RUN: `pnpm test` -> exit 0 ; les 3 fichiers hérités apparaissent dans la sortie (V0.1) ; ≥120 tests passants (V5.2)
+
 ## V0.1 test-harness
 1. `pnpm test` à la racine exécute les tests via turbo et sort 0 ; il découvre et fait passer les
    3 fichiers hérités (queue-view-model, state-machine outbox, mail-sanitize).

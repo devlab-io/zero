@@ -1,5 +1,12 @@
 # Check — CI bloquante et gate de deploy (V0.2 ci-and-deploy-gates)
 
+Executor: bash
+
+## RUN (mécanique — check-runner)
+- RUN: `node scripts/security/check-agent-surface.mjs` -> exit 0
+- RUN: `grep -c "frozen-lockfile" .github/workflows/ci.yml` -> ≥1
+- RUN: `grep -rn "oxlint@latest" .github/workflows/ .husky/ package.json | wc -l` -> 0 (versions épinglées partout, y compris le script precommit racine)
+
 1. **Contenu CI PR** (ci.yml, base = version niveau8 `quality-and-security`) : frozen install
    (`--frozen-lockfile --ignore-scripts`), génération wrangler types, typecheck (mode RAPPORT +
    ratchet non croissant en V0 ; flip bloquant = sortie de vague 1), `pnpm test` bloquant,

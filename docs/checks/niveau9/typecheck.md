@@ -1,5 +1,13 @@
 # Check — dette de types à zéro (V1.1 tsc-zero-mail, V1.2 tsc-zero-server)
 
+Executor: bash
+
+## RUN (mécanique — check-runner ; l'app hors périmètre de l'issue est informative)
+- RUN: `pnpm --filter @zero/mail exec tsc --noEmit 2>&1 | tail -5` -> 0 erreur pour V1.1
+- RUN: `pnpm --filter @zero/server exec tsc --noEmit 2>&1 | tail -5` -> 0 erreur pour V1.2
+- RUN: `grep -rE ":\s*any\b|as any|<any>|\bany\[\]" apps/mail/app apps/mail/components apps/mail/lib apps/mail/hooks apps/mail/store apps/server/src --include='*.ts' --include='*.tsx' --exclude='*.d.ts' --exclude='*.test.*' | wc -l` -> mail ≤25 / server ≤15 (cible finale ≤40 cumulés)
+- RUN: `grep -rn "@ts-nocheck" apps/mail apps/server --include='*.ts' --include='*.tsx' --exclude='*.d.ts' | wc -l` -> 0
+
 1. **Génération préalable** : les types wrangler sont régénérés de façon reproductible
    (`pnpm --filter <app> exec wrangler types` ou script équivalent documenté) ; la procédure est
    écrite dans le README ou docs/testing.md.
