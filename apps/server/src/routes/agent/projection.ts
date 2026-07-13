@@ -25,13 +25,13 @@
  * projection *content*.
  */
 
-import type { IGetThreadResponse } from '../../lib/driver/types';
-import type { ThreadsResponse } from '@zero/types';
-import { GmailSearchAssistantSystemPrompt } from '../../lib/prompts';
-import type { ZeroDriverInternal } from './internal';
-import type { ParsedMessage, Sender } from '../../types';
-import { get, getThreadLabels } from './db';
 import { threadLabels as threadLabelsTable, labels as labelsTable } from './db/schema';
+import { GmailSearchAssistantSystemPrompt } from '../../lib/prompts';
+import type { IGetThreadResponse } from '../../lib/driver/types';
+import type { ParsedMessage, Sender } from '../../types';
+import type { ZeroDriverInternal } from './internal';
+import type { ThreadsResponse } from '@zero/types';
+import { get, getThreadLabels } from './db';
 import { inArray, eq } from 'drizzle-orm';
 import { openai } from '@ai-sdk/openai';
 import { generateText } from 'ai';
@@ -58,6 +58,23 @@ function projectRow(thread: {
     latest_subject: thread.latestSubject ?? null,
     latest_sender: thread.latestSender ?? null,
   };
+}
+
+/**
+ * Cursor for the slice/heuristic query paths (#30): emit the last row's date only when the
+ * page is exactly full. Guards a null date so we never emit the bogus string `"null"` as a
+ * cursor (which would break the `lt(latest_received_on, token)` continuation).
+ *
+ * The folder path (Case 2) consumes the SQL `LIMIT maxResults+1` token from
+ * `findThreadsByFolderWithPagination` instead (exact — no phantom empty page at a full boundary).
+ * The label/complex paths keep this heuristic: their `findThreadsWithPagination` token points at
+ * the first row of the *next* page, which its own `lt` filter would then skip — so consuming it
+ * would drop a row. That off-by-one lives in `db/**` (out of bounds) and predates this change.
+ */
+export function heuristicToken(rows: ThreadRow[], maxResults: number): string | null {
+  if (rows.length === 0 || rows.length !== maxResults) return null;
+  const last = rows[rows.length - 1].latest_received_on;
+  return last == null ? null : String(last);
 }
 
 /**
@@ -177,13 +194,15 @@ export async function searchThreads(
   const genQueryResult = await Effect.runPromise(genQueryEffect);
 
   const rawEffect = Effect.tryPromise(() =>
-    self.driver!.list({
-      folder,
-      query: genQueryResult,
-      labelIds,
-      maxResults,
-      pageToken,
-    }).then((r) => r.threads.map((t) => t.id)),
+    self
+      .driver!.list({
+        folder,
+        query: genQueryResult,
+        labelIds,
+        maxResults,
+        pageToken,
+      })
+      .then((r) => r.threads.map((t) => t.id)),
   ).pipe(Effect.catchAll(() => Effect.succeed([])));
 
   const effects: Effect.Effect<string[]>[] = [rawEffect];
@@ -226,88 +245,98 @@ function queryThreads(
     maxResults: number;
   },
 ) {
-  return Effect.tryPromise(async (): Promise<ThreadRow[]> => {
-    const { labelIds = [], folder, q, pageToken, maxResults } = params;
+  return Effect.tryPromise(
+    async (): Promise<{ rows: ThreadRow[]; nextPageToken: string | null }> => {
+      const { labelIds = [], folder, q, pageToken, maxResults } = params;
 
-    console.log('[queryThreads] params:', { labelIds, folder, q, pageToken, maxResults });
+      console.log('[queryThreads] params:', { labelIds, folder, q, pageToken, maxResults });
 
-    // Import the new database functions
-    const {
-      findThreadsWithPagination,
-      findThreadsByFolderWithPagination,
-      findThreadsWithAnyLabels,
-      findThreadsWithTextSearch,
-      list,
-    } = await import('./db');
-
-    // Case 1: All threads (no filters)
-    if (!folder && labelIds.length === 0 && !q && !pageToken) {
-      console.log('[queryThreads] Case: all threads');
-      const threads = await list(self.db);
-      return threads.map(projectRow);
-    }
-
-    // Case 2: Folder only — always via the SQL-LIMIT paginated query so the first
-    // inbox page is bounded at the database (#30), not fetch-all-then-slice.
-    if (folder && labelIds.length === 0 && !q) {
-      const folderLabel = folder.toUpperCase();
-      console.log('[queryThreads] Case: folder only', { folderLabel });
-
-      const result = await findThreadsByFolderWithPagination(self.db, folderLabel, {
-        pageToken,
-        maxResults,
+      // Slice/heuristic paths derive the cursor from the page; the folder path overrides it
+      // with the exact SQL LIMIT+1 token (see heuristicToken doc).
+      const page = (rows: ThreadRow[]) => ({
+        rows,
+        nextPageToken: heuristicToken(rows, maxResults),
       });
-      return result.threads.map(projectRow);
-    }
 
-    // Case 3: Single label only
-    if (labelIds.length === 1 && !folder && !q) {
-      const labelId = labelIds[0];
-      console.log('[queryThreads] Case: single label only', { labelId });
+      // Import the new database functions
+      const {
+        findThreadsWithPagination,
+        findThreadsByFolderWithPagination,
+        findThreadsWithAnyLabels,
+        findThreadsWithTextSearch,
+        list,
+      } = await import('./db');
 
-      if (pageToken) {
-        const result = await findThreadsWithPagination(self.db, {
-          labelIds: [labelId],
+      // Case 1: All threads (no filters)
+      if (!folder && labelIds.length === 0 && !q && !pageToken) {
+        console.log('[queryThreads] Case: all threads');
+        const threads = await list(self.db);
+        return page(threads.map(projectRow));
+      }
+
+      // Case 2: Folder only — always via the SQL-LIMIT paginated query so the first
+      // inbox page is bounded at the database (#30), not fetch-all-then-slice. Its
+      // LIMIT+1 token is exact, so consume it directly (no phantom empty page).
+      if (folder && labelIds.length === 0 && !q) {
+        const folderLabel = folder.toUpperCase();
+        console.log('[queryThreads] Case: folder only', { folderLabel });
+
+        const result = await findThreadsByFolderWithPagination(self.db, folderLabel, {
           pageToken,
           maxResults,
         });
-        return result.threads.map(projectRow);
-      } else {
-        const threads = await findThreadsWithAnyLabels(self.db, [labelId]);
-        return threads.slice(0, maxResults).map(projectRow);
+        return { rows: result.threads.map(projectRow), nextPageToken: result.nextPageToken };
       }
-    }
 
-    // Case 4: Text search only
-    if (q && !folder && labelIds.length === 0) {
-      console.log('[queryThreads] Case: text search only', { q });
-      const threads = await findThreadsWithTextSearch(self.db, q);
-      return threads.slice(0, maxResults).map(projectRow);
-    }
+      // Case 3: Single label only
+      if (labelIds.length === 1 && !folder && !q) {
+        const labelId = labelIds[0];
+        console.log('[queryThreads] Case: single label only', { labelId });
 
-    // Case 5: Complex filtering (folder + labels + search + pagination)
-    console.log('[queryThreads] Case: complex filtering', {
-      folder,
-      labelIds,
-      q,
-      pageToken,
-    });
+        if (pageToken) {
+          const result = await findThreadsWithPagination(self.db, {
+            labelIds: [labelId],
+            pageToken,
+            maxResults,
+          });
+          return page(result.threads.map(projectRow));
+        } else {
+          const threads = await findThreadsWithAnyLabels(self.db, [labelId]);
+          return page(threads.slice(0, maxResults).map(projectRow));
+        }
+      }
 
-    const allLabelIds = [...labelIds];
-    if (folder) {
-      allLabelIds.push(folder.toUpperCase());
-    }
+      // Case 4: Text search only
+      if (q && !folder && labelIds.length === 0) {
+        console.log('[queryThreads] Case: text search only', { q });
+        const threads = await findThreadsWithTextSearch(self.db, q);
+        return page(threads.slice(0, maxResults).map(projectRow));
+      }
 
-    const result = await findThreadsWithPagination(self.db, {
-      labelIds: allLabelIds,
-      searchText: q,
-      pageToken,
-      maxResults,
-      requireAllLabels: true, // Require all labels to be present
-    });
+      // Case 5: Complex filtering (folder + labels + search + pagination)
+      console.log('[queryThreads] Case: complex filtering', {
+        folder,
+        labelIds,
+        q,
+        pageToken,
+      });
 
-    return result.threads.map(projectRow);
-  });
+      const allLabelIds = [...labelIds];
+      if (folder) {
+        allLabelIds.push(folder.toUpperCase());
+      }
+
+      const result = await findThreadsWithPagination(self.db, {
+        labelIds: allLabelIds,
+        searchText: q,
+        pageToken,
+        maxResults,
+        requireAllLabels: true, // Require all labels to be present
+      });
+
+      return page(result.threads.map(projectRow));
+    },
+  );
 }
 
 /**
@@ -318,9 +347,10 @@ function queryThreads(
 export function buildThreadProjection(
   rows: ThreadRow[],
   labelsByThread: Map<string, { id: string; name: string }[]>,
-  maxResults: number,
+  nextPageToken: string | null,
 ): ThreadsResponse {
   if (!rows.length) {
+    // Preserve the pre-projection empty sentinel (`''`) regardless of the query token.
     return { threads: [], nextPageToken: '' };
   }
 
@@ -338,12 +368,6 @@ export function buildThreadProjection(
       unread: labels.some((label) => label.id === 'UNREAD'),
     };
   });
-
-  // Cursor heuristic preserved from the pre-projection path: last row's latest_received_on.
-  const nextPageToken =
-    threads.length === maxResults && rows.length > 0
-      ? String(rows[rows.length - 1].latest_received_on)
-      : null;
 
   return { threads, nextPageToken };
 }
@@ -366,12 +390,12 @@ export async function getThreadsFromDB(
   };
 
   try {
-    const rows = await Effect.runPromise(queryThreads(self, normalizedParams));
+    const { rows, nextPageToken } = await Effect.runPromise(queryThreads(self, normalizedParams));
     const labelsByThread = await getLabelsForThreads(
       self.db,
       rows.map((row) => row.id),
     );
-    return buildThreadProjection(rows, labelsByThread, maxResults);
+    return buildThreadProjection(rows, labelsByThread, nextPageToken);
   } catch (error) {
     console.error('Failed to get threads from database:', error);
     throw error;

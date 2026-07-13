@@ -159,4 +159,70 @@ premier page identiques (même `desc(latestReceivedOn)`), bornées au SQLite.
   `threads`. `isProjected` exclut Sent → fetch préservé, aucune ligne destinataires vide.
   Inbox (cible du gate) reste projeté.
 
+---
+
+## Correctif comparator + cursor (post-jugement, sur HEAD 3358c09b)
+
+Deux findings de supervision (verdict suspendu). Round 1 committé par l'orchestrateur
+(`d10f2b39` + checkrun `3358c09b`) ; ce correctif est en uncommitted par-dessus.
+
+### Finding 1 (BLOCKER) — comparateur React.memo incomplet → CORRIGÉ + testé
+
+Régression **introduite** par mon diff : l'ancien comparateur comparait `sender.email` et
+`labels.length` SEULEMENT → un refetch remplaçant STARRED par IMPORTANT (longueur égale) ou
+changeant `sender.name` à email constant laissait la row obsolète.
+
+Corrigé : comparateur COMPLET sur tous les champs rendus depuis la projection — `sender.name`
++ `sender.email`, labels par **contenu ET ordre** (`sameProjectedLabels`), + subject/receivedOn/
+unread/id/index/isKeyboardFocused/onClick. Extrait (avec le view-model) dans un module PUR
+co-localisé `mail-list-thread-projection.ts` pour la testabilité : l'env vitest mail ne résout
+que les imports `type` (pas d'alias `@/` runtime), donc importer le composant complet dans un
+test échoue — le module pur n'a que des imports type-only. La row importe depuis ce module.
+
+Test rouge-avant/vert-après : `mail-list-thread.test.ts` — scénario A (swap STARRED→IMPORTANT
+longueur égale → re-render), scénario B (name change même email → re-render), + subject/date/
+unread/email/label-order/index/focus, + cas positif identité. **21 tests mail passent (5 nouveaux)**.
+
+### Finding 2 — nextPageToken → classifié DETTE PRÉEXISTANTE + fix partiel sûr
+
+**Classification : dette PRÉEXISTANTE.** Le `getThreadsFromDB` d'origine utilisait déjà
+l'heuristique identique (`length===maxResults` + `String(latest_received_on)`) et `queryThreads`
+jetait déjà le token paginé. Non introduit par ce diff.
+
+Réparé ce qui est sûr dans mon may-touch :
+- **Inbox (Case 2)** consomme désormais le token SQL exact de `findThreadsByFolderWithPagination`
+  (`results[maxResults-1]` = last-of-page + `lt` → continuation correcte, plus de page vide fantôme
+  au bord exactement plein).
+- **Garde null-date** (`heuristicToken`) : ne jamais émettre le curseur bogué `"null"`
+  (`String(null)`) qui, comparé par `lt`, matcherait toutes les lignes → boucle/doublons.
+
+NON consommé (à dessein) : le token de `findThreadsWithPagination` (Cases label/complexe) pointe
+sur la 1ʳᵉ ligne de la page SUIVANTE, que son propre `lt` exclurait → consommer = **sauter une
+ligne**. Cet off-by-one vit dans `db/**` (hors bornes) et préexiste ; le fixer proprement exige
+une modif `db/**`. Consigné comme dette datée (2026-07-13, issue #30). Ces chemins gardent donc
+l'heuristique (comportement inchangé, + garde null-date).
+
+Tests : `heuristicToken` (page pleine / courte / vide / null-date) + `buildThreadProjection`
+passe-token + sentinelle vide. **32 tests serveur passent (heuristicToken inclus).**
+
+### Nouveaux fichiers (round 2)
+
+- `apps/mail/components/mail/mail-list-thread-projection.ts` — module PUR (view-model +
+  comparateur), imports type-only. Extraction de MA propre logique de row pour testabilité ;
+  importé uniquement par la row et son test.
+- `apps/mail/components/mail/mail-list-thread.test.ts` — test du comparateur (tests, MAY TOUCH).
+
+### Re-gates correctif — RC natifs=0
+
+| Gate | RC | Preuve |
+|---|---|---|
+| tsc server | 0 | 0 error |
+| tsc mail | 0 | 0 error |
+| tests server | 0 | 6 files / **32** tests ; gzip 50 lignes 1274 B |
+| tests mail | 0 | 4 files / **21** tests (5 comparateur) |
+| build mail | 0 | built ~9s |
+| dry-run server / mail | 0 / 0 | bindings résolus |
+| loc / type / console ratchets | 0 | PASSED (projection.ts 449, row 458, module pur 83, mail.ts 870 — tous < 800/budget) |
+| frontière tRPC | 0 | md5 inchangé (I/O router identique) → pas de drift |
+
 STATUS: COMPLETE

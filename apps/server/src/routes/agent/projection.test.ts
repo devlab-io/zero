@@ -1,6 +1,6 @@
+import { buildThreadProjection, heuristicToken } from './projection';
 import { describe, it, expect } from 'vitest';
 import { gzipSync } from 'node:zlib';
-import { buildThreadProjection } from './projection';
 
 /**
  * #30 — unit proof of the rich list projection with fake DO data.
@@ -46,10 +46,16 @@ describe('buildThreadProjection (#30 rich list projection)', () => {
   it('maps subject / sender / date / labels / unread from the DO row', () => {
     const rows = [fakeRow(0)];
     const labels = new Map([
-      ['thread-0', [{ id: 'INBOX', name: 'Inbox' }, { id: 'UNREAD', name: 'Unread' }]],
+      [
+        'thread-0',
+        [
+          { id: 'INBOX', name: 'Inbox' },
+          { id: 'UNREAD', name: 'Unread' },
+        ],
+      ],
     ]);
 
-    const { threads } = buildThreadProjection(rows, labels, 50);
+    const { threads } = buildThreadProjection(rows, labels, null);
     expect(threads).toHaveLength(1);
     const item = threads[0];
 
@@ -68,13 +74,13 @@ describe('buildThreadProjection (#30 rich list projection)', () => {
   it('derives unread === false when the UNREAD label is absent', () => {
     const rows = [fakeRow(1)];
     const labels = new Map([['thread-1', [{ id: 'INBOX', name: 'Inbox' }]]]);
-    const { threads } = buildThreadProjection(rows, labels, 50);
+    const { threads } = buildThreadProjection(rows, labels, null);
     expect(threads[0].unread).toBe(false);
   });
 
   it('carries NO body / base64 / processedHtml (no per-row payload weight)', () => {
     const rows = Array.from({ length: 50 }, (_, i) => fakeRow(i));
-    const { threads } = buildThreadProjection(rows, fakeLabels(50), 50);
+    const { threads } = buildThreadProjection(rows, fakeLabels(50), null);
     const json = JSON.stringify(threads);
     expect(json).not.toContain('"body"');
     expect(json).not.toContain('"decodedBody"');
@@ -91,7 +97,7 @@ describe('buildThreadProjection (#30 rich list projection)', () => {
 
   it('serializes 50 rows well under the 120 KiB gzip budget', () => {
     const rows = Array.from({ length: 50 }, (_, i) => fakeRow(i));
-    const response = buildThreadProjection(rows, fakeLabels(50), 50);
+    const response = buildThreadProjection(rows, fakeLabels(50), null);
     const raw = Buffer.from(JSON.stringify(response), 'utf8');
     const gzipped = gzipSync(raw);
     // Report the measured sizes so the proof is reproducible from the test log.
@@ -101,18 +107,46 @@ describe('buildThreadProjection (#30 rich list projection)', () => {
     expect(gzipped.length).toBeLessThanOrEqual(120 * 1024);
   });
 
-  it('emits a next-page cursor from the last row when the page is full', () => {
-    const rows = Array.from({ length: 50 }, (_, i) => fakeRow(i));
-    const { nextPageToken } = buildThreadProjection(rows, fakeLabels(50), 50);
-    expect(nextPageToken).toBe(rows[rows.length - 1].latest_received_on);
-  });
+  it('passes the query cursor through unchanged and keeps the empty sentinel', () => {
+    const rows = [fakeRow(0), fakeRow(1)];
+    expect(buildThreadProjection(rows, fakeLabels(2), 'cursor-xyz').nextPageToken).toBe(
+      'cursor-xyz',
+    );
+    expect(buildThreadProjection(rows, fakeLabels(2), null).nextPageToken).toBeNull();
 
-  it('emits null cursor for a short (last) page and empty for no rows', () => {
-    const short = buildThreadProjection([fakeRow(0), fakeRow(1)], fakeLabels(2), 50);
-    expect(short.nextPageToken).toBeNull();
-
-    const empty = buildThreadProjection([], new Map(), 50);
+    // Empty rows always report the pre-projection `''` sentinel, regardless of the token.
+    const empty = buildThreadProjection([], new Map(), 'ignored');
     expect(empty.threads).toEqual([]);
     expect(empty.nextPageToken).toBe('');
+  });
+});
+
+describe('heuristicToken (#30 slice/heuristic cursor)', () => {
+  const row = (
+    date: string | null,
+  ): {
+    id: string;
+    latest_received_on: string | null;
+    latest_subject: string | null;
+    latest_sender: { name?: string; email: string } | null;
+  } => ({ id: 'x', latest_received_on: date, latest_subject: null, latest_sender: null });
+
+  it('emits the last row date only when the page is exactly full', () => {
+    const full = Array.from({ length: 50 }, (_, i) => row(`d${i}`));
+    expect(heuristicToken(full, 50)).toBe('d49');
+  });
+
+  it('emits null for a short (last) page', () => {
+    expect(heuristicToken([row('a'), row('b')], 50)).toBeNull();
+  });
+
+  it('emits null for an empty page', () => {
+    expect(heuristicToken([], 50)).toBeNull();
+  });
+
+  it('guards a null last-row date — never emits the bogus "null" cursor', () => {
+    const full = Array.from({ length: 50 }, () => row('d'));
+    full[full.length - 1] = row(null);
+    expect(heuristicToken(full, 50)).toBeNull();
   });
 });

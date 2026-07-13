@@ -17,3 +17,13 @@
    reste due par #40 (session authentifiée).
 3. Frontière tRPC régénérée par le porteur du contrat projection : conforme
    (déterminisme md5 à re-prouver par le juge).
+
+## RULING 2026-07-13 (round 2 — findings supervision)
+- Finding comparator : correctif COMPLET accepté (tous champs rendus, labels
+  par contenu+ordre, module pur co-localisé justifié par l env de test) —
+  sous réserve de la confirmation de delta du juge.
+- Finding cursor : classification DETTE PRÉEXISTANTE acceptée (heuristique
+  identique à l origine, preuve au rapport) ; fix partiel SÛR in-fence
+  (token SQL exact inbox + garde null-date) ; le non-consommé
+  (findThreadsWithPagination, off-by-one dans db/**) = dette datée consignée
+  pour #39/#40 — raison technique validée (consommer sauterait une ligne).
