@@ -1,3 +1,4 @@
+import { logger } from '../lib/logger';
 import type { ParsedMessage } from '../types';
 import * as cheerio from 'cheerio';
 
@@ -15,7 +16,7 @@ export async function htmlToText(decodedBody: string): Promise<string> {
       .replace(/\s+/g, ' ')
       .trim();
   } catch (error) {
-    console.error('Error extracting text from HTML:', error);
+    logger.error('Error extracting text from HTML:', error);
     return '';
   }
 }
@@ -60,7 +61,7 @@ export const messageToXML = async (message: ParsedMessage) => {
         </message>
         `;
   } catch (error) {
-    console.log('[MESSAGE_TO_XML] Failed to convert message to XML:', {
+    logger.info('[MESSAGE_TO_XML] Failed to convert message to XML:', {
       messageId: message.id,
       error: error instanceof Error ? error.message : String(error),
     });

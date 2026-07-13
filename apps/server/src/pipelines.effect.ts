@@ -12,6 +12,7 @@
  * limitations under the License.
  */
 
+import { logger } from './lib/logger';
 import dedent from 'dedent';
 import { env } from './env';
 
@@ -19,7 +20,7 @@ const showLogs = true;
 
 const log = (message: string, ...args: unknown[]) => {
   if (showLogs) {
-    console.log(message, ...args);
+    logger.info(message, ...args);
     return message;
   }
   return 'no message';

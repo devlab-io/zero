@@ -1,3 +1,4 @@
+import { logger } from '../../lib/logger';
 import { NotesManager } from '../../lib/notes-manager';
 import { privateProcedure, router } from '../trpc';
 import { z } from 'zod';
@@ -71,11 +72,11 @@ export const notesRouter = router({
     .mutation(async ({ ctx, input }) => {
       const { notes } = input;
       if (!notes || notes.length === 0) {
-        console.warn('Attempted to reorder an empty array of notes');
+        logger.warn('Attempted to reorder an empty array of notes');
         return { success: true };
       }
 
-      console.log(
+      logger.info(
         `Reordering ${notes.length} notes:`,
         notes.map(({ id, order, isPinned }) => ({ id, order, isPinned })),
       );

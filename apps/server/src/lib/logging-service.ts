@@ -1,3 +1,4 @@
+import { logger } from './logger';
 import type { TRPCCallLog, LoggingState, SessionStats } from '../types/logging';
 import { DatadogService } from './datadog-service';
 import type { ZeroEnv } from '../env';
@@ -28,7 +29,7 @@ export class LoggingService {
                 log
             );
         } catch (error) {
-            console.error('❌ Failed to log TRPC call to Datadog:', error);
+            logger.error('❌ Failed to log TRPC call to Datadog:', error);
         }
 
         // Update in-memory session stats

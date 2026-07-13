@@ -1,3 +1,4 @@
+import { logger } from './logger';
 import { promises as dns } from 'dns';
 import { createVerify, createHash } from 'crypto';
 
@@ -132,6 +133,7 @@ async function validateSPF(domain: string, ip: string): Promise<boolean> {
           try {
             return ipv6CidrMatch(ip, ipRange, prefix);
           } catch {
+            logger.debug('SPF ip6 CIDR match failed', { ipRange });
             return false;
           }
         }
@@ -149,7 +151,7 @@ async function validateSPF(domain: string, ip: string): Promise<boolean> {
             }
           }
         } catch (e) {
-          // Include domain lookup failed
+          logger.debug('SPF include domain lookup failed', { includeDomain, error: e });
         }
       }
       
@@ -162,6 +164,7 @@ async function validateSPF(domain: string, ip: string): Promise<boolean> {
     
     return false;
   } catch (error) {
+    logger.debug('SPF validation failed', { domain, error });
     return false;
   }
 }
@@ -215,8 +218,9 @@ async function validateDKIM(rawEmail: string): Promise<boolean> {
     
     const pemKey = `-----BEGIN PUBLIC KEY-----\n${pubKey}\n-----END PUBLIC KEY-----`;
     return verifier.verify(pemKey, signature, 'base64');
-    
+
   } catch (error) {
+    logger.debug('DKIM validation failed', { error });
     return false;
   }
 }
@@ -234,8 +238,9 @@ async function validateDMARC(domain: string): Promise<boolean> {
     
     // Require strict policy (quarantine or reject)
     return policy === 'quarantine' || policy === 'reject';
-    
+
   } catch (error) {
+    logger.debug('DMARC validation failed', { domain, error });
     return false;
   }
 }
@@ -243,50 +248,50 @@ async function validateDMARC(domain: string): Promise<boolean> {
 // BIMI Validation
 async function validateBIMI(domain: string): Promise<boolean> {
   try {
-    console.log(`[BIMI_DEBUG] Validating BIMI for domain: ${domain}`);
+    logger.info(`[BIMI_DEBUG] Validating BIMI for domain: ${domain}`);
     
     // Try exact domain first
-    console.log(`[BIMI_DEBUG] Checking default._bimi.${domain}`);
+    logger.info(`[BIMI_DEBUG] Checking default._bimi.${domain}`);
     try {
       const txtRecords = await resolveTxtSafe(`default._bimi.${domain}`);
       const bimiRecord = txtRecords.flat().find(record => record.includes('v=BIMI1'));
       
       if (bimiRecord) {
-        console.log(`[BIMI_DEBUG] Found BIMI record on exact domain: ${bimiRecord}`);
+        logger.info(`[BIMI_DEBUG] Found BIMI record on exact domain: ${bimiRecord}`);
         return await validateBIMIRecord(bimiRecord, domain);
       }
     } catch (exactDomainError) {
-      console.log(`[BIMI_DEBUG] No BIMI record on exact domain ${domain}: ${exactDomainError instanceof Error ? exactDomainError.message : String(exactDomainError)}`);
+      logger.info(`[BIMI_DEBUG] No BIMI record on exact domain ${domain}: ${exactDomainError instanceof Error ? exactDomainError.message : String(exactDomainError)}`);
     }
     
     // If no BIMI record on exact domain, try parent domain for subdomains
     const domainParts = domain.split('.');
-    console.log(`[BIMI_DEBUG] No BIMI on exact domain. Domain parts: ${domainParts}`);
+    logger.info(`[BIMI_DEBUG] No BIMI on exact domain. Domain parts: ${domainParts}`);
     if (domainParts.length > 2) {
       const parentDomain = domainParts.slice(-2).join('.');
-      console.log(`[BIMI_DEBUG] Checking parent domain: default._bimi.${parentDomain}`);
+      logger.info(`[BIMI_DEBUG] Checking parent domain: default._bimi.${parentDomain}`);
       try {
         const parentTxtRecords = await resolveTxtSafe(`default._bimi.${parentDomain}`);
         const parentBimiRecord = parentTxtRecords.flat().find(record => record.includes('v=BIMI1'));
         
         if (parentBimiRecord) {
-          console.log(`[BIMI_DEBUG] Found BIMI record on parent domain: ${parentBimiRecord}`);
+          logger.info(`[BIMI_DEBUG] Found BIMI record on parent domain: ${parentBimiRecord}`);
           return await validateBIMIRecord(parentBimiRecord, parentDomain);
         } else {
-          console.log(`[BIMI_DEBUG] No BIMI record found on parent domain ${parentDomain}`);
+          logger.info(`[BIMI_DEBUG] No BIMI record found on parent domain ${parentDomain}`);
         }
       } catch (parentDomainError) {
-        console.log(`[BIMI_DEBUG] Error checking parent domain ${parentDomain}: ${parentDomainError instanceof Error ? parentDomainError.message : String(parentDomainError)}`);
+        logger.info(`[BIMI_DEBUG] Error checking parent domain ${parentDomain}: ${parentDomainError instanceof Error ? parentDomainError.message : String(parentDomainError)}`);
       }
     } else {
-      console.log(`[BIMI_DEBUG] Domain ${domain} is not a subdomain, skipping parent check`);
+      logger.info(`[BIMI_DEBUG] Domain ${domain} is not a subdomain, skipping parent check`);
     }
     
-    console.log(`[BIMI_DEBUG] BIMI validation failed for ${domain}`);
+    logger.info(`[BIMI_DEBUG] BIMI validation failed for ${domain}`);
     return false;
     
   } catch (error) {
-    console.error(`[BIMI_DEBUG] Unexpected error validating BIMI for ${domain}:`, error);
+    logger.error(`[BIMI_DEBUG] Unexpected error validating BIMI for ${domain}:`, error);
     return false;
   }
 }
@@ -297,25 +302,25 @@ async function validateBIMIRecord(bimiRecord: string, domain: string): Promise<b
     const logoUrl = params.l;
     const vmcUrl = params.a;
     
-    console.log(`[BIMI_DEBUG] Validating BIMI record for ${domain}: logoUrl=${logoUrl}, vmcUrl=${vmcUrl}`);
+    logger.info(`[BIMI_DEBUG] Validating BIMI record for ${domain}: logoUrl=${logoUrl}, vmcUrl=${vmcUrl}`);
     
     // Require a valid HTTPS logo URL
     if (!logoUrl || !logoUrl.startsWith('https://')) {
-      console.log(`[BIMI_DEBUG] Invalid logo URL for ${domain}: ${logoUrl}`);
+      logger.info(`[BIMI_DEBUG] Invalid logo URL for ${domain}: ${logoUrl}`);
       return false;
     }
     
     // If VMC URL is provided, validate it
     if (vmcUrl) {
       if (!vmcUrl.startsWith('https://')) {
-        console.log(`[BIMI_DEBUG] Invalid VMC URL for ${domain}: ${vmcUrl}`);
+        logger.info(`[BIMI_DEBUG] Invalid VMC URL for ${domain}: ${vmcUrl}`);
         return false;
       }
       
       // Validate VMC certificate (basic check)
       const vmcValid = await validateVMC(vmcUrl, domain);
       if (!vmcValid) {
-        console.log(`[BIMI_DEBUG] VMC validation failed for ${domain}`);
+        logger.info(`[BIMI_DEBUG] VMC validation failed for ${domain}`);
         return false;
       }
     }
@@ -323,22 +328,22 @@ async function validateBIMIRecord(bimiRecord: string, domain: string): Promise<b
     // Validate logo accessibility
     const logoValid = await validateLogo(logoUrl, domain);
     if (!logoValid) {
-      console.log(`[BIMI_DEBUG] Logo validation failed for ${domain}`);
+      logger.info(`[BIMI_DEBUG] Logo validation failed for ${domain}`);
       return false;
     }
     
-    console.log(`[BIMI_DEBUG] BIMI validation successful for ${domain}`);
+    logger.info(`[BIMI_DEBUG] BIMI validation successful for ${domain}`);
     return true;
     
   } catch (error) {
-    console.log(`[BIMI_DEBUG] Error validating BIMI record for ${domain}:`, error instanceof Error ? error.message : String(error));
+    logger.info(`[BIMI_DEBUG] Error validating BIMI record for ${domain}:`, error instanceof Error ? error.message : String(error));
     return false;
   }
 }
 
 async function validateVMC(vmcUrl: string, domain: string): Promise<boolean> {
   try {
-    console.log(`[BIMI_DEBUG] Validating VMC for ${domain}: ${vmcUrl}`);
+    logger.info(`[BIMI_DEBUG] Validating VMC for ${domain}: ${vmcUrl}`);
     
     // Basic VMC validation - check if certificate is accessible
     const response = await fetch(vmcUrl, { 
@@ -347,29 +352,29 @@ async function validateVMC(vmcUrl: string, domain: string): Promise<boolean> {
     });
     
     if (!response.ok) {
-      console.log(`[BIMI_DEBUG] VMC not accessible for ${domain}: ${response.status}`);
+      logger.info(`[BIMI_DEBUG] VMC not accessible for ${domain}: ${response.status}`);
       return false;
     }
     
     // Check content type
     const contentType = response.headers.get('content-type');
     if (!contentType || (!contentType.includes('application/x-pem-file') && !contentType.includes('application/x-x509-ca-cert') && !contentType.includes('text/plain'))) {
-      console.log(`[BIMI_DEBUG] Invalid VMC content type for ${domain}: ${contentType}`);
+      logger.info(`[BIMI_DEBUG] Invalid VMC content type for ${domain}: ${contentType}`);
       return false;
     }
     
-    console.log(`[BIMI_DEBUG] VMC validation passed for ${domain}`);
+    logger.info(`[BIMI_DEBUG] VMC validation passed for ${domain}`);
     return true;
     
   } catch (error) {
-    console.log(`[BIMI_DEBUG] VMC validation error for ${domain}:`, error instanceof Error ? error.message : String(error));
+    logger.info(`[BIMI_DEBUG] VMC validation error for ${domain}:`, error instanceof Error ? error.message : String(error));
     return false;
   }
 }
 
 async function validateLogo(logoUrl: string, domain: string): Promise<boolean> {
   try {
-    console.log(`[BIMI_DEBUG] Validating logo for ${domain}: ${logoUrl}`);
+    logger.info(`[BIMI_DEBUG] Validating logo for ${domain}: ${logoUrl}`);
     
     // Basic logo validation - check if logo is accessible
     const response = await fetch(logoUrl, { 
@@ -378,22 +383,22 @@ async function validateLogo(logoUrl: string, domain: string): Promise<boolean> {
     });
     
     if (!response.ok) {
-      console.log(`[BIMI_DEBUG] Logo not accessible for ${domain}: ${response.status}`);
+      logger.info(`[BIMI_DEBUG] Logo not accessible for ${domain}: ${response.status}`);
       return false;
     }
     
     // Check content type for SVG
     const contentType = response.headers.get('content-type');
     if (!contentType || !contentType.includes('image/svg+xml')) {
-      console.log(`[BIMI_DEBUG] Invalid logo content type for ${domain}: ${contentType}`);
+      logger.info(`[BIMI_DEBUG] Invalid logo content type for ${domain}: ${contentType}`);
       return false;
     }
     
-    console.log(`[BIMI_DEBUG] Logo validation passed for ${domain}`);
+    logger.info(`[BIMI_DEBUG] Logo validation passed for ${domain}`);
     return true;
     
   } catch (error) {
-    console.log(`[BIMI_DEBUG] Logo validation error for ${domain}:`, error instanceof Error ? error.message : String(error));
+    logger.info(`[BIMI_DEBUG] Logo validation error for ${domain}:`, error instanceof Error ? error.message : String(error));
     return false;
   }
 }
@@ -433,6 +438,7 @@ async function getBIMILogo(domain: string): Promise<string | undefined> {
     return undefined;
     
   } catch (error) {
+    logger.debug('BIMI logo lookup failed', { error });
     return undefined;
   }
 }
@@ -455,15 +461,19 @@ export async function verify(rawEmail: string): Promise<{isVerified: boolean; lo
     // Run validations in parallel
     const [spfValid, dkimValid, dmarcValid, bimiValid] = await Promise.all([
       senderIP ? validateSPF(domain, senderIP).catch(error => {
+        logger.debug('SPF check errored', { domain, error });
         return false;
       }) : Promise.resolve(false),
       validateDKIM(rawEmail).catch(error => {
+        logger.debug('DKIM check errored', { domain, error });
         return false;
       }),
       validateDMARC(domain).catch(error => {
+        logger.debug('DMARC check errored', { domain, error });
         return false;
       }),
       validateBIMI(domain).catch(error => {
+        logger.debug('BIMI check errored', { domain, error });
         return false;
       }),
     ]);
@@ -471,9 +481,9 @@ export async function verify(rawEmail: string): Promise<{isVerified: boolean; lo
     const authValid = dkimValid || spfValid || dmarcValid;
     
     // Gmail requires both email authentication AND BIMI validation btw
-    console.log(`[VERIFY_DEBUG] Domain: ${domain}, SPF: ${spfValid}, DKIM: ${dkimValid}, DMARC: ${dmarcValid}, BIMI: ${bimiValid}`);
+    logger.info(`[VERIFY_DEBUG] Domain: ${domain}, SPF: ${spfValid}, DKIM: ${dkimValid}, DMARC: ${dmarcValid}, BIMI: ${bimiValid}`);
     const isVerified = authValid && bimiValid;
-    console.log(`[VERIFY_DEBUG] Final verification result for ${domain}: ${isVerified} (auth: ${authValid}, bimi: ${bimiValid})`);
+    logger.info(`[VERIFY_DEBUG] Final verification result for ${domain}: ${isVerified} (auth: ${authValid}, bimi: ${bimiValid})`);
 
     if (isVerified) {
       const logoUrl = await getBIMILogo(domain);
@@ -485,7 +495,7 @@ export async function verify(rawEmail: string): Promise<{isVerified: boolean; lo
 
     return { isVerified: false };
   } catch (error) {
-    console.error('Email verification error:', error);
+    logger.error('Email verification error:', error);
     return { isVerified: false };
   }
 }

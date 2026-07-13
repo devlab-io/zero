@@ -1,3 +1,4 @@
+import { logger } from '../../lib/logger';
 import { disableBrainFunction, getPrompts } from '../../lib/brain';
 import { EProviders, EPrompts, type ISubscribeBatch } from '../../types';
 import { activeConnectionProcedure, router } from '../trpc';
@@ -72,7 +73,7 @@ export const brainRouter = router({
       try {
         return labels ? (JSON.parse(labels) as z.infer<typeof labelsSchema>) : [];
       } catch (error) {
-        console.error(`[GET_LABELS] Error parsing labels for ${connection.id}:`, error);
+        logger.error(`[GET_LABELS] Error parsing labels for ${connection.id}:`, error);
         return [];
       }
     }),
@@ -104,10 +105,10 @@ export const brainRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const connection = ctx.activeConnection;
-      console.log(input.labels);
+      logger.info(input.labels);
 
       const labels = labelsSchema.parse(input.labels);
-      console.log(labels);
+      logger.info(labels);
 
       await env.connection_labels.put(connection.id, JSON.stringify(labels));
       return { success: true };

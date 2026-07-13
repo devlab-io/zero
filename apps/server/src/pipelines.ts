@@ -11,6 +11,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+import { logger } from './lib/logger';
 import {
   createDefaultWorkflows,
   type WorkflowContext,
@@ -265,7 +266,7 @@ export class WorkflowRunner extends DurableObject<ZeroEnv> {
 
       const foundConnection = yield* Effect.tryPromise({
         try: async () => {
-          console.log('[ZERO_WORKFLOW] Finding connection:', connectionId);
+          logger.info('[ZERO_WORKFLOW] Finding connection:', connectionId);
           const [foundConnection] = await db
             .select()
             .from(connection)
@@ -277,7 +278,7 @@ export class WorkflowRunner extends DurableObject<ZeroEnv> {
           if (!foundConnection.accessToken || !foundConnection.refreshToken) {
             throw new Error(`Connection is not authorized ${connectionId}`);
           }
-          console.log('[ZERO_WORKFLOW] Found connection:', foundConnection.id);
+          logger.info('[ZERO_WORKFLOW] Found connection:', foundConnection.id);
           return foundConnection;
         },
         catch: (error) => ({ _tag: 'DatabaseError' as const, error }),
@@ -301,11 +302,11 @@ export class WorkflowRunner extends DurableObject<ZeroEnv> {
 
         const history = yield* Effect.tryPromise({
           try: async () => {
-            console.log('[ZERO_WORKFLOW] Getting Gmail history with ID:', historyId);
+            logger.info('[ZERO_WORKFLOW] Getting Gmail history with ID:', historyId);
             const { history } = (await agent.listHistory(historyId.toString())) as {
               history: gmail_v1.Schema$History[];
             };
-            console.log('[ZERO_WORKFLOW] Found history entries:', history);
+            logger.info('[ZERO_WORKFLOW] Found history entries:', history);
             return history;
           },
           catch: (error) => ({ _tag: 'GmailApiError' as const, error }),
@@ -313,7 +314,7 @@ export class WorkflowRunner extends DurableObject<ZeroEnv> {
 
         yield* Effect.tryPromise({
           try: () => {
-            console.log('[ZERO_WORKFLOW] Updating next history ID:', nextHistoryId);
+            logger.info('[ZERO_WORKFLOW] Updating next history ID:', nextHistoryId);
             return this.env.gmail_history_id.put(connectionId.toString(), nextHistoryId.toString());
           },
           catch: (error) => ({ _tag: 'WorkflowCreationFailed' as const, error }),
@@ -383,11 +384,11 @@ export class WorkflowRunner extends DurableObject<ZeroEnv> {
               Effect.tryPromise({
                 try: async () => {
                   const result = await agent.syncThread({ threadId });
-                  console.log(`[ZERO_WORKFLOW] Successfully synced thread ${threadId}`);
+                  logger.info(`[ZERO_WORKFLOW] Successfully synced thread ${threadId}`);
                   return { threadId, result };
                 },
                 catch: (error) => {
-                  console.error(`[ZERO_WORKFLOW] Failed to sync thread ${threadId}:`, error);
+                  logger.error(`[ZERO_WORKFLOW] Failed to sync thread ${threadId}:`, error);
                   // Let this effect fail so allSuccesses will exclude it
                   throw new Error(
                     `Failed to sync thread ${threadId}: ${error instanceof Error ? error.message : String(error)}`,
@@ -514,9 +515,9 @@ export class WorkflowRunner extends DurableObject<ZeroEnv> {
         if (keysToDelete.length > 0) {
           yield* Effect.tryPromise({
             try: async () => {
-              console.log('[ZERO_WORKFLOW] Bulk deleting keys:', keysToDelete);
+              logger.info('[ZERO_WORKFLOW] Bulk deleting keys:', keysToDelete);
               const result = await bulkDeleteKeys(keysToDelete);
-              console.log('[ZERO_WORKFLOW] Bulk delete result:', result);
+              logger.info('[ZERO_WORKFLOW] Bulk delete result:', result);
               return result;
             },
             catch: (error) => ({ _tag: 'WorkflowCreationFailed' as const, error }),
@@ -541,12 +542,12 @@ export class WorkflowRunner extends DurableObject<ZeroEnv> {
         return Effect.tryPromise({
           try: async () => {
             const errorCleanupKey = `history_${params.connectionId}__${params.historyId}`;
-            console.log(
+            logger.info(
               '[ZERO_WORKFLOW] Clearing processing flag for history after error:',
               errorCleanupKey,
             );
             const result = await bulkDeleteKeys([errorCleanupKey]);
-            console.log('[ZERO_WORKFLOW] Error cleanup result:', result);
+            logger.info('[ZERO_WORKFLOW] Error cleanup result:', result);
             return result;
           },
           catch: () => ({
@@ -575,7 +576,7 @@ export class WorkflowRunner extends DurableObject<ZeroEnv> {
 
         const foundConnection = yield* Effect.tryPromise({
           try: async () => {
-            console.log('[THREAD_WORKFLOW] Finding connection:', connectionId);
+            logger.info('[THREAD_WORKFLOW] Finding connection:', connectionId);
             const [foundConnection] = await db
               .select()
               .from(connection)
@@ -586,7 +587,7 @@ export class WorkflowRunner extends DurableObject<ZeroEnv> {
             if (!foundConnection.accessToken || !foundConnection.refreshToken) {
               throw new Error(`Connection is not authorized ${connectionId}`);
             }
-            console.log('[THREAD_WORKFLOW] Found connection:', foundConnection.id);
+            logger.info('[THREAD_WORKFLOW] Found connection:', foundConnection.id);
             return foundConnection;
           },
           catch: (error) => ({ _tag: 'DatabaseError' as const, error }),
@@ -599,9 +600,9 @@ export class WorkflowRunner extends DurableObject<ZeroEnv> {
 
         const thread = yield* Effect.tryPromise({
           try: async () => {
-            console.log('[THREAD_WORKFLOW] Getting thread:', threadId);
+            logger.info('[THREAD_WORKFLOW] Getting thread:', threadId);
             const { result: thread } = await getThread(foundConnection.id, threadId.toString());
-            console.log('[THREAD_WORKFLOW] Found thread with messages:', thread.messages.length);
+            logger.info('[THREAD_WORKFLOW] Found thread with messages:', thread.messages.length);
             return thread;
           },
           catch: (error) => ({ _tag: 'GmailApiError' as const, error }),
@@ -658,7 +659,7 @@ export class WorkflowRunner extends DurableObject<ZeroEnv> {
           yield* Console.log('[THREAD_WORKFLOW] Failed steps:', failedSteps);
           // Log errors efficiently using forEach to avoid nested iteration
           workflowResults.errors.forEach((error, stepId) => {
-            console.log(`[THREAD_WORKFLOW] Error in step ${stepId}:`, error.message);
+            logger.info(`[THREAD_WORKFLOW] Error in step ${stepId}:`, error.message);
           });
         }
 
@@ -669,9 +670,9 @@ export class WorkflowRunner extends DurableObject<ZeroEnv> {
         if (keysToDelete.length > 0) {
           yield* Effect.tryPromise({
             try: async () => {
-              console.log('[THREAD_WORKFLOW] Bulk deleting keys:', keysToDelete);
+              logger.info('[THREAD_WORKFLOW] Bulk deleting keys:', keysToDelete);
               const result = await bulkDeleteKeys(keysToDelete);
-              console.log('[THREAD_WORKFLOW] Bulk delete result:', result);
+              logger.info('[THREAD_WORKFLOW] Bulk delete result:', result);
               return result;
             },
             catch: (error) => ({ _tag: 'DatabaseError' as const, error }),
@@ -695,12 +696,12 @@ export class WorkflowRunner extends DurableObject<ZeroEnv> {
         // Clean up thread processing flag on error using bulk delete
         return Effect.tryPromise({
           try: async () => {
-            console.log(
+            logger.info(
               '[THREAD_WORKFLOW] Clearing processing flag for thread after error:',
               params.threadId,
             );
             const result = await bulkDeleteKeys([params.threadId.toString()]);
-            console.log('[THREAD_WORKFLOW] Error cleanup result:', result);
+            logger.info('[THREAD_WORKFLOW] Error cleanup result:', result);
             return result;
           },
           catch: () => ({
@@ -723,17 +724,17 @@ export class WorkflowRunner extends DurableObject<ZeroEnv> {
 
   private async runThreadWorkflowWithoutEffectImpl(params: ThreadWorkflowParams): Promise<string> {
     try {
-      console.log('[THREAD_WORKFLOW] Starting workflow with payload:', params);
+      logger.info('[THREAD_WORKFLOW] Starting workflow with payload:', params);
       const { connectionId, threadId, providerId } = params;
       const keysToDelete: string[] = [];
 
       if (providerId === EProviders.google) {
-        console.log('[THREAD_WORKFLOW] Processing Google provider workflow');
+        logger.info('[THREAD_WORKFLOW] Processing Google provider workflow');
         const { db, conn } = createDb(this.env.HYPERDRIVE.connectionString);
 
         let foundConnection;
         try {
-          console.log('[THREAD_WORKFLOW] Finding connection:', connectionId);
+          logger.info('[THREAD_WORKFLOW] Finding connection:', connectionId);
           const [connectionRecord] = await db
             .select()
             .from(connection)
@@ -745,32 +746,32 @@ export class WorkflowRunner extends DurableObject<ZeroEnv> {
           if (!connectionRecord.accessToken || !connectionRecord.refreshToken) {
             throw new Error(`Connection is not authorized ${connectionId}`);
           }
-          console.log('[THREAD_WORKFLOW] Found connection:', connectionRecord.id);
+          logger.info('[THREAD_WORKFLOW] Found connection:', connectionRecord.id);
           foundConnection = connectionRecord;
         } catch (error) {
-          console.error('[THREAD_WORKFLOW] Database error:', error);
+          logger.error('[THREAD_WORKFLOW] Database error:', error);
           throw { _tag: 'DatabaseError' as const, error };
         } finally {
           try {
             await conn.end();
           } catch (error) {
-            console.error('[THREAD_WORKFLOW] Failed to close connection:', error);
+            logger.error('[THREAD_WORKFLOW] Failed to close connection:', error);
           }
         }
 
         let thread;
         try {
-          console.log('[THREAD_WORKFLOW] Getting thread:', threadId);
+          logger.info('[THREAD_WORKFLOW] Getting thread:', threadId);
           const { result } = await getThread(connectionId.toString(), threadId.toString());
-          console.log('[THREAD_WORKFLOW] Found thread with messages:', result.messages.length);
+          logger.info('[THREAD_WORKFLOW] Found thread with messages:', result.messages.length);
           thread = result;
         } catch (error) {
-          console.error('[THREAD_WORKFLOW] Gmail API error:', error);
+          logger.error('[THREAD_WORKFLOW] Gmail API error:', error);
           throw { _tag: 'GmailApiError' as const, error };
         }
 
         if (!thread.messages || thread.messages.length === 0) {
-          console.log('[THREAD_WORKFLOW] Thread has no messages, skipping processing');
+          logger.info('[THREAD_WORKFLOW] Thread has no messages, skipping processing');
           keysToDelete.push(threadId.toString());
           return 'Thread has no messages';
         }
@@ -794,7 +795,7 @@ export class WorkflowRunner extends DurableObject<ZeroEnv> {
           const workflowNames = workflowEngine.getWorkflowNames();
 
           for (const workflowName of workflowNames) {
-            console.log(`[THREAD_WORKFLOW] Executing workflow: ${workflowName}`);
+            logger.info(`[THREAD_WORKFLOW] Executing workflow: ${workflowName}`);
 
             try {
               const { results, errors } = await workflowEngine.executeWorkflow(
@@ -805,9 +806,9 @@ export class WorkflowRunner extends DurableObject<ZeroEnv> {
               results.forEach((value, key) => allResults.set(key, value));
               errors.forEach((value, key) => allErrors.set(key, value));
 
-              console.log(`[THREAD_WORKFLOW] Completed workflow: ${workflowName}`);
+              logger.info(`[THREAD_WORKFLOW] Completed workflow: ${workflowName}`);
             } catch (error) {
-              console.error(`[THREAD_WORKFLOW] Failed to execute workflow ${workflowName}:`, error);
+              logger.error(`[THREAD_WORKFLOW] Failed to execute workflow ${workflowName}:`, error);
               const errorObj = error instanceof Error ? error : new Error(String(error));
               allErrors.set(workflowName, errorObj);
             }
@@ -815,7 +816,7 @@ export class WorkflowRunner extends DurableObject<ZeroEnv> {
 
           workflowResults = { results: allResults, errors: allErrors };
         } catch (error) {
-          console.error('[THREAD_WORKFLOW] Workflow creation failed:', error);
+          logger.error('[THREAD_WORKFLOW] Workflow creation failed:', error);
           throw { _tag: 'WorkflowCreationFailed' as const, error };
         }
 
@@ -825,13 +826,13 @@ export class WorkflowRunner extends DurableObject<ZeroEnv> {
         const failedSteps = Array.from(workflowResults.errors.keys());
 
         if (successfulSteps.length > 0) {
-          console.log('[THREAD_WORKFLOW] Successfully executed steps:', successfulSteps);
+          logger.info('[THREAD_WORKFLOW] Successfully executed steps:', successfulSteps);
         }
 
         if (failedSteps.length > 0) {
-          console.log('[THREAD_WORKFLOW] Failed steps:', failedSteps);
+          logger.info('[THREAD_WORKFLOW] Failed steps:', failedSteps);
           workflowResults.errors.forEach((error, stepId) => {
-            console.log(`[THREAD_WORKFLOW] Error in step ${stepId}:`, error.message);
+            logger.info(`[THREAD_WORKFLOW] Error in step ${stepId}:`, error.message);
           });
         }
 
@@ -839,32 +840,32 @@ export class WorkflowRunner extends DurableObject<ZeroEnv> {
 
         if (keysToDelete.length > 0) {
           try {
-            console.log('[THREAD_WORKFLOW] Bulk deleting keys:', keysToDelete);
+            logger.info('[THREAD_WORKFLOW] Bulk deleting keys:', keysToDelete);
             const result = await bulkDeleteKeys(keysToDelete);
-            console.log('[THREAD_WORKFLOW] Bulk delete result:', result);
+            logger.info('[THREAD_WORKFLOW] Bulk delete result:', result);
           } catch (error) {
-            console.error('[THREAD_WORKFLOW] Failed to bulk delete keys:', error);
+            logger.error('[THREAD_WORKFLOW] Failed to bulk delete keys:', error);
           }
         }
 
-        console.log('[THREAD_WORKFLOW] Thread processing complete');
+        logger.info('[THREAD_WORKFLOW] Thread processing complete');
         return 'Thread workflow completed successfully';
       } else {
-        console.log('[THREAD_WORKFLOW] Unsupported provider:', providerId);
+        logger.info('[THREAD_WORKFLOW] Unsupported provider:', providerId);
         throw { _tag: 'UnsupportedProvider' as const, providerId };
       }
     } catch (error) {
-      console.error('[THREAD_WORKFLOW] Error in workflow:', error);
+      logger.error('[THREAD_WORKFLOW] Error in workflow:', error);
 
       try {
-        console.log(
+        logger.info(
           '[THREAD_WORKFLOW] Clearing processing flag for thread after error:',
           params.threadId,
         );
         const result = await bulkDeleteKeys([params.threadId.toString()]);
-        console.log('[THREAD_WORKFLOW] Error cleanup result:', result);
+        logger.info('[THREAD_WORKFLOW] Error cleanup result:', result);
       } catch (cleanupError) {
-        console.error('[THREAD_WORKFLOW] Failed to cleanup thread processing flag:', cleanupError);
+        logger.error('[THREAD_WORKFLOW] Failed to cleanup thread processing flag:', cleanupError);
       }
 
       throw error;

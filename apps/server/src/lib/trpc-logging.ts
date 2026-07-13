@@ -1,3 +1,4 @@
+import { logger } from './logger';
 import type { TRPCCallLog } from '../types/logging';
 import { LoggingService } from './logging-service';
 import { getContext } from 'hono/context-storage';
@@ -53,7 +54,7 @@ export const createLoggingMiddleware = () => {
                 loggingService = new LoggingService(c.env);
                 loggingService.initializeSession(sessionId, userId);
             } catch (error) {
-                console.error('Failed to initialize logging service:', error);
+                logger.error('Failed to initialize logging service:', error);
             }
         }
 
@@ -162,7 +163,7 @@ export const createLoggingMiddleware = () => {
 
                 // Log using the new service which will immediately log to Datadog
                 loggingService.logCall(callData).catch((err) => {
-                    console.error('Failed to log TRPC call:', err);
+                    logger.error('Failed to log TRPC call:', err);
                 });
 
                 // Complete the trace after logging
@@ -233,7 +234,7 @@ export const createLoggingMiddleware = () => {
 
                 // Log using the new service which will immediately log to Datadog
                 loggingService.logCall(callData).catch((logErr) => {
-                    console.error('Failed to log TRPC error:', logErr);
+                    logger.error('Failed to log TRPC error:', logErr);
                 });
 
                 // Complete the trace after logging error

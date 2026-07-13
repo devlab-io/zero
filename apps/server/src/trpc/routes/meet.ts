@@ -1,3 +1,4 @@
+import { logger } from '../../lib/logger';
 import { activeDriverProcedure, createRateLimiterMiddleware, router } from '../trpc';
 import { isProCustomer } from '../../lib/utils';
 import { Ratelimit } from '@upstash/ratelimit';
@@ -54,7 +55,7 @@ export const meetRouter = router({
       });
 
       if (!response.ok) {
-        console.error(await response.text());
+        logger.error(await response.text());
         throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to create meeting' });
       }
 

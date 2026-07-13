@@ -1,4 +1,5 @@
 import { mapToObj, pipe, entries, sortBy, take, fromEntries } from 'remeda';
+import { logger } from '../lib/logger';
 
 import { writingStyleMatrix } from '../db/schema';
 
@@ -352,9 +353,11 @@ const extractStyleMatrix = async (emailBody: string) => {
 
         return text;
       } catch {
+        logger.debug('writing-style: model JSON invalid, attempting jsonrepair');
         try {
           return jsonrepair(text);
         } catch {
+          logger.debug('writing-style: jsonrepair failed, trimming to last complete token');
           // 3. Fallback – trim to the last complete object/array
           const lastClosing = Math.max(text.lastIndexOf('}'), text.lastIndexOf(']'));
 

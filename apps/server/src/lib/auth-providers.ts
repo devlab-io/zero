@@ -1,3 +1,4 @@
+import { logger } from './logger';
 import { GOOGLE_OAUTH_SCOPES } from './google-scopes';
 
 export interface EnvVarInfo {
@@ -80,8 +81,8 @@ export function isProviderEnabled(provider: ProviderConfig, env: Record<string, 
   const hasEnvVars = provider.requiredEnvVars.every((envVar) => !!env[envVar]);
 
   if (provider.required && !hasEnvVars) {
-    console.error(`Required provider "${provider.id}" is not configured properly.`);
-    console.error(
+    logger.error(`Required provider "${provider.id}" is not configured properly.`);
+    logger.error(
       `Missing environment variables: ${provider.requiredEnvVars.filter((envVar) => !env[envVar]).join(', ')}`,
     );
   }
@@ -100,7 +101,7 @@ export function getSocialProviders(env: Record<string, string>) {
             `Required provider "${provider.id}" is not configured properly. Check your environment variables.`,
           );
         } else {
-          console.warn(`Provider "${provider.id}" is not configured properly. Skipping.`);
+          logger.warn(`Provider "${provider.id}" is not configured properly. Skipping.`);
           return null;
         }
       })

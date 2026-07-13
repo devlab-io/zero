@@ -1,3 +1,4 @@
+import { logger } from '../lib/logger';
 import { systemPrompt } from '../services/call-service/system-prompt';
 import { openai } from '@ai-sdk/openai';
 import { tools } from './agent/tools';
@@ -48,7 +49,7 @@ aiRouter.post('/do/:action', async (c) => {
   try {
     const action = c.req.param('action') as keyof ToolsReturnType;
     const body = await c.req.json();
-    console.log('[DEBUG] action', action, body);
+    logger.info('[DEBUG] action', action, body);
 
     // Get all tools for this connection
     const toolset: ToolsReturnType = await tools(connection.id, action === Tools.InboxRag);
@@ -64,7 +65,7 @@ aiRouter.post('/do/:action', async (c) => {
     });
     return c.json({ success: true, result });
   } catch (error) {
-    console.error(`Error executing tool '${c.req.param('action')}':`, error);
+    logger.error(`Error executing tool '${c.req.param('action')}':`, error);
     return c.json(
       { success: false, error: error instanceof Error ? error.message : String(error) },
       400,
@@ -73,24 +74,24 @@ aiRouter.post('/do/:action', async (c) => {
 });
 
 aiRouter.post('/call', async (c) => {
-  console.log('[DEBUG] Received call request');
+  logger.info('[DEBUG] Received call request');
 
   if (env.DISABLE_CALLS) {
-    console.log('[DEBUG] Calls are disabled');
+    logger.info('[DEBUG] Calls are disabled');
     return c.json({ success: false, error: 'Not implemented' }, 400);
   }
 
   if (env.VOICE_SECRET !== c.req.header('X-Voice-Secret')) {
-    console.log('[DEBUG] Invalid voice secret');
+    logger.info('[DEBUG] Invalid voice secret');
     return c.json({ success: false, error: 'Unauthorized' }, 401);
   }
 
   if (!c.req.header('X-Caller')) {
-    console.log('[DEBUG] Missing caller header');
+    logger.info('[DEBUG] Missing caller header');
     return c.json({ success: false, error: 'Unauthorized' }, 401);
   }
 
-  console.log('[DEBUG] Parsing request body');
+  logger.info('[DEBUG] Parsing request body');
   const { success, data } = await z
     .object({
       query: z.string(),
@@ -98,25 +99,25 @@ aiRouter.post('/call', async (c) => {
     .safeParseAsync(await c.req.json());
 
   if (!success) {
-    console.log('[DEBUG] Invalid request body');
+    logger.info('[DEBUG] Invalid request body');
     return c.json({ success: false, error: 'Invalid request' }, 400);
   }
 
-  console.log('[DEBUG] Connecting to database');
+  logger.info('[DEBUG] Connecting to database');
   const { db, conn } = createDb(env.HYPERDRIVE.connectionString);
 
-  console.log('[DEBUG] Finding user by phone number:', c.req.header('X-Caller'));
+  logger.info('[DEBUG] Finding user by phone number:', c.req.header('X-Caller'));
   const user = await db.query.user.findFirst({
     where: (user, { eq, and }) =>
       and(eq(user.phoneNumber, c.req.header('X-Caller')!), eq(user.phoneNumberVerified, true)),
   });
 
   if (!user) {
-    console.log('[DEBUG] User not found or not verified');
+    logger.info('[DEBUG] User not found or not verified');
     return c.json({ success: false, error: 'Unauthorized' }, 401);
   }
 
-  console.log('[DEBUG] Finding connection for user:', user.id);
+  logger.info('[DEBUG] Finding connection for user:', user.id);
   const connection = await db.query.connection.findFirst({
     where: (connection, { eq, or }) =>
       or(eq(connection.id, user.defaultConnectionId!), eq(connection.userId, user.id)),
@@ -125,11 +126,11 @@ aiRouter.post('/call', async (c) => {
   await conn.end();
 
   if (!connection) {
-    console.log('[DEBUG] No connection found for user');
+    logger.info('[DEBUG] No connection found for user');
     return c.json({ success: false, error: 'Unauthorized' }, 401);
   }
 
-  console.log('[DEBUG] Creating toolset for connection:', connection.id);
+  logger.info('[DEBUG] Creating toolset for connection:', connection.id);
   const toolset = await tools(connection.id);
   const { text } = await generateText({
     model: openai(env.OPENAI_MODEL || 'gpt-4o'),

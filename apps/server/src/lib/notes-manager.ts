@@ -1,3 +1,4 @@
+import { logger } from './logger';
 import { getZeroDB } from './server-utils';
 import { note } from '../db/schema';
 
@@ -34,7 +35,7 @@ export class NotesManager {
       }
       return result[0];
     } catch (error) {
-      console.error('Error creating note:', error);
+      logger.error('Error creating note:', error);
       throw error;
     }
   }
@@ -67,7 +68,7 @@ export class NotesManager {
       await db.deleteNote(noteId);
       return true;
     } catch (error) {
-      console.error('Error deleting note:', error);
+      logger.error('Error deleting note:', error);
       return false;
     }
   }
@@ -89,7 +90,7 @@ export class NotesManager {
 
     if (foundNoteIds.size !== noteIds.length) {
       const missingNotes = noteIds.filter((id) => !foundNoteIds.has(id));
-      console.error(`Notes not found or unauthorized: ${missingNotes.join(', ')}`);
+      logger.error(`Notes not found or unauthorized: ${missingNotes.join(', ')}`);
       throw new Error('One or more notes not found or unauthorized');
     }
 

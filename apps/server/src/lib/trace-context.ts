@@ -1,3 +1,4 @@
+import { logger } from './logger';
 export interface TraceSpan {
     id: string;
     name: string;
@@ -72,7 +73,7 @@ class TraceContextClass {
 
         // Log cleanup statistics in development
         if (tracesToDelete.length > 0 || this.traces.size > this.MAX_TRACES * 0.8) {
-            console.debug(`Trace cleanup: removed ${tracesToDelete.length} stale traces, ${this.traces.size} traces remaining`);
+            logger.debug(`Trace cleanup: removed ${tracesToDelete.length} stale traces, ${this.traces.size} traces remaining`);
         }
     }
 
