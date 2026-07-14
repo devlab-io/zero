@@ -9,7 +9,7 @@ Spec: `docs/spec/niveau10-mailos.md` section 2 et critères recherche/triage.
 - RUN: `pnpm --filter @zero/mail exec vitest run components/context/command-palette-context.test.tsx components/context/command-palette-search.test.tsx components/mail/thread-triage.test.tsx` -> exit 0
 - RUN: `pnpm --filter @zero/mail exec eslint components/context components/mail/mail-list.tsx components/mail/thread-display.tsx components/mail/mail-list-thread.tsx lib/hotkeys/global-hotkeys.tsx` -> exit 0
 - RUN: `pnpm --filter @zero/server types && pnpm --filter @zero/mail types && pnpm --filter @zero/mail exec react-router typegen && TYPECHECK_BLOCKING=1 node scripts/checks/typecheck-report.mjs` -> server 0 et mail 0
-- RUN: `git status --porcelain | sed 's/^...//' | awk '!/^(apps\/mail\/(components\/context\/.*|components\/mail\/(mail-list\.tsx|thread-display(\.[^.]+)?\.tsx|thread-display\.tsx|mail-list-thread(\.test)?\.tsx)|lib\/hotkeys\/global-hotkeys\.tsx)|docs\/jobs\/niveau10\/search-triage-01\.md)$/ {print; bad=1} END {exit bad}'` -> aucune sortie ; touch-set respecté
+- RUN: `git status --porcelain --untracked-files=all | sed 's/^...//' | awk '!/^(apps\/mail\/(components\/context\/.*|components\/mail\/(mail-list\.tsx|thread-display(\.[^.]+)?\.tsx|thread-display\.tsx|mail-list-thread(\.test)?\.tsx)|lib\/hotkeys\/global-hotkeys\.tsx)|docs\/jobs\/niveau10\/search-triage-01\.md)$/ {print; bad=1} END {exit bad}'` -> aucune sortie ; touch-set respecté
 - RUN: `git diff --check` -> exit 0
 
 ## ACCEPTANCE

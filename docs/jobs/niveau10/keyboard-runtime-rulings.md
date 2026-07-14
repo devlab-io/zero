@@ -7,3 +7,8 @@
 - The frozen touch-set regular expression named the `lib/hotkeys/` and settings shortcut directories without a suffix wildcard, so it rejected their authorised contents. Directory alternatives now match descendants explicitly.
 - These are check-contract corrections. They do not widen the product acceptance criteria or the MAY TOUCH boundary.
 - A fresh builder must rerun every corrected frozen check and update `docs/jobs/niveau10/keyboard-runtime-01.md`; no implementation is accepted from the blocked report alone.
+
+## 2026-07-14 — Untracked report path precision
+
+- Plain `git status --porcelain` collapses a newly created untracked report directory to `docs/jobs/niveau10/`, causing the touch-set check to reject the authorised report before it is committed.
+- The touch-set command now requests `--untracked-files=all`; the allowed product and report paths are unchanged.
