@@ -25,6 +25,7 @@ import {
   handleRetryOutboxItem,
   mcpToolDescriptions as descriptions,
   mcpToolAnnotations as annotations,
+  mcpSdkInputSchemas as sdkSchemas,
   mcpToolSchemas as schemas,
   MCP_SERVER_INSTRUCTIONS,
   MCP_SERVER_INFO,
@@ -358,10 +359,11 @@ export class ZeroMCP extends McpAgent<typeof env, Record<string, unknown>, { use
       'composeEmail',
       {
         description: descriptions.composeEmail,
-        inputSchema: composeEmailInputSchema,
+        inputSchema: sdkSchemas.composeEmail,
         annotations: annotations.composeEmail,
       },
-      async (data) => {
+      async (input) => {
+        const data = composeEmailInputSchema.parse(input);
         const active = await accountResolver.getActiveConnection();
         const newBody = await composeEmail({
           prompt: data.prompt,
@@ -424,10 +426,11 @@ export class ZeroMCP extends McpAgent<typeof env, Record<string, unknown>, { use
       'createDraft',
       {
         description: descriptions.createDraft,
-        inputSchema: createDraftInputSchema,
+        inputSchema: sdkSchemas.createDraft,
         annotations: annotations.createDraft,
       },
-      async (data) => {
+      async (input) => {
+        const data = createDraftInputSchema.parse(input);
         const active = await accountResolver.getActiveConnection();
         const result = await idempotency.execute({
           connectionId: active.id,

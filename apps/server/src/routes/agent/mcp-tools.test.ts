@@ -39,9 +39,12 @@ import {
   handleInspectOutboxItem,
   handleRetryOutboxItem,
   jsonSchemaForShape,
+  mcpSdkInputSchemas,
   mcpToolSchemas,
 } from './mcp-tools';
+import { toJsonSchemaCompat } from '@modelcontextprotocol/sdk/server/zod-json-schema-compat.js';
 import type { DraftOutboxItem, DraftOutboxStatus } from '../../lib/draft-outbox/state-machine';
+import { normalizeObjectSchema } from '@modelcontextprotocol/sdk/server/zod-compat.js';
 import type { ThreadsResponse } from '@zero/types';
 import { describe, it, expect, vi } from 'vitest';
 import { dirname, resolve } from 'node:path';
@@ -264,6 +267,29 @@ describe('surface guarantees — draft-only whitelist', () => {
 });
 
 describe('schema snapshot is a valid, stable JSON schema', () => {
+  it('publishes full MCP SDK schemas for refined tools instead of empty objects', () => {
+    for (const [name, shape] of Object.entries(mcpSdkInputSchemas)) {
+      const normalized = normalizeObjectSchema(shape);
+      expect(normalized, `${name} must normalize as an MCP object schema`).toBeDefined();
+      const schema = toJsonSchemaCompat(normalized!);
+      expect(schema).toMatchObject({ type: 'object' });
+      expect(
+        Object.keys(schema.properties ?? {}),
+        `${name} must expose typed properties`,
+      ).not.toHaveLength(0);
+    }
+
+    const createDraft = toJsonSchemaCompat(normalizeObjectSchema(mcpSdkInputSchemas.createDraft)!);
+    expect(createDraft).toMatchObject({
+      properties: {
+        to: { type: 'array', items: { type: 'object' } },
+        subject: { type: 'string' },
+        message: { type: 'string' },
+        idempotencyKey: { type: 'string' },
+      },
+    });
+  });
+
   it('each tool renders a JSON-schema object with typed properties', () => {
     const snap = buildMcpSchemaSnapshot();
     expect(snap.tools).toHaveLength(MCP_TOOL_DEFINITIONS.length);

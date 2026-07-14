@@ -526,6 +526,19 @@ export const mcpToolSchemas = {
   },
 } as const;
 
+/**
+ * Raw Zod shapes used at the MCP SDK registration boundary.
+ *
+ * The SDK can execute a refined ZodEffects schema, but cannot normalize it to
+ * an object for `tools/list`; it then publishes `{ properties: {} }`. Keep the
+ * cross-field refinements in the handler parsers below, while exposing these
+ * raw shapes so clients such as Claude receive the real argument contract.
+ */
+export const mcpSdkInputSchemas = {
+  composeEmail: mcpToolSchemas.composeEmail,
+  createDraft: mcpToolSchemas.createDraft,
+} as const;
+
 export const createDraftInputSchema = z
   .object(mcpToolSchemas.createDraft)
   .superRefine((value, ctx) => {
