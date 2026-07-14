@@ -1,10 +1,20 @@
 import { HotkeysProvider, useHotkeysContext } from 'react-hotkeys-hook';
 import { act, useEffect } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { afterEach, describe, expect, it } from 'vitest';
+import { MemoryRouter, useLocation } from 'react-router';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { keyboardShortcuts, type Shortcut } from '@/config/shortcuts';
 import { dispatchShortcutEvent, dispatchShortcutSequenceEvent, useShortcuts } from './use-hotkey-utils';
+
+vi.mock('@/components/context/command-palette-context', () => ({ useCommandPalette: () => ({ clearAllFilters: vi.fn() }) }));
+vi.mock('@/components/context/sidebar-context', () => ({ useSidebar: () => ({ toggleSidebar: vi.fn() }) }));
+vi.mock('@/hooks/use-optimistic-actions', () => ({ useOptimisticActions: () => ({ undoLastAction: vi.fn() }) }));
+vi.mock('next-themes', () => ({ useTheme: () => ({ theme: 'light', setTheme: vi.fn() }) }));
+vi.mock('nuqs', async () => {
+  const React = await import('react');
+  return { useQueryState: () => React.useState<string | null>(null) };
+});
 
 const shortcutsFor = (scope: string) => keyboardShortcuts.filter((shortcut) => shortcut.scope === scope);
 
@@ -171,7 +181,7 @@ describe('keyboard runtime', () => {
       800,
     );
     dispatchShortcutSequenceEvent(
-      new KeyboardEvent('keydown', { key: '#', code: 'Digit3', altKey: true }),
+      new KeyboardEvent('keydown', { key: '#', code: 'Digit3', ctrlKey: true, altKey: true }),
       shortcutsFor('navigation'),
       handlers,
       { key: 'g', startedAt: 3 },
@@ -180,5 +190,64 @@ describe('keyboard runtime', () => {
     );
 
     expect(calls).toEqual(['spam', 'bin']);
+  });
+
+  it('accepts Ctrl+Alt layout punctuation only for punctuation shortcuts', () => {
+    const calls: string[] = [];
+    const handlers = { bulkDelete: () => calls.push('delete'), archiveEmail: () => calls.push('archive') };
+    const input = document.createElement('input');
+    const dialog = document.createElement('div');
+    dialog.setAttribute('role', 'dialog');
+
+    dispatchShortcutEvent(
+      new KeyboardEvent('keydown', { key: '#', code: 'Digit3', ctrlKey: true, altKey: true }),
+      shortcutsFor('mail-list'),
+      handlers,
+    );
+    dispatchShortcutEvent(
+      new KeyboardEvent('keydown', { key: 'd', code: 'KeyD', ctrlKey: true, altKey: true }),
+      shortcutsFor('mail-list'),
+      handlers,
+    );
+    dispatchShortcutEvent(
+      new KeyboardEvent('keydown', { key: '#', code: 'Digit3', ctrlKey: true, altKey: true }),
+      shortcutsFor('mail-list'),
+      handlers,
+      input,
+    );
+    dispatchShortcutEvent(
+      new KeyboardEvent('keydown', { key: '#', code: 'Digit3', ctrlKey: true, altKey: true }),
+      shortcutsFor('mail-list'),
+      handlers,
+      dialog,
+    );
+
+    expect(calls).toEqual(['delete']);
+  });
+
+  it('opens localized contextual shortcut help in place from Shift+?', async () => {
+    const Location = () => <output data-testid="location">{useLocation().pathname}</output>;
+    const { GlobalHotkeys } = await import('./global-hotkeys');
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+
+    act(() => {
+      root?.render(
+        <MemoryRouter initialEntries={['/mail/inbox']}>
+          <HotkeysProvider initiallyActiveScopes={['global']}>
+            <GlobalHotkeys />
+            <Location />
+          </HotkeysProvider>
+        </MemoryRouter>,
+      );
+    });
+    act(() => {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: '?', code: 'Slash', shiftKey: true, bubbles: true }));
+    });
+
+    expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Keyboard Shortcuts');
+    expect(document.querySelector('[role="dialog"]')?.textContent).toContain('New Email');
+    expect(container.querySelector('[data-testid="location"]')?.textContent).toBe('/mail/inbox');
   });
 });

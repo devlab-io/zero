@@ -289,6 +289,17 @@ export type PendingShortcutSequence = { key: string; startedAt: number } | null;
 
 const modifierKeys = new Set(['mod', 'meta', 'ctrl', 'control', 'alt', 'shift']);
 
+function isAltGraphProducedPunctuation(event: KeyboardEvent, key: string): boolean {
+  if (event.metaKey || event.shiftKey || !event.ctrlKey || !event.altKey) return false;
+  if (key.length !== 1 || /[a-z0-9]/i.test(key) || event.key.toLowerCase() !== key) return false;
+
+  // Chromium and Firefox expose AltGr differently: some report AltGraph, while
+  // others expose the same layout-produced character as Ctrl+Alt. Restrict the
+  // fallback to the reported punctuation character so Ctrl/Alt letter, digit,
+  // and command chords cannot claim a bare shortcut.
+  return event.getModifierState('AltGraph') || (event.ctrlKey && event.altKey);
+}
+
 function shortcutMatchesEvent(event: KeyboardEvent, shortcut: Shortcut): boolean {
   const keys = shortcut.keys.map((key) => key.toLowerCase());
   const expected = new Set(keys.filter((key) => modifierKeys.has(key)));
@@ -296,11 +307,12 @@ function shortcutMatchesEvent(event: KeyboardEvent, shortcut: Shortcut): boolean
   const expectsMeta = expectsMod || expected.has('meta');
   const expectsCtrl = expectsMod || expected.has('ctrl') || expected.has('control');
   const hasMod = event.metaKey || event.ctrlKey;
-
-  if (expectsMod ? !hasMod : event.metaKey || event.ctrlKey) return false;
-  if (!expectsMod && (expectsMeta !== event.metaKey || expectsCtrl !== event.ctrlKey)) return false;
   const key = keys.find((candidate) => !modifierKeys.has(candidate));
   if (!key) return false;
+  const usesAltGraphPunctuation = !expected.size && isAltGraphProducedPunctuation(event, key);
+
+  if (expectsMod ? !hasMod : (event.metaKey || event.ctrlKey) && !usesAltGraphPunctuation) return false;
+  if (!expectsMod && !usesAltGraphPunctuation && (expectsMeta !== event.metaKey || expectsCtrl !== event.ctrlKey)) return false;
   const eventKey = event.key.toLowerCase();
   // Shift and AltGr are part of producing punctuation on common layouts. A bare
   // punctuation row therefore accepts them only when the browser already reports
@@ -352,12 +364,12 @@ export function dispatchShortcutSequenceEvent(
   now: number,
   timeoutMs: number,
 ): PendingShortcutSequence {
-  // AltGr is required to produce `#` on AZERTY, so only command/control chords
-  // cancel a navigation sequence.
-  if (event.defaultPrevented || event.metaKey || event.ctrlKey) return null;
+  const key = event.key.toLowerCase();
+  // AltGr is required to produce `#` on AZERTY. Browsers may expose it as
+  // Ctrl+Alt, which is accepted only for the already-produced punctuation.
+  if (event.defaultPrevented || event.metaKey || (event.ctrlKey && !isAltGraphProducedPunctuation(event, key))) return null;
   if (isTypingOrModalTarget(event.target)) return null;
 
-  const key = event.key.toLowerCase();
   if (pending && now - pending.startedAt <= timeoutMs) {
     const match = shortcuts.find(
       (shortcut) => shortcut.keys[0] === pending.key && shortcut.keys[1] === key,
