@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { assertMailEnv, requiredMailEnvSchema } from './env-schema';
 import worker from './spa-fallback';
 
 // #44 (gate A8) — micro-harness for the SPA-fallback worker. A mocked ASSETS binding returns 404
@@ -70,5 +71,36 @@ describe('spa-fallback worker', () => {
     const res = await worker.fetch(navRequest('HEAD'), makeEnv(200) as never);
     expect(res.status).toBe(200);
     expect(await res.text()).toBe('');
+  });
+});
+
+// A6 — boot-time env validation. The worker's fetch handler calls `bootEnv(env)` → `assertMailEnv`
+// at the first request; the pure assert is tested here directly (deterministic, independent of the
+// once-per-isolate `booted` flag), mirroring apps/server/src/env-schema.test.ts.
+describe('assertMailEnv — boot guard for the ASSETS binding', () => {
+  const validEnv = { ASSETS: { fetch: async () => new Response('ok') } };
+
+  it('declares exactly the ASSETS binding in its schema', () => {
+    expect(Object.keys(requiredMailEnvSchema.shape)).toEqual(['ASSETS']);
+  });
+
+  it('passes when ASSETS is a fetcher binding (extra bindings/vars ignored)', () => {
+    expect(() =>
+      assertMailEnv({ ...validEnv, VITE_PUBLIC_APP_URL: 'https://0.email', SOME_KV: {} }),
+    ).not.toThrow();
+    expect(requiredMailEnvSchema.safeParse(validEnv).success).toBe(true);
+  });
+
+  it('throws a legible error NAMING ASSETS when the binding is absent', () => {
+    expect(() => assertMailEnv({})).toThrow(/ASSETS/);
+  });
+
+  it('throws when ASSETS is present but not a fetcher (no .fetch method)', () => {
+    expect(() => assertMailEnv({ ASSETS: {} })).toThrow(/ASSETS/);
+    expect(() => assertMailEnv({ ASSETS: { fetch: 'nope' } })).toThrow(/ASSETS/);
+  });
+
+  it('the error message points to the wrangler assets binding config', () => {
+    expect(() => assertMailEnv({})).toThrow(/wrangler\.jsonc/);
   });
 });

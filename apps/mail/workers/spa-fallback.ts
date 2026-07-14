@@ -19,10 +19,25 @@
  * Requires `assets.not_found_handling: "none"` so ASSETS.fetch surfaces the 404 to this Worker
  * instead of substituting index.html at the asset layer.
  */
+import { assertMailEnv } from './env-schema';
+
 interface Env {
   // Self-contained binding type (no @cloudflare/workers-types dependency for this single-file
   // asset-fronting worker). Matches the runtime Assets binding surface we use.
   ASSETS: { fetch: (request: Request | URL | string) => Promise<Response> };
+}
+
+// --- Boot-time validation (A6) --------------------------------------------------------
+// Mirror of the server's boot guard (apps/server/src/env.ts `bootEnv`): validate the required
+// env exactly once per isolate, at the first request. The zod schema + `assertMailEnv` live in
+// the dependency-free ./env-schema module so the env contract is unit-testable in Node.
+let booted = false;
+
+/** Boot guard: validates the worker env exactly once per isolate. Called at first request. */
+function bootEnv(env: Env): void {
+  if (booted) return;
+  assertMailEnv(env as unknown as Record<string, unknown>);
+  booted = true;
 }
 
 function isHtmlNavigation(request: Request): boolean {
@@ -33,6 +48,9 @@ function isHtmlNavigation(request: Request): boolean {
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
+    // Fail loud and legibly at the first request if the ASSETS binding is missing/misconfigured,
+    // rather than crashing opaquely on `env.ASSETS.fetch` below.
+    bootEnv(env);
     const response = await env.ASSETS.fetch(request);
     if (response.status !== 404) return response;
 
