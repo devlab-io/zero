@@ -30,6 +30,10 @@ import {
   projectOwnedDraft,
   type AgentDraftProjection,
 } from '../../lib/driver/agent-drafts';
+import {
+  unsupportedProviderDraftUpdate,
+  type ProviderDraftUpdateCapability,
+} from '../../lib/driver/draft-update-capability';
 import type { IGetThreadResponse, ParsedDraft } from '../../lib/driver/types';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 
@@ -53,6 +57,25 @@ export type DraftLoopCreateData = {
   fromEmail: null;
 };
 
+export type DraftConditionalUpdateResult =
+  | { status: 'updated'; id: string }
+  | { status: 'precondition_failed' }
+  | { status: 'not_found' }
+  | { status: 'error'; error: string };
+
+type OperationalDraftUpdateCapability =
+  | { supported: false; summary: ProviderDraftUpdateCapability }
+  | {
+      supported: true;
+      summary: ProviderDraftUpdateCapability & { supported: true };
+      getProviderRevision: (draft: ParsedDraft) => string | null;
+      updateDraftConditionally: (
+        connectionId: string,
+        data: DraftLoopCreateData,
+        expectedProviderRevision: string,
+      ) => Promise<DraftConditionalUpdateResult>;
+    };
+
 export interface DraftLoopDependencies {
   getActiveConnection: () => Promise<{ id: string; email: string }>;
   getThread: (connectionId: string, threadId: string) => Promise<IGetThreadResponse | null>;
@@ -71,6 +94,13 @@ export interface DraftLoopDependencies {
     connectionId: string,
     data: DraftLoopCreateData,
   ) => Promise<{ id?: string | null; success?: boolean; error?: string }>;
+  getDraftUpdateCapability: (connectionId: string) => Promise<ProviderDraftUpdateCapability>;
+  getProviderDraftRevision?: (draft: ParsedDraft) => string | null;
+  updateDraftConditionally?: (
+    connectionId: string,
+    data: DraftLoopCreateData,
+    expectedProviderRevision: string,
+  ) => Promise<DraftConditionalUpdateResult>;
   sanitizeMailContent: (content: string | null | undefined) => { text: string };
 }
 
@@ -83,15 +113,65 @@ const text = (value: unknown) => ({
   ],
 });
 
-const getOwnedDraft = async (
+const getOwnedDraftState = async (
   dependencies: DraftLoopDependencies,
   connectionId: string,
   draftId: string,
-): Promise<AgentDraftProjection | null> => {
+  capability: OperationalDraftUpdateCapability,
+): Promise<{
+  projection: AgentDraftProjection;
+  providerRevision: string | null;
+} | null> => {
   const draft = await dependencies.getDraft(connectionId, draftId);
   if (!draft || draft.id !== draftId) return null;
-  return projectOwnedDraft(connectionId, draft);
+  const providerRevision = capability.supported ? capability.getProviderRevision(draft) : undefined;
+  if (capability.supported && !providerRevision) {
+    throw new Error(
+      `Safe updateDraft is unavailable for ${capability.summary.provider}: the provider draft has no CAS token. ${capability.summary.recommendedAction}`,
+    );
+  }
+  return {
+    projection: await projectOwnedDraft(connectionId, draft, providerRevision ?? undefined),
+    providerRevision: providerRevision ?? null,
+  };
 };
+
+const resolveDraftUpdateCapability = async (
+  dependencies: DraftLoopDependencies,
+  connectionId: string,
+): Promise<OperationalDraftUpdateCapability> => {
+  const advertised = await dependencies.getDraftUpdateCapability(connectionId);
+  if (!advertised.supported) return { supported: false, summary: advertised };
+  if (advertised.concurrencyControl !== 'provider-native-atomic-cas') {
+    return {
+      supported: false,
+      summary: unsupportedProviderDraftUpdate(
+        advertised.provider,
+        'The provider did not advertise provider-native atomic CAS for draft updates.',
+      ),
+    };
+  }
+  if (!dependencies.getProviderDraftRevision || !dependencies.updateDraftConditionally) {
+    return {
+      supported: false,
+      summary: unsupportedProviderDraftUpdate(
+        advertised.provider,
+        'The provider advertised draft CAS but the driver exposed no atomic conditional-update seam.',
+      ),
+    };
+  }
+  return {
+    supported: true,
+    summary: { ...advertised, supported: true },
+    getProviderRevision: dependencies.getProviderDraftRevision,
+    updateDraftConditionally: dependencies.updateDraftConditionally,
+  };
+};
+
+const unavailableDraftUpdateError = (capability: ProviderDraftUpdateCapability) =>
+  new Error(
+    `Safe updateDraft is unavailable for ${capability.provider}: ${capability.reason} ${capability.recommendedAction}`,
+  );
 
 const canonicalDraftBody = (dependencies: DraftLoopDependencies, message: string) =>
   dependencies.sanitizeMailContent(message).text;
@@ -163,7 +243,11 @@ export const createDraftLoopHandlers = (
 
   getDraft: async (input: { draftId: string }) => {
     const active = await dependencies.getActiveConnection();
-    return (await getOwnedDraft(dependencies, active.id, input.draftId)) ?? MCP_DRAFT_NOT_FOUND;
+    const capability = await resolveDraftUpdateCapability(dependencies, active.id);
+    const state = await getOwnedDraftState(dependencies, active.id, input.draftId, capability);
+    return state
+      ? { ...state.projection, updateCapability: capability.summary }
+      : MCP_DRAFT_NOT_FOUND;
   },
 
   updateDraft: async (input: {
@@ -173,6 +257,8 @@ export const createDraftLoopHandlers = (
     idempotencyKey: string;
   }) => {
     const active = await dependencies.getActiveConnection();
+    const capability = await resolveDraftUpdateCapability(dependencies, active.id);
+    if (!capability.supported) throw unavailableDraftUpdateError(capability.summary);
     return idempotency.execute({
       connectionId: active.id,
       idempotencyKey: input.idempotencyKey,
@@ -183,27 +269,46 @@ export const createDraftLoopHandlers = (
         message: input.message,
       },
       effect: async () => {
-        const current = await getOwnedDraft(dependencies, active.id, input.draftId);
-        if (!current) throw new Error(MCP_DRAFT_NOT_FOUND);
+        const state = await getOwnedDraftState(dependencies, active.id, input.draftId, capability);
+        if (!state) throw new Error(MCP_DRAFT_NOT_FOUND);
+        const current = state.projection;
         assertCurrentRevision(current, input.revision);
-        const updated = await dependencies.createDraft(active.id, {
-          to: formatRecipients(current.to),
-          cc: current.cc.length ? formatRecipients(current.cc) : undefined,
-          bcc: current.bcc.length ? formatRecipients(current.bcc) : undefined,
-          subject: current.subject,
-          message: input.message,
-          attachments: [],
-          id: current.id,
-          threadId: current.threadId,
-          fromEmail: null,
-        });
-        if (updated.error)
+        if (!state.providerRevision) throw unavailableDraftUpdateError(capability.summary);
+        const updated = await capability.updateDraftConditionally(
+          active.id,
+          {
+            to: formatRecipients(current.to),
+            cc: current.cc.length ? formatRecipients(current.cc) : undefined,
+            bcc: current.bcc.length ? formatRecipients(current.bcc) : undefined,
+            subject: current.subject,
+            message: input.message,
+            attachments: [],
+            id: current.id,
+            threadId: current.threadId,
+            fromEmail: null,
+          },
+          state.providerRevision,
+        );
+        if (updated.status === 'precondition_failed') {
+          throw new Error(
+            `Draft ${current.id} revision is stale; provider rejected the conditional write (412 equivalent)`,
+          );
+        }
+        if (updated.status === 'not_found') throw new Error(MCP_DRAFT_NOT_FOUND);
+        if (updated.status === 'error') {
           throw new Error(`Provider failed to update draft ${current.id}: ${updated.error}`);
-        if (updated.id && updated.id !== current.id) {
+        }
+        if (updated.id !== current.id) {
           throw new Error(`Provider changed draft id during update: expected ${current.id}`);
         }
-        const verified = await getOwnedDraft(dependencies, active.id, current.id);
-        if (!verified) throw new Error(`Provider did not return updated draft ${current.id}`);
+        const verifiedState = await getOwnedDraftState(
+          dependencies,
+          active.id,
+          current.id,
+          capability,
+        );
+        if (!verifiedState) throw new Error(`Provider did not return updated draft ${current.id}`);
+        const verified = verifiedState.projection;
         if (
           canonicalDraftBody(dependencies, verified.message) !==
           canonicalDraftBody(dependencies, input.message)

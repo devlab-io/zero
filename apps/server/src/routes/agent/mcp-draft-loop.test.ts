@@ -29,6 +29,7 @@ import {
   type IdempotencyTransaction,
 } from './mcp-tools';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
+import { unsupportedProviderDraftUpdate } from '../../lib/driver/draft-update-capability';
 import type { IGetThreadResponse, ParsedDraft } from '../../lib/driver/types';
 import type { GmailTransport } from '../../lib/driver/google-transport';
 import type { GmailMessages } from '../../lib/driver/google-messages';
@@ -103,14 +104,21 @@ const ownedThread = (): IGetThreadResponse => {
   } as IGetThreadResponse;
 };
 
-const fakeEnvironment = ({ normalizeProviderBodies = false } = {}) => {
+const fakeEnvironment = ({ normalizeProviderBodies = false, casSupported = true } = {}) => {
   const drafts = new Map<string, ParsedDraft>();
   let nextDraft = 0;
+  let nextProviderRevision = 0;
   let createEffects = 0;
   let updateEffects = 0;
+  let conditionalAttempts = 0;
+  let getDraftReads = 0;
   let sendCalls = 0;
+  let concurrentEditBody: string | null = null;
   const createdInputs: DraftLoopCreateData[] = [];
   const sanitize = vi.fn(sanitizeMailContent);
+  const nextCasToken = () => `provider-cas-${++nextProviderRevision}`;
+  const providerState = (draft: ParsedDraft) =>
+    draft.rawMessage as unknown as { threadId?: string; casToken?: string };
 
   const dependencies: DraftLoopDependencies = {
     getActiveConnection: async () => ({ id: 'connection-owned', email: 'thomas@devlab.io' }),
@@ -135,26 +143,17 @@ const fakeEnvironment = ({ normalizeProviderBodies = false } = {}) => {
       })),
       nextPageToken: null,
     }),
-    getDraft: async (_connectionId, draftId) => drafts.get(draftId) ?? null,
+    getDraft: async (_connectionId, draftId) => {
+      getDraftReads += 1;
+      return drafts.get(draftId) ?? null;
+    },
     createDraft: async (_connectionId, data) => {
       createdInputs.push(structuredClone(data));
       const persistedMessage = normalizeProviderBodies
         ? (await realSanitizeTipTapHtml(data.message)).html
         : data.message;
       if (data.id) {
-        updateEffects += 1;
-        const current = drafts.get(data.id);
-        if (!current) return { error: 'not found' };
-        drafts.set(data.id, {
-          ...current,
-          to: [data.to],
-          cc: data.cc ? [data.cc] : [],
-          bcc: data.bcc ? [data.bcc] : [],
-          subject: data.subject,
-          content: persistedMessage,
-          rawMessage: { threadId: data.threadId } as unknown as ParsedDraft['rawMessage'],
-        });
-        return { id: data.id, success: true };
+        throw new Error('The CAS fake forbids unconditional draft updates');
       }
       createEffects += 1;
       const id = `provider-draft-${++nextDraft}`;
@@ -165,9 +164,62 @@ const fakeEnvironment = ({ normalizeProviderBodies = false } = {}) => {
         bcc: data.bcc ? [data.bcc] : [],
         subject: data.subject,
         content: persistedMessage,
-        rawMessage: { threadId: data.threadId } as unknown as ParsedDraft['rawMessage'],
+        rawMessage: {
+          threadId: data.threadId,
+          casToken: nextCasToken(),
+        } as unknown as ParsedDraft['rawMessage'],
       });
       return { id, success: true };
+    },
+    getDraftUpdateCapability: async () =>
+      casSupported
+        ? {
+            provider: 'fake-cas',
+            supported: true,
+            concurrencyControl: 'provider-native-atomic-cas',
+            reason: 'The fake binds revisions to a provider token and applies writes atomically.',
+            recommendedAction: 'Use updateDraft with the current revision.',
+          }
+        : unsupportedProviderDraftUpdate('fake-no-cas'),
+    getProviderDraftRevision: (draft) => providerState(draft).casToken ?? null,
+    updateDraftConditionally: async (_connectionId, data, expectedProviderRevision) => {
+      conditionalAttempts += 1;
+      if (!data.id) return { status: 'error', error: 'missing draft id' };
+      let current = drafts.get(data.id);
+      if (!current) return { status: 'not_found' };
+      if (concurrentEditBody !== null) {
+        current = {
+          ...current,
+          content: concurrentEditBody,
+          rawMessage: {
+            ...providerState(current),
+            casToken: nextCasToken(),
+          } as unknown as ParsedDraft['rawMessage'],
+        };
+        drafts.set(data.id, current);
+        concurrentEditBody = null;
+      }
+      if (providerState(current).casToken !== expectedProviderRevision) {
+        return { status: 'precondition_failed' };
+      }
+      const persistedMessage = normalizeProviderBodies
+        ? (await realSanitizeTipTapHtml(data.message)).html
+        : data.message;
+      updateEffects += 1;
+      drafts.set(data.id, {
+        ...current,
+        to: [data.to],
+        cc: data.cc ? [data.cc] : [],
+        bcc: data.bcc ? [data.bcc] : [],
+        subject: data.subject,
+        content: persistedMessage,
+        rawMessage: {
+          ...providerState(current),
+          threadId: data.threadId,
+          casToken: nextCasToken(),
+        } as unknown as ParsedDraft['rawMessage'],
+      });
+      return { status: 'updated', id: data.id };
     },
     sanitizeMailContent: sanitize,
   };
@@ -183,11 +235,20 @@ const fakeEnvironment = ({ normalizeProviderBodies = false } = {}) => {
     get updateEffects() {
       return updateEffects;
     },
+    get conditionalAttempts() {
+      return conditionalAttempts;
+    },
+    get getDraftReads() {
+      return getDraftReads;
+    },
     get sendCalls() {
       return sendCalls;
     },
     observeSend() {
       sendCalls += 1;
+    },
+    editBeforeNextConditionalUpdate(body: string) {
+      concurrentEditBody = body;
     },
   };
 };
@@ -389,6 +450,88 @@ describe('revisable draft handlers', () => {
     ).rejects.toThrow('revision is stale');
     expect(environment.updateEffects).toBe(mutationsBeforeStale);
     expect(environment.drafts.get(current.id)?.content).toBe('Revised body');
+  });
+
+  it('maps a concurrent provider CAS rejection to stale without overwriting the provider edit', async () => {
+    const environment = fakeEnvironment();
+    const handlers = createDraftLoopHandlers(
+      environment.dependencies,
+      new PayloadBoundIdempotency(memoryStorage()),
+    );
+    const created = await handlers.createReplyDraft({
+      threadId: 'thread-owned',
+      message: 'Initial body',
+      idempotencyKey: 'concurrent-create',
+    });
+    const current = await handlers.getDraft({ draftId: created.value.id });
+    expect(typeof current).not.toBe('string');
+    if (typeof current === 'string') return;
+
+    environment.editBeforeNextConditionalUpdate('Concurrent provider edit');
+    await expect(
+      handlers.updateDraft({
+        draftId: current.id,
+        revision: current.revision,
+        message: 'Agent must not overwrite',
+        idempotencyKey: 'concurrent-update',
+      }),
+    ).rejects.toThrow(/412 equivalent/);
+
+    expect(environment.conditionalAttempts).toBe(1);
+    expect(environment.updateEffects).toBe(0);
+    expect(environment.drafts.get(current.id)?.content).toBe('Concurrent provider edit');
+    expect(environment.sendCalls).toBe(0);
+  });
+
+  it('advertises no CAS and rejects before idempotency reservation or provider access', async () => {
+    const environment = fakeEnvironment({ casSupported: false });
+    environment.drafts.set('no-cas-draft', {
+      id: 'no-cas-draft',
+      to: ['client@example.com'],
+      cc: [],
+      bcc: [],
+      subject: 'No CAS',
+      content: 'Original body',
+      rawMessage: { threadId: 'thread-owned' } as unknown as ParsedDraft['rawMessage'],
+    });
+    const storagePut = vi.fn();
+    const storage: AtomicIdempotencyStorage = {
+      get: async () => undefined,
+      put: storagePut,
+      transaction: async (closure) =>
+        closure({
+          get: async () => undefined,
+          put: storagePut,
+        }),
+    };
+    const handlers = createDraftLoopHandlers(
+      environment.dependencies,
+      new PayloadBoundIdempotency(storage),
+    );
+    const projected = await handlers.getDraft({ draftId: 'no-cas-draft' });
+    expect(typeof projected).not.toBe('string');
+    if (typeof projected === 'string') return;
+    expect(projected.updateCapability).toMatchObject({
+      provider: 'fake-no-cas',
+      supported: false,
+      concurrencyControl: 'unavailable',
+    });
+    const readsBeforeUpdate = environment.getDraftReads;
+
+    await expect(
+      handlers.updateDraft({
+        draftId: projected.id,
+        revision: projected.revision,
+        message: 'Must not be written',
+        idempotencyKey: 'no-cas-update',
+      }),
+    ).rejects.toThrow(/Create a new unsent draft/);
+
+    expect(storagePut).not.toHaveBeenCalled();
+    expect(environment.getDraftReads).toBe(readsBeforeUpdate);
+    expect(environment.conditionalAttempts).toBe(0);
+    expect(environment.updateEffects).toBe(0);
+    expect(environment.drafts.get('no-cas-draft')?.content).toBe('Original body');
   });
 
   it('accepts provider-normalized HTML across create, get, and same-id update', async () => {
@@ -711,6 +854,11 @@ describe('in-process Streamable HTTP MCP smoke', () => {
       sessionId!,
     );
     const fetched = JSON.parse(toolResult(getResponse).text);
+    expect(fetched.updateCapability).toMatchObject({
+      provider: 'fake-cas',
+      supported: true,
+      concurrencyControl: 'provider-native-atomic-cas',
+    });
 
     const updateResponse = await mcpRequest(
       transport,
@@ -738,6 +886,90 @@ describe('in-process Streamable HTTP MCP smoke', () => {
     expect(environment.createEffects).toBe(1);
     expect(environment.updateEffects).toBe(1);
     expect(environment.sendCalls).toBe(0);
+
+    await server.close();
+  });
+
+  it('reports a no-CAS provider and refuses update over HTTP with zero provider effect', async () => {
+    const environment = fakeEnvironment({ casSupported: false });
+    environment.drafts.set('http-no-cas', {
+      id: 'http-no-cas',
+      to: ['client@example.com'],
+      cc: [],
+      bcc: [],
+      subject: 'No CAS smoke',
+      content: 'Original HTTP body',
+      rawMessage: { threadId: 'thread-owned' } as unknown as ParsedDraft['rawMessage'],
+    });
+    const server = new McpServer(MCP_SERVER_INFO, { instructions: MCP_SERVER_INSTRUCTIONS });
+    const transport = new WebStandardStreamableHTTPServerTransport({
+      sessionIdGenerator: () => 'no-cas-session',
+      enableJsonResponse: true,
+    });
+    registerDraftLoopTools(
+      server,
+      environment.dependencies,
+      new PayloadBoundIdempotency(memoryStorage()),
+    );
+    await server.connect(transport);
+    const initialized = await mcpRequest(transport, {
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'initialize',
+      params: {
+        protocolVersion: '2025-11-25',
+        capabilities: {},
+        clientInfo: { name: 'zero-no-cas-smoke', version: '1.0.0' },
+      },
+    });
+    const sessionId = initialized.response.headers.get('mcp-session-id');
+    await mcpRequest(
+      transport,
+      { jsonrpc: '2.0', method: 'notifications/initialized' },
+      sessionId!,
+    );
+    const getResponse = await mcpRequest(
+      transport,
+      {
+        jsonrpc: '2.0',
+        id: 2,
+        method: 'tools/call',
+        params: { name: 'getDraft', arguments: { draftId: 'http-no-cas' } },
+      },
+      sessionId!,
+    );
+    const fetched = JSON.parse(toolResult(getResponse).text);
+    expect(fetched.updateCapability).toMatchObject({
+      provider: 'fake-no-cas',
+      supported: false,
+    });
+    const readsBeforeUpdate = environment.getDraftReads;
+    const updateResponse = await mcpRequest(
+      transport,
+      {
+        jsonrpc: '2.0',
+        id: 3,
+        method: 'tools/call',
+        params: {
+          name: 'updateDraft',
+          arguments: {
+            draftId: fetched.id,
+            revision: fetched.revision,
+            message: 'Must not overwrite',
+            idempotencyKey: 'http-no-cas-update',
+          },
+        },
+      },
+      sessionId!,
+    );
+
+    expect(toolResult(updateResponse)).toMatchObject({ isError: true });
+    expect(toolResult(updateResponse).text).toMatch(/Create a new unsent draft/);
+    expect(environment.getDraftReads).toBe(readsBeforeUpdate);
+    expect(environment.conditionalAttempts).toBe(0);
+    expect(environment.updateEffects).toBe(0);
+    expect(environment.sendCalls).toBe(0);
+    expect(environment.drafts.get('http-no-cas')?.content).toBe('Original HTTP body');
 
     await server.close();
   });

@@ -17,6 +17,7 @@ enabled_tools = [
   "listDrafts",
   "getDraft",
   "createReplyDraft",
-  "updateDraft",
 ]
+# updateDraft is intentionally excluded: enable it only after getServerCapabilities
+# reports draftUpdate.supported=true for the active provider.
 default_tools_approval_mode = "writes"

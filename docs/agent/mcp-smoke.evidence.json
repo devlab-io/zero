@@ -29,6 +29,20 @@
     "threadIdentityDerivedServerSide": true,
     "sameProviderDraftIdAfterUpdate": true
   },
+  "draftUpdate": {
+    "requiredConcurrencyControl": "provider-native-atomic-cas",
+    "casFakeAdvertisedSupport": true,
+    "revisionBoundToProviderToken": true,
+    "freshRevisionAfterSuccess": true,
+    "concurrentEditResult": "412-equivalent",
+    "concurrentEditOverwrites": 0,
+    "noCasFakeAdvertisedSupport": false,
+    "noCasIdempotencyReservations": 0,
+    "noCasProviderReadsDuringUpdate": 0,
+    "noCasConditionalWriteAttempts": 0,
+    "noCasProviderMutations": 0,
+    "noCasFallback": "create a new unsent draft for human review"
+  },
   "idempotency": {
     "concurrentCallsPerMutation": 20,
     "providerEffectsPerSameKeyPayload": 1,

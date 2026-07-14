@@ -1,7 +1,8 @@
 # Claude Code and Claude Connectors setup for Zero MCP
 
-Zero MCP supports a bounded **read → create unsent reply draft → fetch → revise the same
-draft → human review** workflow. It exposes no tool that can send, approve, permanently
+Zero MCP supports a bounded **read → create unsent reply draft → fetch → human review**
+workflow. Revising the same draft is enabled only for a provider that exposes a native,
+atomic conditional write tied to the returned revision. It exposes no tool that can send, approve, permanently
 delete, mark spam, or change account settings.
 
 This guide was checked on 2026-07-14 against Claude Code 2.1.209, the current
@@ -35,25 +36,30 @@ authorization-server discovery. Cancel if the discovered issuer or scopes are un
 
 Copy the `permissions` object from `claude-settings.example.json` into
 `.claude/settings.json`. It allows only the bounded read tools, places
-`setActiveConnection`, `createReplyDraft`, and `updateDraft` in `permissions.ask`, and
-denies every other Zero MCP tool. Claude evaluates deny before ask before allow, so the two
-draft writes always require a visible approval prompt under this policy.
+`setActiveConnection` and `createReplyDraft` in `permissions.ask`, and denies every other
+Zero MCP tool, including `updateDraft` until provider CAS is proven. Claude evaluates deny
+before ask before allow, so draft creation always requires a visible approval prompt.
 
 Do not use `bypassPermissions` with Zero MCP. Review the active account, recipients,
 subject, thread, and body at each write approval.
 
 Use this sequence:
 
-1. `getServerCapabilities`, then confirm all forbidden capabilities are `false`.
+1. `getServerCapabilities`, then confirm all forbidden capabilities are `false` and inspect
+   `draftUpdate`. Google/Gmail and Microsoft are currently reported as `supported: false`
+   because their integrated public write paths do not provide proven provider-native atomic CAS.
 2. Select the intended owned account with `getConnections`, `getActiveConnection`, and an
    explicitly approved `setActiveConnection` if needed.
 3. Find a thread, then call `getThreadContext`; it returns at most 20 sanitized messages
    and 64 KiB of text, without attachments or raw headers.
 4. Approve `createReplyDraft` with a thread ID, body, and unique 1–128 character
    idempotency key. Recipients, subject, and threading are server-derived.
-5. Call `getDraft`, review the projection, and retain its opaque revision.
-6. Approve `updateDraft` for the same ID with that revision, revised body, and a new key.
-   A stale revision changes nothing. Review the resulting unsent draft in Zero.
+5. Call `getDraft`, review the projection, opaque revision, and `updateCapability`.
+6. Only when `draftUpdate.supported=true`, move the exact `mcp__zero__updateDraft` tool from
+   `deny` to `ask`, then approve the same-ID update with the current revision and a new key.
+   A stale or concurrent provider edit is rejected atomically.
+7. When support is `false`, leave `updateDraft` denied. Create a new unsent draft with a fresh
+   key, review both drafts in Zero, and let the human retain the intended one.
 
 ## Claude Desktop and hosted Claude
 
@@ -77,6 +83,7 @@ egress approval. It returns text and creates no draft.
 ## Verification boundary
 
 The checked-in proof is local and in-process: the installed Streamable HTTP transport runs
-against realistic fakes with no OAuth consent, production credentials, provider network,
-deploy, or send path. See `mcp-smoke.md` and `mcp-smoke.evidence.json`. A hosted connector
+against a provider-CAS fake and a no-CAS fake, including a concurrent-edit 412-equivalent,
+with no OAuth consent, production credentials, provider network, deploy, or send path. See
+`mcp-smoke.md` and `mcp-smoke.evidence.json`. A hosted connector
 or live-account smoke is a separate human-authorized action.

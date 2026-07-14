@@ -209,6 +209,11 @@ describe('surface guarantees — draft-only whitelist', () => {
     expect(caps.canPermanentlyDeleteMail).toBe(false);
     expect(caps.canReportSpam).toBe(false);
     expect(caps.canChangeAccountSettings).toBe(false);
+    expect(caps.draftUpdate).toMatchObject({
+      provider: 'unknown',
+      supported: false,
+      concurrencyControl: 'unavailable',
+    });
     expect(caps.statement).toMatch(/no tool can send mail/i);
     expect(MCP_SEND_GUARANTEES.canSendMail).toBe(false);
   });
@@ -240,7 +245,8 @@ describe('surface guarantees — draft-only whitelist', () => {
   it('publishes self-contained draft-only instructions and truthful annotations', () => {
     expect(MCP_SERVER_INSTRUCTIONS.slice(0, 512)).toMatch(/draft-only/i);
     expect(MCP_SERVER_INSTRUCTIONS.slice(0, 512)).toMatch(/create an unsent reply draft/i);
-    expect(MCP_SERVER_INSTRUCTIONS.slice(0, 512)).toMatch(/update that same draft/i);
+    expect(MCP_SERVER_INSTRUCTIONS.slice(0, 512)).toMatch(/provider-native atomic CAS/i);
+    expect(MCP_SERVER_INSTRUCTIONS.slice(0, 512)).toMatch(/create a new unsent draft/i);
     for (const definition of MCP_TOOL_DEFINITIONS) {
       expect(definition.annotations.readOnlyHint).toBe(
         definition.name === 'setActiveConnection' ? false : !definition.mutates,
@@ -274,6 +280,14 @@ describe('schema snapshot is a valid, stable JSON schema', () => {
     expect(required).toContain('subject');
     expect(required).toContain('idempotencyKey');
     expect(snap.instructions).toBe(MCP_SERVER_INSTRUCTIONS);
+    expect(snap.draftUpdatePolicy).toMatchObject({
+      requiredConcurrencyControl: 'provider-native-atomic-cas',
+      failClosed: true,
+      knownProviders: {
+        google: { supported: false },
+        microsoft: { supported: false },
+      },
+    });
     for (const requiredTool of [
       'getThreadContext',
       'createReplyDraft',

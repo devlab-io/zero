@@ -13,7 +13,8 @@ sequence:
 4. `tools/call(getThreadContext)`;
 5. `tools/call(createReplyDraft)`;
 6. `tools/call(getDraft)`;
-7. `tools/call(updateDraft)`.
+7. `tools/call(updateDraft)` through a provider-native atomic CAS fake;
+8. repeat `getDraft`/`updateDraft` with a provider that advertises no CAS.
 
 The server and provider dependencies are realistic in-memory fakes. The smoke asserts:
 
@@ -23,14 +24,20 @@ The server and provider dependencies are realistic in-memory fakes. The smoke as
 - thread context contains at most 20 messages and 64 KiB of sanitized text, without raw
   attachments or headers;
 - reply recipients, subject, and thread identity come from the owned thread/account;
-- create and update retain the same provider draft ID;
+- the CAS fake binds the opaque revision to its provider token, and a successful update
+  retains the same provider draft ID while returning a fresh revision;
+- a provider edit injected between read and conditional write produces a 412-equivalent,
+  preserves the concurrent provider body, and causes zero overwrite;
+- the no-CAS fake advertises `supported: false` and rejects before idempotency reservation,
+  provider read, conditional-write attempt, or mutation, with advice to create a new unsent draft;
 - the revised body is refetched from provider state;
 - the fake exposes no send dependency and observes zero send calls.
 
 Focused tests around the same handlers separately prove 20 concurrent same-key create and
-update calls produce one provider effect, changed-payload key reuse conflicts before a
-second effect, stale revision changes nothing, and missing/other-user draft IDs return the
-same result.
+CAS-update calls produce one provider effect, changed-payload key reuse conflicts before a
+second effect, stale and concurrently changed revisions produce no overwrite, no-CAS updates
+produce no reservation or provider effect, and missing/other-user draft IDs return the same
+result.
 
 `mcp-smoke.evidence.json` is the compact assertion manifest for this test. The committed
 tool/schema snapshot is drift-checked by `mcp-tools.test.ts` against the single TypeScript

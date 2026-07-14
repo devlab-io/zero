@@ -39,6 +39,7 @@ import {
   listDraftOutboxItems,
   retryDraftOutboxJob,
 } from '../../lib/draft-outbox';
+import { unsupportedProviderDraftUpdate } from '../../lib/driver/draft-update-capability';
 import { ActiveAccountResolver, withManagedResource } from './mcp-account';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { getThread, getZeroAgent } from '../../lib/server-utils';
@@ -144,7 +145,11 @@ export class ZeroMCP extends McpAgent<typeof env, Record<string, unknown>, { use
         annotations: annotations.getServerCapabilities,
       },
       async () => {
-        const capabilities = buildCapabilities(MCP_TOOL_DEFINITIONS);
+        const active = await accountResolver.getActiveConnection();
+        const capabilities = buildCapabilities(
+          MCP_TOOL_DEFINITIONS,
+          unsupportedProviderDraftUpdate(active.providerId),
+        );
         return text(JSON.stringify(capabilities, null, 2));
       },
     );
@@ -581,6 +586,11 @@ export class ZeroMCP extends McpAgent<typeof env, Record<string, unknown>, { use
         createDraft: async (connectionId, data) => {
           const { stub } = await getZeroAgent(connectionId);
           return stub.createDraft(data);
+        },
+        getDraftUpdateCapability: async (connectionId) => {
+          const active = await accountResolver.getActiveConnection();
+          if (active.id !== connectionId) throw new Error('Connection not found');
+          return unsupportedProviderDraftUpdate(active.providerId);
         },
         sanitizeMailContent,
       },

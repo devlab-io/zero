@@ -191,7 +191,8 @@ const providerThreadId = (draft: ParsedDraft): string | null => {
 const revisionPayload = (
   connectionId: string,
   projection: Omit<AgentDraftProjection, 'revision'>,
-) => JSON.stringify({ connectionId, ...projection });
+  providerCasToken?: string,
+) => JSON.stringify({ connectionId, providerCasToken: providerCasToken ?? null, ...projection });
 
 const digest = async (value: string) => {
   const bytes = await crypto.subtle.digest('SHA-256', encoder.encode(value));
@@ -201,6 +202,7 @@ const digest = async (value: string) => {
 export const projectOwnedDraft = async (
   connectionId: string,
   draft: ParsedDraft,
+  providerCasToken?: string,
 ): Promise<AgentDraftProjection> => {
   if (!draft.id) throw new Error('Provider returned a draft without an id');
   const message = draft.content ?? '';
@@ -221,7 +223,16 @@ export const projectOwnedDraft = async (
   if (recipientCount > MCP_RECIPIENT_LIMIT) {
     throw new Error(`Draft ${draft.id} exceeds the 50-recipient MCP limit`);
   }
-  return { ...projection, revision: await digest(revisionPayload(connectionId, projection)) };
+  if (
+    providerCasToken !== undefined &&
+    (!providerCasToken || providerCasToken.length > 4096 || /[\r\n]/.test(providerCasToken))
+  ) {
+    throw new Error(`Provider returned an invalid CAS token for draft ${draft.id}`);
+  }
+  return {
+    ...projection,
+    revision: await digest(revisionPayload(connectionId, projection, providerCasToken)),
+  };
 };
 
 export const projectDraftListItem = (raw: unknown, fallbackId: string): AgentDraftListItem => {
