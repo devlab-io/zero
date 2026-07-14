@@ -9,7 +9,7 @@ Spec: `docs/spec/niveau10-mailos.md` en entier.
 - RUN: `pnpm test` -> exit 0
 - RUN: `pnpm check` -> exit 0
 - RUN: `pnpm --filter @zero/server types && pnpm --filter @zero/mail types && pnpm --filter @zero/mail exec react-router typegen && TYPECHECK_BLOCKING=1 node scripts/checks/typecheck-report.mjs` -> server 0 et mail 0
-- RUN: `pnpm --filter @zero/mail build` -> exit 0
+- RUN: `pnpm --filter @zero/mail exec react-router typegen && pnpm --filter @zero/mail build` -> exit 0
 - RUN: `pnpm --filter @zero/server exec wrangler deploy --dry-run --env local --outdir .architect/tmp/niveau10-server-dryrun` -> exit 0 sans déploiement
 - RUN: `node scripts/security/check-agent-surface.mjs` -> exit 0
 - RUN: `git diff --check` -> exit 0

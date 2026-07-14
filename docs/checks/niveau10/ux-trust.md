@@ -9,8 +9,8 @@ Spec: `docs/spec/niveau10-mailos.md` section 5 et critères responsive/accessibi
 - RUN: `pnpm --filter @zero/mail exec vitest run components/mail/ux-trust.test.tsx components/mail/mail-list-thread.test.ts components/queue/queue-review.test.tsx` -> exit 0
 - RUN: `pnpm --filter @zero/mail exec eslint components/mail components/queue app/root.tsx app/'(routes)'/settings/shortcuts` -> exit 0
 - RUN: `pnpm --filter @zero/server types && pnpm --filter @zero/mail types && pnpm --filter @zero/mail exec react-router typegen && TYPECHECK_BLOCKING=1 node scripts/checks/typecheck-report.mjs` -> server 0 et mail 0
-- RUN: `pnpm --filter @zero/mail build` -> exit 0
-- RUN: `git status --porcelain | sed 's/^...//' | awk '!/^(apps\/mail\/(app\/root\.tsx|components\/mail\/|components\/queue\/|app\/\(routes\)\/settings\/shortcuts\/|messages\/)|docs\/jobs\/niveau10\/ux-trust-01\.md)$/ {print; bad=1} END {exit bad}'` -> aucune sortie ; touch-set respecté
+- RUN: `pnpm --filter @zero/mail exec react-router typegen && pnpm --filter @zero/mail build` -> exit 0
+- RUN: `git status --porcelain | sed 's/^...//' | awk '!/^(apps\/mail\/(app\/root\.tsx|components\/mail\/.*|components\/queue\/.*|app\/\(routes\)\/settings\/shortcuts\/.*|messages\/.*)|docs\/jobs\/niveau10\/ux-trust-01\.md)$/ {print; bad=1} END {exit bad}'` -> aucune sortie ; touch-set respecté
 - RUN: `git diff -U0 -- apps/mail | grep -E '^\+.*transition-all' && exit 1 || exit 0` -> aucune transition-all ajoutée (diff uniquement)
 - RUN: `git diff --check` -> exit 0
 
