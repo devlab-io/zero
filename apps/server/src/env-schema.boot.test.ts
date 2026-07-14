@@ -1,13 +1,12 @@
-import { describe, expect, it } from 'vitest';
 import { assertServerEnv, requiredServerEnvSchema } from './env-schema';
+import { describe, expect, it } from 'vitest';
 
 // Complément du garde de boot zod (env-schema.test.ts) : preuve exhaustive que CHACUNE des
-// 9 variables requises fait échouer le boot si absente/vide, et que les clés hors-schéma
-// (bindings DO/KV/Queues, features optionnelles) sont ignorées.
+// 7 variables requises fait échouer le boot si absente/vide, et que les clés hors-schéma
+// (bindings DO/KV/Queues, features optionnelles, DATABASE_URL/BETTER_AUTH_URL jamais lues
+// au runtime — incident M2) sont ignorées.
 const REQUIRED = [
-  'DATABASE_URL',
   'BETTER_AUTH_SECRET',
-  'BETTER_AUTH_URL',
   'JWT_SECRET',
   'COOKIE_DOMAIN',
   'VITE_PUBLIC_APP_URL',
@@ -19,7 +18,7 @@ const REQUIRED = [
 const complete: Record<string, string> = Object.fromEntries(REQUIRED.map((k) => [k, `val-${k}`]));
 
 describe('requiredServerEnvSchema — forme', () => {
-  it('déclare exactement les 9 clés requises', () => {
+  it('déclare exactement les 7 clés requises', () => {
     expect(Object.keys(requiredServerEnvSchema.shape).sort()).toEqual([...REQUIRED].sort());
   });
 
@@ -48,6 +47,8 @@ describe('assertServerEnv — chaque clé requise garde le boot', () => {
         ...complete,
         ZERO_DB: {},
         send_email_queue: {},
+        DATABASE_URL: 'postgresql://outillage-local-uniquement',
+        BETTER_AUTH_URL: 'https://jamais-lue-au-runtime',
         RESEND_API_KEY: undefined,
         NODE_ENV: 'production',
       }),
@@ -55,7 +56,7 @@ describe('assertServerEnv — chaque clé requise garde le boot', () => {
   });
 
   it('le message d’erreur oriente vers .dev.vars', () => {
-    const { DATABASE_URL: _o, ...missing } = complete;
+    const { JWT_SECRET: _o, ...missing } = complete;
     expect(() => assertServerEnv(missing)).toThrow(/\.dev\.vars/);
   });
 });

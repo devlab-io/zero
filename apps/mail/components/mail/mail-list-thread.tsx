@@ -7,18 +7,20 @@ import { useOptimisticThreadState } from '@/components/mail/optimistic-thread-st
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { ThreadContextMenu } from '@/components/context/thread-context';
 import { useOptimisticActions } from '@/hooks/use-optimistic-actions';
+import { highlightText } from '@/lib/email-utils-highlight.client';
 import { useMail, type Config } from '@/components/mail/use-mail';
 import { ThreadHoverActions } from './mail-list-thread-actions';
 import { focusedIndexAtom } from '@/hooks/use-mail-navigation';
 import { type ThreadDestination } from '@/lib/thread-actions';
 import { useThread, useThreads } from '@/hooks/use-threads';
 import { GroupPeople, PencilCompose } from '../icons/icons';
+import { memo, useCallback, useMemo, useRef } from 'react';
 import { useSearchValue } from '@/hooks/use-search-value';
-import { highlightText } from '@/lib/email-utils-highlight.client';
+import { useQueryClient } from '@tanstack/react-query';
 import { cn, FOLDERS, formatDate } from '@/lib/utils';
+import { useTRPC } from '@/providers/query-provider';
 import { useThreadLabels } from '@/hooks/use-labels';
 import { cleanNameDisplay } from './mail-list-utils';
-import { memo, useCallback, useMemo } from 'react';
 import { MailLabels } from './mail-list-labels';
 import { BimiAvatar } from '../ui/bimi-avatar';
 import { RenderLabels } from './render-labels';
@@ -46,6 +48,13 @@ export const Thread = memo(function Thread({
   // projection does not carry — keep fetching there to preserve that display.
   const isProjected = message.unread !== undefined && folder !== FOLDERS.SENT;
   const thread = useThread(message.id, { enabled: !isProjected });
+  const trpc = useTRPC();
+  const queryClient = useQueryClient();
+  // #30 (suite M2): préchargement délibéré du corps au survol (pattern Superhuman, ruling
+  // w2a). Alimente le cache pour l'ouverture du fil (froid mesuré 4,2 s serveur) et pour
+  // ThreadContextMenu (enabled:false). 120 ms de garde: un balayage du pointeur sur la
+  // liste ne déclenche aucun fetch; staleTime 1 h aligné sur useThread (déduplication).
+  const hoverPrefetchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const projectedData = useMemo(
     () => (isProjected ? buildProjectedThreadData(message) : undefined),
     [isProjected, message],
@@ -217,9 +226,16 @@ export const Thread = memo(function Thread({
         // single-key actions (d/r/a/f/h) on the thread under the cursor.
         onMouseEnter={() => {
           window.dispatchEvent(new CustomEvent('emailHover', { detail: { id: idToUse } }));
+          if (hoverPrefetchTimer.current) clearTimeout(hoverPrefetchTimer.current);
+          hoverPrefetchTimer.current = setTimeout(() => {
+            void queryClient.prefetchQuery(
+              trpc.mail.get.queryOptions({ id: idToUse }, { staleTime: 1000 * 60 * 60 }),
+            );
+          }, 120);
         }}
         onMouseLeave={() => {
           window.dispatchEvent(new CustomEvent('emailHover', { detail: { id: null } }));
+          if (hoverPrefetchTimer.current) clearTimeout(hoverPrefetchTimer.current);
         }}
       >
         <div

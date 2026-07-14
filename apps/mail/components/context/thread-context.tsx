@@ -1,4 +1,3 @@
-import { log } from '@/lib/log';
 import {
   ContextMenu,
   ContextMenuContent,
@@ -26,15 +25,16 @@ import {
   Trash,
 } from 'lucide-react';
 import { useOptimisticThreadState } from '@/components/mail/optimistic-thread-state';
-import { LabelDialog } from '@/components/labels/label-dialog';
+import { useMemo, type ReactNode, useState, useCallback } from 'react';
 import { useOptimisticActions } from '@/hooks/use-optimistic-actions';
 import { ExclamationCircle, Mail, Clock } from '../icons/icons';
+import { LabelDialog } from '@/components/labels/label-dialog';
 import { SnoozeDialog } from '@/components/mail/snooze-dialog';
 import { type ThreadDestination } from '@/lib/thread-actions';
 import { useThread, useThreads } from '@/hooks/use-threads';
-import { useMemo, type ReactNode, useState, useCallback } from 'react';
 import { useTRPC } from '@/providers/query-provider';
 import { useMutation } from '@tanstack/react-query';
+import type { Label as LabelType } from '@/types';
 import { useLabels } from '@/hooks/use-labels';
 import { FOLDERS, LABELS } from '@/lib/utils';
 import { useMail } from '../mail/use-mail';
@@ -42,8 +42,8 @@ import { Checkbox } from '../ui/checkbox';
 import { m } from '@/paraglide/messages';
 import { useParams } from 'react-router';
 import { useQueryState } from 'nuqs';
+import { log } from '@/lib/log';
 import { toast } from 'sonner';
-import type { Label as LabelType } from '@/types';
 
 interface EmailAction {
   id: string;
@@ -65,7 +65,15 @@ interface EmailContextMenuProps {
   refreshCallback?: () => void;
 }
 
-const LabelsList = ({ threadId, bulkSelected, onCreateLabel }: { threadId: string; bulkSelected: string[]; onCreateLabel: () => void }) => {
+const LabelsList = ({
+  threadId,
+  bulkSelected,
+  onCreateLabel,
+}: {
+  threadId: string;
+  bulkSelected: string[];
+  onCreateLabel: () => void;
+}) => {
   const { userLabels: labels } = useLabels();
   const { optimisticToggleLabel } = useOptimisticActions();
   const targetThreadIds = bulkSelected.length > 0 ? bulkSelected : [threadId];
@@ -100,10 +108,7 @@ const LabelsList = ({ threadId, bulkSelected, onCreateLabel }: { threadId: strin
   // If no labels exist, show create label button
   if (!labels || labels.length === 0) {
     return (
-      <ContextMenuItem 
-        onClick={onCreateLabel}
-        className="font-normal"
-      >
+      <ContextMenuItem onClick={onCreateLabel} className="font-normal">
         <Plus className="mr-2 h-4 w-4 opacity-60" />
         {m['common.mail.createNewLabel']()}
       </ContextMenuItem>
@@ -164,7 +169,10 @@ export function ThreadContextMenu({
   const isSnoozedFolder = currentFolder === FOLDERS.SNOOZED;
   const [, setMode] = useQueryState('mode');
   const [, setThreadId] = useQueryState('threadId');
-  const { data: threadData } = useThread(threadId);
+  // #30 (suite M2): monté par chaque rang de la liste, ce menu déclenchait 15 mail.get
+  // (~1,6 MB) à chaque cache client froid. enabled:false lit le cache sans fetch — le
+  // préchargement au survol du rang (mail-list-thread) fournit les données au clic droit.
+  const { data: threadData } = useThread(threadId, { enabled: false });
   const [, setActiveReplyId] = useQueryState('activeReplyId');
   const optimisticState = useOptimisticThreadState(threadId);
   const trpc = useTRPC();
@@ -495,22 +503,22 @@ export function ThreadContextMenu({
       name: data.name,
       color: {
         backgroundColor: data.color?.backgroundColor || '#202020',
-        textColor: data.color?.textColor || '#FFFFFF'
-      }
+        textColor: data.color?.textColor || '#FFFFFF',
+      },
     };
-    
+
     try {
       const promise = createLabel(labelData).then(async (result) => {
         await refetchLabels();
         return result;
       });
-      
+
       toast.promise(promise, {
         loading: m['common.labels.savingLabel'](),
         success: m['common.labels.saveLabelSuccess'](),
         error: m['common.labels.failedToSavingLabel'](),
       });
-      
+
       await promise;
     } catch (error) {
       log.error('Failed to create label:', error);
@@ -603,7 +611,11 @@ export function ThreadContextMenu({
               {m['common.mail.labels']()}
             </ContextMenuSubTrigger>
             <ContextMenuSubContent className="dark:bg-panelDark max-h-[520px] w-48 overflow-y-auto bg-white">
-              <LabelsList threadId={threadId} bulkSelected={mail.bulkSelected} onCreateLabel={handleOpenCreateLabel} />
+              <LabelsList
+                threadId={threadId}
+                bulkSelected={mail.bulkSelected}
+                onCreateLabel={handleOpenCreateLabel}
+              />
             </ContextMenuSubContent>
           </ContextMenuSub>
 

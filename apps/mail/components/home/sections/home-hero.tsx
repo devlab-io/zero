@@ -4,7 +4,6 @@ import { signIn, useSession } from '@/lib/auth-client';
 import { Link, useNavigate } from 'react-router';
 import { Button } from '@/components/ui/button';
 import { Balancer } from 'react-wrap-balancer';
-import { motion } from 'motion/react';
 import { toast } from 'sonner';
 
 const tabs = [
@@ -20,31 +19,19 @@ export function HomeHero() {
   return (
     <>
       <section className="z-10 mt-32 flex flex-col items-center px-4">
-        <motion.h1
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5, delay: 0.2 }}
-          className="text-center text-4xl font-medium md:text-6xl"
-        >
+        {/* Prerender-safe entrance: framer initial={opacity:0} was serialized into the
+            prerendered index.html, hiding the hero until JS boot (FCP=LCP=boot). CSS
+            animate-fade-up (translate only, never opacity:0) paints at CSS-parse time. */}
+        <h1 className="animate-fade-up text-center text-4xl font-medium [animation-delay:0.2s] md:text-6xl">
           <Balancer className="mb-3 max-w-[1130px]">
             AI Powered Email, Built to Save You Time
           </Balancer>
-        </motion.h1>
-        <motion.p
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5, delay: 0.4 }}
-          className="mx-auto mb-4 max-w-2xl text-center text-base font-medium text-[#B7B7B7] md:text-lg"
-        >
-          Zero is an AI-native email client that manages your inbox, so you don't have to.
-        </motion.p>
+        </h1>
+        <p className="animate-fade-up mx-auto mb-4 max-w-2xl text-center text-base font-medium text-[#B7B7B7] [animation-delay:0.4s] md:text-lg">
+          Zero is an AI-native email client that manages your inbox, so you don&apos;t have to.
+        </p>
         <p className="mb-4 ml-0.5 text-xs text-[#B7B7B7]/60">No credit card required.</p>
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5 }}
-          className="border-input/50 mb-6 inline-flex items-center gap-4 rounded-full border border-[#2A2A2A] bg-[#1E1E1E] px-4 py-1"
-        >
+        <div className="animate-fade-up border-input/50 mb-6 inline-flex items-center gap-4 rounded-full border border-[#2A2A2A] bg-[#1E1E1E] px-4 py-1">
           <Link to="https://yc.vc" target="_blank" className="flex items-center gap-2 text-sm">
             Backed by
             <span>
@@ -58,15 +45,10 @@ export function HomeHero() {
             </span>
             Combinator
           </Link>
-        </motion.div>
+        </div>
 
         {/* Get Started button only visible for mobile screens */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5, delay: 0.6 }}
-          className="mb-6 lg:hidden"
-        >
+        <div className="animate-fade-up mb-6 [animation-delay:0.6s] lg:hidden">
           <Button
             onClick={() => {
               if (session) {
@@ -86,12 +68,15 @@ export function HomeHero() {
           >
             Get Started
           </Button>
-        </motion.div>
+        </div>
       </section>
 
       <section className="relative mt-10 hidden flex-col justify-center md:flex">
         <div className="bg-border absolute left-1/2 top-0 h-px w-full -translate-x-1/2 md:container xl:max-w-7xl" />
-        <Tabs defaultValue="smart-categorization" className="flex w-full flex-col items-center gap-0">
+        <Tabs
+          defaultValue="smart-categorization"
+          className="flex w-full flex-col items-center gap-0"
+        >
           <div
             className="relative bottom-2 flex w-full justify-center md:border-t"
             style={{ clipPath: 'inset(0 0 0 0)', height: '110%' }}

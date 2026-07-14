@@ -1,10 +1,8 @@
-import { describe, expect, it } from 'vitest';
 import { assertServerEnv } from './env-schema';
+import { describe, expect, it } from 'vitest';
 
 const complete = {
-  DATABASE_URL: 'postgres://localhost:5432/db',
   BETTER_AUTH_SECRET: 'secret',
-  BETTER_AUTH_URL: 'http://localhost:3000',
   JWT_SECRET: 'jwt',
   COOKIE_DOMAIN: 'localhost',
   VITE_PUBLIC_APP_URL: 'http://localhost:3000',
@@ -28,7 +26,14 @@ describe('assertServerEnv', () => {
   });
 
   it('treats an empty string as missing and names it', () => {
-    expect(() => assertServerEnv({ ...complete, DATABASE_URL: '' })).toThrow(/DATABASE_URL/);
+    expect(() => assertServerEnv({ ...complete, JWT_SECRET: '' })).toThrow(/JWT_SECRET/);
+  });
+
+  it('ignores DATABASE_URL and BETTER_AUTH_URL (never read at runtime — M2 deploy incident)', () => {
+    expect(() => assertServerEnv(complete)).not.toThrow();
+    expect(() =>
+      assertServerEnv({ ...complete, DATABASE_URL: '', BETTER_AUTH_URL: '' }),
+    ).not.toThrow();
   });
 
   it('names every missing key', () => {

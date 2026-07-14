@@ -10,10 +10,13 @@
 
 import { z } from 'zod';
 
+// M2 (incident deploy prod 2026-07-13): DATABASE_URL et BETTER_AUTH_URL, exigées ici, ne
+// sont JAMAIS lues au runtime — la DB passe par env.HYPERDRIVE.connectionString et le
+// baseURL d'auth par VITE_PUBLIC_BACKEND_URL. Les exiger a rendu un 500 global au premier
+// boot d'un worker neuf. Retirées du requis; drizzle-kit (outillage local) lit DATABASE_URL
+// depuis process.env, hors de ce garde.
 export const requiredServerEnvSchema = z.object({
-  DATABASE_URL: z.string().min(1),
   BETTER_AUTH_SECRET: z.string().min(1),
-  BETTER_AUTH_URL: z.string().min(1),
   JWT_SECRET: z.string().min(1),
   COOKIE_DOMAIN: z.string().min(1),
   VITE_PUBLIC_APP_URL: z.string().min(1),
