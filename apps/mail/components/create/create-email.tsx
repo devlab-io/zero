@@ -1,3 +1,4 @@
+import { log } from '@/lib/log';
 import { useUndoSend, type EmailData, deserializeFiles } from '@/hooks/use-undo-send';
 import { m } from '@/paraglide/messages';
 import { useActiveConnection } from '@/hooks/use-connections';
@@ -79,7 +80,7 @@ export function CreateEmail({
   // If there was an error loading the draft, set the failed state
   useEffect(() => {
     if (draftError) {
-      console.error('Error loading draft:', draftError);
+      log.error('Error loading draft:', draftError);
       setIsDraftFailed(true);
       toast.error(m['pages.createEmail.failedToLoadDraft']());
     }
@@ -179,7 +180,7 @@ export function CreateEmail({
       
       return parsedData;
     } catch (error) {
-      console.error('Failed to parse undo email data:', error);
+      log.error('Failed to parse undo email data:', error);
       return null;
     }
   }, [isComposeOpen]);
@@ -204,7 +205,7 @@ export function CreateEmail({
       }
       return new File([byteArray], filename, { type: mimeType });
     } catch (error) {
-      console.error('Failed to convert base64 to file', error);
+      log.error('Failed to convert base64 to file', error);
       return null;
     }
   };

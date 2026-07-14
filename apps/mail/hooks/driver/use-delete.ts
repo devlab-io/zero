@@ -1,3 +1,4 @@
+import { log } from '@/lib/log';
 import useBackgroundQueue from '@/hooks/ui/use-background-queue';
 import { useMail } from '@/components/mail/use-mail';
 import { useTRPC } from '@/providers/query-provider';
@@ -27,7 +28,7 @@ const useDelete = () => {
           loading: m['common.actions.deletingMail'](),
           success: m['common.actions.deletedMail'](),
           error: (error) => {
-            console.error(`Error deleting ${type}:`, error);
+            log.error(`Error deleting ${type}:`, error);
 
             return m['common.actions.failedToDeleteMail']();
           },

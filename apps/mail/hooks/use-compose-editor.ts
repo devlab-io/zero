@@ -1,3 +1,4 @@
+import { log } from '@/lib/log';
 import { useEditor, type KeyboardShortcutCommand, Extension, generateJSON } from '@tiptap/react';
 import { AutoComplete } from '@/components/create/editor-autocomplete';
 import { defaultExtensions } from '@/components/create/extensions';
@@ -175,7 +176,7 @@ const useComposeEditor = ({
       onPaste: (currentEditor, files, htmlContent) => {
         files.forEach((file) => {
           if (htmlContent) {
-            console.log(htmlContent); // eslint-disable-line no-console
+            log.debug(htmlContent);
             return false;
           }
 

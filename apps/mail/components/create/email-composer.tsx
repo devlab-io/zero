@@ -1,3 +1,4 @@
+import { log } from '@/lib/log';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ScheduleSendPicker } from './schedule-send-picker';
 import { Command, Loader, Plus, Type } from 'lucide-react';
@@ -123,7 +124,7 @@ export function EmailComposer({
       });
 
       if (compressedFiles.length !== filesToProcess.length) {
-        console.warn('Compressed files array length mismatch:', {
+        log.warn('Compressed files array length mismatch:', {
           original: filesToProcess.length,
           compressed: compressedFiles.length,
         });
@@ -164,7 +165,7 @@ export function EmailComposer({
         }
       }
     } catch (error) {
-      console.error('Error compressing images:', error);
+      log.error('Error compressing images:', error);
       setValue('attachments', filesToProcess, { shouldDirty: true });
       setHasUnsavedChanges(true);
       if (showToast) {
@@ -349,7 +350,7 @@ export function EmailComposer({
         }
       }
     } catch (error) {
-      console.error('Error sending email:', error);
+      log.error('Error sending email:', error);
       toast.error('Failed to send email');
     } finally {
       setIsLoading(false);
@@ -403,7 +404,7 @@ export function EmailComposer({
       setAiGeneratedMessage(result.newBody);
       // toast.success('Email generated successfully');
     } catch (error) {
-      console.error('Error generating AI email:', error);
+      log.error('Error generating AI email:', error);
       toast.error('Failed to generate email');
     } finally {
       setIsLoading(false);
@@ -442,7 +443,7 @@ export function EmailComposer({
         setDraftId(response.id);
       }
     } catch (error) {
-      console.error('Error saving draft:', error);
+      log.error('Error saving draft:', error);
       toast.error('Failed to save draft');
       setIsSavingDraft(false);
       setHasUnsavedChanges(false);
@@ -466,7 +467,7 @@ export function EmailComposer({
       setValue('subject', subject);
       setHasUnsavedChanges(true);
     } catch (error) {
-      console.error('Error generating subject:', error);
+      log.error('Error generating subject:', error);
       toast.error('Failed to generate subject');
     } finally {
       setIsGeneratingSubject(false);

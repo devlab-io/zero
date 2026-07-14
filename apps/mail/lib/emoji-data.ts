@@ -1,3 +1,4 @@
+import { log } from '@/lib/log';
 import type { EmojiItem } from '@tiptap/extension-emoji';
 // perf: the gitHubEmojis dataset (~480 kB of pure data, 1952 entries, generated 1:1 from
 // @tiptap/extension-emoji's `gitHubEmojis` export) used to be bundled inside the editor
@@ -25,7 +26,7 @@ export function loadGitHubEmojis(): Promise<EmojiItem[]> {
       .catch((error) => {
         // Allow a later retry instead of caching the failure forever.
         pending = null;
-        console.warn('[emoji-data] failed to load emoji dataset', error);
+        log.warn('[emoji-data] failed to load emoji dataset', error);
         return [] as EmojiItem[];
       });
   }
@@ -34,7 +35,7 @@ export function loadGitHubEmojis(): Promise<EmojiItem[]> {
 
 export function getGitHubEmojis(): EmojiItem[] {
   if (!cache) {
-    console.warn('[emoji-data] getGitHubEmojis() called before load — emoji list is empty');
+    log.warn('[emoji-data] getGitHubEmojis() called before load — emoji list is empty');
   }
   return cache ?? [];
 }

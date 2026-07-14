@@ -1,3 +1,4 @@
+import { log } from '@/lib/log';
 import { isToday, isThisMonth, differenceInCalendarMonths } from 'date-fns';
 import { getBrowserTimezone } from './timezones';
 import { formatInTimeZone } from 'date-fns-tz';
@@ -83,13 +84,13 @@ export const parseAndValidateDate = (dateString: string): Date | null => {
 
     // Check if the date is valid
     if (isNaN(dateObj.getTime())) {
-      console.error('Invalid date', dateString);
+      log.error('Invalid date', dateString);
       return null;
     }
 
     return dateObj;
   } catch (error) {
-    console.error('Error parsing date', error);
+    log.error('Error parsing date', error);
     return null;
   }
 };
@@ -169,7 +170,7 @@ export function formatDate(dateInput: string | Date | number): string {
     // Otherwise show the date in MM/DD/YY format
     return formatInTimeZone(dateObj, timezone, 'MM/dd/yy');
   } catch (error) {
-    console.error('Error formatting date', error);
+    log.error('Error formatting date', error);
     return '';
   }
 }
@@ -186,7 +187,7 @@ export const formatTime = (date: string) => {
     // Always return the time in h:mm a format
     return formatInTimeZone(dateObj, timezone, 'h:mm a');
   } catch (error) {
-    console.error('Error formatting time', error);
+    log.error('Error formatting time', error);
     return '';
   }
 };

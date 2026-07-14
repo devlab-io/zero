@@ -1,3 +1,4 @@
+import { log } from '@/lib/log';
 import {
   ArrowLeft,
   ArrowRight,
@@ -282,7 +283,7 @@ export function SearchView({
                         navigate(`/inbox?threadId=${thread.id}`);
                       }
                     } catch (error) {
-                      console.error('Error navigating to thread:', error);
+                      log.error('Error navigating to thread:', error);
                       toast.error('Failed to open email');
                     }
                   });

@@ -1,3 +1,4 @@
+import { log } from '@/lib/log';
 import {
   isRouteErrorResponse,
   Links,
@@ -128,8 +129,8 @@ export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {
   }
 
   useEffect(() => {
-    console.error(error);
-    console.error({ message, details, stack });
+    log.error(error);
+    log.error({ message, details, stack });
 
     // Report error to Sentry (lazy — see captureToSentry above)
     if (isRouteErrorResponse(error)) {

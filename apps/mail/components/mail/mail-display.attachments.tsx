@@ -1,3 +1,4 @@
+import { log } from '@/lib/log';
 import { m } from '@/paraglide/messages';
 import type { Attachment } from '@/types';
 import { Docx, Figma, ImageFile, PDF } from '../icons/icons';
@@ -67,7 +68,7 @@ export const downloadAttachment = async (attachment: {
     document.body.removeChild(link);
     window.URL.revokeObjectURL(url);
   } catch (error) {
-    console.error('Error downloading attachment:', error);
+    log.error('Error downloading attachment:', error);
     toast.error(m['common.mailDisplay.failedToDownloadAttachment']());
   }
 };
@@ -80,7 +81,7 @@ export const handleDownloadAllAttachments =
     const JSZip = (await import('jszip')).default;
     const zip = new JSZip();
 
-    console.log('attachments', attachments);
+    log.debug('attachments', attachments);
     attachments.forEach((attachment) => {
       try {
         const byteCharacters = atob(attachment.body);
@@ -96,7 +97,7 @@ export const handleDownloadAllAttachments =
           unixPermissions: 0o644,
         });
       } catch (error) {
-        console.error(`Error adding ${attachment.filename} to zip:`, error);
+        log.error(`Error adding ${attachment.filename} to zip:`, error);
       }
     });
 
@@ -120,10 +121,10 @@ export const handleDownloadAllAttachments =
         window.URL.revokeObjectURL(url);
       })
       .catch((error) => {
-        console.error('Error generating zip file:', error);
+        log.error('Error generating zip file:', error);
       });
 
-    console.log('downloaded', subject, attachments);
+    log.debug('downloaded', subject, attachments);
   };
 
 export const openAttachment = async (attachment: {
@@ -165,7 +166,7 @@ export const openAttachment = async (attachment: {
       setTimeout(() => window.URL.revokeObjectURL(url), 1000);
     }
   } catch (error) {
-    console.error('Error opening attachment:', error);
+    log.error('Error opening attachment:', error);
     toast.error(m['common.mailDisplay.failedToOpenAttachment']());
   }
 };
@@ -194,7 +195,7 @@ export const ThreadAttachments = ({ attachments }: { attachments: Attachment[] }
       document.body.removeChild(link);
       window.URL.revokeObjectURL(url);
     } catch (error) {
-      console.error('Error downloading attachment:', error);
+      log.error('Error downloading attachment:', error);
     }
   };
 

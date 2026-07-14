@@ -1,3 +1,4 @@
+import { log } from '@/lib/log';
 import { addOptimisticActionAtom, removeOptimisticActionAtom } from '@/store/optimistic-updates';
 import { optimisticActionsManager, type PendingAction } from '@/lib/optimistic-actions-manager';
 import { buildOptimisticFailureToast, isLastPendingOfType } from '@/lib/optimistic-recovery';
@@ -154,7 +155,7 @@ export function useOptimisticActions() {
           removeOptimisticAction(optimisticId);
         }
       } catch (error) {
-        console.error('Action failed:', error);
+        log.error('Action failed:', error);
         // Reconcile the optimistic view: undo() removes the optimistic hide AND
         // clears any background-queue entry (MOVE/DELETE) so the thread reappears
         // instead of vanishing silently.

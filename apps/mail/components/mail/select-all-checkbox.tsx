@@ -1,3 +1,4 @@
+import { log } from '@/lib/log';
 import React, { useCallback, useMemo, useRef, useState, useEffect } from 'react';
 import { useSearchValue } from '@/hooks/use-search-value';
 import { trpcClient } from '@/providers/query-provider';
@@ -52,7 +53,7 @@ export default function SelectAllCheckbox({ className }: { className?: string })
         cursor = page.nextPageToken;
       }
     } catch (err) {
-      console.error('Failed to fetch all thread IDs', err);
+      log.error('Failed to fetch all thread IDs', err);
       toast.error(
         (err instanceof Error ? err.message : undefined) ?? m['common.mail.failedToSelectAll'](),
       );
@@ -86,7 +87,7 @@ export default function SelectAllCheckbox({ className }: { className?: string })
               const allIds = allIdsCache.current ?? [];
               setMail((prev) => ({ ...prev, bulkSelected: allIds }));
             } catch (err) {
-              console.error(err);
+              log.error(err);
               setIsFetchingIds(false);
               toast.error(m['common.mail.failedToSelectAllConversations']());
             }

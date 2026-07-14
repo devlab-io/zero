@@ -1,3 +1,4 @@
+import { log } from '@/lib/log';
 import * as emailAddresses from 'email-addresses';
 import type { Sender } from '@/types';
 import DOMPurify from 'dompurify';
@@ -39,7 +40,7 @@ export const fixNonReadableColors = (
         el.style.color = blackContrast >= whiteContrast ? '#000000' : '#ffffff';
       }
     } catch (error) {
-      console.error('Error fixing non-readable colors:', error);
+      log.error('Error fixing non-readable colors:', error);
     }
   }
 };
@@ -217,7 +218,7 @@ export const cleanHtml = (html: string) => {
   try {
     return DOMPurify.sanitize(html);
   } catch (error) {
-    console.warn('DOMPurify Failed or not Available, falling back to Default HTML ', error);
+    log.warn('DOMPurify Failed or not Available, falling back to Default HTML ', error);
     return '<p><em>No email content available</em></p>';
   }
 };

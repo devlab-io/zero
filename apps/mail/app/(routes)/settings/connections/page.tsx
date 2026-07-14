@@ -1,3 +1,4 @@
+import { log } from '@/lib/log';
 import {
   Dialog,
   DialogContent,
@@ -42,7 +43,7 @@ export default function ConnectionsPage() {
       { connectionId },
       {
         onError: (error) => {
-          console.error('Error disconnecting account:', error);
+          log.error('Error disconnecting account:', error);
           toast.error(m['pages.settings.connections.disconnectError']());
         },
       },

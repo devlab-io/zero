@@ -120,7 +120,6 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   //       navigator.clipboard.writeText(`https://meet.0.email/${id}`);
   //       toast.success('Meeting linked copied to clipboard');
   //     } catch (error) {
-  //       console.error(error);
   //       toast.error('Failed to create meeting');
   //     }
   //   };

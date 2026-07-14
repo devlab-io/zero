@@ -1,3 +1,4 @@
+import { log } from '@/lib/log';
 import {
   Form,
   FormControl,
@@ -169,7 +170,7 @@ export default function GeneralPage() {
 
       toast.success(m['common.settings.saved']());
     } catch (error) {
-      console.error(error);
+      log.error(error);
       toast.error(m['common.settings.failedToSave']());
       queryClient.setQueryData(trpc.settings.get.queryKey(), (updater) => {
         if (!updater) return;

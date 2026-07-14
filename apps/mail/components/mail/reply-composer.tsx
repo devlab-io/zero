@@ -1,3 +1,4 @@
+import { log } from '@/lib/log';
 import { useUndoSend } from '@/hooks/use-undo-send';
 import { constructReplyBody, constructForwardBody } from '@/lib/utils';
 import { useActiveConnection } from '@/hooks/use-connections';
@@ -204,7 +205,7 @@ export default function ReplyCompose({ messageId }: ReplyComposeProps) {
       });
     } catch (error) {
       toast.dismiss(sendingToast);
-      console.error('Error sending email:', error);
+      log.error('Error sending email:', error);
       toast.error(m['pages.createEmail.failedToSendEmail']());
     }
   };

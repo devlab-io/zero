@@ -1,3 +1,4 @@
+import { log } from '@/lib/log';
 import {
   ContextMenu,
   ContextMenuContent,
@@ -223,7 +224,7 @@ export function ThreadContextMenu({
         setMail({ ...mail, bulkSelected: [] });
       }
     } catch (error) {
-      console.error(`Error moving ${threadId ? 'email' : 'thread'}:`, error);
+      log.error(`Error moving ${threadId ? 'email' : 'thread'}:`, error);
       toast.error(m['common.actions.failedToMove']());
     }
   };
@@ -509,7 +510,7 @@ export function ThreadContextMenu({
       
       await promise;
     } catch (error) {
-      console.error('Failed to create label:', error);
+      log.error('Failed to create label:', error);
     } finally {
       setCreateLabelOpen(false);
     }

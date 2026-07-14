@@ -1,3 +1,4 @@
+import { log } from '@/lib/log';
 import { m } from '@/paraglide/messages';
 import type { Attachment, ParsedMessage } from '@/types';
 import { cleanHtml } from '@/lib/email-utils';
@@ -179,7 +180,7 @@ export function printMail(
           setTimeout(() => {
             try {
               if (!printFrame.contentWindow) {
-                console.error('Failed to get iframe window');
+                log.error('Failed to get iframe window');
                 return;
               }
               // Focus the iframe and print
@@ -193,7 +194,7 @@ export function printMail(
                 }
               }, 1000);
             } catch (error) {
-              console.error('Error during print:', error);
+              log.error('Error during print:', error);
               // Clean up on error
               if (printFrame && printFrame.parentNode) {
                 document.body.removeChild(printFrame);
@@ -203,7 +204,7 @@ export function printMail(
         };
       }
     } catch (error) {
-      console.error('Error printing email:', error);
+      log.error('Error printing email:', error);
       toast.error(m['common.mailDisplay.failedToPrint']());
     }
   };

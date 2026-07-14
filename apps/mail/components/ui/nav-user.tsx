@@ -1,3 +1,4 @@
+import { log } from '@/lib/log';
 import {
   HelpCircle,
   LogOut,
@@ -140,7 +141,7 @@ export function NavUser() {
       queryClient.clear();
       await queryClient.refetchQueries({ queryKey: trpc.mail.listThreads.infiniteQueryKey() });
     } catch (error) {
-      console.error('Error switching accounts:', error);
+      log.error('Error switching accounts:', error);
       toast.error(m['common.navUser.failedToSwitchAccount']());
 
       await refetchActiveConnection();
