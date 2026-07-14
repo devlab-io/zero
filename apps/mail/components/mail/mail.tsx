@@ -10,7 +10,7 @@ import { useCategorySettings, useDefaultCategoryId } from '@/hooks/use-categorie
 import { ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable';
 import { useCommandPalette } from '../context/command-palette-context';
 import { useHotkeys, useHotkeysContext } from 'react-hotkeys-hook';
-import { ThreadDisplay } from '@/components/mail/thread-display';
+import { ThreadReaderSurface, PricingDialogSurface } from '@/components/mail/mail-lazy-surfaces';
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { useActiveConnection } from '@/hooks/use-connections';
 import { Check, ChevronDown, RefreshCcw } from 'lucide-react';
@@ -20,7 +20,6 @@ import { MailList } from '@/components/mail/mail-list';
 import { useNavigate, useParams } from 'react-router';
 import { useMail } from '@/components/mail/use-mail';
 import { SidebarToggle } from '../ui/sidebar-toggle';
-import { PricingDialog } from '../ui/pricing-dialog';
 import { clearBulkSelectionAtom } from './use-mail';
 import { loadGitHubEmojis } from '@/lib/emoji-data';
 // Loaded lazily so the AI sidebar bundle (AIChat, livekit/elevenlabs, agents) is only
@@ -32,6 +31,7 @@ const AISidebar = lazy(() =>
     default: mod.default,
   })),
 );
+
 import { useThreads } from '@/hooks/use-threads';
 import AIToggleButton from '../ai-toggle-button';
 import { useIsMobile } from '@/hooks/use-mobile';
@@ -351,6 +351,7 @@ export function MailLayout() {
   const isDesktop = useMediaQuery('(min-width: 768px)');
 
   const [threadId] = useQueryState('threadId');
+  const [pricingDialogOpen] = useQueryState('pricingDialog');
 
   useEffect(() => {
     if (threadId) {
@@ -419,7 +420,7 @@ export function MailLayout() {
 
   return (
     <TooltipProvider delayDuration={0}>
-      <PricingDialog />
+      <PricingDialogSurface open={!!pricingDialogOpen} />
       <div className="rounded-inherit z-5 relative flex p-0 md:mr-0.5 md:mt-1">
         <ResizablePanelGroup
           direction="horizontal"
@@ -557,7 +558,7 @@ export function MailLayout() {
               minSize={30}
             >
               <div className="relative flex-1">
-                <ThreadDisplay />
+                <ThreadReaderSurface threadId={threadId} emptyOnNull />
               </div>
             </ResizablePanel>
           )}
@@ -567,7 +568,7 @@ export function MailLayout() {
             <div className="bg-panelLight dark:bg-panelDark fixed inset-0 z-50">
               <div className="flex h-full flex-col">
                 <div className="h-full overflow-y-auto outline-none">
-                  <ThreadDisplay />
+                  <ThreadReaderSurface threadId={threadId} emptyOnNull={false} />
                 </div>
               </div>
             </div>

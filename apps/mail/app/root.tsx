@@ -108,14 +108,17 @@ export default function App() {
 }
 
 export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {
-  let message = 'Oops!';
+  // #44 (post-#38): consume the ErrorBoundary i18n keys delivered by #38 (pages.error.boundary.*).
+  let message = m['pages.error.boundary.oops']();
   let details = 'An unexpected error occurred.';
   let stack: string | undefined;
 
   if (isRouteErrorResponse(error)) {
-    message = error.status === 404 ? '404' : 'Error';
+    message = error.status === 404 ? '404' : m['pages.error.boundary.error']();
     details =
-      error.status === 404 ? 'The requested page could not be found.' : error.statusText || details;
+      error.status === 404
+        ? m['pages.error.boundary.notFoundDetails']()
+        : error.statusText || details;
     if (error.status === 404) {
       return <NotFound />;
     }
@@ -163,8 +166,10 @@ export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {
       <div className="flex-col items-center justify-center md:flex dark:text-gray-100">
         {/* Message */}
         <div className="space-y-2">
-          <h2 className="text-2xl font-semibold tracking-tight">Something went wrong!</h2>
-          <p className="text-muted-foreground">See the console for more information.</p>
+          <h2 className="text-2xl font-semibold tracking-tight">
+            {m['pages.error.boundary.somethingWentWrong']()}
+          </h2>
+          <p className="text-muted-foreground">{m['pages.error.boundary.seeConsole']()}</p>
           <pre className="text-muted-foreground">{JSON.stringify(error, null, 2)}</pre>
         </div>
 

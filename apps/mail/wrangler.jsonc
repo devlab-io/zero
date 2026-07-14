@@ -5,9 +5,11 @@
   "observability": {
     "enabled": true,
   },
+  "main": "workers/spa-fallback.ts",
   "assets": {
     "directory": "./build/client/",
-    "not_found_handling": "single-page-application",
+    "binding": "ASSETS",
+    "not_found_handling": "none",
     "html_handling": "force-trailing-slash",
   },
   "env": {

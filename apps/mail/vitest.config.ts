@@ -12,11 +12,15 @@ import { defineConfig } from 'vitest/config';
 // importing @/config/shortcuts) fails to resolve. The regex `^@/` is used so scoped
 // npm packages (`@tanstack/…`, `@react-email/…`) are left untouched.
 export default defineConfig({
+  // #44 (gate A8): the palette-split contract tests render real source components (which use the
+  // automatic JSX runtime, without importing React). Match that in the test transform so those
+  // components don't fail with "React is not defined". Build/runtime are unaffected by this.
+  esbuild: { jsx: 'automatic', jsxImportSource: 'react' },
   resolve: {
     alias: [{ find: /^@\//, replacement: fileURLToPath(new URL('./', import.meta.url)) }],
   },
   test: {
     environment: 'happy-dom',
-    include: ['{app,components,lib,hooks,store}/**/*.test.{ts,tsx}'],
+    include: ['{app,components,lib,hooks,store,workers}/**/*.test.{ts,tsx}'],
   },
 });

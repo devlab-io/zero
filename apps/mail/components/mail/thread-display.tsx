@@ -22,7 +22,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { useOptimisticThreadState } from '@/components/mail/optimistic-thread-state';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { useOptimisticActions } from '@/hooks/use-optimistic-actions';
 import { focusedIndexAtom } from '@/hooks/use-mail-navigation';
 import { type ThreadDestination } from '@/lib/thread-actions';
@@ -33,12 +33,10 @@ import { EmptyStateIcon } from '../icons/empty-state-svg';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import type { Attachment } from '@/types';
 import { useAnimations } from '@/hooks/use-animations';
-import { AnimatePresence, motion } from 'motion/react';
 import { MailDisplaySkeleton } from './mail-skeleton';
 import { useTRPC } from '@/providers/query-provider';
 import { useMutation } from '@tanstack/react-query';
 import { useIsMobile } from '@/hooks/use-mobile';
-import ReplyCompose from './reply-composer';
 import { NotesPanel } from './note-panel';
 import { selectThreadViewState } from '@/lib/thread-view-state';
 import { useIsOffline } from '@/hooks/use-online-status';
@@ -53,8 +51,21 @@ import { toast } from 'sonner';
 import { printThread } from './thread-display.print';
 import { ThreadActionButton } from './thread-display.action-button';
 import { MessageList } from './thread-display.message-list';
+import { THREAD_TRANSITION_WRAPPER_CLASS } from './thread-display.transition';
 
 export { ThreadDemo } from './thread-display.demo';
+
+// #44 (gate A8): the motion-powered thread transition lives in a lazily-loaded sibling so
+// `motion` stays out of the critical inbox chunk. It resolves when a thread is first shown
+// with animations on (via the Suspense boundary below); a structurally-equivalent fallback is
+// rendered while it loads, so the first such thread may render without its entry animation.
+const AnimatedMessageList = lazy(() => import('./thread-display.animated-message-list'));
+
+// #44 (gate A8): reply composer (pulls posthog-js + its shell) is loaded lazily so it stays out
+// of the critical inbox chunk. It resolves when the user opens a reply (via the Suspense below);
+// its embedded editor was already lazy, so this adds only the composer shell to that same
+// on-open resolution. The composer's own behaviour is unchanged.
+const ReplyCompose = lazy(() => import('./reply-composer'));
 
 const isFullscreen = false;
 export function ThreadDisplay() {
@@ -501,61 +512,42 @@ export function ThreadDisplay() {
               </div>
             </div>
             <div className={cn('flex min-h-0 flex-1 flex-col', isMobile && 'h-full')}>
-              {animationsEnabled ? (
-                <AnimatePresence mode="wait" initial={false}>
-                  <motion.div
-                    key={id}
-                    initial={{
-                      opacity: 0,
-                      x:
-                        navigationDirection === 'previous'
-                          ? -25
-                          : navigationDirection === 'next'
-                            ? 25
-                            : 0,
-                    }}
-                    animate={{
-                      opacity: 1,
-                      x: 0,
-                    }}
-                    exit={{
-                      opacity: 0,
-                      x:
-                        navigationDirection === 'previous'
-                          ? 25
-                          : navigationDirection === 'next'
-                            ? -25
-                            : 0,
-                    }}
-                    transition={{
-                      duration: 0.08,
-                      ease: [0.4, 0, 0.2, 1],
-                    }}
-                    onAnimationComplete={handleAnimationComplete}
-                    className="h-full w-full"
+              {(() => {
+                const messageListProps = {
+                  messages: emailData.messages,
+                  isFullscreen,
+                  totalReplies: emailData?.totalReplies,
+                  allThreadAttachments,
+                  mode: mode || undefined,
+                  activeReplyId: activeReplyId || undefined,
+                  isMobile,
+                };
+                // Animations on → lazy motion wrapper (resolved on first thread render). The
+                // Suspense fallback is STRUCTURALLY EQUIVALENT to the resolved output: the animated
+                // path renders <motion.div className="h-full w-full"><MessageList/></motion.div>,
+                // and motion.div IS a <div>, so the fallback uses the same <div> + shared
+                // THREAD_TRANSITION_WRAPPER_CLASS — the transition DOM (layout/scroll box) stays
+                // stable while the chunk loads. Off → plain MessageList, exactly as before. motion
+                // is not part of this route-critical chunk.
+                return animationsEnabled ? (
+                  <Suspense
+                    fallback={
+                      <div className={THREAD_TRANSITION_WRAPPER_CLASS}>
+                        <MessageList {...messageListProps} />
+                      </div>
+                    }
                   >
-                    <MessageList
-                      messages={emailData.messages}
-                      isFullscreen={isFullscreen}
-                      totalReplies={emailData?.totalReplies}
-                      allThreadAttachments={allThreadAttachments}
-                      mode={mode || undefined}
-                      activeReplyId={activeReplyId || undefined}
-                      isMobile={isMobile}
+                    <AnimatedMessageList
+                      threadKey={id}
+                      navigationDirection={navigationDirection}
+                      onAnimationComplete={handleAnimationComplete}
+                      messageListProps={messageListProps}
                     />
-                  </motion.div>
-                </AnimatePresence>
-              ) : (
-                <MessageList
-                  messages={emailData.messages}
-                  isFullscreen={isFullscreen}
-                  totalReplies={emailData?.totalReplies}
-                  allThreadAttachments={allThreadAttachments}
-                  mode={mode || undefined}
-                  activeReplyId={activeReplyId || undefined}
-                  isMobile={isMobile}
-                />
-              )}
+                  </Suspense>
+                ) : (
+                  <MessageList {...messageListProps} />
+                );
+              })()}
 
               {mode &&
                 activeReplyId &&
@@ -564,7 +556,9 @@ export function ThreadDisplay() {
                     className="border-border bg-panelLight dark:bg-panelDark sticky bottom-0 z-10 border-t px-4 py-2"
                     id={`reply-composer-${activeReplyId}`}
                   >
-                    <ReplyCompose messageId={activeReplyId} />
+                    <Suspense fallback={null}>
+                      <ReplyCompose messageId={activeReplyId} />
+                    </Suspense>
                   </div>
                 )}
               <LabelMovePicker />
