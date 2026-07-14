@@ -14,25 +14,42 @@ import type { ManagerConfig } from '../types';
 
 export type GmailHandler = (params: Record<string, unknown>) => unknown;
 
+/** Feuille du client Gmail factice : une méthode async renvoyant la réponse du handler. */
+type GmailFakeLeaf = (params: Record<string, unknown>) => Promise<unknown>;
+/** Nœud récursif du client Gmail factice (ex. `users` → `messages` → `get`). */
+interface GmailFakeClient {
+  [segment: string]: GmailFakeClient | GmailFakeLeaf;
+}
+
 /**
- * Construit un faux `gmail_v1.Gmail` à partir d'une map plate `chemin.pointé → handler`.
- * Chaque feuille devient une méthode async : un handler qui LÈVE produit une promesse
- * rejetée (comme le vrai client googleapis), servant les chemins d'erreur.
+ * Construit un client Gmail factice à partir d'une map plate `chemin.pointé → handler`
+ * (ex. `users.messages.get`). Chaque feuille devient une méthode async : un handler qui
+ * LÈVE produit une promesse rejetée (comme le vrai client googleapis), servant les chemins
+ * d'erreur. Le client est injecté tel quel au transport factice ; les modules CRUD, typés
+ * contre `GmailTransport`, le consomment comme un `gmail_v1.Gmail`.
  */
-export function makeFakeGmail(handlers: Record<string, GmailHandler>): gmail_v1.Gmail {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const root: any = {};
+export function makeFakeGmail(handlers: Record<string, GmailHandler>): GmailFakeClient {
+  const root: GmailFakeClient = {};
   for (const [path, fn] of Object.entries(handlers)) {
-    const parts = path.split('.');
+    const segments = path.split('.');
+    const leaf = segments.pop();
+    if (leaf === undefined) continue;
     let node = root;
-    for (let i = 0; i < parts.length - 1; i++) {
-      node[parts[i] as string] ??= {};
-      node = node[parts[i] as string];
+    for (const segment of segments) {
+      let child = node[segment];
+      if (child === undefined) {
+        child = {};
+        node[segment] = child;
+      }
+      if (typeof child === 'function') {
+        throw new Error(`makeFakeGmail: collision de chemin sur "${segment}"`);
+      }
+      node = child;
     }
     // async ⇒ un throw synchrone du handler devient un rejet de promesse.
-    node[parts[parts.length - 1] as string] = async (params: Record<string, unknown>) => fn(params);
+    node[leaf] = async (params: Record<string, unknown>) => fn(params);
   }
-  return root as gmail_v1.Gmail;
+  return root;
 }
 
 /** Réponse gmail standard : le corps est enveloppé dans `{ data }` comme googleapis. */
@@ -47,14 +64,19 @@ export function gmailError(message: string, code?: number): () => never {
   };
 }
 
+/** Surface d'auth OAuth réellement utilisée par les tests google-account (tokens). */
+export interface FakeAuth {
+  getToken?: (code: string) => Promise<unknown>;
+  revokeToken?: (token: string) => Promise<unknown>;
+}
+
 export interface FakeTransport {
   config: ManagerConfig;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  auth: any;
+  auth: FakeAuth;
   getQuotaUser: () => string | undefined;
   getScope: () => string;
   getGmailCallCount: () => number;
-  execute: <T>(fn: (g: gmail_v1.Gmail) => Promise<T>, opts?: { retry?: boolean }) => Promise<T>;
+  execute: <T>(fn: (g: GmailFakeClient) => Promise<T>, opts?: { retry?: boolean }) => Promise<T>;
   withErrorHandler: <T>(op: string, fn: () => Promise<T> | T, ctx?: unknown) => Promise<T>;
   withSyncErrorHandler: <T>(op: string, fn: () => T, ctx?: unknown) => T;
   batchThreadsGet: (ids: readonly string[], format?: string) => Promise<Map<string, gmail_v1.Schema$Thread>>;
@@ -72,9 +94,8 @@ export interface FakeTransport {
 
 export interface FakeTransportOptions {
   config?: ManagerConfig;
-  gmail?: gmail_v1.Gmail;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  auth?: any;
+  gmail?: GmailFakeClient;
+  auth?: FakeAuth;
   batchThreadsGet?: (
     ids: readonly string[],
     format?: string,
@@ -98,7 +119,7 @@ const defaultConfig = { auth: { email: 'user@devlab.io', refreshToken: 'refresh-
  */
 export function makeFakeTransport(opts: FakeTransportOptions = {}): FakeTransport {
   const config = opts.config ?? defaultConfig;
-  const gmail = opts.gmail ?? ({} as gmail_v1.Gmail);
+  const gmail: GmailFakeClient = opts.gmail ?? {};
   const calls = { execute: 0, retry: 0, ops: [] as string[], executeRetryFlags: [] as boolean[] };
   return {
     config,
@@ -106,7 +127,7 @@ export function makeFakeTransport(opts: FakeTransportOptions = {}): FakeTranspor
     getQuotaUser: () => (config.auth?.email ? `${config.auth.email}-test` : undefined),
     getScope: () => 'https://www.googleapis.com/auth/gmail.modify',
     getGmailCallCount: () => calls.execute,
-    execute: async <T>(fn: (g: gmail_v1.Gmail) => Promise<T>, o?: { retry?: boolean }): Promise<T> => {
+    execute: async <T>(fn: (g: GmailFakeClient) => Promise<T>, o?: { retry?: boolean }): Promise<T> => {
       calls.execute += 1;
       calls.executeRetryFlags.push(!!o?.retry);
       if (o?.retry) calls.retry += 1;
