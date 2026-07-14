@@ -35,13 +35,14 @@ redistribuables. Toute conclusion de ce type relève d'une **revue juridique**, 
 grep -rl "Zero Email Inc" apps packages | wc -l   # => 22 au HEAD gelé
 ```
 
-Décomposition des 22 correspondances : **20 en-têtes** portant la clause restrictive + **2 mentions**
-(sans en-tête de licence). Les 20 sont vérifiables par
+Décomposition des 22 correspondances : **20 fichiers restrictifs** (en-têtes portant la clause) +
+**2 mentions** — `instrument.ts` (commentaire de télémétrie) et `footer.tsx` (branding UI), sans
+en-tête de licence. Les 20 restrictifs sont vérifiables par
 `grep -rl "Reuse or distribution of this file requires a license from Zero Email Inc" apps packages | wc -l` → **20**.
 
 | # | Fichier | Nature |
 |---|---|---|
-| 1 | `apps/mail/app/instrument.ts` | **mention** (commentaire Devlab sur le DSN Sentry upstream — pas un en-tête de licence) |
+| 1 | `apps/mail/app/instrument.ts` | **commentaire de télémétrie** (DSN Sentry upstream — pas d'en-tête Apache, pas de clause) |
 | 2 | `apps/mail/components/home/footer.tsx` | **mention** (`© … All Rights Reserved`, branding UI — pas un en-tête) |
 | 3 | `apps/server/src/lib/analyze/interests.ts` | en-tête Apache 2.0 **+ clause restrictive** |
 | 4 | `apps/server/src/routes/agent/index.ts` | en-tête Apache 2.0 **+ clause restrictive** |
@@ -87,8 +88,8 @@ supprimée.
 | 8 | `apps/server/src/workflows/sync-threads-workflow.ts` | en-tête+clause | inchangé | — |
 | 9 | `apps/server/src/workflows/sync-threads-coordinator-workflow.ts` | en-tête+clause | inchangé | — |
 
-**Compte : 9 d'origine (7 en-têtes + 2 mentions, tous survivants) + 13 dérivés (11 de `index.ts` +
-2 de `mcp.ts`) = 22** (soit 20 en-têtes porteurs de clause + 2 mentions). Les 9 sont inventoriés, et
+**Compte : 9 d'origine (7 restrictifs + 2 mentions, tous survivants) + 13 dérivés (11 de `index.ts` +
+2 de `mcp.ts`) = 22** (soit **20 fichiers restrictifs** + 2 mentions ; lignée restrictive 7 → 20). Les 9 sont inventoriés, et
 leurs 13 descendants avec eux ; l'écart est intégralement expliqué. Vérification de la préservation
 sur un dérivé (ex. `projection.ts:14`) : la clause restrictive y figure identique à `index.ts:14`.
 

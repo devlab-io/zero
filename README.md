@@ -39,11 +39,12 @@ Zero is built with modern and reliable technologies:
 > environments — see [`ARCHITECTURE.md`](./ARCHITECTURE.md). For tests and CI, see
 > [`docs/testing.md`](./docs/testing.md). This repo is a fork of `Mail-0/Zero`; see
 > [`FORK.md`](./FORK.md) and [`LICENSE-NOTES.md`](./LICENSE-NOTES.md) for divergences and the
-> licensing posture. Note: 20 files carry an Apache-2.0 header **plus an additional restrictive
-> clause** — `Reuse or distribution of this file requires a license from Zero Email Inc.` — whose
-> scope relative to the MIT root is **not adjudicated here**. Operational posture: do **not**
-> redistribute, relicense, or strip the header from these files without written upstream permission
-> or a legal review.
+> licensing posture. Note: **20 restricted files** carry an Apache-2.0 header **plus an additional
+> restrictive clause** — `Reuse or distribution of this file requires a license from Zero Email Inc.`
+> (The 22 `Zero Email Inc` matches = 20 restricted files + 1 telemetry comment in `instrument.ts` +
+> 1 UI branding line in `footer.tsx`.) The clause's scope relative to the MIT root is **not
+> adjudicated here**. Operational posture for the 20 restricted files: do **not** redistribute,
+> relicense, or strip the header without written upstream permission or a legal review.
 
 ## Getting Started
 
