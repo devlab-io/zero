@@ -49,7 +49,10 @@ export function deriveReplyRecipients({
   const senderEmail = message.sender.email.toLowerCase();
 
   const addUnique = (recipients: string[], email: string) => {
-    if (!owned.has(email.toLowerCase()) && !recipients.some((recipient) => recipient.toLowerCase() === email.toLowerCase())) {
+    if (
+      !owned.has(email.toLowerCase()) &&
+      !recipients.some((recipient) => recipient.toLowerCase() === email.toLowerCase())
+    ) {
       recipients.push(email);
     }
   };
@@ -59,7 +62,9 @@ export function deriveReplyRecipients({
     if (!owned.has(senderEmail)) {
       addUnique(to, message.sender.email);
     } else {
-      const firstExternalRecipient = message.to?.find((recipient) => !owned.has(recipient.email.toLowerCase()));
+      const firstExternalRecipient = message.to?.find(
+        (recipient) => !owned.has(recipient.email.toLowerCase()),
+      );
       if (firstExternalRecipient) addUnique(to, firstExternalRecipient.email);
     }
   } else if (mode === 'replyAll') {
@@ -75,7 +80,11 @@ export function deriveReplyRecipients({
     // Add CC recipients not already in To.
     message.cc?.forEach((recipient: Sender) => {
       const recipientEmail = recipient.email.toLowerCase();
-      if (recipientEmail !== senderEmail && !to.some((email) => email.toLowerCase() === recipientEmail)) addUnique(cc, recipient.email);
+      if (
+        recipientEmail !== senderEmail &&
+        !to.some((email) => email.toLowerCase() === recipientEmail)
+      )
+        addUnique(cc, recipient.email);
     });
   }
 

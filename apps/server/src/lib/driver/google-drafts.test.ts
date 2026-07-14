@@ -1,26 +1,28 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import type { GmailTransport } from './google-transport';
 import type { GmailMessages } from './google-messages';
-import type { CreateDraftData } from '../schemas';
 import type { IOutgoingMessage } from '../../types';
+import type { CreateDraftData } from '../schemas';
 
 // google-drafts → google-parse (→ ./utils, sanitize), ./utils, google-threads (→ ../utils
 // → ../env). On neutralise les feuilles lourdes ; le pipeline drafts tourne en réel.
 vi.mock('../server-utils', () => ({ getActiveConnection: vi.fn(), getZeroDB: vi.fn() }));
 vi.mock('hono/context-storage', () => ({ getContext: vi.fn(() => ({})) }));
 vi.mock('../../env', () => ({ env: {} }));
-vi.mock('../logger', () => ({ logger: { info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
+vi.mock('../logger', () => ({
+  logger: { info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn() },
+}));
 const sanitizeTipTapHtml = vi.fn(async (html: string) => ({ html, inlineImages: [] as unknown[] }));
 vi.mock('../sanitize-tip-tap-html', () => ({ sanitizeTipTapHtml }));
 
 const { GmailDrafts } = await import('./google-drafts');
-const { makeFakeTransport, makeFakeGmail, data, gmailError } = await import(
-  './__fixtures__/google-http-fake'
-);
+const { makeFakeTransport, makeFakeGmail, data } = await import('./__fixtures__/google-http-fake');
 
 const asT = (t: unknown) => t as unknown as GmailTransport;
-const noMessages = () => ({ getAttachment: vi.fn(async () => 'ATTB64') }) as unknown as GmailMessages;
-const b64url = (s: string) => Buffer.from(s, 'utf-8').toString('base64').replace(/\+/g, '-').replace(/\//g, '_');
+const noMessages = () =>
+  ({ getAttachment: vi.fn(async () => 'ATTB64') }) as unknown as GmailMessages;
+const b64url = (s: string) =>
+  Buffer.from(s, 'utf-8').toString('base64').replace(/\+/g, '-').replace(/\//g, '_');
 
 beforeEach(() => {
   sanitizeTipTapHtml.mockClear();
@@ -124,7 +126,9 @@ describe('GmailDrafts.getDraft / parseDraft', () => {
       id: 'd2',
       message: { id: 'm', payload: { headers: [], body: { data: b64url('texte brut') } } },
     };
-    const t = makeFakeTransport({ gmail: makeFakeGmail({ 'users.drafts.get': () => data(draft) }) });
+    const t = makeFakeTransport({
+      gmail: makeFakeGmail({ 'users.drafts.get': () => data(draft) }),
+    });
     const out = await new GmailDrafts(asT(t), noMessages()).getDraft('d2');
     expect(out.content).toBe('texte brut');
     expect(out.to).toEqual([]);
@@ -157,8 +161,14 @@ describe('GmailDrafts.getDraft / parseDraft', () => {
         },
       },
     };
-    const messages = { getAttachment: vi.fn(async () => { throw new Error('boom'); }) } as unknown as GmailMessages;
-    const t = makeFakeTransport({ gmail: makeFakeGmail({ 'users.drafts.get': () => data(draft) }) });
+    const messages = {
+      getAttachment: vi.fn(async () => {
+        throw new Error('boom');
+      }),
+    } as unknown as GmailMessages;
+    const t = makeFakeTransport({
+      gmail: makeFakeGmail({ 'users.drafts.get': () => data(draft) }),
+    });
     const out = await new GmailDrafts(asT(t), messages).getDraft('d4');
     expect(out.attachments).toEqual([]);
   });
@@ -177,11 +187,18 @@ describe('GmailDrafts.listDrafts', () => {
             nextPageToken: 'PG',
           }),
         'users.drafts.get': (p) => {
-          const date = p.id === 'new' ? 'Wed, 10 Jul 2026 10:00:00 +0000' : 'Mon, 01 Jul 2026 10:00:00 +0000';
+          const date =
+            p.id === 'new' ? 'Wed, 10 Jul 2026 10:00:00 +0000' : 'Mon, 01 Jul 2026 10:00:00 +0000';
           return data({
             message: {
               id: p.id,
-              payload: { headers: [{ name: 'date', value: date }, { name: 'From', value: 'a@b.c' }] },
+              threadId: `thr-${p.id}`,
+              payload: {
+                headers: [
+                  { name: 'date', value: date },
+                  { name: 'From', value: 'a@b.c' },
+                ],
+              },
             },
           });
         },
@@ -199,7 +216,9 @@ describe('GmailDrafts.listDrafts', () => {
         'users.drafts.list': () => data({ drafts: [{ id: 'ok' }, { message: {} }] }),
         'users.drafts.get': (p) => {
           if (p.id === 'ok')
-            return data({ message: { id: 'ok', payload: { headers: [{ name: 'From', value: 'a@b.c' }] } } });
+            return data({
+              message: { id: 'ok', payload: { headers: [{ name: 'From', value: 'a@b.c' }] } },
+            });
           throw new Error('nope');
         },
       }),
@@ -228,7 +247,9 @@ describe('GmailDrafts.createDraft', () => {
         },
       }),
     });
-    const res = await new GmailDrafts(asT(t), noMessages()).createDraft(base({ cc: 'cc@e.com', bcc: 'bcc@e.com', threadId: 'thread-owned' }));
+    const res = await new GmailDrafts(asT(t), noMessages()).createDraft(
+      base({ cc: 'cc@e.com', bcc: 'bcc@e.com', threadId: 'thread-owned' }),
+    );
     expect(res).toEqual({ id: 'created' });
     const rb = createParams?.requestBody as { message?: { raw?: string; threadId?: string } };
     expect(rb?.message?.raw).toMatch(/^[A-Za-z0-9_-]+$/); // URL-safe, sans +, / ni =
@@ -259,13 +280,15 @@ describe('GmailDrafts.createDraft', () => {
   it('intègre pièces jointes (base64 + arrayBuffer) et images inline', async () => {
     sanitizeTipTapHtml.mockResolvedValueOnce({
       html: '<p><img src="cid:i1@0.email"></p>',
-      inlineImages: [{ cid: 'i1@0.email', data: Buffer.from('IMG').toString('base64'), mimeType: 'image/png' }],
+      inlineImages: [
+        { cid: 'i1@0.email', data: Buffer.from('IMG').toString('base64'), mimeType: 'image/png' },
+      ],
     });
     let raw = '';
     const t = makeFakeTransport({
       gmail: makeFakeGmail({
         'users.drafts.create': (p) => {
-          raw = ((p.requestBody as { message?: { raw?: string } }).message?.raw) ?? '';
+          raw = (p.requestBody as { message?: { raw?: string } }).message?.raw ?? '';
           return data({ id: 'c' });
         },
       }),
@@ -273,8 +296,20 @@ describe('GmailDrafts.createDraft', () => {
     await new GmailDrafts(asT(t), noMessages()).createDraft(
       base({
         attachments: [
-          { name: 'a.txt', type: 'text/plain', size: 3, lastModified: 0, base64: Buffer.from('AAA').toString('base64') },
-          { name: 'b.bin', type: 'application/octet-stream', size: 3, lastModified: 0, arrayBuffer: async () => Uint8Array.from([1, 2, 3]).buffer } as never,
+          {
+            name: 'a.txt',
+            type: 'text/plain',
+            size: 3,
+            lastModified: 0,
+            base64: Buffer.from('AAA').toString('base64'),
+          },
+          {
+            name: 'b.bin',
+            type: 'application/octet-stream',
+            size: 3,
+            lastModified: 0,
+            arrayBuffer: async () => Uint8Array.from([1, 2, 3]).buffer,
+          } as never,
         ],
       }),
     );

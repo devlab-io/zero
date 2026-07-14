@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
 import { ActiveAccountResolver, withManagedResource } from './mcp-account';
+import { describe, expect, it } from 'vitest';
 
 describe('MCP active-account and resource lifecycle', () => {
   it('resolves the agent again after switching from account A to account B', async () => {
@@ -21,8 +21,10 @@ describe('MCP active-account and resource lifecycle', () => {
     expect((await resolver.getActiveAgent()).agent.connectionId).toBe('conn-a');
     await resolver.setActiveByEmail('b@example.com');
     for (const operation of ['list', 'get', 'create']) {
-      expect({ operation, connectionId: (await resolver.getActiveAgent()).agent.connectionId })
-        .toMatchObject({ connectionId: 'conn-b' });
+      expect({
+        operation,
+        connectionId: (await resolver.getActiveAgent()).agent.connectionId,
+      }).toMatchObject({ connectionId: 'conn-b' });
     }
     const thirdParty = resolver.setActiveByEmail('third@example.com');
     const absent = resolver.setActiveByEmail('absent@example.com');
