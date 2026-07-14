@@ -2,9 +2,10 @@ import { readFile } from 'node:fs/promises';
 
 const read = (path) => readFile(new URL(`../../${path}`, import.meta.url), 'utf8');
 
-const [toolRegistry, mcp, scopes, auth, prompt, legacyPrompt] = await Promise.all([
+const [toolRegistry, mcp, mcpTools, scopes, auth, prompt, legacyPrompt] = await Promise.all([
   read('apps/server/src/routes/agent/tools.ts'),
   read('apps/server/src/routes/agent/mcp.ts'),
+  read('apps/server/src/routes/agent/mcp-tools.ts'),
   read('apps/server/src/lib/google-scopes.ts'),
   read('apps/server/src/lib/auth.ts'),
   read('apps/server/src/lib/prompts.ts'),
@@ -68,65 +69,83 @@ for (const forbiddenMcpTool of [
   "'markThreadsUnread'",
   "'modifyLabels'",
   "'createLabel'",
+  "'approveDraft'",
+  "'approveOutboxItem'",
+  "'getThreadContext'",
+  "'createReplyDraft'",
+  "'listDrafts'",
+  "'getDraft'",
+  "'updateDraft'",
 ]) {
-  assert(!mcp.includes(forbiddenMcpTool), `MCP exposes forbidden/retired tool ${forbiddenMcpTool}`);
+  assert(
+    !mcp.includes(forbiddenMcpTool) && !mcpTools.includes(`name: ${forbiddenMcpTool}`),
+    `MCP exposes forbidden/retired/out-of-slice tool ${forbiddenMcpTool}`,
+  );
 }
 
-// (c) Committable MCP schema snapshot must exist and encode the draft-only guarantees.
-let schemaSnapshot = null;
-try {
-  schemaSnapshot = JSON.parse(await read('docs/agent/mcp-schema.snapshot.json'));
-} catch {
-  schemaSnapshot = null;
+for (const genericProviderEscapeHatch of [
+  "'gmailRequest'",
+  "'executeGmailRequest'",
+  "'rawProviderRequest'",
+]) {
+  assert(
+    !mcp.includes(genericProviderEscapeHatch) && !mcpTools.includes(genericProviderEscapeHatch),
+    `MCP exposes generic provider escape hatch ${genericProviderEscapeHatch}`,
+  );
 }
-assert(schemaSnapshot, 'MCP schema snapshot docs/agent/mcp-schema.snapshot.json is missing/invalid');
 
-if (schemaSnapshot) {
-  for (const guarantee of [
-    'canSendMail',
-    'canPermanentlyDeleteMail',
-    'canReportSpam',
-    'canChangeAccountSettings',
-  ]) {
-    assert(schemaSnapshot[guarantee] === false, `MCP snapshot must guarantee ${guarantee} === false`);
+// (c) Validate the live TypeScript catalogue, not an older docs snapshot outside this slice.
+for (const guarantee of [
+  'canSendMail',
+  'canPermanentlyDeleteMail',
+  'canReportSpam',
+  'canChangeAccountSettings',
+]) {
+  assert(
+    new RegExp(`${guarantee}:\\s*false`).test(mcpTools),
+    `MCP catalogue must guarantee ${guarantee} === false`,
+  );
+}
+
+const tools = [...mcpTools.matchAll(
+  /\{\s*name:\s*'([^']+)',\s*category:\s*'(read|write)',\s*mutates:\s*(true|false),\s*idempotent:\s*(true|false),/g,
+)].map((match) => ({
+  name: match[1],
+  category: match[2],
+  mutates: match[3] === 'true',
+  idempotent: match[4] === 'true',
+}));
+assert(tools.length === 18, `MCP live catalogue must contain exactly 18 tools, found ${tools.length}`);
+
+const toolNames = new Set(tools.map((tool) => tool.name));
+const writeWhitelist = new Set([
+  'createDraft',
+  'enqueueDraftJob',
+  'cancelOutboxItem',
+  'retryOutboxItem',
+]);
+for (const tool of tools) {
+  if (tool.category === 'write') {
+    assert(
+      writeWhitelist.has(tool.name),
+      `MCP live write tool "${tool.name}" is outside the draft/outbox whitelist`,
+    );
   }
-  assert(schemaSnapshot.draftOnly === true, 'MCP snapshot must declare draftOnly === true');
-
-  const tools = Array.isArray(schemaSnapshot.tools) ? schemaSnapshot.tools : [];
-  const toolNames = new Set(tools.map((t) => t.name));
-
-  // WRITE tools are limited to create draft + reviewable outbox create/inspect/cancel/retry.
-  const writeWhitelist = new Set([
-    'createDraft',
-    'enqueueDraftJob',
-    'cancelOutboxItem',
-    'retryOutboxItem',
-  ]);
-  for (const tool of tools) {
-    if (tool.category === 'write') {
-      assert(
-        writeWhitelist.has(tool.name),
-        `MCP snapshot write tool "${tool.name}" is outside the draft/outbox whitelist`,
-      );
-    }
-    // Every mutation tool must be idempotent (spec §"Mutation tools must be idempotent").
-    if (tool.mutates) {
-      assert(tool.idempotent === true, `MCP snapshot mutation tool "${tool.name}" is not idempotent`);
-    }
+  if (tool.mutates) {
+    assert(tool.idempotent, `MCP live mutation tool "${tool.name}" is not idempotent`);
   }
+}
 
-  // Required read coverage: capabilities, connections, compact list/search, thread, labels.
-  for (const requiredRead of [
-    'getServerCapabilities',
-    'getConnections',
-    'listThreads',
-    'searchThreads',
-    'getThread',
-    'getUserLabels',
-    'getLabel',
-  ]) {
-    assert(toolNames.has(requiredRead), `MCP snapshot is missing required read tool ${requiredRead}`);
-  }
+for (const requiredRead of [
+  'getServerCapabilities',
+  'getConnections',
+  'listThreads',
+  'searchThreads',
+  'getThread',
+  'getUserLabels',
+  'getLabel',
+]) {
+  assert(toolNames.has(requiredRead), `MCP live catalogue is missing required read tool ${requiredRead}`);
 }
 
 assert(!scopes.includes('https://mail.google.com/'), 'unrestricted Gmail scope is present');

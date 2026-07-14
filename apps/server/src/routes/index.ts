@@ -14,6 +14,10 @@ import { createLocalJWKSet, jwtVerify } from 'jose';
 import { trpcServer } from '@hono/trpc-server';
 import { agentsMiddleware } from 'hono-agents';
 import { ZeroMCP } from './agent/mcp';
+import {
+  buildMcpProtectedResourceMetadata,
+  mcpUnauthorizedResponse,
+} from './agent/mcp-auth';
 import { initTracing } from '../lib/tracing';
 import type { HonoContext } from '../ctx';
 import { EProviders } from '../types';
@@ -166,7 +170,6 @@ export const api = new Hono<HonoContext>()
     // Note: Trace will be completed by TRPC middleware after logging
 
     c.set('sessionUser', undefined);
-    c.set('auth', undefined as any);
   })
   .route('/ai', aiRouter)
   .route('/autumn', autumnApi)
@@ -228,19 +231,22 @@ export const app = new Hono<HonoContext>()
     const auth = createAuth();
     return oAuthDiscoveryMetadata(auth)(c.req.raw);
   })
+  .get('/.well-known/oauth-protected-resource/mcp', (c) =>
+    c.json(buildMcpProtectedResourceMetadata(env.VITE_PUBLIC_BACKEND_URL)),
+  )
   .mount(
     '/sse',
     async (request, env, ctx) => {
       const authBearer = request.headers.get('Authorization');
       if (!authBearer) {
         logger.info('No auth provided');
-        return new Response('Unauthorized', { status: 401 });
+        return mcpUnauthorizedResponse(env.VITE_PUBLIC_BACKEND_URL);
       }
       const auth = createAuth();
       const session = await auth.api.getMcpSession({ headers: request.headers });
       if (!session) {
-        logger.info('Invalid auth provided', Array.from(request.headers.entries()));
-        return new Response('Unauthorized', { status: 401 });
+        logger.info('Invalid auth provided', { transport: 'sse' });
+        return mcpUnauthorizedResponse(env.VITE_PUBLIC_BACKEND_URL);
       }
       ctx.props = {
         userId: session?.userId,
@@ -265,13 +271,13 @@ export const app = new Hono<HonoContext>()
     async (request, env, ctx) => {
       const authBearer = request.headers.get('Authorization');
       if (!authBearer) {
-        return new Response('Unauthorized', { status: 401 });
+        return mcpUnauthorizedResponse(env.VITE_PUBLIC_BACKEND_URL);
       }
       const auth = createAuth();
       const session = await auth.api.getMcpSession({ headers: request.headers });
       if (!session) {
-        logger.info('Invalid auth provided', Array.from(request.headers.entries()));
-        return new Response('Unauthorized', { status: 401 });
+        logger.info('Invalid auth provided', { transport: 'streamable-http' });
+        return mcpUnauthorizedResponse(env.VITE_PUBLIC_BACKEND_URL);
       }
       ctx.props = {
         userId: session?.userId,
