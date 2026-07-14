@@ -1,4 +1,3 @@
-import { log } from '@/lib/log';
 import {
   HelpCircle,
   LogOut,
@@ -39,6 +38,7 @@ import { useTheme } from 'next-themes';
 import { useQueryState } from 'nuqs';
 import { Button } from './button';
 import { cn } from '@/lib/utils';
+import { log } from '@/lib/log';
 import { toast } from 'sonner';
 
 const bytesToMB = (bytes: number) => (bytes / 1024 / 1024).toFixed(2);
@@ -181,7 +181,11 @@ export function NavUser() {
           activeAccount && (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <div className="flex cursor-pointer items-center">
+                <button
+                  type="button"
+                  aria-label={`${m['common.navUser.accounts']()}: ${activeAccount.email}`}
+                  className="flex cursor-pointer items-center"
+                >
                   <div className="relative">
                     <Avatar className="relative left-0.5 size-7 rounded-[5px]">
                       <AvatarImage
@@ -200,7 +204,7 @@ export function NavUser() {
                       </AvatarFallback>
                     </Avatar>
                   </div>
-                </div>
+                </button>
               </DropdownMenuTrigger>
               <DropdownMenuContent
                 className="w-(--radix-dropdown-menu-trigger-width) ml-3 min-w-56 bg-white font-medium dark:bg-[#131313]"
@@ -336,7 +340,7 @@ export function NavUser() {
                   <DropdownMenuSeparator className="mt-1" />
                   <DropdownMenuItem onSelect={() => handleThemeToggle()} className="cursor-pointer">
                     <div className="flex w-full items-center gap-2">
-                    {resolvedTheme === 'dark' ? (
+                      {resolvedTheme === 'dark' ? (
                         <MoonIcon className="size-4 opacity-60" />
                       ) : (
                         <SunIcon className="size-4 opacity-60" />
@@ -383,7 +387,9 @@ export function NavUser() {
           <div className="flex w-full items-center justify-between">
             <div className="flex items-center gap-2">
               {data && activeAccount ? (
-                <div
+                <button
+                  type="button"
+                  aria-label={`${m['common.navUser.accounts']()}: ${activeAccount.email}`}
                   key={activeAccount.id}
                   onClick={handleAccountSwitch(activeAccount.id)}
                   className={`flex cursor-pointer items-center ${
@@ -412,7 +418,7 @@ export function NavUser() {
                       <CircleCheck className="fill-mainBlue absolute -bottom-2 -right-2 size-4 rounded-full bg-white dark:bg-[#141414]" />
                     )}
                   </div>
-                </div>
+                </button>
               ) : (
                 <div className="flex cursor-pointer items-center">
                   <div className="relative">
@@ -423,7 +429,9 @@ export function NavUser() {
               {otherConnections.slice(0, 2).map((connection) => (
                 <Tooltip key={connection.id}>
                   <TooltipTrigger asChild>
-                    <div
+                    <button
+                      type="button"
+                      aria-label={`${m['common.navUser.accounts']()}: ${connection.email}`}
                       onClick={handleAccountSwitch(connection.id)}
                       className={`flex cursor-pointer items-center ${
                         connection.id === activeConnection?.id && otherConnections.length > 1
@@ -451,7 +459,7 @@ export function NavUser() {
                           <CircleCheck className="fill-mainBlue absolute -bottom-2 -right-2 size-4 rounded-full bg-white dark:bg-black" />
                         )}
                       </div>
-                    </div>
+                    </button>
                   </TooltipTrigger>
                   <TooltipContent className="text-muted-foreground text-xs">
                     {connection.email}
@@ -462,7 +470,11 @@ export function NavUser() {
               {otherConnections.length > 3 && (
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
-                    <button className="hover:bg-muted flex h-7 w-7 cursor-pointer items-center justify-center rounded-[5px]">
+                    <button
+                      type="button"
+                      aria-label={m['common.navUser.accounts']()}
+                      className="hover:bg-muted flex h-7 w-7 cursor-pointer items-center justify-center rounded-[5px]"
+                    >
                       <span className="text-[10px]">+{otherConnections.length - 3}</span>
                     </button>
                   </DropdownMenuTrigger>
@@ -511,7 +523,10 @@ export function NavUser() {
 
               {isPro ? (
                 <AddConnectionDialog>
-                  <Button className="hover:bg-offsetLight/80 dark:hover:bg-offsetDark/80 flex h-7 w-7 cursor-pointer items-center justify-center rounded-[5px] border border-dashed bg-transparent px-0 text-black dark:bg-[#262626] dark:text-[#929292]">
+                  <Button
+                    aria-label={m['common.navUser.accounts']()}
+                    className="hover:bg-offsetLight/80 dark:hover:bg-offsetDark/80 flex h-7 w-7 cursor-pointer items-center justify-center rounded-[5px] border border-dashed bg-transparent px-0 text-black dark:bg-[#262626] dark:text-[#929292]"
+                  >
                     <Plus className="size-4" />
                   </Button>
                 </AddConnectionDialog>
@@ -519,6 +534,7 @@ export function NavUser() {
                 <>
                   <Button
                     onClick={() => setPricingDialog('true')}
+                    aria-label={m['common.navUser.accounts']()}
                     className="hover:bg-offsetLight/80 dark:hover:bg-offsetDark/80 flex h-7 w-7 cursor-pointer items-center justify-center rounded-[5px] border border-dashed bg-transparent px-0 text-black dark:bg-[#262626] dark:text-[#929292]"
                   >
                     <Plus className="size-4" />
@@ -535,7 +551,11 @@ export function NavUser() {
               )} */}
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" className={cn('md:h-fit md:px-2')}>
+                  <Button
+                    variant="ghost"
+                    aria-label={m['common.navUser.accounts']()}
+                    className={cn('md:h-fit md:px-2')}
+                  >
                     <ThreeDots className="fill-iconLight dark:fill-iconDark" />
                   </Button>
                 </DropdownMenuTrigger>

@@ -9,9 +9,9 @@ export default function MailLayout() {
   return (
     <>
       <AppSidebar />
-      <div className="bg-sidebar dark:bg-sidebar w-full">
+      <main id="main-content" className="bg-sidebar dark:bg-sidebar w-full min-w-0">
         <Outlet />
-      </div>
+      </main>
       <OnboardingWrapper />
     </>
   );

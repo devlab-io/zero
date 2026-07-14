@@ -6,7 +6,9 @@ export default function QueuePage() {
   return (
     <>
       <AppSidebar />
-      <QueueReview />
+      <main id="main-content" className="min-w-0 flex-1">
+        <QueueReview />
+      </main>
       <OnboardingWrapper />
     </>
   );

@@ -521,6 +521,7 @@ export function MailLayout() {
 
                   <Button
                     onClick={handleRefetchThreads}
+                    aria-label={m['common.actions.refresh']()}
                     variant="ghost"
                     size="icon"
                     className="hover:bg-accent/50 h-10 w-10 rounded-lg border-none bg-transparent backdrop-blur-sm"
