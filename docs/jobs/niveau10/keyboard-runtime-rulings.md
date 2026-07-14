@@ -56,3 +56,17 @@
 - A complete generated mail `tsc` then failed only on `mail-list-thread.tsx:232`, a search/triage-owned prefetch guard already corrected on that job branch. The two additional errors seen before Wrangler generation disappeared after the full `server types` + `mail types` setup, confirming setup drift rather than product defects.
 - Requiring global mail=0 inside the keyboard slice creates a dependency cycle: search consumes the corrected keyboard freeze while the keyboard check waits for a search-owned file. The keyboard gate is therefore narrowed to reject TypeScript errors in its authorised touch-set and still runs the full production build; the search slice retains the global blocking mail=0 gate.
 - A fresh builder must rerun the corrected owner-scoped command. The cast from builder 2 is not integrated from a BLOCKED report alone.
+
+## 2026-07-14 — La navigation queue manquait au registre canonique
+
+- Le builder UX a constaté que le registre `queue` ne contient que `d/a/r/f/h`, tandis que
+  l'acceptation UX exige aussi `j/k`, les flèches, `Enter` et `Space`.
+- Une première adaptation locale réutilisait les entrées `list` via un nouveau listener
+  `document.keydown`. Cela aurait contourné le binder canonique, ses scopes et ses gardes
+  input/editor/dialog ; cette approche est refusée.
+- La correction propriétaire doit ajouter les variantes de navigation au scope `queue`, étendre le
+  manifeste de handlers et prouver par événements réels que chaque variante appelle exactement une
+  fois le bon handler sans fuite de scope. `QueueReview` doit ensuite les consommer via
+  `useShortcuts` ; aucun listener clavier natif parallèle n'est accepté.
+- Aucun changement visuel de la queue n'est autorisé dans cette correction. L'UX reprend la
+  présentation et le pending par item après intégration du nouveau freeze clavier.
