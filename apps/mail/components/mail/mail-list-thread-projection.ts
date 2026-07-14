@@ -48,6 +48,14 @@ export type ThreadRowProps = {
   index?: number;
 };
 
+export function buildThreadRowAccessibleName(message: MailListItem): string {
+  const sender = message.sender?.name?.trim() || message.sender?.email || 'Unknown sender';
+  const subject = message.subject?.trim() || 'No subject';
+  const unread = message.unread ? 'Unread' : 'Read';
+  const received = message.receivedOn ? `, ${message.receivedOn}` : '';
+  return `${unread}: ${sender}, ${subject}${received}`;
+}
+
 /** Content+order equality of the projected labels (drives starred/important + label chips). */
 function sameProjectedLabels(a: MailListItem['labels'], b: MailListItem['labels']): boolean {
   const al = a ?? [];

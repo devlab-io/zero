@@ -4,6 +4,28 @@ import { Skeleton } from '../ui/skeleton';
 import { Button } from '../ui/button';
 import { cn } from '@/lib/utils';
 
+export const MailListSkeleton = () => (
+  <div role="status" aria-live="polite" className="w-full" aria-label="Loading inbox">
+    <span className="sr-only">Loading inbox</span>
+    {Array.from({ length: 6 }, (_, index) => (
+      <div
+        key={index}
+        className="flex min-h-24 items-center gap-3 border-b px-4 py-3 md:mx-1 md:rounded-lg md:border-b-0"
+      >
+        <Skeleton className="h-10 w-10 shrink-0 rounded-full" />
+        <div className="min-w-0 flex-1 space-y-2">
+          <div className="flex items-center justify-between gap-4">
+            <Skeleton className="h-4 w-2/5" />
+            <Skeleton className="h-3 w-16" />
+          </div>
+          <Skeleton className="h-4 w-4/5" />
+          <Skeleton className="h-3 w-full" />
+        </div>
+      </div>
+    ))}
+  </div>
+);
+
 export const MailDisplaySkeleton = ({ isFullscreen }: { isFullscreen?: boolean }) => {
   return (
     <>
@@ -132,6 +154,37 @@ export const MailDisplaySkeleton = ({ isFullscreen }: { isFullscreen?: boolean }
     </>
   );
 };
+
+/** Stable reply surface used by both lazy boundaries, so opening reply never paints blank. */
+export const ReplyComposerSkeleton = () => (
+  <div
+    role="status"
+    aria-live="polite"
+    className="bg-background flex min-h-[18rem] w-full flex-col overflow-hidden rounded-2xl border"
+  >
+    <span className="sr-only">Loading composer</span>
+    <div className="space-y-3 border-b p-3">
+      <div className="flex items-center gap-2">
+        <Skeleton className="h-4 w-8" />
+        <Skeleton className="h-10 flex-1" />
+        <Skeleton className="h-10 w-20" />
+      </div>
+      <div className="flex items-center gap-2">
+        <Skeleton className="h-4 w-14" />
+        <Skeleton className="h-10 flex-1" />
+      </div>
+    </div>
+    <div className="flex-1 space-y-2 p-3">
+      <Skeleton className="h-4 w-full" />
+      <Skeleton className="h-4 w-11/12" />
+      <Skeleton className="h-4 w-4/5" />
+    </div>
+    <div className="flex min-h-16 items-center justify-between gap-3 border-t p-3">
+      <Skeleton className="h-11 w-28" />
+      <Skeleton className="h-5 w-36" />
+    </div>
+  </div>
+);
 
 export const MailHeaderSkeleton = ({ isFullscreen }: { isFullscreen?: boolean }) => {
   return (

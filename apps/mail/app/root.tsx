@@ -1,4 +1,3 @@
-import { log } from '@/lib/log';
 import {
   isRouteErrorResponse,
   Links,
@@ -24,6 +23,7 @@ import { m } from '@/paraglide/messages';
 import { ArrowLeft } from 'lucide-react';
 import { Loader2 } from 'lucide-react';
 import superjson from 'superjson';
+import { log } from '@/lib/log';
 import './globals.css';
 
 // w2cd (client weight): @sentry/react is loaded via dynamic import() so it stays out
@@ -79,7 +79,7 @@ export function Layout({ children }: PropsWithChildren) {
         )}
         <Links />
       </head>
-      <body className="antialiased">
+      <body className="antialiased motion-reduce:[&_*]:animate-none motion-reduce:[&_*]:scroll-auto motion-reduce:[&_*]:transition-none">
         <ServerProviders connectionId={null}>
           <ClientProviders>{children}</ClientProviders>
           {/* Devlab: DubAnalytics removed — click/referral tracking phoning dub.co
@@ -113,6 +113,7 @@ export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {
   let message = m['pages.error.boundary.oops']();
   let details = 'An unexpected error occurred.';
   let stack: string | undefined;
+  const isNotFound = isRouteErrorResponse(error) && error.status === 404;
 
   if (isRouteErrorResponse(error)) {
     message = error.status === 404 ? '404' : m['pages.error.boundary.error']();
@@ -120,9 +121,6 @@ export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {
       error.status === 404
         ? m['pages.error.boundary.notFoundDetails']()
         : error.statusText || details;
-    if (error.status === 404) {
-      return <NotFound />;
-    }
   } else if (import.meta.env.DEV && error && error instanceof Error) {
     details = error.message;
     stack = error.stack;
@@ -161,6 +159,8 @@ export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {
       });
     }
   }, [error, message, details, stack]);
+
+  if (isNotFound) return <NotFound />;
 
   return (
     <div className="dark:bg-background flex w-full items-center justify-center bg-white text-center">

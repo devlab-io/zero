@@ -1,50 +1,56 @@
-import { log } from '@/lib/log';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip';
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
+import { useEmailAliases } from '@/hooks/use-email-aliases';
 import { ScheduleSendPicker } from './schedule-send-picker';
 import { Command, Loader, Plus, Type } from 'lucide-react';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip';
-import { CurvedArrow, Sparkles } from '../icons/icons';
-import { useEmailAliases } from '@/hooks/use-email-aliases';
 import useComposeEditor from '@/hooks/use-compose-editor';
+import { CurvedArrow, Sparkles } from '../icons/icons';
 import { getGitHubEmojis } from '@/lib/emoji-data';
-import { AnimatePresence } from 'motion/react';
 import { zodResolver } from '@/lib/zod-resolver';
+import { AnimatePresence } from 'motion/react';
+import { log } from '@/lib/log';
 
 import { useTRPC } from '@/providers/query-provider';
 import { useMutation } from '@tanstack/react-query';
 import { useSettings } from '@/hooks/use-settings';
 
-import { cn } from '@/lib/utils';
 import { useThread } from '@/hooks/use-threads';
 import { serializeFiles } from '@/lib/schemas';
 import { Input } from '@/components/ui/input';
 import { EditorContent } from '@tiptap/react';
 import { useForm } from 'react-hook-form';
+import { m } from '@/paraglide/messages';
 import { Button } from '../ui/button';
 import { useQueryState } from 'nuqs';
 import { Toolbar } from './toolbar';
 import pluralize from 'pluralize';
+import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { z } from 'zod';
 
-import { compressImages } from '@/lib/image-compression';
-import type { ImageQuality } from '@/lib/image-compression';
-import { TemplateButton } from './template-button';
-import { ComposerHeader } from './email-composer.fields';
-import { ComposerAttachments } from './email-composer.attachments';
-import { ComposerDialogs } from './email-composer.dialogs';
-import { ContentPreview } from './email-composer.content-preview';
+import {
+  canRetryComposerSave,
+  reduceComposerSaveStatus,
+  type ComposerSaveStatus,
+} from '@/components/mail/composer-trust';
 import {
   buildThreadContent,
   schema,
   type EmailComposerProps,
   type ThreadContent,
 } from './email-composer.types';
+import { useComposerDraftPersistence } from '@/hooks/use-composer-draft-persistence';
 // Issue #32 — send-and-archive (mod+shift+Enter): the editor has no Mod-Shift-Enter
 // keymap, so it is bound here with useHotkeys and archives the open thread after send.
 import { useOptimisticActions } from '@/hooks/use-optimistic-actions';
+import { ComposerAttachments } from './email-composer.attachments';
+import { ContentPreview } from './email-composer.content-preview';
 import { computeArchiveAfterSend } from './send-and-archive';
-import { useComposerDraftPersistence } from '@/hooks/use-composer-draft-persistence';
+import type { ImageQuality } from '@/lib/image-compression';
+import { ComposerDialogs } from './email-composer.dialogs';
+import { compressImages } from '@/lib/image-compression';
+import { ComposerHeader } from './email-composer.fields';
+import { TemplateButton } from './template-button';
 import { useHotkeys } from 'react-hotkeys-hook';
 import { useParams } from 'react-router';
 
@@ -106,6 +112,11 @@ export function EmailComposer({
     draftId,
     replyId: activeReplyId,
   });
+  const [saveStatus, dispatchSaveStatus] = useReducer(
+    reduceComposerSaveStatus,
+    restoredDraft ? 'local' : ('idle' as ComposerSaveStatus),
+  );
+  const lastSnapshotRef = useRef<string | null>(null);
   const processAndSetAttachments = async (
     filesToProcess: File[],
     quality: ImageQuality,
@@ -257,6 +268,14 @@ export function EmailComposer({
     }
   }, [editor, autofocus]);
 
+  useEffect(() => {
+    const editorElement = editor?.view.dom;
+    if (!editorElement) return;
+    editorElement.setAttribute('role', 'textbox');
+    editorElement.setAttribute('aria-multiline', 'true');
+    editorElement.setAttribute('aria-label', m['states.composer.bodyLabel']());
+  }, [editor]);
+
   // Remove the TRPC query - we'll use the component's internal logic instead
   useEffect(() => {
     if (isComposeOpen === 'true' && editor) {
@@ -393,19 +412,39 @@ export function EmailComposer({
     }
   };
 
-  const saveDraft = async () => {
+  const saveDraft = async (): Promise<boolean> => {
     const values = getValues();
 
-    if (!hasUnsavedChanges) return;
+    if (!hasUnsavedChanges) return false;
     const messageText = editor.getText();
+    const localPersisted = persistDraftSnapshot({
+      to: values.to,
+      cc: values.cc ?? [],
+      bcc: values.bcc ?? [],
+      subject: values.subject,
+      message: editor.getHTML(),
+      savedAt: Date.now(),
+    });
 
-    if (messageText.trim() === initialMessage.trim()) return;
-    if (editor.getHTML() === initialMessage.trim()) return;
-    if (!values.to.length || !values.subject.length || !messageText.length) return;
-    if (aiGeneratedMessage || aiIsLoading || isGeneratingSubject) return;
+    if (!localPersisted) {
+      setHasUnsavedChanges(true);
+      dispatchSaveStatus({ type: 'SAVE_FAILED' });
+      return false;
+    }
+
+    // Incomplete drafts are still durable locally, but the provider draft API needs
+    // all three fields. Stop the autosave loop only after localStorage confirms the
+    // snapshot, and never claim a server save.
+    if (!values.to.length || !values.subject.length || !messageText.length) {
+      setHasUnsavedChanges(false);
+      dispatchSaveStatus({ type: 'LOCAL_PERSISTED' });
+      return false;
+    }
+    if (aiGeneratedMessage || aiIsLoading || isGeneratingSubject) return false;
 
     try {
       setIsSavingDraft(true);
+      dispatchSaveStatus({ type: 'SAVE_STARTED' });
       const draftData = {
         to: values.to.join(', '),
         cc: values.cc?.join(', '),
@@ -423,14 +462,18 @@ export function EmailComposer({
       if (response?.id && response.id !== draftId) {
         setDraftId(response.id);
       }
+      setHasUnsavedChanges(false);
+      dispatchSaveStatus({ type: 'SAVE_SUCCEEDED' });
+      return true;
     } catch (error) {
       log.error('Error saving draft:', error);
       toast.error('Failed to save draft');
-      setIsSavingDraft(false);
-      setHasUnsavedChanges(false);
+      // Keep the dirty bit and local snapshot: the visible Retry action owns the
+      // next server attempt and failure is never announced as saved.
+      dispatchSaveStatus({ type: 'SAVE_FAILED' });
+      return false;
     } finally {
       setIsSavingDraft(false);
-      setHasUnsavedChanges(false);
     }
   };
 
@@ -488,19 +531,28 @@ export function EmailComposer({
     setShowLeaveConfirmation(false);
   };
 
-  // Persist the latest composer state locally on every change (issue #34, check
-  // point 5). The persistence hook flushes this on pagehide/visibility-hidden/unmount,
-  // so a draft survives teardown, reload and a failed server autosave.
+  // Persist the latest composer state locally on every change. Comparing the
+  // serialized form also catches recipient edits, which do not pass through the
+  // editor's onLengthChange callback.
   useEffect(() => {
     if (!editor) return;
-    persistDraftSnapshot({
+    const snapshot = {
       to: toEmails,
       cc: ccEmails ?? [],
       bcc: bccEmails ?? [],
       subject: subjectInput,
       message: editor.getHTML(),
       savedAt: Date.now(),
-    });
+    };
+    const signature = JSON.stringify({ ...snapshot, savedAt: 0 });
+    const changed = lastSnapshotRef.current !== null && lastSnapshotRef.current !== signature;
+    lastSnapshotRef.current = signature;
+
+    const persisted = persistDraftSnapshot(snapshot);
+    if (changed) {
+      setHasUnsavedChanges(true);
+      dispatchSaveStatus({ type: persisted ? 'LOCAL_PERSISTED' : 'SAVE_FAILED' });
+    }
   }, [toEmails, ccEmails, bccEmails, subjectInput, messageLength, editor, persistDraftSnapshot]);
 
   // A restored draft that carried cc/bcc reveals those rows so they are not silently dropped.
@@ -510,14 +562,14 @@ export function EmailComposer({
   }, [restoredDraft]);
 
   useEffect(() => {
-    if (!hasUnsavedChanges) return;
+    if (!hasUnsavedChanges || saveStatus === 'error') return;
 
     const autoSaveTimer = setTimeout(() => {
-      saveDraft();
+      void saveDraft();
     }, 3000);
 
     return () => clearTimeout(autoSaveTimer);
-  }, [hasUnsavedChanges, saveDraft]);
+  }, [hasUnsavedChanges, saveDraft, saveStatus]);
 
   useEffect(() => {
     const handlePasteFiles = (event: ClipboardEvent) => {
@@ -549,7 +601,6 @@ export function EmailComposer({
   //   setAiGeneratedMessage(null);
   //   await handleAiGenerate();
   // });
-
 
   // keep fromEmail in sync when settings or aliases load afterwards
   useEffect(() => {
@@ -586,13 +637,31 @@ export function EmailComposer({
     });
   };
 
+  const saveStatusLabel = {
+    idle: m['states.composer.autosave.idle'](),
+    local: m['states.composer.autosave.local'](),
+    saving: m['states.composer.autosave.saving'](),
+    server: m['states.composer.autosave.server'](),
+    error: m['states.composer.autosave.error'](),
+  } satisfies Record<ComposerSaveStatus, string>;
+
   return (
     <div
+      role="region"
+      aria-labelledby="composer-title"
+      aria-describedby="composer-description"
       className={cn(
-        'flex max-h-[500px] w-full max-w-[750px] flex-col overflow-hidden rounded-2xl bg-[#FAFAFA] shadow-sm dark:bg-[#202020]',
+        'bg-background flex min-h-0 w-full min-w-0 max-w-[750px] flex-col overflow-hidden rounded-2xl shadow-sm',
+        'max-h-[min(46rem,calc(100dvh_-_env(safe-area-inset-top)_-_env(safe-area-inset-bottom)_-_1rem))]',
         className,
       )}
     >
+      <h2 id="composer-title" className="sr-only">
+        {m['states.composer.title']()}
+      </h2>
+      <p id="composer-description" className="sr-only">
+        {m['states.composer.description']()}
+      </p>
       <div className="no-scrollbar dark:bg-panelDark flex min-h-0 flex-1 flex-col overflow-y-auto rounded-2xl">
         <ComposerHeader
           control={form.control}
@@ -601,18 +670,12 @@ export function EmailComposer({
           showBcc={showBcc}
           onToggleCc={() => setShowCc(!showCc)}
           onToggleBcc={() => setShowBcc(!showBcc)}
-          canClose={!!onClose}
-          onCloseClick={handleClose}
-          activeReplyId={activeReplyId}
           subjectInput={subjectInput}
           onSubjectInputChange={(value) => {
             const next = replaceEmojiShortcodes(value);
             setValue('subject', next);
             setHasUnsavedChanges(true);
           }}
-          onGenerateSubject={handleGenerateSubject}
-          isGeneratingSubject={isGeneratingSubject}
-          messageLength={messageLength}
           aliases={aliases}
           fromEmail={fromEmail || ''}
           onFromChange={(value) => {
@@ -622,7 +685,7 @@ export function EmailComposer({
         />
 
         {/* Message Content */}
-        <div className="flex-1 overflow-y-auto border-t bg-[#FFFFFF] px-3 py-3 outline-white/5 dark:bg-[#202020]">
+        <div className="bg-background flex-1 overflow-y-auto overflow-x-hidden border-t px-3 py-3">
           <div
             onClick={() => {
               editor.commands.focus();
@@ -633,17 +696,25 @@ export function EmailComposer({
               aiGeneratedMessage !== null ? 'blur-sm' : '',
             )}
           >
-            <EditorContent editor={editor} className="h-full w-full max-w-full overflow-x-auto" />
+            <EditorContent
+              editor={editor}
+              className="h-full w-full max-w-full overflow-x-hidden break-words [&_.ProseMirror]:break-words"
+            />
           </div>
         </div>
       </div>
 
       {/* Bottom Actions */}
-      <div className="inline-flex w-full shrink-0 items-end justify-between self-stretch rounded-b-2xl bg-[#FFFFFF] px-3 py-3 outline-white/5 dark:bg-[#202020]">
-        <div className="flex flex-col items-start justify-start gap-2">
+      <div className="bg-background sticky bottom-0 z-20 flex w-full shrink-0 flex-col gap-2 self-stretch border-t px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 sm:flex-row sm:items-end sm:justify-between [&_button]:min-h-11 sm:[&_button]:min-h-10">
+        <div className="flex min-w-0 flex-col items-start justify-start gap-2">
           {toggleToolbar && <Toolbar editor={editor} />}
-          <div className="flex items-center justify-start gap-2">
-            <Button size={'xs'} onClick={handleSend} disabled={isLoading || settingsLoading || !isScheduleValid}>
+          <div className="flex min-w-0 flex-wrap items-center justify-start gap-2">
+            <Button
+              size="xs"
+              className="min-h-11 sm:min-h-10"
+              onClick={handleSend}
+              disabled={isLoading || settingsLoading || !isScheduleValid}
+            >
               <div className="flex items-center justify-center">
                 <div className="text-center text-sm leading-none text-white dark:text-black">
                   <span>Send </span>
@@ -659,7 +730,13 @@ export function EmailComposer({
               onChange={handleScheduleChange}
               onValidityChange={handleScheduleValidityChange}
             />
-            <Button variant={'secondary'} size={'xs'} onClick={() => fileInputRef.current?.click()} className="bg-background border hover:bg-gray-50 dark:hover:bg-[#404040] transition-colors cursor-pointer">
+            <Button
+              variant="secondary"
+              size="xs"
+              aria-label={m['states.composer.attach']()}
+              onClick={() => fileInputRef.current?.click()}
+              className="bg-background hover:bg-accent min-h-11 cursor-pointer border transition-colors sm:min-h-10"
+            >
               <Plus className="h-3 w-3 fill-[#9A9A9A]" />
               <span className="hidden px-0.5 text-sm md:block">Add</span>
             </Button>
@@ -698,11 +775,14 @@ export function EmailComposer({
                 <TooltipTrigger asChild>
                   <Button
                     type="button"
-                    tabIndex={-1}
                     variant="ghost"
                     size="icon"
+                    aria-label={m['states.composer.formatting']()}
                     onClick={() => setToggleToolbar(!toggleToolbar)}
-                    className={`h-auto w-auto rounded p-1.5 ${toggleToolbar ? 'bg-muted' : 'bg-background'} border hover:bg-gray-50 dark:hover:bg-[#404040] transition-colors cursor-pointer`}
+                    className={cn(
+                      'hover:bg-accent min-h-11 min-w-11 cursor-pointer rounded-md border p-1.5 transition-colors sm:min-h-10 sm:min-w-10',
+                      toggleToolbar ? 'bg-muted' : 'bg-background',
+                    )}
                   >
                     <Type className="h-4 w-4" />
                   </Button>
@@ -712,7 +792,28 @@ export function EmailComposer({
             </TooltipProvider>
           </div>
         </div>
-        <div className="flex items-start justify-start gap-2">
+        <div className="flex min-w-0 flex-wrap items-center justify-between gap-2 sm:justify-start">
+          <div
+            role="status"
+            aria-live="polite"
+            className={cn(
+              'min-w-0 text-xs font-medium tabular-nums',
+              saveStatus === 'error' ? 'text-destructive' : 'text-muted-foreground',
+            )}
+          >
+            {saveStatusLabel[saveStatus]}
+          </div>
+          {canRetryComposerSave(saveStatus) ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="min-h-11 sm:min-h-10"
+              onClick={() => void saveDraft()}
+            >
+              {m['states.composer.autosave.retry']()}
+            </Button>
+          ) : null}
           <div className="relative">
             <AnimatePresence>
               {aiGeneratedMessage !== null ? (
@@ -737,9 +838,9 @@ export function EmailComposer({
               ) : null}
             </AnimatePresence>
             <Button
-              size={'xs'}
-              variant={'ghost'}
-              className="border border-[#8B5CF6] cursor-pointer"
+              size="xs"
+              variant="ghost"
+              className="min-h-11 cursor-pointer border border-[#8B5CF6] sm:min-h-10"
               onClick={async () => {
                 if (!subjectInput.trim()) {
                   await handleGenerateSubject();
@@ -763,6 +864,27 @@ export function EmailComposer({
               </div>
             </Button>
           </div>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="min-h-11 sm:min-h-10"
+            onClick={() => void handleGenerateSubject()}
+            disabled={isLoading || isGeneratingSubject || messageLength < 1}
+          >
+            {m['states.composer.generateSubject']()}
+          </Button>
+          {onClose ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="min-h-11 sm:min-h-10"
+              onClick={handleClose}
+            >
+              {m['states.composer.close']()}
+            </Button>
+          ) : null}
         </div>
       </div>
 

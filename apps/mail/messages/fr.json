@@ -169,13 +169,8 @@
       "attachments": "Pièces jointes",
       "attachmentCount": [
         {
-          "declarations": [
-            "input count",
-            "local countPlural = count: plural"
-          ],
-          "selectors": [
-            "countPlural"
-          ],
+          "declarations": ["input count", "local countPlural = count: plural"],
+          "selectors": ["countPlural"],
           "match": {
             "countPlural=0": "pièces jointes",
             "countPlural=one": "pièce jointe",
@@ -185,13 +180,8 @@
       ],
       "fileCount": [
         {
-          "declarations": [
-            "input count",
-            "local countPlural = count: plural"
-          ],
-          "selectors": [
-            "countPlural"
-          ],
+          "declarations": ["input count", "local countPlural = count: plural"],
+          "selectors": ["countPlural"],
           "match": {
             "countPlural=0": "fichiers",
             "countPlural=one": "fichier",
@@ -267,13 +257,8 @@
       "search": "Rechercher des notes...",
       "noteCount": [
         {
-          "declarations": [
-            "input count",
-            "local countPlural = count: plural"
-          ],
-          "selectors": [
-            "countPlural"
-          ],
+          "declarations": ["input count", "local countPlural = count: plural"],
+          "selectors": ["countPlural"],
           "match": {
             "countPlural=0": "Ajoutez des notes",
             "countPlural=one": "# note",
@@ -337,13 +322,8 @@
     "mail": {
       "replies": [
         {
-          "declarations": [
-            "input count",
-            "local countPlural = count: plural"
-          ],
-          "selectors": [
-            "countPlural"
-          ],
+          "declarations": ["input count", "local countPlural = count: plural"],
+          "selectors": ["countPlural"],
           "match": {
             "countPlural=0": "réponses",
             "countPlural=one": "# réponse",
@@ -409,13 +389,8 @@
       "selectAllConversations": "Sélectionner toutes les conversations",
       "conversationsSelected": [
         {
-          "declarations": [
-            "input count",
-            "local countPlural = count: plural"
-          ],
-          "selectors": [
-            "countPlural"
-          ],
+          "declarations": ["input count", "local countPlural = count: plural"],
+          "selectors": ["countPlural"],
           "match": {
             "countPlural=one": "# conversation sélectionnée sur cette page.",
             "countPlural=other": "# conversations sélectionnées sur cette page."
@@ -514,6 +489,8 @@
     "keyboardApprove": "Approuver",
     "keyboardReject": "Rejeter",
     "keyboardOpen": "Ouvrir le brouillon",
+    "keyboardMove": "Déplacer la sélection",
+    "keyboardActivate": "Ouvrir la sélection",
     "keyboardUndo": "Annuler l'approbation",
     "actions": {
       "approve": "Approuver",
@@ -562,6 +539,7 @@
       "updated": "Mis à jour",
       "scheduled": "Planifié",
       "draftId": "Brouillon",
+      "details": "Détails techniques",
       "error": "Erreur",
       "undoCountdown": "Annuler pendant {seconds}s"
     }
@@ -875,18 +853,39 @@
     "sending": "Envoi…",
     "retry": "Réessayer",
     "actionFailed": "Action échouée",
+    "composer": {
+      "title": "Rédiger un email",
+      "description": "Saisissez les destinataires, l’objet et le message, puis vérifiez les actions avant l’envoi.",
+      "loading": "Chargement de l’éditeur",
+      "bodyLabel": "Corps du message",
+      "attach": "Joindre des fichiers",
+      "formatting": "Options de mise en forme",
+      "generateSubject": "Générer l’objet",
+      "close": "Fermer l’éditeur",
+      "autosave": {
+        "idle": "Prêt",
+        "local": "Enregistré sur cet appareil",
+        "saving": "Enregistrement sur le serveur…",
+        "server": "Enregistré sur le serveur",
+        "error": "Échec de l’enregistrement",
+        "retry": "Réessayer"
+      }
+    },
     "mailList": {
       "errorTitle": "Chargement de la boîte impossible",
       "errorDescription": "Le serveur est injoignable. Vérifiez votre connexion et réessayez.",
       "offlineNotice": "Vous êtes hors ligne — emails enregistrés affichés.",
       "staleNotice": "Actualisation impossible — emails enregistrés affichés.",
       "emptyTitle": "C'est vide ici",
-      "emptyDescription": "Cherchez un autre email ou",
+      "emptyDescription": "Cette boîte ne contient encore aucun message.",
+      "filteredEmptyTitle": "Aucun message ne correspond à ces filtres",
+      "filteredEmptyDescription": "Essayez une autre recherche ou",
       "clearFilters": "réinitialisez les filtres"
     },
     "thread": {
       "errorTitle": "Ouverture de la conversation impossible",
       "errorDescription": "Le serveur est injoignable. Vérifiez votre connexion et réessayez.",
+      "bodyError": "Le contenu du message n’a pas pu être chargé.",
       "retry": "Réessayer",
       "back": "Retour à la boîte"
     }

@@ -1,4 +1,3 @@
-import { useCallback, useEffect, useMemo, useRef } from 'react';
 import {
   clearLocalDraft,
   draftHasContent,
@@ -8,6 +7,7 @@ import {
   type ComposerDraftScope,
   type StoredComposerDraft,
 } from '@/lib/draft-storage';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { registerComposerFlush } from '@/lib/composer-flush';
 
 const MAX_RESTORE_AGE_MS = 7 * 24 * 60 * 60 * 1000;
@@ -16,7 +16,7 @@ export interface ComposerDraftPersistence {
   /** A meaningful, non-stale snapshot to seed the composer on mount, if any. */
   restored: StoredComposerDraft | null;
   /** Record the latest composer state (durable + flushed on pagehide/unmount). */
-  update: (snapshot: StoredComposerDraft) => void;
+  update: (snapshot: StoredComposerDraft) => boolean;
   /** Drop the local snapshot (on successful send or explicit discard). */
   clear: () => void;
 }
@@ -48,7 +48,7 @@ export function useComposerDraftPersistence(scope: ComposerDraftScope): Composer
   const update = useCallback(
     (snapshot: StoredComposerDraft) => {
       latestRef.current = snapshot;
-      if (draftHasContent(snapshot)) saveLocalDraft(key, snapshot);
+      return draftHasContent(snapshot) ? saveLocalDraft(key, snapshot) : false;
     },
     [key],
   );

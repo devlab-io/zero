@@ -1,7 +1,7 @@
-import { Mail, Sparkles } from '../icons/icons';
 import { useAISidebar } from '@/components/ui/use-ai-sidebar';
 import { EmptyStateIcon } from '../icons/empty-state-svg';
 import { useIsMobile } from '@/hooks/use-mobile';
+import { Mail, Sparkles } from '../icons/icons';
 import { useQueryState } from 'nuqs';
 import { cn } from '@/lib/utils';
 
@@ -27,14 +27,14 @@ export function ThreadEmptyState() {
           <div className="flex flex-col items-center justify-center gap-2 text-center">
             <EmptyStateIcon width={200} height={200} />
             <div className="mt-4">
-              <p className="text-lg">It's empty here</p>
+              <p className="text-lg">It&apos;s empty here</p>
               <p className="text-md text-muted-foreground dark:text-white/50">
                 Choose an email to view details
               </p>
               <div className="mt-4 grid grid-cols-1 gap-2 xl:grid-cols-2">
                 <button
                   onClick={toggleAISidebar}
-                  className="inline-flex h-7 items-center justify-center gap-0.5 overflow-hidden rounded-lg border bg-white px-2 dark:border-none dark:bg-[#313131] hover:bg-gray-100 dark:hover:bg-[#404040] transition-colors cursor-pointer"
+                  className="inline-flex h-7 cursor-pointer items-center justify-center gap-0.5 overflow-hidden rounded-lg border bg-white px-2 transition-colors hover:bg-gray-100 dark:border-none dark:bg-[#313131] dark:hover:bg-[#404040]"
                 >
                   <Sparkles className="mr-1 h-3.5 w-3.5 fill-[#959595]" />
                   <div className="flex items-center justify-center gap-2.5 px-0.5">
@@ -45,7 +45,7 @@ export function ThreadEmptyState() {
                 </button>
                 <button
                   onClick={() => setIsComposeOpen('true')}
-                  className="inline-flex h-7 items-center justify-center gap-0.5 overflow-hidden rounded-lg border bg-white px-2 dark:border-none dark:bg-[#313131] hover:bg-gray-100 dark:hover:bg-[#404040] transition-colors cursor-pointer"
+                  className="inline-flex h-7 cursor-pointer items-center justify-center gap-0.5 overflow-hidden rounded-lg border bg-white px-2 transition-colors hover:bg-gray-100 dark:border-none dark:bg-[#313131] dark:hover:bg-[#404040]"
                 >
                   <Mail className="mr-1 h-3.5 w-3.5 fill-[#959595]" />
                   <div className="flex items-center justify-center gap-2.5 px-0.5">

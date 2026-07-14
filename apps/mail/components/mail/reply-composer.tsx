@@ -1,23 +1,24 @@
-import { log } from '@/lib/log';
-import { useUndoSend } from '@/hooks/use-undo-send';
+import { deriveReplyRecipients, deriveReplySubject } from './reply-recipients';
 import { constructReplyBody, constructForwardBody } from '@/lib/utils';
 import { useActiveConnection } from '@/hooks/use-connections';
 import { useEmailAliases } from '@/hooks/use-email-aliases';
+import { lazy, Suspense, useEffect, useMemo } from 'react';
+import { ReplyComposerSkeleton } from './mail-skeleton';
 import { useHotkeysContext } from 'react-hotkeys-hook';
-import { loadGitHubEmojis } from '@/lib/emoji-data';
 import { useTRPC } from '@/providers/query-provider';
 import { useMutation } from '@tanstack/react-query';
+import { useUndoSend } from '@/hooks/use-undo-send';
+import { loadGitHubEmojis } from '@/lib/emoji-data';
 import { useSettings } from '@/hooks/use-settings';
 import { useThread } from '@/hooks/use-threads';
 import { useSession } from '@/lib/auth-client';
 import { serializeFiles } from '@/lib/schemas';
-import { deriveReplyRecipients, deriveReplySubject } from './reply-recipients';
 import { useDraft } from '@/hooks/use-drafts';
 import { m } from '@/paraglide/messages';
 import type { Sender } from '@/types';
 import { useQueryState } from 'nuqs';
-import { lazy, Suspense, useEffect, useMemo } from 'react';
 import posthog from 'posthog-js';
+import { log } from '@/lib/log';
 import { toast } from 'sonner';
 
 // Loaded lazily: the editor (tiptap/prosemirror) only downloads when the user actually
@@ -237,35 +238,30 @@ export default function ReplyCompose({ messageId }: ReplyComposeProps) {
     return [];
   };
 
-  if (!mode || !emailData) return null;
+  if (!mode) return null;
+  if (!emailData) return <ReplyComposerSkeleton />;
 
   return (
-    <div className="w-full rounded-2xl overflow-visible border">
-      <Suspense
-        fallback={
-          <div className="flex h-[120px] w-full items-center justify-center">
-            <div className="h-5 w-5 animate-spin rounded-full border-2 border-gray-300 border-t-blue-600" />
-          </div>
-        }
-      >
-      <EmailComposer
-        editorClassName="min-h-[50px]"
-        className="w-full max-w-none! pb-1 overflow-visible"
-        onSendEmail={handleSendEmail}
-        onClose={async () => {
-          setMode(null);
-          setDraftId(null);
-          setActiveReplyId(null);
-        }}
-        initialMessage={draft?.content ?? latestDraft?.decodedBody}
-        initialTo={draft ? ensureEmailArray(draft.to) : replyDefaults.to}
-        initialCc={draft ? ensureEmailArray(draft.cc) : replyDefaults.cc}
-        initialBcc={ensureEmailArray(draft?.bcc)}
-        initialSubject={draft?.subject ?? replyDefaults.subject}
-        autofocus={true}
-        settingsLoading={settingsLoading}
-        replyingTo={replyToMessage?.sender.email}
-      />
+    <div className="w-full min-w-0 overflow-visible rounded-2xl border">
+      <Suspense fallback={<ReplyComposerSkeleton />}>
+        <EmailComposer
+          editorClassName="min-h-[50px]"
+          className="max-w-none! w-full overflow-visible pb-1"
+          onSendEmail={handleSendEmail}
+          onClose={async () => {
+            setMode(null);
+            setDraftId(null);
+            setActiveReplyId(null);
+          }}
+          initialMessage={draft?.content ?? latestDraft?.decodedBody}
+          initialTo={draft ? ensureEmailArray(draft.to) : replyDefaults.to}
+          initialCc={draft ? ensureEmailArray(draft.cc) : replyDefaults.cc}
+          initialBcc={ensureEmailArray(draft?.bcc)}
+          initialSubject={draft?.subject ?? replyDefaults.subject}
+          autofocus={true}
+          settingsLoading={settingsLoading}
+          replyingTo={replyToMessage?.sender.email}
+        />
       </Suspense>
     </div>
   );

@@ -22,6 +22,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { focusedIndexAtom, runThreadRemovalNavigation } from '@/hooks/use-mail-navigation';
 import { useOptimisticThreadState } from '@/components/mail/optimistic-thread-state';
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
+import { MailDisplaySkeleton, ReplyComposerSkeleton } from './mail-skeleton';
 import { useOptimisticActions } from '@/hooks/use-optimistic-actions';
 import { selectThreadViewState } from '@/lib/thread-view-state';
 import { useAISidebar } from '@/components/ui/use-ai-sidebar';
@@ -31,10 +32,10 @@ import { useThread, useThreads } from '@/hooks/use-threads';
 import { EmptyStateIcon } from '../icons/empty-state-svg';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useIsOffline } from '@/hooks/use-online-status';
+import { useMediaQuery } from '@/hooks/use-media-query';
 import { useAnimations } from '@/hooks/use-animations';
 // #32 label/move picker — self-contained, driven by the `picker` query-state (l/v shortcuts).
 import { LabelMovePicker } from './label-move-picker';
-import { MailDisplaySkeleton } from './mail-skeleton';
 import { useTRPC } from '@/providers/query-provider';
 import { useMutation } from '@tanstack/react-query';
 import { useIsMobile } from '@/hooks/use-mobile';
@@ -87,6 +88,8 @@ export function ThreadDisplay() {
   const [navigationDirection, setNavigationDirection] = useState<'previous' | 'next' | null>(null);
 
   const animationsEnabled = useAnimations();
+  const prefersReducedMotion = useMediaQuery('(prefers-reduced-motion: reduce)');
+  const shouldAnimate = animationsEnabled && !prefersReducedMotion;
 
   // Collect all attachments from all messages in the thread
   const allThreadAttachments = useMemo(() => {
@@ -155,7 +158,7 @@ export function ThreadDisplay() {
         setThreadId,
         setFocusedIndex,
       });
-      if (navigation.threadId && animationsEnabled) {
+      if (navigation.threadId && shouldAnimate) {
         setNavigationDirection('next');
       }
     },
@@ -169,7 +172,7 @@ export function ThreadDisplay() {
       setMode,
       setActiveReplyId,
       setDraftId,
-      animationsEnabled,
+      shouldAnimate,
     ],
   );
 
@@ -242,11 +245,14 @@ export function ThreadDisplay() {
       setTimeout(() => {
         const replyElement = document.getElementById(`reply-composer-${activeReplyId}`);
         if (replyElement) {
-          replyElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          replyElement.scrollIntoView({
+            behavior: shouldAnimate ? 'smooth' : 'auto',
+            block: 'center',
+          });
         }
       }, 100); // Short delay to ensure the component is rendered
     }
-  }, [mode, activeReplyId]);
+  }, [mode, activeReplyId, shouldAnimate]);
 
   const handleAnimationComplete = useCallback(() => {
     setNavigationDirection(null);
@@ -282,14 +288,14 @@ export function ThreadDisplay() {
             <div className="flex flex-col items-center justify-center gap-2 text-center">
               <EmptyStateIcon width={200} height={200} />
               <div className="mt-4">
-                <p className="text-lg">It's empty here</p>
+                <p className="text-lg">It&apos;s empty here</p>
                 <p className="text-md text-muted-foreground dark:text-white/50">
                   Choose an email to view details
                 </p>
                 <div className="mt-4 grid grid-cols-1 gap-2 xl:grid-cols-2">
                   <button
                     onClick={toggleAISidebar}
-                    className="inline-flex h-7 cursor-pointer items-center justify-center gap-0.5 overflow-hidden rounded-lg border bg-white px-2 transition-colors hover:bg-gray-100 dark:border-none dark:bg-[#313131] dark:hover:bg-[#404040]"
+                    className="inline-flex h-11 cursor-pointer items-center justify-center gap-0.5 overflow-hidden rounded-lg border bg-white px-2 transition-colors hover:bg-gray-100 md:h-10 dark:border-none dark:bg-[#313131] dark:hover:bg-[#404040]"
                   >
                     <Sparkles className="mr-1 h-3.5 w-3.5 fill-[#959595]" />
                     <div className="flex items-center justify-center gap-2.5 px-0.5">
@@ -300,7 +306,7 @@ export function ThreadDisplay() {
                   </button>
                   <button
                     onClick={() => setIsComposeOpen('true')}
-                    className="inline-flex h-7 cursor-pointer items-center justify-center gap-0.5 overflow-hidden rounded-lg border bg-white px-2 transition-colors hover:bg-gray-100 dark:border-none dark:bg-[#313131] dark:hover:bg-[#404040]"
+                    className="inline-flex h-11 cursor-pointer items-center justify-center gap-0.5 overflow-hidden rounded-lg border bg-white px-2 transition-colors hover:bg-gray-100 md:h-10 dark:border-none dark:bg-[#313131] dark:hover:bg-[#404040]"
                   >
                     <Mail className="mr-1 h-3.5 w-3.5 fill-[#959595]" />
                     <div className="flex items-center justify-center gap-2.5 px-0.5">
@@ -322,7 +328,7 @@ export function ThreadDisplay() {
             </ScrollArea>
           </div>
         ) : threadState === 'error' ? (
-          <div className="flex h-full items-center justify-center p-6">
+          <div role="alert" className="flex h-full items-center justify-center p-6">
             <div className="flex max-w-md flex-col items-center justify-center gap-3 text-center">
               <EmptyStateIcon width={160} height={160} />
               <div>
@@ -337,7 +343,7 @@ export function ThreadDisplay() {
                 <button
                   type="button"
                   onClick={() => void refetchThread()}
-                  className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-md border bg-white px-3 text-sm transition-colors hover:bg-gray-100 dark:border-none dark:bg-[#313131] dark:hover:bg-[#404040]"
+                  className="inline-flex h-11 cursor-pointer items-center gap-1.5 rounded-md border bg-white px-3 text-sm transition-colors hover:bg-gray-100 md:h-10 dark:border-none dark:bg-[#313131] dark:hover:bg-[#404040]"
                 >
                   <RefreshCcw className="h-4 w-4" />
                   {m['states.thread.retry']()}
@@ -345,7 +351,7 @@ export function ThreadDisplay() {
                 <button
                   type="button"
                   onClick={handleClose}
-                  className="text-muted-foreground inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-md px-3 text-sm transition-colors hover:bg-gray-100 dark:hover:bg-[#313131]"
+                  className="text-muted-foreground inline-flex h-11 cursor-pointer items-center gap-1.5 rounded-md px-3 text-sm transition-colors hover:bg-gray-100 md:h-10 dark:hover:bg-[#313131]"
                 >
                   {m['states.thread.back']()}
                 </button>
@@ -354,6 +360,26 @@ export function ThreadDisplay() {
           </div>
         ) : id && emailData ? (
           <>
+            {isError || isOffline ? (
+              <div
+                role="status"
+                className="flex min-h-10 shrink-0 items-center justify-between gap-2 border-b border-amber-200/60 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-200"
+              >
+                <span>
+                  {isOffline
+                    ? m['states.mailList.offlineNotice']()
+                    : m['states.mailList.staleNotice']()}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => void refetchThread()}
+                  className="inline-flex min-h-11 shrink-0 items-center gap-1 rounded-md px-2 font-medium transition-colors hover:bg-amber-100 md:min-h-10 dark:hover:bg-amber-500/20"
+                >
+                  <RefreshCcw className="h-3.5 w-3.5" />
+                  {m['states.thread.retry']()}
+                </button>
+              </div>
+            ) : null}
             <div
               className={cn(
                 'flex shrink-0 items-center px-1 pb-[10px] md:px-3 md:pb-[11px] md:pt-[12px]',
@@ -546,7 +572,7 @@ export function ThreadDisplay() {
                 // THREAD_TRANSITION_WRAPPER_CLASS — the transition DOM (layout/scroll box) stays
                 // stable while the chunk loads. Off → plain MessageList, exactly as before. motion
                 // is not part of this route-critical chunk.
-                return animationsEnabled ? (
+                return shouldAnimate ? (
                   <Suspense
                     fallback={
                       <div className={THREAD_TRANSITION_WRAPPER_CLASS}>
@@ -573,7 +599,7 @@ export function ThreadDisplay() {
                     className="border-border bg-panelLight dark:bg-panelDark sticky bottom-0 z-10 border-t px-4 py-2"
                     id={`reply-composer-${activeReplyId}`}
                   >
-                    <Suspense fallback={null}>
+                    <Suspense fallback={<ReplyComposerSkeleton />}>
                       <ReplyCompose messageId={activeReplyId} />
                     </Suspense>
                   </div>

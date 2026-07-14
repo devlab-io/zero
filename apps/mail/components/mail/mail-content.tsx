@@ -1,13 +1,16 @@
-import { log } from '@/lib/log';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { defaultUserSettings } from '@zero/server/schemas';
 import { useTRPC } from '@/providers/query-provider';
 import { getBrowserTimezone } from '@/lib/timezones';
 import { useSettings } from '@/hooks/use-settings';
+import { Skeleton } from '../ui/skeleton';
+import { RefreshCcw } from 'lucide-react';
 import { m } from '@/paraglide/messages';
 import { useTheme } from 'next-themes';
+import { Button } from '../ui/button';
 import { cn } from '@/lib/utils';
+import { log } from '@/lib/log';
 import { toast } from 'sonner';
 
 interface MailContentProps {
@@ -17,7 +20,7 @@ interface MailContentProps {
 }
 
 export function MailContent({ id, html, senderEmail }: MailContentProps) {
-  const { data, refetch } = useSettings();
+  const { data, refetch: refetchSettings } = useSettings();
   const queryClient = useQueryClient();
   const isTrustedSender = useMemo(
     () => data?.settings?.externalImages || data?.settings?.trustedSenders?.includes(senderEmail),
@@ -56,7 +59,7 @@ export function MailContent({ id, html, senderEmail }: MailContentProps) {
       }
     },
     onSuccess: () => {
-      refetch();
+      refetchSettings();
     },
     onError: () => {
       toast.error(m['common.mail.failedToTrustSender']());
@@ -67,7 +70,12 @@ export function MailContent({ id, html, senderEmail }: MailContentProps) {
     trpc.mail.processEmailContent.mutationOptions(),
   );
 
-  const { data: processedData } = useQuery({
+  const {
+    data: processedData,
+    isLoading: isContentLoading,
+    isError: isContentError,
+    refetch: refetchContent,
+  } = useQuery({
     queryKey: ['email-content', id, isTrustedSender || temporaryImagesEnabled, resolvedTheme],
     queryFn: async () => {
       const result = await processEmailContent({
@@ -83,6 +91,7 @@ export function MailContent({ id, html, senderEmail }: MailContentProps) {
     },
     staleTime: 30 * 60 * 1000,
     gcTime: 60 * 60 * 1000,
+    placeholderData: (previousData) => previousData,
     refetchOnWindowFocus: false,
     refetchOnMount: false,
   });
@@ -182,7 +191,58 @@ export function MailContent({ id, html, senderEmail }: MailContentProps) {
           </button>
         </div>
       )}
-      <div ref={hostRef} className={cn('mail-content w-full flex-1 overflow-scroll no-scrollbar px-4 text-black dark:text-white')} />
+      {!processedData && isContentLoading ? (
+        <div role="status" aria-live="polite" className="min-h-48 w-full space-y-3 px-4 py-5">
+          <span className="sr-only">Loading message</span>
+          <Skeleton className="h-4 w-full" />
+          <Skeleton className="h-4 w-11/12" />
+          <Skeleton className="h-4 w-4/5" />
+          <Skeleton className="h-4 w-2/3" />
+        </div>
+      ) : null}
+      {!processedData && isContentError ? (
+        <div
+          role="alert"
+          className="flex min-h-48 w-full flex-col items-center justify-center gap-3 px-4 py-5 text-center"
+        >
+          <p className="text-sm font-medium">{m['states.thread.bodyError']()}</p>
+          <Button
+            type="button"
+            variant="outline"
+            className="min-h-11 md:min-h-10"
+            onClick={() => void refetchContent()}
+          >
+            <RefreshCcw className="h-4 w-4" />
+            {m['states.thread.retry']()}
+          </Button>
+        </div>
+      ) : null}
+      {processedData && isContentError ? (
+        <div
+          role="status"
+          className="bg-muted/60 text-muted-foreground flex min-h-11 items-center justify-between gap-3 border-y px-4 py-2 text-sm"
+        >
+          <span>{m['states.mailList.staleNotice']()}</span>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="min-h-11 shrink-0 md:min-h-10"
+            onClick={() => void refetchContent()}
+          >
+            <RefreshCcw className="h-4 w-4" />
+            {m['states.thread.retry']()}
+          </Button>
+        </div>
+      ) : null}
+      <div
+        ref={hostRef}
+        aria-hidden={!processedData}
+        className={cn(
+          'mail-content no-scrollbar w-full min-w-0 flex-1 overflow-x-auto overflow-y-visible px-4 text-black dark:text-white',
+          !processedData && 'hidden',
+        )}
+      />
     </>
   );
 }

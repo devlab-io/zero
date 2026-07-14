@@ -1,5 +1,6 @@
 import {
   buildProjectedThreadData,
+  buildThreadRowAccessibleName,
   threadRowPropsAreEqual,
   type ThreadRowProps,
 } from './mail-list-thread-projection';
@@ -209,9 +210,20 @@ export const Thread = memo(function Thread({
     if (!latestMessage || !getThreadData) return null;
 
     return (
-      <div
-        className={cn('select-none border-b md:my-1 md:border-none')}
+      <article
+        aria-label={buildThreadRowAccessibleName(message)}
+        tabIndex={0}
+        className={cn(
+          'focus-visible:ring-ring group select-none rounded-lg border-b focus-visible:outline-none focus-visible:ring-2 md:my-1 md:border-none',
+        )}
         onClick={onClick ? onClick(latestMessage) : undefined}
+        onKeyDown={(event) => {
+          if (event.target !== event.currentTarget) return;
+          if (event.key !== 'Enter' && event.key !== ' ') return;
+          event.preventDefault();
+          const activate = onClick?.(latestMessage);
+          activate?.();
+        }}
         // Devlab: hover targeting restored — required for Superhuman-style
         // single-key actions (d/r/a/f/h) on the thread under the cursor.
         onMouseEnter={() => {
@@ -233,12 +245,11 @@ export const Thread = memo(function Thread({
           data-thread-id={idToUse}
           key={idToUse}
           className={cn(
-            'hover:bg-offsetLight dark:hover:bg-primary/5 group relative mx-1 flex cursor-pointer flex-col items-start rounded-lg py-2 text-left text-sm hover:opacity-100',
+            'hover:bg-offsetLight dark:hover:bg-primary/5 group relative mx-1 flex min-h-24 cursor-pointer flex-col items-start rounded-lg py-2 text-left text-sm hover:opacity-100',
             (isMailSelected || isMailBulkSelected || isKeyboardFocused) &&
               'border-border bg-primary/5 opacity-100',
-            isKeyboardFocused && 'ring-primary/50',
+            isKeyboardFocused && 'ring-primary/50 ring-2',
             'relative',
-            'group',
           )}
         >
           <ThreadHoverActions
@@ -251,9 +262,7 @@ export const Thread = memo(function Thread({
             moveThreadTo={moveThreadTo}
           />
 
-          <div
-            className={`relative flex w-full items-center justify-between gap-4 px-4 ${displayUnread ? '' : 'opacity-60'}`}
-          >
+          <div className="relative flex w-full items-center justify-between gap-4 px-4">
             <div>
               {isMailBulkSelected ? (
                 <Avatar
@@ -346,7 +355,7 @@ export const Thread = memo(function Thread({
                     {getThreadData.totalReplies > 1 ? (
                       <Tooltip>
                         <TooltipTrigger asChild>
-                          <span className="rounded-md text-xs opacity-70">
+                          <span className="rounded-md text-xs tabular-nums opacity-70">
                             [{getThreadData.totalReplies}]
                           </span>
                         </TooltipTrigger>
@@ -375,7 +384,7 @@ export const Thread = memo(function Thread({
                   {latestMessage.receivedOn ? (
                     <p
                       className={cn(
-                        'text-muted-foreground text-nowrap text-xs font-normal opacity-70 transition-opacity group-hover:opacity-100 dark:text-[#8C8C8C]',
+                        'text-muted-foreground text-nowrap text-xs font-normal tabular-nums opacity-70 transition-opacity group-hover:opacity-100 dark:text-[#8C8C8C]',
                         isMailSelected && 'opacity-100',
                       )}
                     >
@@ -387,7 +396,7 @@ export const Thread = memo(function Thread({
                   {isFolderSent ? (
                     <p
                       className={cn(
-                        'mt-1 line-clamp-1 max-w-[50ch] overflow-hidden text-sm text-[#8C8C8C] md:max-w-[25ch]',
+                        'text-muted-foreground mt-1 line-clamp-1 max-w-[50ch] overflow-hidden text-sm md:max-w-[25ch]',
                       )}
                     >
                       {latestMessage.to.map((e) => e.email).join(', ')}
@@ -395,7 +404,7 @@ export const Thread = memo(function Thread({
                   ) : (
                     <p
                       className={cn(
-                        'mt-1 line-clamp-1 w-[95%] min-w-0 overflow-hidden text-sm text-[#8C8C8C]',
+                        'text-muted-foreground mt-1 line-clamp-1 w-[95%] min-w-0 overflow-hidden text-sm',
                       )}
                     >
                       {highlightText(latestMessage.subject, searchValue.highlight)}
@@ -427,10 +436,11 @@ export const Thread = memo(function Thread({
             </div>
           </div>
         </div>
-      </div>
+      </article>
     );
   }, [
     latestMessage,
+    message,
     getThreadData,
     optimisticState,
     idToUse,
