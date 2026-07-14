@@ -1,16 +1,28 @@
 # Checkrun: final-qa-checkrun
 
-generated: 2026-07-14T16:13:37Z runner: sh config: .architect/checkrun-final-qa-v18.json
+generated: 2026-07-14T16:16:13Z runner: sh config: .architect/checkrun-final-qa-v18.json
 check_file: docs/checks/niveau10/final-qa.md freeze_sha: c9fdc91f0c516d58910b00c722d84d46b1c93069
 Executor: bash
 executor_config: bash
-integrity: check_file_matches_freeze=true head=c9fdc91f0c516d58910b00c722d84d46b1c93069
-changed_files: 0 listed below; docs_checks_touched=false
+integrity: check_file_matches_freeze=true head=9f78f52624bae3046d18559f7a7a791ff5382c71
+changed_files: 12 listed below; docs_checks_touched=false
+apps/mail/app/(routes)/settings/shortcuts/contextual-shortcut-sheet.tsx
+apps/mail/components/mail/reply-recipients.test.ts
+apps/mail/components/mail/reply-recipients.ts
+apps/mail/lib/hotkeys/use-hotkey-utils.ts
+apps/server/src/lib/driver/google-drafts.test.ts
+apps/server/src/routes/agent/mcp-account.test.ts
+apps/server/src/routes/agent/mcp-account.ts
+apps/server/src/routes/agent/mcp-auth.test.ts
+apps/server/src/routes/agent/mcp-idempotency.test.ts
+apps/server/src/routes/index.ts
+docs/jobs/niveau10/final-qa-01.md
+docs/jobs/niveau10/final-qa-checkrun.md
 
 ## RUN line 9
 
 $ pnpm test
-exit: 0 ms: 5436 bytes: 11405
+exit: 0 ms: 4528 bytes: 11402
 
 > zero@0.1.0 test /Users/thomasverdenne/cc/zero-niveau10/.architect/wt/niveau10/final-qa-01
 > turbo run test
@@ -21,55 +33,53 @@ turbo 2.5.6
 • Running test in 7 packages
 • Remote caching disabled
 @zero/mail:test: cache bypass, force executing efa1b73b16b424d1
-@zero/server:test: cache bypass, force executing c36e6e527bcfd2e2
-@zero/server:test:
-@zero/server:test: > @zero/server@ test /Users/thomasverdenne/cc/zero-niveau10/.architect/wt/niveau10/final-qa-01/apps/server
-@zero/server:test: > vitest run
-@zero/server:test:
+@zero/server:test: cache bypass, force executing 76a4f623968bd3e8
 @zero/mail:test:
 @zero/mail:test: > @zero/mail@0.1.0 test /Users/thomasverdenne/cc/zero-niveau10/.architect/wt/niveau10/final-qa-01/apps/mail
 @zero/mail:test: > vitest run
 @zero/mail:test:
+@zero/server:test:
+@zero/server:test: > @zero/server@ test /Users/thomasverdenne/cc/zero-niveau10/.architect/wt/niveau10/final-qa-01/apps/server
+@zero/server:test: > vitest run
+@zero/server:test:
 @zero/server:test:
 @zero/server:test: RUN v3.2.7 /Users/thomasverdenne/cc/zero-niveau10/.architect/wt/niveau10/final-qa-01/apps/server
 @zero/server:test:
 @zero/mail:test:
 @zero/mail:test: RUN v3.2.7 /Users/thomasverdenne/cc/zero-niveau10/.architect/wt/niveau10/final-qa-01/apps/mail
 @zero/mail:test:
-@zero/server:test: ✓ src/lib/driver/gmail-backoff.test.ts (17 tests) 6ms
-@zero/server:test: ✓ src/lib/sentry.test.ts (5 tests) 6ms
+@zero/server:test: ✓ src/lib/driver/gmail-batch.test.ts (17 tests) 25ms
+@zero/server:test: ✓ src/lib/driver/gmail-backoff.test.ts (17 tests) 7ms
+@zero/server:test: ✓ src/lib/sentry.test.ts (5 tests) 13ms
+@zero/server:test: ✓ src/lib/errors.test.ts (6 tests) 2ms
+@zero/server:test: ✓ src/env-schema.boot.test.ts (19 tests) 5ms
+@zero/server:test: ✓ src/routes/agent/mcp-idempotency.test.ts (3 tests) 12ms
+@zero/server:test: ✓ src/trpc/routes/mail.test.ts (43 tests) 16ms
+@zero/server:test: ✓ src/routes/agent/mcp-tools.test.ts (23 tests) 19ms
+@zero/server:test: ✓ src/lib/mail-sanitize/index.test.ts (3 tests) 6ms
+@zero/server:test: ✓ src/routes/agent/mcp-auth.test.ts (4 tests) 11ms
+@zero/server:test: ✓ src/lib/driver/google-transport.test.ts (20 tests) 32ms
+@zero/server:test: ✓ src/routes/agent/mcp-account.test.ts (2 tests) 3ms
 @zero/server:test: ✓ src/lib/driver/driver-utils.test.ts (15 tests) 5ms
-@zero/server:test: ✓ src/lib/driver/gmail-batch.test.ts (17 tests) 27ms
-@zero/server:test: ✓ src/env-schema.boot.test.ts (19 tests) 6ms
-@zero/server:test: ✓ src/routes/agent/mcp-idempotency.test.ts (3 tests) 10ms
-@zero/server:test: ✓ src/lib/mail-sanitize/index.test.ts (3 tests) 9ms
-@zero/server:test: ✓ src/routes/agent/mcp-tools.test.ts (23 tests) 16ms
-@zero/server:test: ✓ src/trpc/routes/mail.test.ts (43 tests) 25ms
-@zero/server:test: ✓ src/routes/agent/mcp-auth.test.ts (4 tests) 10ms
-@zero/server:test: ✓ src/lib/driver/google-transport.test.ts (20 tests) 17ms
-@zero/server:test: ✓ src/lib/driver/google-messages.test.ts (9 tests) 15ms
+@zero/server:test: ✓ src/lib/driver/google-parse.test.ts (23 tests) 17ms
 @zero/server:test: ✓ src/lib/driver/google-account.test.ts (8 tests) 4ms
-@zero/server:test: ✓ src/lib/driver/google-threads.test.ts (21 tests) 14ms
-@zero/server:test: ✓ src/lib/driver/google-parse.test.ts (23 tests) 51ms
-@zero/server:test: ✓ src/lib/driver/google-drafts.test.ts (12 tests) 15ms
-@zero/server:test: ✓ src/lib/draft-outbox/state-machine.test.ts (4 tests) 3ms
 @zero/server:test: ✓ src/env-schema.test.ts (6 tests) 4ms
+@zero/server:test: ✓ src/lib/driver/google-messages.test.ts (9 tests) 6ms
+@zero/server:test: ✓ src/lib/driver/google-threads.test.ts (21 tests) 15ms
+@zero/server:test: ✓ src/lib/draft-outbox/state-machine.test.ts (4 tests) 3ms
+@zero/server:test: ✓ src/lib/driver/google-drafts.test.ts (12 tests) 13ms
 @zero/server:test: ✓ src/lib/driver/google-label-color-map.test.ts (8 tests) 3ms
+@zero/server:test: ✓ src/lib/google-scopes.test.ts (5 tests) 4ms
+@zero/server:test: ✓ src/lib/auth-providers.test.ts (7 tests) 3ms
 @zero/server:test: ✓ src/lib/driver/gmail-sync-persist.test.ts (4 tests) 3ms
-@zero/server:test: ✓ src/lib/google-scopes.test.ts (5 tests) 3ms
-@zero/server:test: ✓ src/lib/auth-providers.test.ts (7 tests) 4ms
-@zero/server:test: ✓ src/routes/agent/mcp-account.test.ts (2 tests) 4ms
-@zero/server:test: ✓ src/lib/errors.test.ts (6 tests) 5ms
-@zero/mail:test: ✓ components/create/send-and-archive.test.ts (4 tests) 4ms
-@zero/mail:test: ✓ lib/draft-storage.test.ts (7 tests) 5ms
-@zero/mail:test: ✓ lib/query-retry.test.ts (6 tests) 53ms
-@zero/mail:test: ✓ components/mail/reply-recipients.test.ts (18 tests) 5ms
+@zero/mail:test: ✓ lib/optimistic-recovery.test.ts (4 tests) 3ms
+@zero/mail:test: ✓ lib/draft-storage.test.ts (7 tests) 3ms
 @zero/mail:test: ✓ store/optimistic-updates.test.ts (6 tests) 5ms
+@zero/mail:test: ✓ components/mail/label-move-picker.logic.test.ts (3 tests) 2ms
 @zero/mail:test: ✓ workers/spa-fallback.test.ts (11 tests) 5ms
+@zero/mail:test: ✓ components/mail/reply-recipients.test.ts (18 tests) 7ms
+@zero/mail:test: ✓ lib/query-retry.test.ts (6 tests) 71ms
 @zero/mail:test: stderr | components/mail/thread-triage.test.tsx
-@zero/mail:test: KeyboardLayoutMap API is not supported in this browser
-@zero/mail:test:
-@zero/mail:test: stderr | components/queue/queue-review.test.tsx
 @zero/mail:test: KeyboardLayoutMap API is not supported in this browser
 @zero/mail:test:
 @zero/mail:test: stderr | lib/hotkeys/keyboard-parity.test.ts
@@ -78,93 +88,144 @@ turbo 2.5.6
 @zero/mail:test: stderr | lib/hotkeys/keyboard-runtime.test.tsx
 @zero/mail:test: KeyboardLayoutMap API is not supported in this browser
 @zero/mail:test:
+@zero/mail:test: stderr | hooks/use-optimistic-actions.test.ts > useOptimisticActions — markAsRead (silent = exécution directe) > chemin d’erreur (post-#34) : undo + réconciliation liste + toast.error avec action Retry
+@zero/mail:test: Action failed: Error: net
+@zero/mail:test: at /Users/thomasverdenne/cc/zero-niveau10/.architect/wt/niveau10/final-qa-01/apps/mail/hooks/use-optimistic-actions.test.ts:149:68
+@zero/mail:test: at file:///Users/thomasverdenne/cc/zero-niveau10/.architect/wt/niveau10/final-qa-01/node_modules/.pnpm/@vitest+runner@3.2.7/node_modules/@vitest/runner/dist/chunk-hooks.js:155:11
+@zero/mail:test: at file:///Users/thomasverdenne/cc/zero-niveau10/.architect/wt/niveau10/final-qa-01/node_modules/.pnpm/@vitest+runner@3.2.7/node_modules/@vitest/runner/dist/chunk-hooks.js:752:26
+@zero/mail:test: at file:///Users/thomasverdenne/cc/zero-niveau10/.architect/wt/niveau10/final-qa-01/node_modules/.pnpm/@vitest+runner@3.2.7/node_modules/@vitest/runner/dist/chunk-hooks.js:1897:20
+@zero/mail:test: at new Promise (<anonymous>)
+@zero/mail:test: at runWithTimeout (file:///Users/thomasverdenne/cc/zero-niveau10/.architect/wt/niveau10/final-qa-01/node_modules/.pnpm/@vitest+runner@3.2.7/node_modules/@vitest/runner/dist/chunk-hooks.js:1863:10)
+@zero/mail:test: at runTest (file:///Users/thomasverdenne/cc/zero-niveau10/.architect/wt/niveau10/final-qa-01/node_modules/.pnpm/@vitest+runner@3.2.7/node_modules/@vitest/runner/dist/chunk-hooks.js:1574:12)
+@zero/mail:test: at runSuite (file:///Users/thomasverdenne/cc/zero-niveau10/.architect/wt/niveau10/final-qa-01/node_modules/.pnpm/@vitest+runner@3.2.7/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)
+@zero/mail:test: at runSuite (file:///Users/thomasverdenne/cc/zero-niveau10/.architect/wt/niveau10/final-qa-01/node_modules/.pnpm/@vitest+runner@3.2.7/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)
+@zero/mail:test: at runFiles (file:///Users/thomasverdenne/cc/zero-niveau10/.architect/wt/niveau10/final-qa-01/node_modules/.pnpm/@vitest+runner@3.2.7/node_modules/@vitest/runner/dist/chunk-hooks.js:1787:3)
+@zero/mail:test:
+@zero/mail:test: stderr | hooks/use-optimistic-actions.test.ts > useOptimisticActions — markAsRead (silent = exécution directe) > chemin d’erreur (post-#34) : undo + réconciliation liste + toast.error avec action Retry
+@zero/mail:test: Action failed: Error: net
+@zero/mail:test: at /Users/thomasverdenne/cc/zero-niveau10/.architect/wt/niveau10/final-qa-01/apps/mail/hooks/use-optimistic-actions.test.ts:149:68
+@zero/mail:test: at file:///Users/thomasverdenne/cc/zero-niveau10/.architect/wt/niveau10/final-qa-01/node_modules/.pnpm/@vitest+runner@3.2.7/node_modules/@vitest/runner/dist/chunk-hooks.js:155:11
+@zero/mail:test: at file:///Users/thomasverdenne/cc/zero-niveau10/.architect/wt/niveau10/final-qa-01/node_modules/.pnpm/@vitest+runner@3.2.7/node_modules/@vitest/runner/dist/chunk-hooks.js:752:26
+@zero/mail:test: at file:///Users/thomasverdenne/cc/zero-niveau10/.architect/wt/niveau10/final-qa-01/node_modules/.pnpm/@vitest+runner@3.2.7/node_modules/@vitest/runner/dist/chunk-hooks.js:1897:20
+@zero/mail:test: at new Promise (<anonymous>)
+@zero/mail:test: at runWithTimeout (file:///Users/thomasverdenne/cc/zero-niveau10/.architect/wt/niveau10/final-qa-01/node_modules/.pnpm/@vitest+runner@3.2.7/node_modules/@vitest/runner/dist/chunk-hooks.js:1863:10)
+@zero/mail:test: at runTest (file:///Users/thomasverdenne/cc/zero-niveau10/.architect/wt/niveau10/final-qa-01/node_modules/.pnpm/@vitest+runner@3.2.7/node_modules/@vitest/runner/dist/chunk-hooks.js:1574:12)
+@zero/mail:test: at runSuite (file:///Users/thomasverdenne/cc/zero-niveau10/.architect/wt/niveau10/final-qa-01/node_modules/.pnpm/@vitest+runner@3.2.7/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)
+@zero/mail:test: at runSuite (file:///Users/thomasverdenne/cc/zero-niveau10/.architect/wt/niveau10/final-qa-01/node_modules/.pnpm/@vitest+runner@3.2.7/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)
+@zero/mail:test: at runFiles (file:///Users/thomasverdenne/cc/zero-niveau10/.architect/wt/niveau10/final-qa-01/node_modules/.pnpm/@vitest+runner@3.2.7/node_modules/@vitest/runner/dist/chunk-hooks.js:1787:3)
+@zero/mail:test:
 @zero/mail:test: stderr | components/context/command-palette-search.test.tsx
 @zero/mail:test: KeyboardLayoutMap API is not supported in this browser
 @zero/mail:test:
-@zero/mail:test: ✓ components/queue/queue-review.test.tsx (4 tests) 3ms
-@zero/mail:test: stderr | hooks/use-optimistic-actions.test.ts > useOptimisticActions — markAsRead (silent = exécution directe) > chemin d’erreur (post-#34) : undo + réconciliation liste + toast.error avec action Retry
-@zero/mail:test: Action failed: Error: net
-@zero/mail:test: at /Users/thomasverdenne/cc/zero-niveau10/.architect/wt/niveau10/final-qa-01/apps/mail/hooks/use-optimistic-actions.test.ts:149:68
-@zero/mail:test: at file:///Users/thomasverdenne/cc/zero-niveau10/.architect/wt/niveau10/final-qa-01/node_modules/.pnpm/@vitest+runner@3.2.7/node_modules/@vitest/runner/dist/chunk-hooks.js:155:11
-@zero/mail:test: at file:///Users/thomasverdenne/cc/zero-niveau10/.architect/wt/niveau10/final-qa-01/node_modules/.pnpm/@vitest+runner@3.2.7/node_modules/@vitest/runner/dist/chunk-hooks.js:752:26
-@zero/mail:test: at file:///Users/thomasverdenne/cc/zero-niveau10/.architect/wt/niveau10/final-qa-01/node_modules/.pnpm/@vitest+runner@3.2.7/node_modules/@vitest/runner/dist/chunk-hooks.js:1897:20
-@zero/mail:test: at new Promise (<anonymous>)
-@zero/mail:test: at runWithTimeout (file:///Users/thomasverdenne/cc/zero-niveau10/.architect/wt/niveau10/final-qa-01/node_modules/.pnpm/@vitest+runner@3.2.7/node_modules/@vitest/runner/dist/chunk-hooks.js:1863:10)
-@zero/mail:test: at runTest (file:///Users/thomasverdenne/cc/zero-niveau10/.architect/wt/niveau10/final-qa-01/node_modules/.pnpm/@vitest+runner@3.2.7/node_modules/@vitest/runner/dist/chunk-hooks.js:1574:12)
-@zero/mail:test: at runSuite (file:///Users/thomasverdenne/cc/zero-niveau10/.architect/wt/niveau10/final-qa-01/node_modules/.pnpm/@vitest+runner@3.2.7/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)
-@zero/mail:test: at runSuite (file:///Users/thomasverdenne/cc/zero-niveau10/.architect/wt/niveau10/final-qa-01/node_modules/.pnpm/@vitest+runner@3.2.7/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)
-@zero/mail:test: at runFiles (file:///Users/thomasverdenne/cc/zero-niveau10/.architect/wt/niveau10/final-qa-01/node_modules/.pnpm/@vitest+runner@3.2.7/node_modules/@vitest/runner/dist/chunk-hooks.js:1787:3)
-@zero/mail:test:
-@zero/mail:test: stderr | hooks/use-optimistic-actions.test.ts > useOptimisticActions — markAsRead (silent = exécution directe) > chemin d’erreur (post-#34) : undo + réconciliation liste + toast.error avec action Retry
-@zero/mail:test: Action failed: Error: net
-@zero/mail:test: at /Users/thomasverdenne/cc/zero-niveau10/.architect/wt/niveau10/final-qa-01/apps/mail/hooks/use-optimistic-actions.test.ts:149:68
-@zero/mail:test: at file:///Users/thomasverdenne/cc/zero-niveau10/.architect/wt/niveau10/final-qa-01/node_modules/.pnpm/@vitest+runner@3.2.7/node_modules/@vitest/runner/dist/chunk-hooks.js:155:11
-@zero/mail:test: at file:///Users/thomasverdenne/cc/zero-niveau10/.architect/wt/niveau10/final-qa-01/node_modules/.pnpm/@vitest+runner@3.2.7/node_modules/@vitest/runner/dist/chunk-hooks.js:752:26
-@zero/mail:test: at file:///Users/thomasverdenne/cc/zero-niveau10/.architect/wt/niveau10/final-qa-01/node_modules/.pnpm/@vitest+runner@3.2.7/node_modules/@vitest/runner/dist/chunk-hooks.js:1897:20
-@zero/mail:test: at new Promise (<anonymous>)
-@zero/mail:test: at runWithTimeout (file:///Users/thomasverdenne/cc/zero-niveau10/.architect/wt/niveau10/final-qa-01/node_modules/.pnpm/@vitest+runner@3.2.7/node_modules/@vitest/runner/dist/chunk-hooks.js:1863:10)
-@zero/mail:test: at runTest (file:///Users/thomasverdenne/cc/zero-niveau10/.architect/wt/niveau10/final-qa-01/node_modules/.pnpm/@vitest+runner@3.2.7/node_modules/@vitest/runner/dist/chunk-hooks.js:1574:12)
-@zero/mail:test: at runSuite (file:///Users/thomasverdenne/cc/zero-niveau10/.architect/wt/niveau10/final-qa-01/node_modules/.pnpm/@vitest+runner@3.2.7/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)
-@zero/mail:test: at runSuite (file:///Users/thomasverdenne/cc/zero-niveau10/.architect/wt/niveau10/final-qa-01/node_modules/.pnpm/@vitest+runner@3.2.7/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)
-@zero/mail:test: at runFiles (file:///Users/thomasverdenne/cc/zero-niveau10/.architect/wt/niveau10/final-qa-01/node_modules/.pnpm/@vitest+runner@3.2.7/node_modules/@vitest/runner/dist/chunk-hooks.js:1787:3)
-@zero/mail:test:
+@zero/mail:test: ✓ components/icons/animated/icon-restart.test.tsx (3 tests) 20ms
 @zero/mail:test: ✓ lib/hotkeys/keyboard-parity.test.ts (12 tests) 8ms
-@zero/mail:test: ✓ components/icons/animated/icon-restart.test.tsx (3 tests) 25ms
-@zero/mail:test: ✓ hooks/use-optimistic-actions.test.ts (19 tests) 50ms
-@zero/server:test: ✓ src/lib/driver/google-labels.test.ts (14 tests) 119ms
-@zero/mail:test: ✓ components/mail/label-move-picker.logic.test.ts (3 tests) 4ms
-@zero/mail:test: ✓ components/ui/animated-number.test.ts (5 tests) 2ms
+@zero/mail:test: ✓ hooks/use-optimistic-actions.test.ts (19 tests) 52ms
+@zero/server:test: ✓ src/lib/driver/google-labels.test.ts (14 tests) 116ms
+@zero/mail:test: ✓ components/create/send-and-archive.test.ts (4 tests) 2ms
 @zero/mail:test: ✓ lib/optimistic-actions-manager.test.ts (4 tests) 2ms
 @zero/mail:test: ✓ lib/mail-list-state.test.ts (6 tests) 3ms
-@zero/mail:test: ✓ lib/thread-view-state.test.ts (6 tests) 2ms
-@zero/server:test: ✓ src/routes/agent/mcp-draft-loop.test.ts (17 tests) 354ms
-@zero/mail:test: ✓ lib/optimistic-recovery.test.ts (4 tests) 10ms
-@zero/mail:test: ✓ components/queue/queue-view-model.test.ts (2 tests) 1ms
-@zero/mail:test: ✓ components/mail/mail-list-thread.test.ts (6 tests) 3ms
+@zero/mail:test: ✓ components/ui/animated-number.test.ts (5 tests) 2ms
 @zero/mail:test: ✓ lib/composer-flush.test.ts (4 tests) 2ms
-@zero/mail:test: ✓ components/mail/mail-lazy-surfaces.test.tsx (5 tests) 26ms
-@zero/mail:test: ✓ components/mail/thread-display.transition.test.ts (3 tests) 2ms
-@zero/mail:test: ✓ components/context/command-registry.test.ts (4 tests) 3ms
-@zero/mail:test: ✓ components/context/command-palette-search.test.tsx (23 tests) 158ms
+@zero/mail:test: stderr | components/queue/queue-review.test.tsx
+@zero/mail:test: KeyboardLayoutMap API is not supported in this browser
+@zero/mail:test:
+@zero/mail:test: ✓ components/mail/mail-list-thread.test.ts (6 tests) 2ms
+@zero/mail:test: ✓ components/queue/queue-review.test.tsx (4 tests) 2ms
+@zero/mail:test: ✓ lib/thread-view-state.test.ts (6 tests) 2ms
+@zero/mail:test: ✓ components/mail/thread-display.transition.test.ts (3 tests) 1ms
+@zero/server:test: ✓ src/routes/agent/mcp-draft-loop.test.ts (17 tests) 154ms
+@zero/mail:test: ✓ components/mail/mail-lazy-surfaces.test.tsx (5 tests) 19ms
+@zero/mail:test: ✓ components/queue/queue-view-model.test.ts (2 tests) 1ms
+@zero/mail:test: ✓ components/context/command-registry.test.ts (4 tests) 2ms
+@zero/mail:test: ✓ components/context/command-palette-search.test.tsx (23 tests) 138ms
 @zero/server:test: stdout | src/routes/agent/projection.test.ts > buildThreadProjection (#30 rich list projection) > serializes 50 rows well under the 120 KiB gzip budget
 @zero/server:test: [#30] 50-row projection payload: raw=17959B gzip=1274B (budget 122880B)
 @zero/server:test:
-@zero/server:test: ✓ src/routes/agent/projection.test.ts (9 tests) 5ms
+@zero/server:test: ✓ src/routes/agent/projection.test.ts (9 tests) 4ms
 @zero/server:test:
 @zero/server:test: Test Files 27 passed (27)
 @zero/server:test: Tests 324 passed (324)
-@zero/server:test: Start at 06:13:38
-@zero/server:test: Duration 3.01s (transform 2.45s, setup 0ms, collect 10.86s, tests 740ms, environment 9ms, prepare 4.61s)
+@zero/server:test: Start at 06:16:14
+@zero/server:test: Duration 2.35s (transform 2.44s, setup 0ms, collect 9.53s, tests 505ms, environment 3ms, prepare 3.73s)
 @zero/server:test:
-@zero/mail:test: ✓ components/context/command-palette-context.test.tsx (6 tests) 29ms
-@zero/mail:test: ✓ components/mail/ux-trust.test.tsx (6 tests) 12ms
+@zero/mail:test: ✓ components/context/command-palette-context.test.tsx (6 tests) 23ms
+@zero/mail:test: ✓ components/mail/ux-trust.test.tsx (6 tests) 9ms
 @zero/mail:test: ✓ components/mail/thread-triage.test.tsx (6 tests) 4ms
-@zero/mail:test: ✓ lib/hotkeys/keyboard-runtime.test.tsx (10 tests) 2247ms
-@zero/mail:test: ✓ keyboard runtime > opens localized contextual shortcut help in place from Shift+? 2229ms
+@zero/mail:test: ✓ lib/hotkeys/keyboard-runtime.test.tsx (10 tests) 1742ms
+@zero/mail:test: ✓ keyboard runtime > opens localized contextual shortcut help in place from Shift+? 1723ms
 @zero/mail:test: ✓ components/ui/app-sidebar.triggers.test.tsx (3 tests) 30ms
 @zero/mail:test:
 @zero/mail:test: Test Files 28 passed (28)
 @zero/mail:test: Tests 196 passed (196)
-@zero/mail:test: Start at 06:13:38
-@zero/mail:test: Duration 3.94s (transform 2.79s, setup 0ms, collect 16.24s, tests 2.70s, environment 16.03s, prepare 3.62s)
+@zero/mail:test: Start at 06:16:14
+@zero/mail:test: Duration 3.18s (transform 2.17s, setup 0ms, collect 12.47s, tests 2.16s, environment 12.78s, prepare 2.95s)
 @zero/mail:test:
 
 Tasks: 2 successful, 2 total
 Cached: 0 cached, 2 total
-Time: 4.522s
+Time: 3.677s
 
 ## RUN line 10
 
 $ git diff --name-only --diff-filter=ACMR bc3dab47...HEAD -- apps/mail apps/server docs/agent scripts/security | rg '\.(ts|tsx|js|jsx|mjs|cjs|json|jsonc|md|mdx|css|html|yml|yaml)$' | tr '\n' '\0' | xargs -0 pnpm exec prettier --check && pnpm --filter @zero/server exec eslint src/routes/index.ts src/lib/logger.ts src/routes/agent/mcp.ts src/routes/agent/mcp-tools.ts src/routes/agent/mcp-tools.test.ts src/routes/agent/mcp-draft-loop.ts src/routes/agent/mcp-draft-loop.test.ts src/lib/driver/agent-drafts.ts src/lib/driver/google-drafts.ts && pnpm --filter @zero/mail exec eslint config/shortcuts.ts lib/hotkeys components/context/command-palette-search.test.tsx components/mail components/queue components/create/email-composer.tsx components/create/email-composer.fields.tsx components/create/create-email.tsx hooks/use-composer-draft-persistence.ts hooks/use-labels-search.ts hooks/use-mail-navigation.ts app/root.tsx app/'(routes)'/settings/shortcuts
-exit: 1 ms: 1556 bytes: 163
+exit: 0 ms: 4144 bytes: 6566
 Checking formatting...
-[warn] apps/server/src/lib/driver/google-drafts.test.ts
-[warn] Code style issues found in the above file. Run Prettier with --write to fix.
+All matched files use Prettier code style!
+Warning: React version not specified in eslint-plugin-react settings. See https://github.com/jsx-eslint/eslint-plugin-react#configuration .
+Warning: React version not specified in eslint-plugin-react settings. See https://github.com/jsx-eslint/eslint-plugin-react#configuration .
+
+/Users/thomasverdenne/cc/zero-niveau10/.architect/wt/niveau10/final-qa-01/apps/mail/components/create/email-composer.tsx
+251:9 warning The 'handleAttachment' function makes the dependencies of useEffect Hook (at line 670) change on every render. To fix this, wrap the definition of 'handleAttachment' in its own useCallback() Hook react-hooks/exhaustive-deps
+457:9 warning The 'saveDraft' function makes the dependencies of useEffect Hook (at line 651) change on every render. To fix this, wrap the definition of 'saveDraft' in its own useCallback() Hook react-hooks/exhaustive-deps
+551:9 warning The 'handleClose' function makes the dependencies of useEffect Hook (at line 572) change on every render. To fix this, wrap the definition of 'handleClose' in its own useCallback() Hook react-hooks/exhaustive-deps
+
+/Users/thomasverdenne/cc/zero-niveau10/.architect/wt/niveau10/final-qa-01/apps/mail/components/mail/mail-display.research.tsx
+95:6 warning React Hook useCallback has missing dependencies: 'doSearch' and 'person.email'. Either include them or remove the dependency array react-hooks/exhaustive-deps
+101:6 warning React Hook useEffect has a missing dependency: 'handleSearch'. Either include it or remove the dependency array react-hooks/exhaustive-deps
+123:5 warning React Hook useCallback has a missing dependency: 'findSource'. Either include it or remove the dependency array react-hooks/exhaustive-deps
+
+/Users/thomasverdenne/cc/zero-niveau10/.architect/wt/niveau10/final-qa-01/apps/mail/components/mail/mail-display.tsx
+128:6 warning React Hook useEffect has missing dependencies: 'index' and 'totalEmails'. Either include them or remove the dependency array react-hooks/exhaustive-deps
+244:5 warning React Hook useCallback has a missing dependency: 'handleCopySenderEmail'. Either include it or remove the dependency array react-hooks/exhaustive-deps
+263:6 warning React Hook useMemo has a missing dependency: 'folder'. Either include it or remove the dependency array react-hooks/exhaustive-deps
+
+/Users/thomasverdenne/cc/zero-niveau10/.architect/wt/niveau10/final-qa-01/apps/mail/components/mail/mail-list-draft.tsx
+28:6 warning React Hook useCallback has missing dependencies: 'setComposeOpen' and 'setDraftId'. Either include them or remove the dependency array react-hooks/exhaustive-deps
+
+/Users/thomasverdenne/cc/zero-niveau10/.architect/wt/niveau10/final-qa-01/apps/mail/components/mail/mail-list-thread.tsx
+132:8 warning React Hook useMemo has a missing dependency: 'getThreadData?.latest?.body'. Either include it or remove the dependency array react-hooks/exhaustive-deps
+441:6 warning React Hook useMemo has missing dependencies: 'cleanName', 'displayImportant', 'displayStarred', 'handleToggleImportant', 'handleToggleStar', 'hasDraft', 'index', 'isGroupThread', 'isKeyboardFocused', 'moveThreadTo', 'queryClient', 'setMail', and 'trpc.mail.get'. Either include them or remove the dependency array react-hooks/exhaustive-deps
+
+/Users/thomasverdenne/cc/zero-niveau10/.architect/wt/niveau10/final-qa-01/apps/mail/components/mail/mail-list.tsx
+118:7 warning React Hook useCallback has a missing dependency: 'setAnchorIndex'. Either include it or remove the dependency array react-hooks/exhaustive-deps
+145:8 warning React Hook useEffect has a missing dependency: 'searchValue'. Either include it or remove the dependency array react-hooks/exhaustive-deps
+187:7 warning React Hook useCallback has a missing dependency: 'Comp'. Either include it or remove the dependency array react-hooks/exhaustive-deps
+
+/Users/thomasverdenne/cc/zero-niveau10/.architect/wt/niveau10/final-qa-01/apps/mail/components/mail/mail.tsx
+349:6 warning React Hook useEffect has a missing dependency: 'navigate'. Either include it or remove the dependency array react-hooks/exhaustive-deps
+
+/Users/thomasverdenne/cc/zero-niveau10/.architect/wt/niveau10/final-qa-01/apps/mail/components/queue/queue-review.tsx
+135:9 warning The 'items' logical expression could make the dependencies of useMemo Hook (at line 137) change on every render. To fix this, wrap the initialization of 'items' in its own useMemo() Hook react-hooks/exhaustive-deps
+142:9 warning The 'visibleStatuses' conditional could make the dependencies of useMemo Hook (at line 145) change on every render. To fix this, wrap the initialization of 'visibleStatuses' in its own useMemo() Hook react-hooks/exhaustive-deps
+319:8 warning React Hook useMemo has missing dependencies: 'approveItem', 'cancelItem', and 'openItem'. Either include them or remove the dependency array react-hooks/exhaustive-deps
+
+/Users/thomasverdenne/cc/zero-niveau10/.architect/wt/niveau10/final-qa-01/apps/mail/hooks/use-composer-draft-persistence.ts
+33:5 warning React Hook useMemo has a missing dependency: 'scope'. Either include it or remove the dependency array react-hooks/exhaustive-deps
+
+/Users/thomasverdenne/cc/zero-niveau10/.architect/wt/niveau10/final-qa-01/apps/mail/hooks/use-mail-navigation.ts
+143:5 warning React Hook useCallback has a missing dependency: 'optimisticMarkAsRead'. Either include it or remove the dependency array react-hooks/exhaustive-deps
+274:5 warning React Hook useCallback has an unnecessary dependency: 'setFocusedIndex'. Either exclude it or remove the dependency array react-hooks/exhaustive-deps
+
+/Users/thomasverdenne/cc/zero-niveau10/.architect/wt/niveau10/final-qa-01/apps/mail/lib/hotkeys/mail-list-hotkeys.tsx
+85:6 warning React Hook useCallback has a missing dependency: 'setMail'. Either include it or remove the dependency array react-hooks/exhaustive-deps
+197:6 warning React Hook useCallback has a missing dependency: 'setMail'. Either include it or remove the dependency array react-hooks/exhaustive-deps
+
+✖ 24 problems (0 errors, 24 warnings)
 
 ## RUN line 11
 
 $ pnpm --filter @zero/server types && pnpm --filter @zero/mail types && pnpm --filter @zero/mail exec react-router typegen && TYPECHECK_BLOCKING=1 node scripts/checks/typecheck-report.mjs
-exit: 0 ms: 10802 bytes: 7471
+exit: 0 ms: 10902 bytes: 7470
 
 > @zero/server@ types /Users/thomasverdenne/cc/zero-niveau10/.architect/wt/niveau10/final-qa-01/apps/server
 > wrangler types --env local
@@ -276,8 +337,18 @@ Runtime types generated.
 https://developers.cloudflare.com/workers/languages/typescript/#generate-types
 📣 Remember to rerun 'wrangler types' after you change your wrangler.json file.
 
-(node:92968) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(node:1190) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
 (Use `node --trace-warnings ...` to show where the warning was created)
+
+[38;2;244;191;117;1m⚠[0m [38;2;244;191;117;1meslint(no-unused-vars): Parameter 'values' is declared but never used. Unused parameters should start with a '\_'.[0m
+╭─[[38;2;92;157;255;1mapp/(routes)/settings/security/page.tsx[0m:35:21]
+[2m34[0m │
+[2m35[0m │ function onSubmit(values: z.infer<typeof formSchema>) {
+· [38;2;246;87;248m ───┬──[0m
+· [38;2;246;87;248m╰── [38;2;246;87;248m'values' is declared here[0m[0m
+[2m36[0m │ setIsSaving(true);
+╰────
+[38;2;106;159;181m help: [0mConsider removing this parameter.
 
 [38;2;244;191;117;1m⚠[0m [38;2;244;191;117;1meslint(no-unused-vars): Identifier 'useState' is imported but never used.[0m
 ╭─[[38;2;92;157;255;1mcomponents/ui/ai-sidebar.tsx[0m:8:10]
@@ -299,18 +370,8 @@ https://developers.cloudflare.com/workers/languages/typescript/#generate-types
 ╰────
 [38;2;106;159;181m help: [0mConsider removing this import.
 
-[38;2;244;191;117;1m⚠[0m [38;2;244;191;117;1meslint(no-unused-vars): Parameter 'values' is declared but never used. Unused parameters should start with a '\_'.[0m
-╭─[[38;2;92;157;255;1mapp/(routes)/settings/security/page.tsx[0m:35:21]
-[2m34[0m │
-[2m35[0m │ function onSubmit(values: z.infer<typeof formSchema>) {
-· [38;2;246;87;248m ───┬──[0m
-· [38;2;246;87;248m╰── [38;2;246;87;248m'values' is declared here[0m[0m
-[2m36[0m │ setIsSaving(true);
-╰────
-[38;2;106;159;181m help: [0mConsider removing this parameter.
-
 Found 3 warnings and 0 errors.
-Finished in 27ms on 366 files using 18 threads.
+Finished in 20ms on 366 files using 18 threads.
 
 Oxlint successfully finished.
 ✔ [paraglide-js] Compilation complete (message-modules)
@@ -322,8 +383,10 @@ typecheck-report OK — no regression above baseline.
 ## RUN line 12
 
 $ pnpm --filter @zero/mail exec react-router typegen && pnpm --filter @zero/mail build
-exit: 0 ms: 21120 bytes: 33629 truncated
+exit: 0 ms: 20503 bytes: 33789 truncated
 ✔ [paraglide-js] Compilation complete (message-modules)
+(node:1722) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
 
 > @zero/mail@0.1.0 build /Users/thomasverdenne/cc/zero-niveau10/.architect/wt/niveau10/final-qa-01/apps/mail
 > react-router build
@@ -331,7 +394,7 @@ exit: 0 ms: 21120 bytes: 33629 truncated
 ✔ [paraglide-js] Compilation complete (message-modules)
 Using Vite Environment API (experimental)
 vite v6.3.5 building for production...
-(node:93700) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(node:1946) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
 (Use `node --trace-warnings ...` to show where the warning was created)
 
 [38;2;244;191;117;1m⚠[0m [38;2;244;191;117;1meslint(no-unused-vars): Parameter 'values' is declared but never used. Unused parameters should start with a '\_'.[0m
@@ -370,18 +433,8 @@ Finished in 11ms on 366 files using 18 threads.
 Oxlint successfully finished.
 ✔ [paraglide-js] Compilation complete (message-modules)
 transforming...
-(node:93753) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(node:2001) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
 (Use `node --trace-warnings ...` to show where the warning was created)
-
-[38;2;244;191;117;1m⚠[0m [38;2;244;191;117;1meslint(no-unused-vars): Parameter 'values' is declared but never used. Unused parameters should start with a '\_'.[0m
-╭─[[38;2;92;157;255;1mapp/(routes)/settings/security/page.tsx[0m:35:21]
-[2m34[0m │
-[2m35[0m │ function onSubmit(values: z.infer<typeof formSchema>) {
-· [38;2;246;87;248m ───┬──[0m
-· [38;2;246;87;248m╰── [38;2;246;87;248m'values' is declared here[0m[0m
-[2m36[0m │ setIsSaving(true);
-╰────
-[38;2;106;159;181m help: [0mConsider removing this parameter.
 
 [38;2;244;191;117;1m⚠[0m [38;2;244;191;117;1meslint(no-unused-vars): Identifier 'useState' is imported but never used.[0m
 ╭─[[38;2;92;157;255;1mcomponents/ui/ai-sidebar.tsx[0m:8:10]
@@ -402,6 +455,16 @@ transforming...
 [2m9[0m │ import useSearchLabels from '@/hooks/use-labels-search';
 ╰────
 [38;2;106;159;181m help: [0mConsider removing this import.
+
+[38;2;244;191;117;1m⚠[0m [38;2;244;191;117;1meslint(no-unused-vars): Parameter 'values' is declared but never used. Unused parameters should start with a '\_'.[0m
+╭─[[38;2;92;157;255;1mapp/(routes)/settings/security/page.tsx[0m:35:21]
+[2m34[0m │
+[2m35[0m │ function onSubmit(values: z.infer<typeof formSchema>) {
+· [38;2;246;87;248m ───┬──[0m
+· [38;2;246;87;248m╰── [38;2;246;87;248m'values' is declared here[0m[0m
+[2m36[0m │ setIsSaving(true);
+╰────
+[38;2;106;159;181m help: [0mConsider removing this parameter.
 
 Found 3 warnings and 0 errors.
 Finished in 11ms on 366 files using 18 threads.
@@ -540,13 +603,11 @@ build/client/assets/thread-display.animated-message-list-DoMPVPe2.js 4.32 kB │
 build/client/assets/page-IZ6HN6OD.js 4.41 kB │ gzip: 2.07 kB
 build/client/assets/page-k-x2zaof.js 4.52 kB │ gzip: 1.94 kB
 build/client/assets/use-billing-Bz4A3HnK.js 5.05 kB │ gzip: 1.96 kB
-build/client/assets/command-palette-context-CUmnn6uZ.js 5.17 kB │ gzip: 2.40 kB
-build/client/assets/add-ByC2Inz0.js 5.17 kB │ gzip: 2.36 kB
 
 ## RUN line 13
 
 $ pnpm --filter @zero/server exec wrangler deploy --dry-run --env local --outdir .architect/tmp/niveau10-server-dryrun
-exit: 0 ms: 2732 bytes: 5773
+exit: 0 ms: 2680 bytes: 5773
 
 ⛅️ wrangler 4.32.0 (update available 4.110.0)
 ──────────────────────────────────────────────
@@ -610,10 +671,10 @@ env.DD_SITE ("datadoghq.com") Environment Variable
 ## RUN line 14
 
 $ node scripts/security/check-agent-surface.mjs
-exit: 0 ms: 30 bytes: 84
+exit: 0 ms: 29 bytes: 84
 Security surface check passed: least scopes, bounded session cache, draft-only MCP.
 
 ## RUN line 15
 
 $ git diff --check
-exit: 0 ms: 31 bytes: 0
+exit: 0 ms: 18 bytes: 0
