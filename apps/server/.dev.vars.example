@@ -48,7 +48,7 @@ ZERO_CLIENT_SECRET=""
 OPENAI_API_KEY=""
 OPENAI_MODEL=""
 OPENAI_MINI_MODEL=""
-ANTHROPIC_API_KEY=""
+ANTHROPIC_API_KEY="" # gitleaks:allow — placeholder vide ; guillemets vides adjacents = faux positif bridging generic-api-key
 GROQ_API_KEY=""
 PERPLEXITY_API_KEY=""
 GOOGLE_GENERATIVE_AI_API_KEY=""

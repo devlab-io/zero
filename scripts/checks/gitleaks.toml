@@ -28,3 +28,16 @@ this single generated file.
 paths = [
   '''(^|/)i18n\.lock$''',
 ]
+
+[[allowlists]]
+description = """
+Evidence checkrun headers (docs/jobs/**/*-checkrun.md) print a git commit SHA as
+`freeze_sha: <40-hex>` right after a check filename ending in "…api.md"; the "api"
+keyword adjacent to the 40-hex string trips generic-api-key. A git SHA is never a
+secret. Scoped by the literal `freeze_sha:` label + exactly 40 lowercase-hex chars
+(regexTarget = line): pérenne for every checkrun, and cannot match a real credential.
+"""
+regexTarget = "line"
+regexes = [
+  '''freeze_sha: [0-9a-f]{40}''',
+]
