@@ -9,18 +9,22 @@
 
 ## Contexte
 
-Ce dépôt est un fork de `Mail-0/Zero`. Trois éléments coexistent (constatés, non tranchés) :
+Ce dépôt est un fork de `Mail-0/Zero`. Les correspondances de « Zero Email Inc » se répartissent en
+catégories distinctes (constatées, non tranchées) :
 
 - la racine est sous **MIT** (`LICENSE`, `Copyright (c) 2025 Zero Email`) ;
-- **20 fichiers** serveur/mail portent un en-tête référençant l'**Apache License 2.0** **assorti
-  d'une clause additionnelle restrictive**, citée verbatim :
+- **20 fichiers restrictifs** portent un en-tête référençant l'**Apache License 2.0** **assorti d'une
+  clause additionnelle restrictive**, citée verbatim :
   > `Reuse or distribution of this file requires a license from Zero Email Inc.`
-- un pied de page produit (`footer.tsx`) affiche `© 2025 Zero Email Inc, All Rights Reserved` —
-  **branding** distinct de la question de licence.
+- **`apps/mail/app/instrument.ts`** : un **commentaire de télémétrie** (DSN Sentry upstream) — **pas**
+  d'en-tête Apache, **pas** de clause ;
+- **`apps/mail/components/home/footer.tsx`** : **branding** UI (`© … All Rights Reserved`), distinct
+  de la question de licence.
 
-Au point de coupe du run (`23359642`), 9 fichiers correspondaient à « Zero Email Inc » (7 en-têtes +
-2 mentions) ; le HEAD en compte 22 après les éclatements du run — inventaire et mapping dans
-`LICENSE-NOTES.md`. L'axe conformité (A10) exige une **posture documentée**, pas une réécriture
+Décompte au HEAD : **22 = 20 restrictifs + 1 commentaire de télémétrie (`instrument.ts`) + 1 branding
+(`footer.tsx`)**. À la baseline (`23359642`) : **9 = 7 restrictifs + `instrument.ts` + `footer.tsx`**.
+La lignée restrictive est **7 → 20 (+13 dérivés : #22 +11, #36 +2)** — tableau origine→dérivés dans
+`LICENSE-NOTES.md` §3. L'axe conformité (A10) exige une **posture documentée**, pas une réécriture
 clean-room ni une conclusion sur la portée de la clause.
 
 ## Décision

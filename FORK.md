@@ -47,9 +47,13 @@ pas :
 
 ## Posture de redistribution (stricte)
 
-**20 fichiers** portent un en-tête référençant l'Apache 2.0 **assorti d'une clause additionnelle
-restrictive** : `Reuse or distribution of this file requires a license from Zero Email Inc.` La portée
-de cette clause et son articulation avec le MIT racine **ne sont pas tranchées ici**. En conséquence,
+**20 fichiers restrictifs** portent un en-tête référençant l'Apache 2.0 **assorti d'une clause
+additionnelle restrictive** : `Reuse or distribution of this file requires a license from Zero Email Inc.`
+Décompte au HEAD : **22 correspondances « Zero Email Inc » = 20 restrictifs + `apps/mail/app/instrument.ts`
+(commentaire de télémétrie, pas d'en-tête) + `apps/mail/components/home/footer.tsx` (branding UI)**.
+Baseline `23359642` = **9 (7 restrictifs + instrument + footer)** ; lignée restrictive **7 → 20
+(+13 dérivés : #22 +11, #36 +2)**. La portée de la clause et son articulation avec le MIT racine
+**ne sont pas tranchées ici**. En conséquence,
 la posture opérationnelle du fork est prudente : **PAS de redistribution, PAS de relicensing, PAS de
 stripping** de ces fichiers **sans permission écrite d'upstream (`Zero Email Inc.`) OU une revue
 juridique**. Les en-têtes (Apache 2.0 + clause) sont préservés verbatim sur tout module dérivé. Le
