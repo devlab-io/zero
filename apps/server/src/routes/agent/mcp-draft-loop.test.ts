@@ -30,6 +30,8 @@ import {
 } from './mcp-tools';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
 import type { IGetThreadResponse, ParsedDraft } from '../../lib/driver/types';
+import type { GmailTransport } from '../../lib/driver/google-transport';
+import type { GmailMessages } from '../../lib/driver/google-messages';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { sanitizeMailContent } from '../../lib/mail-sanitize';
 import { describe, expect, it, vi } from 'vitest';
@@ -45,11 +47,15 @@ vi.mock('../../lib/driver/utils', () => ({
   deleteActiveConnection: vi.fn(),
   FatalErrors: [],
   fromBase64Url: (value: string) => value,
+  fromBinary: (value: string) => Buffer.from(value, 'base64').toString('utf-8'),
+  getSimpleLoginSender: vi.fn(() => undefined),
   sanitizeContext: (value: unknown) => value,
   StandardizedError: class StandardizedError extends Error {},
 }));
+vi.mock('../../env', () => ({ env: {} }));
 
 const { OutlookMailManager } = await import('../../lib/driver/microsoft');
+const { GmailDrafts } = await import('../../lib/driver/google-drafts');
 
 const memoryStorage = (): AtomicIdempotencyStorage => {
   const values = new Map<string, unknown>();
@@ -81,6 +87,8 @@ const message = (index: number, overrides: Record<string, unknown> = {}) => ({
   processedHtml: `<p>${'bounded '.repeat(900)}</p><span style="display:none">HIDDEN-SECRET</span>`,
   blobUrl: '',
   threadId: 'thread-owned',
+  messageId: `<message-${index}@client.example>`,
+  references: '<root@client.example> <parent@client.example>',
   ...overrides,
 });
 
@@ -292,12 +300,57 @@ describe('revisable draft handlers', () => {
       subject: 'Re: Quarterly review',
       threadId: 'thread-owned',
       replyToMessageId: 'message-24',
+      serverDerivedReplyHeaders: {
+        inReplyTo: '<message-24@client.example>',
+        references: '<root@client.example> <parent@client.example> <message-24@client.example>',
+      },
       id: null,
     });
     await expect(
       handlers.createReplyDraft({ ...input, message: 'Changed payload' }),
     ).rejects.toThrow('different payload');
     expect(environment.createEffects).toBe(1);
+  });
+
+  it.each([
+    ['missing', undefined],
+    ['malformed', 'not-a-message-id'],
+    ['CRLF injection', '<owned@client.example>\r\nBcc: attacker@evil.example'],
+  ])('rejects a %s source Message-ID before any mutation', async (_label, messageId) => {
+    const environment = fakeEnvironment();
+    const source = message(24, { messageId });
+    environment.dependencies.getThread = async () =>
+      ({
+        messages: [source],
+        latest: source,
+        hasUnread: false,
+        totalReplies: 1,
+        labels: [],
+      }) as IGetThreadResponse;
+    const storagePut = vi.fn();
+    const storage: AtomicIdempotencyStorage = {
+      get: async () => undefined,
+      put: storagePut,
+      transaction: async (closure) =>
+        closure({
+          get: async () => undefined,
+          put: storagePut,
+        }),
+    };
+    const handlers = createDraftLoopHandlers(
+      environment.dependencies,
+      new PayloadBoundIdempotency(storage),
+    );
+
+    await expect(
+      handlers.createReplyDraft({
+        threadId: 'thread-owned',
+        message: 'Body must not be persisted',
+        idempotencyKey: `invalid-${_label}`,
+      }),
+    ).rejects.toThrow('invalid RFC Message-ID');
+    expect(storagePut).not.toHaveBeenCalled();
+    expect(environment.createEffects).toBe(0);
   });
 
   it('keeps the same draft id, deduplicates 20 updates, and rejects stale revisions unchanged', async () => {
@@ -476,6 +529,67 @@ describe('Outlook reply-draft provider seam', () => {
       'patch /me/mailfolders/drafts/messages/outlook-existing-draft',
     ]);
     expect(result.id).toBe('outlook-existing-draft');
+  });
+});
+
+describe('Gmail reply-draft provider seam', () => {
+  it('writes server-derived RFC threading headers and the owned thread into raw MIME', async () => {
+    let requestBody: unknown;
+    const gmail = {
+      users: {
+        drafts: {
+          create: async (params: { requestBody?: unknown }) => {
+            requestBody = params.requestBody;
+            return { data: { id: 'gmail-reply-draft' } };
+          },
+        },
+      },
+    };
+    const transport = {
+      config: {
+        auth: {
+          userId: 'user-owned',
+          accessToken: 'unused-test-token',
+          refreshToken: 'unused-test-refresh',
+          email: 'thomas@devlab.io',
+        },
+      },
+      withErrorHandler: async (_operation: string, effect: () => Promise<unknown>) => effect(),
+      execute: async (effect: (client: typeof gmail) => Promise<unknown>) => effect(gmail),
+    } as unknown as GmailTransport;
+    const messages = { getAttachment: vi.fn() } as unknown as GmailMessages;
+    const environment = fakeEnvironment();
+    const gmailDrafts = new GmailDrafts(transport, messages);
+    environment.dependencies.createDraft = (_connectionId, data) => gmailDrafts.createDraft(data);
+    const handlers = createDraftLoopHandlers(
+      environment.dependencies,
+      new PayloadBoundIdempotency(memoryStorage()),
+    );
+    const input = {
+      threadId: 'thread-owned',
+      message: '<p>Server-derived reply</p>',
+      idempotencyKey: 'gmail-raw-reply',
+    };
+
+    const result = await handlers.createReplyDraft(input);
+
+    const body = requestBody as { message?: { raw?: string; threadId?: string } };
+    const raw = body.message?.raw ?? '';
+    const mime = Buffer.from(raw.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf-8');
+    const headerBlock = mime.split(/\r?\n\r?\n/, 1)[0] ?? '';
+    const subject = headerBlock.match(/^Subject: =\?utf-8\?B\?([^?]+)\?=$/im)?.[1];
+
+    expect(input).not.toHaveProperty('headers');
+    expect(input).not.toHaveProperty('serverDerivedReplyHeaders');
+    expect(result.value.id).toBe('gmail-reply-draft');
+    expect(body.message?.threadId).toBe('thread-owned');
+    expect(headerBlock).toContain('In-Reply-To: <message-24@client.example>');
+    expect(headerBlock).toContain(
+      'References: <root@client.example> <parent@client.example> <message-24@client.example>',
+    );
+    expect(Buffer.from(subject ?? '', 'base64').toString('utf-8')).toBe('Re: Quarterly review');
+    expect(headerBlock).not.toContain('\r\nBcc: attacker@evil.example');
+    expect(headerBlock).not.toContain('\nBcc: attacker@evil.example');
   });
 });
 

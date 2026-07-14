@@ -45,6 +45,12 @@ export type AgentReplyMetadata = {
   subject: string;
   threadId: string;
   replyToMessageId: string;
+  serverDerivedReplyHeaders: ServerDerivedReplyHeaders;
+};
+
+export type ServerDerivedReplyHeaders = {
+  inReplyTo: string;
+  references: string;
 };
 
 export type AgentDraftProjection = {
@@ -69,6 +75,45 @@ const assertHeaderValue = (label: string, value: string, maximum: number) => {
     throw new Error(`Provider returned an invalid ${label}`);
   }
   return value;
+};
+
+const RFC_MESSAGE_ID = /^<[^<>\s@]+@[^<>\s@]+>$/;
+const HEADER_CONTROL = /[\u0000-\u001f\u007f]/;
+
+export const assertServerDerivedReplyHeaders = (
+  headers: ServerDerivedReplyHeaders,
+): ServerDerivedReplyHeaders => {
+  const inReplyTo = headers.inReplyTo.trim();
+  if (
+    !inReplyTo ||
+    inReplyTo.length > 998 ||
+    HEADER_CONTROL.test(inReplyTo) ||
+    !RFC_MESSAGE_ID.test(inReplyTo)
+  ) {
+    throw new Error('Provider returned an invalid RFC Message-ID for reply threading');
+  }
+
+  const rawReferences = headers.references.trim();
+  if (!rawReferences || rawReferences.length > 998 || HEADER_CONTROL.test(rawReferences)) {
+    throw new Error('Provider returned invalid References for reply threading');
+  }
+  const references = rawReferences.split(/[ \t]+/).filter(Boolean);
+  if (!references.length || references.some((reference) => !RFC_MESSAGE_ID.test(reference))) {
+    throw new Error('Provider returned invalid References for reply threading');
+  }
+
+  return { inReplyTo, references: references.join(' ') };
+};
+
+const deriveServerReplyHeaders = (
+  messageId: string | undefined,
+  priorReferences: string | undefined,
+): ServerDerivedReplyHeaders => {
+  const inReplyTo = messageId?.trim() ?? '';
+  const references = [...new Set([...(priorReferences?.trim().split(/[ \t]+/) ?? []), inReplyTo])]
+    .filter(Boolean)
+    .join(' ');
+  return assertServerDerivedReplyHeaders({ inReplyTo, references });
 };
 
 const assertEmail = (email: string) => {
@@ -307,7 +352,14 @@ export const deriveReplyMetadata = (
     throw new Error(`Thread ${threadId} has an invalid reply subject`);
   }
 
-  return { to, cc, subject, threadId, replyToMessageId: latest.id };
+  return {
+    to,
+    cc,
+    subject,
+    threadId,
+    replyToMessageId: latest.id,
+    serverDerivedReplyHeaders: deriveServerReplyHeaders(latest.messageId, latest.references),
+  };
 };
 
 export const assertCurrentRevision = (current: AgentDraftProjection, expected: string) => {

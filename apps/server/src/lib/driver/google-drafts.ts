@@ -1,3 +1,4 @@
+import { assertServerDerivedReplyHeaders, type ServerDerivedReplyHeaders } from './agent-drafts';
 import { sanitizeTipTapHtml } from '../sanitize-tip-tap-html';
 import { parseMessage, parseOutgoing } from './google-parse';
 import type { GmailTransport } from './google-transport';
@@ -10,6 +11,10 @@ import { createMimeMessage } from 'mimetext';
 import { fromBinary } from './utils';
 import { logger } from '../logger';
 import * as he from 'he';
+
+type GmailDraftCreateData = CreateDraftData & {
+  serverDerivedReplyHeaders?: ServerDerivedReplyHeaders;
+};
 
 export class GmailDrafts {
   constructor(
@@ -149,7 +154,7 @@ export class GmailDrafts {
     );
   }
 
-  public createDraft(data: CreateDraftData) {
+  public createDraft(data: GmailDraftCreateData) {
     return this.t.withErrorHandler(
       'createDraft',
       async () => {
@@ -172,6 +177,11 @@ export class GmailDrafts {
           msg.setBcc(data.bcc?.split(', ').map((recipient: string) => ({ addr: recipient })));
 
         msg.setSubject(data.subject);
+        if (data.serverDerivedReplyHeaders) {
+          const replyHeaders = assertServerDerivedReplyHeaders(data.serverDerivedReplyHeaders);
+          msg.setHeader('In-Reply-To', replyHeaders.inReplyTo);
+          msg.setHeader('References', replyHeaders.references);
+        }
         msg.addMessage({
           contentType: 'text/html',
           data: message || '',

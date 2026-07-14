@@ -46,6 +46,10 @@ export type DraftLoopCreateData = {
   id: string | null;
   threadId: string | null;
   replyToMessageId?: string;
+  serverDerivedReplyHeaders?: {
+    inReplyTo: string;
+    references: string;
+  };
   fromEmail: null;
 };
 
@@ -109,6 +113,13 @@ export const createDraftLoopHandlers = (
     idempotencyKey: string;
   }) => {
     const active = await dependencies.getActiveConnection();
+    const thread = await dependencies.getThread(active.id, input.threadId);
+    if (!thread?.messages.length) throw new Error(MCP_THREAD_NOT_FOUND);
+    const aliases = await dependencies.getEmailAliases(active.id);
+    const metadata = deriveReplyMetadata(input.threadId, thread, [
+      active.email,
+      ...aliases.map((alias) => alias.email),
+    ]);
     return idempotency.execute({
       connectionId: active.id,
       idempotencyKey: input.idempotencyKey,
@@ -118,13 +129,6 @@ export const createDraftLoopHandlers = (
         message: input.message,
       },
       effect: async () => {
-        const thread = await dependencies.getThread(active.id, input.threadId);
-        if (!thread?.messages.length) throw new Error(MCP_THREAD_NOT_FOUND);
-        const aliases = await dependencies.getEmailAliases(active.id);
-        const metadata = deriveReplyMetadata(input.threadId, thread, [
-          active.email,
-          ...aliases.map((alias) => alias.email),
-        ]);
         const created = await dependencies.createDraft(active.id, {
           to: formatRecipients(metadata.to),
           cc: metadata.cc.length ? formatRecipients(metadata.cc) : undefined,
@@ -134,6 +138,7 @@ export const createDraftLoopHandlers = (
           id: null,
           threadId: metadata.threadId,
           replyToMessageId: metadata.replyToMessageId,
+          serverDerivedReplyHeaders: metadata.serverDerivedReplyHeaders,
           fromEmail: null,
         });
         if (created.error)
