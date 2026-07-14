@@ -22,7 +22,10 @@ export interface OwnedConnection {
 
 export interface ActiveAccountDependencies<TConnection extends OwnedConnection, TAgent> {
   findFirstOwnedConnection: (userId: string) => Promise<TConnection | undefined>;
-  findOwnedConnectionById: (userId: string, connectionId: string) => Promise<TConnection | undefined>;
+  findOwnedConnectionById: (
+    userId: string,
+    connectionId: string,
+  ) => Promise<TConnection | undefined>;
   findOwnedConnectionByEmail: (userId: string, email: string) => Promise<TConnection | undefined>;
   getAgent: (connectionId: string) => Promise<TAgent>;
 }

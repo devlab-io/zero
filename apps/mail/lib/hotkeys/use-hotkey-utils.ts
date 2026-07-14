@@ -1,9 +1,9 @@
 // TODO: Implement shortcuts syncing and caching
 import { type Shortcut, keyboardShortcuts, enhancedKeyboardShortcuts } from '@/config/shortcuts';
 import { keyboardLayoutMapper, type KeyboardLayout } from '@/utils/keyboard-layout-map';
-import { getKeyCodeFromKey } from '@/utils/keyboard-utils';
 import { useHotkeys, useHotkeysContext } from 'react-hotkeys-hook';
 import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { getKeyCodeFromKey } from '@/utils/keyboard-utils';
 import { isMac } from '@/lib/platform';
 
 export const useShortcutCache = () => {
@@ -311,8 +311,14 @@ function shortcutMatchesEvent(event: KeyboardEvent, shortcut: Shortcut): boolean
   if (!key) return false;
   const usesAltGraphPunctuation = !expected.size && isAltGraphProducedPunctuation(event, key);
 
-  if (expectsMod ? !hasMod : (event.metaKey || event.ctrlKey) && !usesAltGraphPunctuation) return false;
-  if (!expectsMod && !usesAltGraphPunctuation && (expectsMeta !== event.metaKey || expectsCtrl !== event.ctrlKey)) return false;
+  if (expectsMod ? !hasMod : (event.metaKey || event.ctrlKey) && !usesAltGraphPunctuation)
+    return false;
+  if (
+    !expectsMod &&
+    !usesAltGraphPunctuation &&
+    (expectsMeta !== event.metaKey || expectsCtrl !== event.ctrlKey)
+  )
+    return false;
   const eventKey = event.key.toLowerCase();
   // Shift and AltGr are part of producing punctuation on common layouts. A bare
   // punctuation row therefore accepts them only when the browser already reports
@@ -346,7 +352,11 @@ export function dispatchShortcutEvent(
   for (const shortcut of shortcuts) {
     if (shortcut.ignore || shortcut.type === 'sequence' || !handlers[shortcut.action]) continue;
     if (!shortcutMatchesEvent(event, shortcut)) continue;
-    if (shortcut.type === 'single' && shortcut.keys[0]?.toLowerCase() !== 'escape' && isTypingOrModalTarget(target)) {
+    if (
+      shortcut.type === 'single' &&
+      shortcut.keys[0]?.toLowerCase() !== 'escape' &&
+      isTypingOrModalTarget(target)
+    ) {
       return false;
     }
     if (shortcut.preventDefault) event.preventDefault();
@@ -367,7 +377,12 @@ export function dispatchShortcutSequenceEvent(
   const key = event.key.toLowerCase();
   // AltGr is required to produce `#` on AZERTY. Browsers may expose it as
   // Ctrl+Alt, which is accepted only for the already-produced punctuation.
-  if (event.defaultPrevented || event.metaKey || (event.ctrlKey && !isAltGraphProducedPunctuation(event, key))) return null;
+  if (
+    event.defaultPrevented ||
+    event.metaKey ||
+    (event.ctrlKey && !isAltGraphProducedPunctuation(event, key))
+  )
+    return null;
   if (isTypingOrModalTarget(event.target)) return null;
 
   if (pending && now - pending.startedAt <= timeoutMs) {

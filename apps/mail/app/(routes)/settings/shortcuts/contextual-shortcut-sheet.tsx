@@ -1,4 +1,10 @@
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { type Shortcut, keyboardShortcuts } from '@/config/shortcuts';
 import { formatDisplayKeys } from '@/lib/hotkeys/use-hotkey-utils';
 import { m } from '@/paraglide/messages';
@@ -73,11 +79,19 @@ function ShortcutRows({ shortcuts }: { shortcuts: Shortcut[] }) {
   return (
     <div className="grid gap-2 sm:grid-cols-2">
       {shortcuts.map((shortcut) => (
-        <div key={`${shortcut.scope}-${shortcut.action}-${shortcut.keys.join('-')}`} className="bg-popover text-muted-foreground flex items-center justify-between gap-2 rounded-lg border p-2 text-sm">
-          <span className="font-medium" data-shortcut-action={shortcut.action}>{actionLabel(shortcut.action)}</span>
+        <div
+          key={`${shortcut.scope}-${shortcut.action}-${shortcut.keys.join('-')}`}
+          className="bg-popover text-muted-foreground flex items-center justify-between gap-2 rounded-lg border p-2 text-sm"
+        >
+          <span className="font-medium" data-shortcut-action={shortcut.action}>
+            {actionLabel(shortcut.action)}
+          </span>
           <div className="flex select-none gap-1">
             {formatDisplayKeys(shortcut.keys).map((key) => (
-              <kbd key={key} className="border-muted-foreground/10 bg-accent h-6 rounded-[6px] border px-1.5 font-mono text-xs leading-6">
+              <kbd
+                key={key}
+                className="border-muted-foreground/10 bg-accent h-6 rounded-[6px] border px-1.5 font-mono text-xs leading-6"
+              >
                 {key}
               </kbd>
             ))}
@@ -88,7 +102,15 @@ function ShortcutRows({ shortcuts }: { shortcuts: Shortcut[] }) {
   );
 }
 
-export function ContextualShortcutSheet({ open, onOpenChange, activeScopes }: { open: boolean; onOpenChange: (open: boolean) => void; activeScopes: string[] }) {
+export function ContextualShortcutSheet({
+  open,
+  onOpenChange,
+  activeScopes,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  activeScopes: string[];
+}) {
   const shortcuts = keyboardShortcuts.filter((shortcut) => activeScopes.includes(shortcut.scope));
 
   return (

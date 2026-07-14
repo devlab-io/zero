@@ -1,14 +1,14 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { dirname, resolve } from 'node:path';
-import { logger } from '../../lib/logger';
-import { OAuthProtectedResourceMetadataSchema } from '@modelcontextprotocol/sdk/shared/auth.js';
 import {
   buildMcpProtectedResourceMetadata,
   mcpProtectedResourceMetadataUrl,
   mcpUnauthorizedResponse,
 } from './mcp-auth';
+import { OAuthProtectedResourceMetadataSchema } from '@modelcontextprotocol/sdk/shared/auth.js';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { dirname, resolve } from 'node:path';
+import { logger } from '../../lib/logger';
+import { fileURLToPath } from 'node:url';
+import { readFileSync } from 'node:fs';
 
 afterEach(() => {
   vi.restoreAllMocks();

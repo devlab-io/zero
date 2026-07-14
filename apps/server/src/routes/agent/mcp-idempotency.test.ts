@@ -1,10 +1,10 @@
-import { describe, expect, it } from 'vitest';
 import {
   IdempotencyConflictError,
   PayloadBoundIdempotency,
   type AtomicIdempotencyStorage,
   type IdempotencyTransaction,
 } from './mcp-tools';
+import { describe, expect, it } from 'vitest';
 
 const memoryStorage = (): AtomicIdempotencyStorage => {
   const values = new Map<string, unknown>();

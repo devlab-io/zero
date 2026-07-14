@@ -71,7 +71,10 @@ describe('deriveReplyRecipients', () => {
         },
       });
       // erin is added to cc; dave already in to (exact match) is skipped; user skipped.
-      expect(result).toEqual({ to: ['alice@example.com', 'dave@example.com'], cc: ['erin@example.com'] });
+      expect(result).toEqual({
+        to: ['alice@example.com', 'dave@example.com'],
+        cc: ['erin@example.com'],
+      });
     });
 
     it('does not add the sender when the sender is the current user', () => {
@@ -95,7 +98,10 @@ describe('deriveReplyRecipients', () => {
         cc: [s('bob@example.com'), s('Carol@Example.com'), s('CAROL@example.com')],
       },
     });
-    expect(result).toEqual({ to: ['Alice@Example.com', 'Bob@Example.com'], cc: ['Carol@Example.com'] });
+    expect(result).toEqual({
+      to: ['Alice@Example.com', 'Bob@Example.com'],
+      cc: ['Carol@Example.com'],
+    });
   });
 
   describe('forward and edge cases', () => {
@@ -103,7 +109,11 @@ describe('deriveReplyRecipients', () => {
       const result = deriveReplyRecipients({
         mode: 'forward',
         userEmail: USER,
-        message: { sender: s('alice@example.com'), to: [s('bob@example.com')], cc: [s('carol@example.com')] },
+        message: {
+          sender: s('alice@example.com'),
+          to: [s('bob@example.com')],
+          cc: [s('carol@example.com')],
+        },
       });
       expect(result).toEqual({ to: [], cc: [] });
     });
