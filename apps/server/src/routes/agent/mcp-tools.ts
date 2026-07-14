@@ -22,9 +22,8 @@
  * driver/DB instantiation: it holds only zod schemas, human descriptions, pure formatters
  * and dependency-injected handlers. `mcp.ts` COMPOSES the live surface by wiring these to
  * the real `agent` stub / DB / DO storage (issue #26 "Option B": composition from a
- * consolidated tool module, no duplicated definitions). The same definitions drive the
- * committable schema snapshot and the local smoke evidence under `docs/agent/`, so the
- * published surface and its documentation can never silently drift.
+ * consolidated tool module, no duplicated definitions). The same definitions can also
+ * render a deterministic schema snapshot for downstream documentation jobs.
  *
  * Non-negotiable (spec §"Non-negotiable product rules" #1/#2): NO tool here sends mail,
  * permanently deletes mail, reports spam, or changes account settings. Every agent write
@@ -146,48 +145,140 @@ export function formatOutboxItem(item: DraftOutboxItem): string {
 }
 
 // ---------------------------------------------------------------------------
-// Idempotency — createDraft (spec §"Mutation tools must be idempotent")
+// Payload-bound idempotency for every MCP mutation
 // ---------------------------------------------------------------------------
 
-export interface DraftIdempotencyStore {
-  get(key: string): Promise<string | undefined>;
-  put(key: string, value: string): Promise<void>;
+export interface IdempotencyTransaction {
+  get<T>(key: string): Promise<T | undefined>;
+  put<T>(key: string, value: T): Promise<void>;
 }
 
-export const draftIdempotencyStorageKey = (connectionId: string, idempotencyKey: string) =>
-  `mcp_draft_idem:${connectionId}:${idempotencyKey}`;
-
-export interface CreateDraftResult {
-  id: string | null;
-  deduped: boolean;
+export interface AtomicIdempotencyStorage extends IdempotencyTransaction {
+  transaction<T>(closure: (transaction: IdempotencyTransaction) => Promise<T>): Promise<T>;
 }
 
-/**
- * Idempotent Gmail draft creation. With an idempotencyKey, a previously-created draft id
- * is returned instead of creating a second Gmail draft — so duplicate calls with one key
- * produce one logical result. Without a key (or store) behaviour is unchanged.
- */
-export async function resolveIdempotentDraft(
-  connectionId: string,
-  idempotencyKey: string | undefined,
-  store: DraftIdempotencyStore | undefined,
-  create: () => Promise<{ id?: string | null; error?: string | null }>,
-): Promise<CreateDraftResult> {
-  const key = idempotencyKey?.trim();
-  if (!key || !store) {
-    const created = await create();
-    if (created?.error) throw new Error(`Failed to create draft: ${created.error}`);
-    return { id: created?.id ?? null, deduped: false };
+type IdempotencyRecord<T> =
+  | { status: 'pending'; payloadHash: string; owner: string }
+  | { status: 'complete'; payloadHash: string; value: T }
+  | { status: 'failed'; payloadHash: string };
+
+export class IdempotencyConflictError extends Error {
+  constructor() {
+    super('Idempotency key already belongs to a different payload');
+    this.name = 'IdempotencyConflictError';
+  }
+}
+
+const stableJson = (value: unknown): string => {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
+  if (value && typeof value === 'object') {
+    return `{${Object.entries(value)
+      .filter(([, item]) => item !== undefined)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, item]) => `${JSON.stringify(key)}:${stableJson(item)}`)
+      .join(',')}}`;
+  }
+  return JSON.stringify(value);
+};
+
+const toHex = (value: ArrayBuffer) =>
+  [...new Uint8Array(value)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+
+export const hashIdempotencyPayload = async (payload: unknown) =>
+  toHex(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(stableJson(payload))));
+
+export const idempotencyStorageKey = (connectionId: string, idempotencyKey: string) =>
+  `mcp_idem:${connectionId}:${idempotencyKey}`;
+
+export class PayloadBoundIdempotency {
+  private readonly inFlight = new Map<
+    string,
+    { signature: string; promise: Promise<{ value: unknown; deduped: boolean }> }
+  >();
+
+  constructor(private readonly storage: AtomicIdempotencyStorage) {}
+
+  async execute<T>(input: {
+    connectionId: string;
+    idempotencyKey: string;
+    payload: unknown;
+    effect: () => Promise<T>;
+  }): Promise<{ value: T; deduped: boolean }> {
+    const storageKey = idempotencyStorageKey(input.connectionId, input.idempotencyKey);
+    const signature = stableJson(input.payload);
+    const existingFlight = this.inFlight.get(storageKey);
+    if (existingFlight) {
+      if (existingFlight.signature !== signature) throw new IdempotencyConflictError();
+      const result = await existingFlight.promise;
+      return { value: result.value as T, deduped: true };
+    }
+
+    const promise = this.executeReserved<T>(storageKey, input.payload, input.effect);
+    this.inFlight.set(storageKey, { signature, promise });
+    try {
+      return await promise;
+    } finally {
+      if (this.inFlight.get(storageKey)?.promise === promise) this.inFlight.delete(storageKey);
+    }
   }
 
-  const storageKey = draftIdempotencyStorageKey(connectionId, key);
-  const existing = await store.get(storageKey);
-  if (existing) return { id: existing, deduped: true };
+  private async executeReserved<T>(
+    storageKey: string,
+    payload: unknown,
+    effect: () => Promise<T>,
+  ): Promise<{ value: T; deduped: boolean }> {
+    const payloadHash = await hashIdempotencyPayload(payload);
+    const owner = crypto.randomUUID();
+    const claim = await this.storage.transaction(async (transaction) => {
+      const existing = await transaction.get<IdempotencyRecord<T>>(storageKey);
+      if (existing) {
+        if (existing.payloadHash !== payloadHash) throw new IdempotencyConflictError();
+        if (existing.status === 'complete') return { status: 'complete' as const, value: existing.value };
+        if (existing.status === 'failed') {
+          throw new Error('Idempotency key is blocked by a previous failed operation');
+        }
+        throw new Error('Idempotency key has an unfinished reservation');
+      }
+      await transaction.put<IdempotencyRecord<T>>(storageKey, {
+        status: 'pending',
+        payloadHash,
+        owner,
+      });
+      return { status: 'reserved' as const };
+    });
 
-  const created = await create();
-  if (created?.error) throw new Error(`Failed to create draft: ${created.error}`);
-  if (created?.id) await store.put(storageKey, created.id);
-  return { id: created?.id ?? null, deduped: false };
+    if (claim.status === 'complete') return { value: claim.value, deduped: true };
+
+    let value: T;
+    try {
+      value = await effect();
+    } catch (error) {
+      await this.storage.transaction(async (transaction) => {
+        const current = await transaction.get<IdempotencyRecord<T>>(storageKey);
+        if (current?.status === 'pending' && current.owner === owner) {
+          await transaction.put<IdempotencyRecord<T>>(storageKey, { status: 'failed', payloadHash });
+        }
+      });
+      throw error;
+    }
+
+    await this.storage.transaction(async (transaction) => {
+      const current = await transaction.get<IdempotencyRecord<T>>(storageKey);
+      if (
+        current?.status !== 'pending' ||
+        current.owner !== owner ||
+        current.payloadHash !== payloadHash
+      ) {
+        throw new Error('Idempotency reservation changed before completion');
+      }
+      await transaction.put<IdempotencyRecord<T>>(storageKey, {
+        status: 'complete',
+        payloadHash,
+        value,
+      });
+    });
+    return { value, deduped: false };
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -251,9 +342,30 @@ export async function handleRetryOutboxItem(deps: OutboxRetryDeps, id: string): 
 // zod input schemas — single source shared by mcp.ts and the schema snapshot
 // ---------------------------------------------------------------------------
 
+const headerValue = (label: string, maximum: number) =>
+  z
+    .string()
+    .max(maximum)
+    .refine((value) => !/[\r\n]/.test(value), `${label} must not contain CR or LF`);
+
+const emailAddress = z
+  .string()
+  .max(320)
+  .email()
+  .refine((value) => !/[\r\n]/.test(value), 'Email must not contain CR or LF');
+const body = z
+  .string()
+  .refine(
+    (value) => new TextEncoder().encode(value).byteLength <= 2 * 1024 * 1024,
+    'Body must not exceed 2 MiB in UTF-8',
+  );
+const idempotencyKey = z.string().trim().min(1).max(128);
+const pageSize = z.number().int().min(1).max(50);
+const query = z.string().max(2048);
+
 export const draftRecipientSchema = z.object({
-  email: z.string(),
-  name: z.string().optional(),
+  email: emailAddress,
+  name: headerValue('Recipient name', 998).optional(),
 });
 
 export type DraftRecipient = z.infer<typeof draftRecipientSchema>;
@@ -267,19 +379,19 @@ export const mcpToolSchemas = {
   getConnections: {},
   getActiveConnection: {},
   setActiveConnection: {
-    email: z.string().describe('Email address of an already-connected account to select'),
+    email: emailAddress.describe('Email address of an already-connected account to select'),
   },
   listThreads: {
     folder: z.string().default('inbox').describe('Mailbox folder to list (default inbox)'),
-    query: z.string().optional().describe('Optional Gmail-style query filter'),
-    maxResults: z.number().optional().default(20).describe('Max threads to return'),
+    query: query.optional().describe('Optional Gmail-style query filter'),
+    maxResults: pageSize.optional().default(20).describe('Max threads to return'),
     labelIds: z.array(z.string()).optional().describe('Restrict to threads carrying these labels'),
     pageToken: z.string().optional().describe('Opaque cursor from a previous page'),
   },
   searchThreads: {
-    query: z.string().describe('Search text; matched against stored thread metadata'),
+    query: query.describe('Search text; matched against stored thread metadata'),
     folder: z.string().default('inbox').describe('Folder to search within (default inbox)'),
-    maxResults: z.number().optional().default(20).describe('Max threads to return'),
+    maxResults: pageSize.optional().default(20).describe('Max threads to return'),
     pageToken: z.string().optional().describe('Opaque cursor from a previous page'),
   },
   getThread: {
@@ -294,40 +406,40 @@ export const mcpToolSchemas = {
   },
   getCurrentDate: {},
   composeEmail: {
-    prompt: z.string().describe('Instruction or rough draft for the email body'),
-    emailSubject: z.string().optional(),
-    to: z.array(z.string()).optional(),
-    cc: z.array(z.string()).optional(),
+    prompt: body.describe('Instruction or rough draft for the email body'),
+    emailSubject: headerValue('Subject', 998).optional(),
+    to: z.array(emailAddress).max(50).optional(),
+    cc: z.array(emailAddress).max(50).optional(),
     threadMessages: z
       .array(
         z.object({
-          from: z.string(),
-          to: z.array(z.string()),
-          cc: z.array(z.string()).optional(),
-          subject: z.string(),
-          body: z.string(),
+          from: emailAddress,
+          to: z.array(emailAddress).max(50),
+          cc: z.array(emailAddress).max(50).optional(),
+          subject: headerValue('Subject', 998),
+          body,
         }),
       )
       .optional()
       .describe('Prior thread messages for context'),
   },
   createDraft: {
-    to: z.array(draftRecipientSchema),
-    subject: z.string(),
-    message: z.string(),
-    cc: z.array(draftRecipientSchema).optional(),
-    bcc: z.array(draftRecipientSchema).optional(),
+    to: z.array(draftRecipientSchema).max(50),
+    subject: headerValue('Subject', 998),
+    message: body,
+    cc: z.array(draftRecipientSchema).max(50).optional(),
+    bcc: z.array(draftRecipientSchema).max(50).optional(),
     threadId: z.string().optional().describe('Reply within an existing thread'),
-    idempotencyKey: z
-      .string()
-      .optional()
-      .describe('Stable key: repeat calls return the same draft instead of duplicating it'),
+    idempotencyKey: idempotencyKey.describe(
+      'Required stable key: same payload deduplicates; a different payload conflicts',
+    ),
   },
   enqueueDraftJob: {
     threadId: z.string().optional(),
-    mission: z.string().optional().describe('What the reviewable draft should accomplish'),
-    subject: z.string().optional(),
-    body: z.string().optional(),
+    mission: query.optional().describe('What the reviewable draft should accomplish'),
+    subject: headerValue('Subject', 998).optional(),
+    body: body.optional(),
+    idempotencyKey,
   },
   listOutbox: {
     status: outboxStatusSchema.optional().describe('Filter to one outbox status'),
@@ -337,11 +449,35 @@ export const mcpToolSchemas = {
   },
   cancelOutboxItem: {
     id: z.string().describe('Outbox item id to cancel (idempotent)'),
+    idempotencyKey,
   },
   retryOutboxItem: {
     id: z.string().describe('Failed outbox item id to re-queue (idempotent)'),
+    idempotencyKey,
   },
 } as const;
+
+export const createDraftInputSchema = z.object(mcpToolSchemas.createDraft).superRefine((value, ctx) => {
+  const recipientCount = value.to.length + (value.cc?.length ?? 0) + (value.bcc?.length ?? 0);
+  if (recipientCount > 50) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'Draft must not contain more than 50 total recipients',
+      path: ['to'],
+    });
+  }
+});
+
+export const composeEmailInputSchema = z.object(mcpToolSchemas.composeEmail).superRefine((value, ctx) => {
+  const recipientCount = (value.to?.length ?? 0) + (value.cc?.length ?? 0);
+  if (recipientCount > 50) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'Composition context must not contain more than 50 total recipients',
+      path: ['to'],
+    });
+  }
+});
 
 export type McpToolName = keyof typeof mcpToolSchemas;
 
@@ -383,13 +519,13 @@ export const mcpToolDescriptions: Record<McpToolName, string> = {
   createDraft:
     'Create a Gmail draft stored in the user Gmail Drafts folder for later human review. Stores ' +
     'the given recipients, subject and body as an UNSENT draft. This NEVER sends the email — ' +
-    'sending is a separate human action in Zero. Pass a stable idempotencyKey so retries return ' +
-    'the same draft instead of creating duplicates.',
+    'sending is a separate human action in Zero. A 1-128 character idempotencyKey is required; ' +
+    'same-key/same-payload retries deduplicate and a changed payload conflicts.',
   enqueueDraftJob:
     'Store a reviewable draft job in the outbox with status "queued". The job holds the given ' +
     'mission/subject/body; a background step later turns it into a Gmail draft that a human must ' +
-    'approve in Zero before anything is sent. This NEVER sends mail. Duplicate calls with ' +
-    'identical fields return the same outbox item (idempotent).',
+    'approve in Zero before anything is sent. This NEVER sends mail. A 1-128 character ' +
+    'idempotencyKey is required; same-key/same-payload retries deduplicate.',
   listOutbox:
     'List the authenticated user outbox draft jobs (id, status, subject, thread, timestamps), ' +
     'optionally filtered by status. Read-only.',
@@ -399,11 +535,13 @@ export const mcpToolDescriptions: Record<McpToolName, string> = {
   cancelOutboxItem:
     'Cancel an outbox draft job the user owns while it is still queued, generating, draft_ready ' +
     'or approved. Idempotent: cancelling an already-cancelled item reports it as such. Never ' +
-    'sends mail. Other-user or missing ids return not-found without revealing existence.',
+    'sends mail. Requires a 1-128 character idempotencyKey. Other-user or missing ids return ' +
+    'not-found without revealing existence.',
   retryOutboxItem:
     'Re-queue a FAILED outbox draft job the user owns for another generation attempt. Idempotent: ' +
     'retrying an item already back in the queue reports it as such. Never sends mail; sending ' +
-    'still requires human approval. Other-user or missing ids return not-found.',
+    'still requires human approval. Requires a 1-128 character idempotencyKey. Other-user or ' +
+    'missing ids return not-found.',
 };
 
 // ---------------------------------------------------------------------------
@@ -463,6 +601,7 @@ function jsonSchemaForType(schema: z.ZodTypeAny): { node: JsonSchemaNode; option
     optional = true;
     inner = inner instanceof z.ZodOptional ? inner.unwrap() : inner.removeDefault();
   }
+  while (inner instanceof z.ZodEffects) inner = inner.innerType();
 
   let node: JsonSchemaNode;
   if (inner instanceof z.ZodString) node = { type: 'string' };

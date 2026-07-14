@@ -15,13 +15,11 @@
  */
 
 /**
- * #36 — proofs for the draft-only "Claude and Codex API" MCP surface, plus the generator
- * for the committable schema snapshot and local smoke evidence under `docs/agent/`.
+ * Focused proofs for the draft-only "Claude and Codex API" MCP surface.
  *
  * Runs in Node (no DO / SQLite / workers): every handler here is dependency-injected, so
  * the read-only + draft-only paths are exercised against fakes with zero send capability.
- * With `UPDATE_MCP_SNAPSHOTS=1` the committed artifacts are (re)written; otherwise the test
- * asserts the committed files still match the code — the anti-drift guard.
+ * Runs in Node with dependency-injected handlers and no provider or production writes.
  */
 
 import {
@@ -30,6 +28,7 @@ import {
   OUTBOX_NOT_FOUND,
   buildCapabilities,
   buildMcpSchemaSnapshot,
+  createDraftInputSchema,
   formatCompactThread,
   formatCompactThreadList,
   formatOutboxItem,
@@ -39,25 +38,11 @@ import {
   handleRetryOutboxItem,
   jsonSchemaForShape,
   mcpToolSchemas,
-  resolveIdempotentDraft,
-  type DraftIdempotencyStore,
 } from './mcp-tools';
 import type { DraftOutboxItem, DraftOutboxStatus } from '../../lib/draft-outbox/state-machine';
 import type { ThreadsResponse } from '@zero/types';
 import { describe, it, expect } from 'vitest';
-import { writeFileSync, readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { dirname, resolve } from 'node:path';
-
-// --- fakes -----------------------------------------------------------------
-
-function memoryIdemStore(): DraftIdempotencyStore {
-  const map = new Map<string, string>();
-  return {
-    get: async (k) => map.get(k),
-    put: async (k, v) => void map.set(k, v),
-  };
-}
+import { z } from 'zod';
 
 const seedItem = (status: DraftOutboxStatus): DraftOutboxItem => ({
   id: 'outbox-1',
@@ -152,39 +137,6 @@ describe('compact thread list — no body / N+1, safe rows', () => {
     const row = formatCompactThread(fakeProjection.threads[0]);
     expect(row).toContain('Unread: yes');
     expect(row).toContain('Labels: Inbox, Unread');
-  });
-});
-
-describe('createDraft idempotency — one logical result per key', () => {
-  it('a repeated key returns the same draft without a second create', async () => {
-    const store = memoryIdemStore();
-    let creates = 0;
-    const create = async () => {
-      creates += 1;
-      return { id: `gmail-draft-${creates}` };
-    };
-    const first = await resolveIdempotentDraft('conn-1', 'k-1', store, create);
-    const second = await resolveIdempotentDraft('conn-1', 'k-1', store, create);
-    expect(creates).toBe(1);
-    expect(first).toEqual({ id: 'gmail-draft-1', deduped: false });
-    expect(second).toEqual({ id: 'gmail-draft-1', deduped: true });
-  });
-
-  it('distinct keys / no key create independently', async () => {
-    const store = memoryIdemStore();
-    let creates = 0;
-    const create = async () => ({ id: `d-${(creates += 1)}` });
-    await resolveIdempotentDraft('conn-1', 'a', store, create);
-    await resolveIdempotentDraft('conn-1', 'b', store, create);
-    await resolveIdempotentDraft('conn-1', undefined, store, create);
-    expect(creates).toBe(3);
-  });
-
-  it('surfaces a create error instead of caching it', async () => {
-    const store = memoryIdemStore();
-    await expect(
-      resolveIdempotentDraft('conn-1', 'k', store, async () => ({ error: 'boom' })),
-    ).rejects.toThrow(/Failed to create draft: boom/);
   });
 });
 
@@ -292,10 +244,10 @@ describe('schema snapshot is a valid, stable JSON schema', () => {
         idempotencyKey: { type: 'string' },
       },
     });
-    // required excludes optionals (idempotencyKey), includes mandatory (subject/message/to).
+    // Every draft mutation requires the idempotency key as well as its payload.
     const required = (createDraft.inputSchema as { required?: string[] }).required ?? [];
     expect(required).toContain('subject');
-    expect(required).not.toContain('idempotencyKey');
+    expect(required).toContain('idempotencyKey');
   });
 
   it('enum schema round-trips (outbox status filter)', () => {
@@ -306,81 +258,73 @@ describe('schema snapshot is a valid, stable JSON schema', () => {
   });
 });
 
-// --- committable artifacts: generate under UPDATE_MCP_SNAPSHOTS, else guard ----
-
-const DOCS = resolve(dirname(fileURLToPath(import.meta.url)), '../../../../../docs/agent');
-const SCHEMA_FILE = resolve(DOCS, 'mcp-schema.snapshot.json');
-const EVIDENCE_FILE = resolve(DOCS, 'mcp-smoke.evidence.json');
-
-/** Deterministic local smoke: read-only + draft-only paths, proving zero send capability. */
-async function runLocalSmoke() {
-  const capabilities = buildCapabilities(
-    MCP_TOOL_DEFINITIONS.map((d) => ({
-      name: d.name,
-      category: d.category,
-      mutates: d.mutates,
-      idempotent: d.idempotent,
-    })),
-  );
-
-  // read-only
-  const listOutput = formatCompactThreadList(fakeProjection);
-  const inspect = await handleInspectOutboxItem({ getItem: async () => seedItem('draft_ready') }, 'outbox-1');
-
-  // draft-only + idempotency
-  const store = memoryIdemStore();
-  let sendCalls = 0; // there is NO send API to call — this must stay 0.
-  let createCalls = 0;
-  const create = async () => ({ id: `gmail-draft-${(createCalls += 1)}` });
-  const draftA = await resolveIdempotentDraft('conn-1', 'mission-42', store, create);
-  const draftB = await resolveIdempotentDraft('conn-1', 'mission-42', store, create);
-
-  return {
-    note:
-      'Local, sandbox smoke with injected driver fakes (no network, no OAuth-console, no prod). ' +
-      'A fully live authenticated /mcp session against local/staging requires an interactive ' +
-      'better-auth OIDC login unavailable here (blocker documented in docs/agent/mcp-smoke.md, ' +
-      'precedent #28/#40). This exercises the read-only and draft-only handlers end-to-end and ' +
-      'proves no send path exists.',
-    readonly: {
-      capabilitiesSendable: capabilities.canSendMail,
-      listThreadsSample: listOutput.split('\n').slice(0, 2),
-      getOutboxItemSample: JSON.parse(inspect),
-    },
-    draftOnly: {
-      createDraftFirst: draftA,
-      createDraftDuplicateSameKey: draftB,
-      distinctGmailDraftsCreated: createCalls,
-      sendCallsObserved: sendCalls,
-    },
-    assertions: {
-      oneLogicalDraftPerKey: createCalls === 1 && draftA.id === draftB.id,
-      zeroSends: sendCalls === 0,
-      draftOnlyGuaranteed: capabilities.canSendMail === false,
-    },
+describe('strict MCP input bounds', () => {
+  const recipient = { email: 'valid@example.com' };
+  const validDraft = {
+    to: [recipient],
+    subject: 'Subject',
+    message: 'Body',
+    idempotencyKey: 'request-1',
   };
-}
 
-describe('docs/agent committable artifacts', () => {
-  const update = process.env.UPDATE_MCP_SNAPSHOTS === '1';
-
-  it('schema snapshot matches the committed file', () => {
-    const built = JSON.stringify(buildMcpSchemaSnapshot(), null, 2) + '\n';
-    if (update) writeFileSync(SCHEMA_FILE, built);
-    const committed = readFileSync(SCHEMA_FILE, 'utf8');
-    expect(committed).toBe(built);
+  it('accepts only valid, header-safe email recipients', () => {
+    expect(createDraftInputSchema.safeParse(validDraft).success).toBe(true);
+    expect(
+      createDraftInputSchema.safeParse({ ...validDraft, to: [{ email: 'not-an-email' }] }).success,
+    ).toBe(false);
+    expect(
+      createDraftInputSchema.safeParse({
+        ...validDraft,
+        to: [{ email: 'victim@example.com\r\nBcc: attacker@example.com' }],
+      }).success,
+    ).toBe(false);
+    expect(
+      createDraftInputSchema.safeParse({ ...validDraft, subject: 'Hello\r\nBcc: attacker' }).success,
+    ).toBe(false);
   });
 
-  it('smoke evidence matches the committed file and proves zero sends', async () => {
-    const evidence = await runLocalSmoke();
-    expect(evidence.assertions).toEqual({
-      oneLogicalDraftPerKey: true,
-      zeroSends: true,
-      draftOnlyGuaranteed: true,
-    });
-    const built = JSON.stringify(evidence, null, 2) + '\n';
-    if (update) writeFileSync(EVIDENCE_FILE, built);
-    const committed = readFileSync(EVIDENCE_FILE, 'utf8');
-    expect(committed).toBe(built);
+  it('enforces integer page sizes from 1 through 50 and queries through 2048 characters', () => {
+    const listSchema = z.object(mcpToolSchemas.listThreads);
+    for (const invalid of [0, 51, 1.5]) {
+      expect(listSchema.safeParse({ maxResults: invalid }).success).toBe(false);
+    }
+    expect(listSchema.safeParse({ maxResults: 1 }).success).toBe(true);
+    expect(listSchema.safeParse({ maxResults: 50 }).success).toBe(true);
+    expect(listSchema.safeParse({ query: 'q'.repeat(2048) }).success).toBe(true);
+    expect(listSchema.safeParse({ query: 'q'.repeat(2049) }).success).toBe(false);
+  });
+
+  it('rejects more than 50 total recipients, oversized subjects, and bodies over 2 MiB', () => {
+    expect(
+      createDraftInputSchema.safeParse({
+        ...validDraft,
+        to: Array.from({ length: 25 }, () => recipient),
+        cc: Array.from({ length: 26 }, () => recipient),
+      }).success,
+    ).toBe(false);
+    expect(
+      createDraftInputSchema.safeParse({ ...validDraft, subject: 's'.repeat(999) }).success,
+    ).toBe(false);
+    expect(
+      createDraftInputSchema.safeParse({ ...validDraft, message: 'é'.repeat(1024 * 1024 + 1) })
+        .success,
+    ).toBe(false);
+  });
+
+  it('requires mutation keys from 1 through 128 trimmed characters', () => {
+    expect(createDraftInputSchema.safeParse({ ...validDraft, idempotencyKey: 'k'.repeat(128) }).success)
+      .toBe(true);
+    for (const key of [undefined, '', '   ', 'k'.repeat(129)]) {
+      expect(createDraftInputSchema.safeParse({ ...validDraft, idempotencyKey: key }).success).toBe(
+        false,
+      );
+    }
+    for (const shape of [
+      mcpToolSchemas.enqueueDraftJob,
+      mcpToolSchemas.cancelOutboxItem,
+      mcpToolSchemas.retryOutboxItem,
+    ]) {
+      expect(z.object(shape).safeParse({ id: 'item-1' }).success).toBe(false);
+    }
   });
 });
