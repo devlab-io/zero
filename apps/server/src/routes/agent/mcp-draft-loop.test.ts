@@ -34,6 +34,10 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { sanitizeMailContent } from '../../lib/mail-sanitize';
 import { describe, expect, it, vi } from 'vitest';
 
+const { sanitizeTipTapHtml: realSanitizeTipTapHtml } = await vi.importActual<
+  typeof import('../../lib/sanitize-tip-tap-html')
+>('../../lib/sanitize-tip-tap-html');
+
 vi.mock('../../lib/sanitize-tip-tap-html', () => ({
   sanitizeTipTapHtml: vi.fn(async (html: string) => ({ html, inlineImages: [] })),
 }));
@@ -91,7 +95,7 @@ const ownedThread = (): IGetThreadResponse => {
   } as IGetThreadResponse;
 };
 
-const fakeEnvironment = () => {
+const fakeEnvironment = ({ normalizeProviderBodies = false } = {}) => {
   const drafts = new Map<string, ParsedDraft>();
   let nextDraft = 0;
   let createEffects = 0;
@@ -126,6 +130,9 @@ const fakeEnvironment = () => {
     getDraft: async (_connectionId, draftId) => drafts.get(draftId) ?? null,
     createDraft: async (_connectionId, data) => {
       createdInputs.push(structuredClone(data));
+      const persistedMessage = normalizeProviderBodies
+        ? (await realSanitizeTipTapHtml(data.message)).html
+        : data.message;
       if (data.id) {
         updateEffects += 1;
         const current = drafts.get(data.id);
@@ -136,7 +143,7 @@ const fakeEnvironment = () => {
           cc: data.cc ? [data.cc] : [],
           bcc: data.bcc ? [data.bcc] : [],
           subject: data.subject,
-          content: data.message,
+          content: persistedMessage,
           rawMessage: { threadId: data.threadId } as unknown as ParsedDraft['rawMessage'],
         });
         return { id: data.id, success: true };
@@ -149,7 +156,7 @@ const fakeEnvironment = () => {
         cc: data.cc ? [data.cc] : [],
         bcc: data.bcc ? [data.bcc] : [],
         subject: data.subject,
-        content: data.message,
+        content: persistedMessage,
         rawMessage: { threadId: data.threadId } as unknown as ParsedDraft['rawMessage'],
       });
       return { id, success: true };
@@ -329,6 +336,40 @@ describe('revisable draft handlers', () => {
     ).rejects.toThrow('revision is stale');
     expect(environment.updateEffects).toBe(mutationsBeforeStale);
     expect(environment.drafts.get(current.id)?.content).toBe('Revised body');
+  });
+
+  it('accepts provider-normalized HTML across create, get, and same-id update', async () => {
+    const environment = fakeEnvironment({ normalizeProviderBodies: true });
+    const handlers = createDraftLoopHandlers(
+      environment.dependencies,
+      new PayloadBoundIdempotency(memoryStorage()),
+    );
+    const created = await handlers.createReplyDraft({
+      threadId: 'thread-owned',
+      message: '<p>Initial normalized body</p>',
+      idempotencyKey: 'normalized-create-key',
+    });
+    const current = await handlers.getDraft({ draftId: created.value.id });
+    expect(typeof current).not.toBe('string');
+    if (typeof current === 'string') return;
+    expect(current.message).toContain('<!DOCTYPE html');
+
+    const updated = await handlers.updateDraft({
+      draftId: current.id,
+      revision: current.revision,
+      message: '<p>Revised normalized body</p>',
+      idempotencyKey: 'normalized-update-key',
+    });
+
+    expect(updated.value.id).toBe(current.id);
+    expect(updated.value.message).toContain('<!DOCTYPE html');
+    expect(sanitizeMailContent(updated.value.message).text).toBe(
+      sanitizeMailContent('<p>Revised normalized body</p>').text,
+    );
+    expect(updated.value.revision).not.toBe(current.revision);
+    expect(environment.createEffects).toBe(1);
+    expect(environment.updateEffects).toBe(1);
+    expect(environment.sendCalls).toBe(0);
   });
 
   it('lists only bounded draft projections without bodies, revisions, or raw provider data', async () => {

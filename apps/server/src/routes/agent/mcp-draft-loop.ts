@@ -89,6 +89,9 @@ const getOwnedDraft = async (
   return projectOwnedDraft(connectionId, draft);
 };
 
+const canonicalDraftBody = (dependencies: DraftLoopDependencies, message: string) =>
+  dependencies.sanitizeMailContent(message).text;
+
 export const createDraftLoopHandlers = (
   dependencies: DraftLoopDependencies,
   idempotency: PayloadBoundIdempotency,
@@ -196,8 +199,14 @@ export const createDraftLoopHandlers = (
         }
         const verified = await getOwnedDraft(dependencies, active.id, current.id);
         if (!verified) throw new Error(`Provider did not return updated draft ${current.id}`);
-        if (verified.message !== input.message) {
+        if (
+          canonicalDraftBody(dependencies, verified.message) !==
+          canonicalDraftBody(dependencies, input.message)
+        ) {
           throw new Error(`Provider did not persist the requested body for draft ${current.id}`);
+        }
+        if (verified.revision === current.revision) {
+          throw new Error(`Provider did not return a fresh revision for draft ${current.id}`);
         }
         return verified;
       },
