@@ -12,3 +12,16 @@
 
 - Plain `git status --porcelain` collapses a newly created untracked report directory to `docs/jobs/niveau10/`, causing the touch-set check to reject the authorised report before it is committed.
 - The touch-set command now requests `--untracked-files=all`; the allowed product and report paths are unchanged.
+
+## 2026-07-14 — Sandboxed Paraglide fetch versus deterministic runner
+
+- The fresh builder passed 35/35 focused tests, focused lint, the corrected touch-set audit, and diff hygiene, but its sandbox could not fetch the two jsDelivr Paraglide plugins; type generation then produced incomplete message exports and React Router prerender failed.
+- The orchestrator's deterministic check-runner reran the exact frozen `react-router typegen && build` command outside the network-restricted builder sandbox. Plugin compilation and the full production build exited 0, while every other frozen command also exited 0.
+- The authoritative independent evidence is `docs/jobs/niveau10/keyboard-runtime-checkrun.md`; no product fallback or check weakening is authorised.
+
+## 2026-07-14 — Judge 1 FAIL: AltGr and contextual help
+
+- Independent judge 1 returned `Slice verdict: FAIL` even though every frozen RUN passed.
+- `shortcutMatchesEvent` rejects a common AZERTY AltGr representation because browsers may expose AltGr as `Ctrl+Alt`; sequence dispatch also rejects any `ctrlKey`. The corrective test must include a produced punctuation event with `ctrlKey: true` and `altKey: true`, without allowing command/control chords to bypass scope rules.
+- `Shift+?` currently navigates to `/settings/shortcuts`. The accepted spec requires an in-place contextual shortcut sheet without leaving the inbox; the fresh builder must implement that within the authorised hotkey/settings surface and add an observable test.
+- Judge evidence is `docs/jobs/niveau10/keyboard-runtime-judge-1.md`. The orchestrator cannot merge until a fresh builder, fresh checkrun, and fresh independent judge all pass.
