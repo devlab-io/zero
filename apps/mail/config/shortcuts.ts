@@ -1,7 +1,6 @@
 import { keyboardLayoutMapper } from '../utils/keyboard-layout-map';
 import { getKeyCodeFromKey } from '../utils/keyboard-utils';
 import { isMac } from '@/lib/platform';
-import { z } from 'zod';
 
 // Machine-readable Shortwave keyboard-parity registry (issue #32).
 //
@@ -17,18 +16,21 @@ import { z } from 'zod';
 //   - combination   a modifier chord (safe while typing)
 //   - sequence      two keys pressed in order within a bounded timeout (the `g …` set)
 
-export const shortcutSchema = z.object({
-  keys: z.array(z.string()),
-  action: z.string(),
-  type: z.enum(['single', 'combination', 'sequence']),
-  description: z.string(),
-  scope: z.string(),
-  preventDefault: z.boolean().optional(),
+// #a8-weight-hunt LEAD F: the shortcut shape is a plain interface, not a zod schema. It was only
+// ever consumed as a type (z.infer) and never runtime-validated (no .parse/.safeParse anywhere),
+// so importing zod here pulled ~12 KiB gz of dead runtime weight into the cold /mail/inbox closure
+// (this module is loaded eagerly by lib/hotkeys/**). Shape is identical; runtime behaviour unchanged.
+export interface Shortcut {
+  keys: string[];
+  action: string;
+  type: 'single' | 'combination' | 'sequence';
+  description: string;
+  scope: string;
+  preventDefault?: boolean;
   /** Documentation-only row: rendered in help, bound outside the registry (e.g. list focus keys). */
-  ignore: z.boolean().optional(),
-});
+  ignore?: boolean;
+}
 
-export type Shortcut = z.infer<typeof shortcutSchema>;
 export type ShortcutType = Shortcut['type'];
 
 /**

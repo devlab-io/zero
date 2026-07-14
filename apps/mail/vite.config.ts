@@ -100,6 +100,10 @@ export default defineConfig({
   },
   build: {
     sourcemap: false,
+    // #a8-weight-hunt LEAD C: modern output target. The app ships only to evergreen browsers
+    // (SPA, no legacy support matrix); es2022 drops rollup/esbuild down-leveling helpers across
+    // app + non-prebundled deps. Behaviour identical on target browsers; measured gz delta logged.
+    target: 'es2022',
     rollupOptions: {
       output: {
         // w2cd (client weight): reasoned vendor split into dedicated, long-term-cacheable,

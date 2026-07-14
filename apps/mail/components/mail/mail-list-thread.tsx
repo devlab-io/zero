@@ -14,7 +14,7 @@ import { type ThreadDestination } from '@/lib/thread-actions';
 import { useThread, useThreads } from '@/hooks/use-threads';
 import { GroupPeople, PencilCompose } from '../icons/icons';
 import { useSearchValue } from '@/hooks/use-search-value';
-import { highlightText } from '@/lib/email-utils.client';
+import { highlightText } from '@/lib/email-utils-highlight.client';
 import { cn, FOLDERS, formatDate } from '@/lib/utils';
 import { useThreadLabels } from '@/hooks/use-labels';
 import { cleanNameDisplay } from './mail-list-utils';

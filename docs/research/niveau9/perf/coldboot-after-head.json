@@ -1,0 +1,72 @@
+  boot 1: http=200 cold_boot_wall=849.4ms req_ttfb=86.91ms
+  boot 2: http=200 cold_boot_wall=776.6ms req_ttfb=132.11ms
+  boot 3: http=200 cold_boot_wall=738.9ms req_ttfb=113.57ms
+  boot 4: http=200 cold_boot_wall=785.0ms req_ttfb=153.24ms
+  boot 5: http=200 cold_boot_wall=845.0ms req_ttfb=137.3ms
+  boot 6: http=200 cold_boot_wall=730.3ms req_ttfb=130.82ms
+{
+  "label": "after-head",
+  "app_dir": "/Users/thomasverdenne/cc/zero/.architect/wt/niveau9/a8-weight-hunt-01/apps/mail",
+  "n_boots": 6,
+  "wrangler": null,
+  "boots": [
+    {
+      "boot": 1,
+      "port": 8830,
+      "http": 200,
+      "cold_boot_wall_ms": 849.4,
+      "req_ttfb_ms": 86.91
+    },
+    {
+      "boot": 2,
+      "port": 8831,
+      "http": 200,
+      "cold_boot_wall_ms": 776.6,
+      "req_ttfb_ms": 132.11
+    },
+    {
+      "boot": 3,
+      "port": 8832,
+      "http": 200,
+      "cold_boot_wall_ms": 738.9,
+      "req_ttfb_ms": 113.57
+    },
+    {
+      "boot": 4,
+      "port": 8833,
+      "http": 200,
+      "cold_boot_wall_ms": 785.0,
+      "req_ttfb_ms": 153.24
+    },
+    {
+      "boot": 5,
+      "port": 8834,
+      "http": 200,
+      "cold_boot_wall_ms": 845.0,
+      "req_ttfb_ms": 137.3
+    },
+    {
+      "boot": 6,
+      "port": 8835,
+      "http": 200,
+      "cold_boot_wall_ms": 730.3,
+      "req_ttfb_ms": 130.82
+    }
+  ],
+  "summary": {
+    "cold_boot_wall_ms": {
+      "n": 6,
+      "median": 780.8,
+      "min": 730.3,
+      "max": 849.4,
+      "stdev": 46.4
+    },
+    "req_ttfb_ms": {
+      "n": 6,
+      "median": 131.5,
+      "min": 86.9,
+      "max": 153.2,
+      "stdev": 20.9
+    }
+  }
+}
