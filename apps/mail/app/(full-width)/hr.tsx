@@ -204,12 +204,12 @@ export default function HRPage() {
           emp.timezone,
         ),
       )
-      .filter(Boolean);
+      .filter((o): o is NonNullable<typeof o> => o != null);
 
     if (overlaps.length === 0) return null;
 
-    const latestStart = Math.max(...overlaps.map((o) => timeToMinutes(o!.start)));
-    const earliestEnd = Math.min(...overlaps.map((o) => timeToMinutes(o!.end)));
+    const latestStart = Math.max(...overlaps.map((o) => timeToMinutes(o.start)));
+    const earliestEnd = Math.min(...overlaps.map((o) => timeToMinutes(o.end)));
 
     if (latestStart >= earliestEnd) return null;
 

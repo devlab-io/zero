@@ -5,6 +5,7 @@
 // discovery, MCP/SSE mounts, agents websocket middleware, health, Sentry
 // tunnel and provider webhooks). Frontier rationale: docs/adr/0001-routing-hono-vs-trpc.md.
 import { logger } from '../lib/logger';
+import { invariant } from '../lib/invariant';
 import { oAuthDiscoveryMetadata } from 'better-auth/plugins';
 import { contextStorage } from 'hono/context-storage';
 import { getZeroDB, verifyToken } from '../lib/server-utils';
@@ -358,7 +359,9 @@ export const app = new Hono<HonoContext>()
           span.setAttributes({ 'error.type': 'missing_subscription_header' });
           return c.json({}, { status: 200 });
         }
-        const isValid = await verifyToken(c.req.header('Authorization')!.split(' ')[1]);
+        const authHeader = c.req.header('Authorization');
+        invariant(authHeader, 'missing Authorization header');
+        const isValid = await verifyToken(authHeader.split(' ')[1]);
         if (!isValid) {
           logger.info('[GOOGLE] invalid request', body);
           span.setAttributes({ 'auth.status': 'invalid' });

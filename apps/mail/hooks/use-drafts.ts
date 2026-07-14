@@ -9,7 +9,7 @@ export const useDraft = (id: string | null) => {
   // without `user` during hydration (issue #34, D2 ruling — third twin guard).
   const draftQuery = useQuery(
     trpc.drafts.get.queryOptions(
-      { id: id! },
+      { id: id ?? '' },
       { enabled: !!session?.user?.id && !!id, staleTime: 1000 * 60 * 60 },
     ),
   );

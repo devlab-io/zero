@@ -15,6 +15,7 @@
  */
 
 import { logger } from '../../lib/logger';
+import { invariant } from '../../lib/invariant';
 import { DateNormalizationError, type ThreadSyncResult } from './errors';
 import type { ZeroDriverInternal } from './internal';
 import migrations from './db/drizzle/migrations';
@@ -96,9 +97,11 @@ export async function syncThread(
 
       this.syncThreadsInProgress.set(threadId, true);
 
+      const connection = this.connection;
+      invariant(connection, 'driver connection is not set');
       const latest = yield* Effect.tryPromise(() =>
         this.env.THREAD_SYNC_WORKER.get(this.env.THREAD_SYNC_WORKER.newUniqueId()).syncThread(
-          this.connection!,
+          connection,
           threadId,
         ),
       );
@@ -158,8 +161,9 @@ export async function syncThread(
 
       // Broadcast update if agent exists
       if (this.agent) {
+        const agent = this.agent;
         yield* Effect.tryPromise(() =>
-          this.agent!.broadcastChatMessage({
+          agent.broadcastChatMessage({
             type: OutgoingMessageType.Mail_Get,
             threadId,
           }),

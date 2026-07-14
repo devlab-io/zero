@@ -39,8 +39,8 @@ export default function LabelsPage() {
 
   const handleSubmit = async (data: LabelType) => {
     await toast.promise(
-      editingLabel
-        ? updateLabel({ id: editingLabel.id!, name: data.name, color: data.color })
+      editingLabel && editingLabel.id
+        ? updateLabel({ id: editingLabel.id, name: data.name, color: data.color })
         : createLabel({ color: data.color, name: data.name }),
       {
         loading: m['common.labels.savingLabel'](),
@@ -145,7 +145,9 @@ export default function LabelsPage() {
                                 variant="ghost"
                                 size="icon"
                                 className="h-6 w-6 hover:bg-[#FDE4E9] dark:hover:bg-[#411D23] [&_svg]:size-3.5"
-                                onClick={() => handleDelete(label.id!)}
+                                onClick={() => {
+                                  if (label.id) handleDelete(label.id);
+                                }}
                               >
                                 <Bin className="fill-[#F43F5E]" />
                               </Button>

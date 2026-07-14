@@ -246,6 +246,7 @@ const MailDisplay = ({ emailData, index, totalEmails, demo, threadAttachments }:
 
   const people = useMemo(() => {
     if (!activeConnection) return [];
+    const connectionEmail = activeConnection.email;
     const allPeople = [
       ...(folder === 'sent' ? [] : [emailData.sender]),
       ...(emailData.to || []),
@@ -255,7 +256,7 @@ const MailDisplay = ({ emailData, index, totalEmails, demo, threadAttachments }:
     return allPeople.filter(
       (p): p is Sender =>
         Boolean(p?.email) &&
-        p.email !== activeConnection!.email &&
+        p.email !== connectionEmail &&
         p.name !== 'No Sender Name' &&
         p === allPeople.find((other) => other?.email === p?.email),
     );

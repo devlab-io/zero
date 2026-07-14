@@ -15,6 +15,7 @@
  */
 
 import { logger } from '../../lib/logger';
+import { invariant } from '../../lib/invariant';
 import {
   appendResponseMessages,
   createDataStreamResponse,
@@ -312,7 +313,9 @@ export class ZeroAgent extends AIChatAgent<ZeroEnv> {
   private async reply(id: string, response: Response) {
     // now take chunks out from dataStreamResponse and send them to the client
     return this.tryCatchChat(async () => {
-      for await (const chunk of response.body!) {
+      const body = response.body;
+      invariant(body, 'response has no body');
+      for await (const chunk of body) {
         const body = decoder.decode(chunk);
 
         this.broadcastChatMessage({

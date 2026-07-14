@@ -199,8 +199,9 @@ export function getUserTopics(self: ZeroDriverInternal): Promise<UserTopic[]> {
 
       // Broadcast message if agent exists
       if (this.agent) {
+        const agent = this.agent;
         yield* Effect.tryPromise(() =>
-          this.agent!.broadcastChatMessage({
+          agent.broadcastChatMessage({
             type: OutgoingMessageType.User_Topics,
           }),
         ).pipe(

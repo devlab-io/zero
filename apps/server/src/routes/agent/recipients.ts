@@ -134,7 +134,8 @@ export async function suggestRecipients(
         ? new Date(String(row.latest_received_on)).getTime()
         : 0;
 
-      if (!map.has(key)) {
+      const entry = map.get(key);
+      if (!entry) {
         map.set(key, {
           email: sender.email,
           name: sender.name || null,
@@ -142,7 +143,6 @@ export async function suggestRecipients(
           last: lastTs,
         });
       } else {
-        const entry = map.get(key)!;
         entry.freq += 1;
         if (lastTs > entry.last) entry.last = lastTs;
       }
