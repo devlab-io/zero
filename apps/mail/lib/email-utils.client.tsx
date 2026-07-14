@@ -62,36 +62,6 @@ export const handleUnsubscribe = async ({ emailData }: { emailData: ParsedMessag
   }
 };
 
-export const highlightText = (text: string, highlight: string) => {
-  try {
-    if (!highlight?.trim()) return text;
-
-    const escapedHighlight = highlight.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const regex = new RegExp(`(${escapedHighlight})`, 'gi');
-
-    if (!regex.test(text)) return text;
-    regex.lastIndex = 0;
-
-    const parts = text.split(regex);
-
-    return parts.map((part, i) => {
-      return i % 2 === 1 ? (
-        <span
-          key={part}
-          className="ring-0.5 bg-primary/10 inline-flex items-center justify-center rounded px-1"
-        >
-          {part}
-        </span>
-      ) : (
-        part
-      );
-    });
-  } catch (error) {
-    log.warn('Error highlighting text:', error);
-    return text;
-  }
-};
-
 interface EmailTemplateProps {
   content: string;
   imagesEnabled: boolean;
