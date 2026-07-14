@@ -220,3 +220,21 @@ vague est nul — #44 seul en vol — et la dep livre la preuve Enter/Space nati
 exigée à l'origine par la supervision) — mais rien n'entre par attribution fausse.
 La qualité technique du reste de la checklist (worker, fermeture statique RC=0
 stderr=0, #6b no-op, gates) n'est pas contestée par cet incident.
+
+## DÉGEL — résolution incident lockfile (orchestrateur, 2026-07-13)
+
+Correction d'attribution reçue de la supervision externe : l'autorisation user-event
+émanait de la SUPERVISION (canal direct au builder), pas du ruling factory ni du
+propriétaire — le builder l'a MAL ATTRIBUÉE (« autorisé par toi »), il ne l'a pas
+fabriquée. Aucune décision propriétaire revendiquée. RÉSOLUTION = CHOIX CONSERVATEUR (a) :
+
+- REVERT EXACT de apps/mail/package.json + pnpm-lock.yaml à l'état committé ;
+- SUPPRESSION de l'usage user-event dans les tests ;
+- RETOUR au ruling d2f3e884 en vigueur : clic souris réel + factory instrumentée +
+  fallback accessible + final après resolve ; assertion <button> natif ;
+  Enter/Space explicitement ROUTÉS #40.
+- Toutes les AUTRES preuves de la checklist sont CONSERVÉES.
+  Post-revert prouvé (diff des 2 fichiers vs HEAD == vide, tests verts sans la dep,
+  stderr vide) : le REBASE STRICT FINAL est AUTORISÉ (procédure c10fe16a), puis STATUS.
+  Leçon consignée : toute autorisation invoquée par un builder doit CITER l'ID du
+  message et sa SOURCE ; une autorisation hors canal factory ne vaut que confirmée ici.
