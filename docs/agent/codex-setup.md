@@ -1,116 +1,72 @@
-# Codex CLI setup for Zero MCP (draft-only)
+# Codex setup for Zero MCP
 
-This guide wires a local Codex CLI agent, version 0.142 or newer, to the Zero MCP
-endpoint for the draft-only workflow. The agent may inspect mail context, compose
-proposed replies, create Gmail drafts, and enqueue/inspect/cancel/retry reviewable
-outbox items. **It cannot send mail, permanently delete mail, report spam, or change
-account settings** — those surfaces are not registered.
+Zero MCP supports a bounded **read → create unsent reply draft → fetch → revise the same
+draft → human review** workflow. It exposes no tool that can send, approve, permanently
+delete, mark spam, or change account settings.
 
-## Config
+This guide was checked on 2026-07-14 against Codex CLI 0.144.1 and the current
+[official Codex MCP documentation](https://developers.openai.com/codex/mcp). It documents
+configuration only; it does not claim a deployment, production connection, OAuth consent,
+or live production smoke.
 
-Add the Zero MCP server to `~/.codex/config.toml`. Keep any existing top-level
-Codex settings already in that file, then add this block:
+## Configure the remote HTTP server
 
-```toml
-# ~/.codex/config.toml
+Either copy `codex-config.example.toml` into `~/.codex/config.toml` and replace the
+`.invalid` URL, or run:
 
-[mcp_servers.zero]
-url = "https://${ZERO_MCP_HOST}/mcp"
+```bash
+codex mcp add zero --url "https://YOUR-ZERO-ORIGIN/mcp"
 ```
 
-`${ZERO_MCP_HOST}` is a placeholder for the deployed Zero origin (for example
-`zero.example.dev`) — **never commit a real host with an embedded token**. A
-versioned snippet is checked in at `docs/agent/codex-config.example.toml`.
+The checked-in TOML sets `auth = "oauth"`, a narrow `enabled_tools` allowlist, and
+`default_tools_approval_mode = "writes"`. The allowlist enables only account selection,
+bounded thread/draft reads, `createReplyDraft`, and `updateDraft`; it excludes the optional
+AI composer and the older generic/outbox tools.
 
-Authenticate the MCP server through the current better-auth OIDC flow (this opens a
-browser login; no bearer token is stored in the config file):
+Start OAuth only when you are ready to review the provider consent screen:
 
 ```bash
 codex mcp login zero
 ```
 
-The better-auth MCP OIDC plugin is a watch item and is expected to be deprecated in
-favor of the OAuth Provider Plugin, so re-check that caveat before changing the auth
-wiring.
+Then use `codex mcp list` or `/mcp` in the TUI to inspect the connection. Do not paste a
+bearer token into the TOML. If the server URL or discovered OAuth issuer is unexpected,
+cancel the login.
 
-## Draft-only contract
+## Approval and safe workflow
 
-This MCP server is draft-only. Call `getServerCapabilities` first — it returns, as
-JSON, the hard guarantees `canSendMail:false`, `canPermanentlyDeleteMail:false`,
-`canReportSpam:false`, `canChangeAccountSettings:false`. The agent must stop at Gmail
-draft creation or outbox queuing; final sending belongs to a human action in Zero.
+`default_tools_approval_mode = "writes"` uses the server annotations to prompt before
+non-read-only tools. Confirm the active account, recipients, subject, thread, and body in
+the approval UI. Never change the mode to `approve` for this server.
 
-The registered MCP tool surface in `apps/server/src/routes/agent/mcp.ts` (the exact,
-machine-readable schema is committed at `docs/agent/mcp-schema.snapshot.json`) is:
+Use this sequence:
 
-Read:
+1. `getServerCapabilities`; verify all four forbidden capabilities are `false`.
+2. `getConnections`, then `getActiveConnection`; use `setActiveConnection` only after
+   confirming the intended owned account.
+3. `searchThreads`/`listThreads`, then `getThreadContext` for one thread. Context is at
+   most 20 sanitized messages and 64 KiB of text, with no attachments or raw headers.
+4. `createReplyDraft` with only `threadId`, body, and a unique 1–128 character
+   `idempotencyKey`. The server derives sender exclusions, To/Cc, subject, and threading.
+5. `getDraft`; review its owned projection and retain the opaque `revision`.
+6. `updateDraft` with the same draft ID, that revision, revised body, and a new idempotency
+   key. A stale revision changes nothing. Review the final unsent draft in Zero.
 
-- `getServerCapabilities` — health/capabilities + draft-only guarantees. Stores nothing.
-- `getConnections` — linked accounts (email + provider).
-- `getActiveConnection` / `setActiveConnection` — read/select the active account. Selection
-  changes no account setting.
-- `listThreads` — COMPACT thread metadata (subject/id/date/sender/unread/labels); never bodies.
-- `searchThreads` — COMPACT thread metadata for a search; never bodies.
-- `getThread` — one thread on demand (sanitized latest message text).
-- `getThreadSummary` — short AI summary for one thread.
-- `getUserLabels` / `getLabel` — list labels / one label.
-- `getCurrentDate` — server date/time.
-- `composeEmail` — returns AI-drafted body TEXT only; creates/stores/sends nothing.
-- `listOutbox` / `getOutboxItem` — inspect reviewable outbox draft jobs the user owns.
+Repeated calls with the same key and payload deduplicate. Reusing a key with a changed
+payload conflicts before provider mutation.
 
-Write (draft-only, idempotent):
+## Optional AI composition
 
-- `createDraft` — creates a Gmail draft stored in Gmail Drafts for later human review,
-  with optional `threadId` for replies and an optional `idempotencyKey` (repeat calls
-  return the same draft).
-- `enqueueDraftJob` — stores a reviewable outbox job (status `queued`); duplicate calls
-  with identical fields return the same item.
-- `cancelOutboxItem` / `retryOutboxItem` — cancel a pending / retry a failed outbox job
-  (idempotent; other-user or missing ids return an identical not-found).
+`composeEmail` is intentionally outside the recommended allowlist. It is the only Zero MCP
+tool that may send supplied content to an external AI provider and permit public web search.
+To opt in, add `composeEmail` to `enabled_tools`, keep write approvals enabled, and call it
+only with `allowWebSearch=true` after the user explicitly approves that egress. It returns
+text and creates no draft.
 
-Deliberately absent: `sendEmail`, `sendDraft`, `drafts.send`, `bulkDelete`,
-`deleteThread`, `deleteLabel`, `deleteAllSpam`, `markThreadsRead`/`markThreadsUnread`,
-`modifyLabels`, `createLabel`, or any send / permanent-delete / spam / account-setting
-tool. `composeEmail` only returns text; `createDraft` creates an unsent draft;
-`enqueueDraftJob` creates an outbox item that still requires human approval.
+## Verification boundary
 
-## Read-only smoke test
-
-After `codex mcp login zero`, prove discovery and a read-only path without touching mail:
-
-```bash
-# 1. Discovery — initialize + list tools; confirm the surface above is returned.
-codex exec "connecte-toi à Zero MCP, appelle getServerCapabilities et liste les outils disponibles"
-
-# 2. Read-only — no write tool is invoked.
-codex exec "via Zero MCP: getConnections, puis listThreads sur inbox (maxResults 5) en résumé compact — ne crée ni draft ni outbox"
-```
-
-Expected: `getServerCapabilities` reports `canSendMail:false`; `listThreads` returns
-compact rows (subject/id/date/sender), no message bodies; no draft or outbox item is
-created.
-
-## Draft-only smoke test
-
-```bash
-codex exec "prépare 2 réponses en attente sur compta@ via Zero MCP, crée les brouillons Gmail (createDraft) ou enqueue (enqueueDraftJob), et n'envoie rien"
-```
-
-Verify the agent stopped at draft-only output:
-
-- Gmail drafts were created for the target account (ids returned by `createDraft`), or
-  matching outbox items exist (`listOutbox` shows status `queued`/`draft_ready`).
-- Idempotency: repeating the same `enqueueDraftJob` (identical fields) or a `createDraft`
-  with the same `idempotencyKey` returns the same id — no duplicate.
-- There were zero sends: no new Sent item and no send-side confirmation. The surface
-  exposes no send tool, so this is structurally guaranteed.
-
-A machine-checked local run of these two paths (with injected driver fakes, no network)
-is saved at `docs/agent/mcp-smoke.evidence.json`; see `docs/agent/mcp-smoke.md` for the
-full procedure and the live-session blocker note.
-
-## Human approval boundary (`/queue`)
-
-Sending remains a separate human action. In Zero `/queue`, a reviewer approves an
-outbox item (15 s countdown → `sent`) or cancels it (`cancelled`). No agent tool can
-perform or shortcut that send.
+The repository proof is local and in-process: `mcp-draft-loop.test.ts` uses the installed
+Streamable HTTP transport and realistic fakes to prove initialization, tool listing,
+bounded read, create, get, same-ID update, forbidden-tool absence, and zero send calls.
+See `mcp-smoke.md` and `mcp-smoke.evidence.json`. A real OAuth login or hosted smoke remains
+a separate, explicit human-authorized action.

@@ -1,9 +1,22 @@
-# Version: niveau9/agent-api-completion-01
-# Codex CLI: >= 0.142
-# Copy this block into ~/.codex/config.toml and replace ${ZERO_MCP_HOST} with the
-# deployed Zero origin (e.g. zero.example.dev). Never commit a real host+token.
-# OAuth credentials are created interactively by:  codex mcp login zero
-# This MCP server is DRAFT-ONLY: no send / permanent-delete / spam / account-settings tool.
+# Verified with Codex CLI 0.144.1 on 2026-07-14.
+# Replace the .invalid URL. OAuth credentials are created by `codex mcp login zero`.
 
 [mcp_servers.zero]
-url = "https://${ZERO_MCP_HOST}/mcp"
+url = "https://zero.example.invalid/mcp"
+auth = "oauth"
+enabled = true
+enabled_tools = [
+  "getServerCapabilities",
+  "getConnections",
+  "getActiveConnection",
+  "setActiveConnection",
+  "listThreads",
+  "searchThreads",
+  "getThread",
+  "getThreadContext",
+  "listDrafts",
+  "getDraft",
+  "createReplyDraft",
+  "updateDraft",
+]
+default_tools_approval_mode = "writes"

@@ -1,93 +1,82 @@
-# Claude Code / Claude Desktop setup for Zero MCP (draft-only)
+# Claude Code and Claude Connectors setup for Zero MCP
 
-This guide wires a Claude Code or Claude Desktop MCP client to the Zero MCP endpoint
-for the draft-only workflow. The agent may inspect mail context, compose proposed
-replies, create Gmail drafts, and enqueue/inspect/cancel/retry reviewable outbox items.
-**It cannot send mail, permanently delete mail, report spam, or change account
-settings** — those surfaces are not registered.
+Zero MCP supports a bounded **read → create unsent reply draft → fetch → revise the same
+draft → human review** workflow. It exposes no tool that can send, approve, permanently
+delete, mark spam, or change account settings.
 
-The tool surface is identical to the Codex setup (`docs/agent/codex-setup.md`); the
-authoritative, machine-readable schema is committed at
-`docs/agent/mcp-schema.snapshot.json`.
+This guide was checked on 2026-07-14 against Claude Code 2.1.209, the current
+[Claude Code MCP documentation](https://code.claude.com/docs/en/mcp), and the current
+[Claude connector OAuth documentation](https://claude.com/docs/connectors/building/authentication).
+It does not claim a deployment, production connection, OAuth consent, or live production
+smoke.
 
-## Config — Claude Code (CLI)
+## Claude Code
 
-Zero MCP is a remote streamable-HTTP server behind a better-auth OIDC login. Add it and
-authenticate through the browser flow (no bearer token is stored in plaintext):
+Add a project-scoped remote HTTP server (all options precede the server name):
 
 ```bash
-# ${ZERO_MCP_HOST} is a placeholder — e.g. zero.example.dev. Never commit a real host+token.
-claude mcp add --transport http zero "https://${ZERO_MCP_HOST}/mcp"
-
-# Then, inside Claude Code, run the OAuth login for the "zero" server:
-#   /mcp        → select "zero" → Authenticate
+claude mcp add --transport http --scope project zero "https://YOUR-ZERO-ORIGIN/mcp"
 ```
 
-## Config — Claude Desktop
+The equivalent `.mcp.json` shape is in `claude-config.example.json`. Claude Code prompts
+before trusting a project-scoped server. Inspect the exact HTTPS URL before approving it.
 
-Add the server to `claude_desktop_config.json` (macOS:
-`~/Library/Application Support/Claude/claude_desktop_config.json`). A versioned example
-is checked in at `docs/agent/claude-config.example.json`:
+Authenticate only when ready to review the provider consent screen:
 
-```json
-{
-  "mcpServers": {
-    "zero": {
-      "type": "http",
-      "url": "https://${ZERO_MCP_HOST}/mcp"
-    }
-  }
-}
+```bash
+claude mcp login zero
 ```
 
-Restart Claude Desktop; the OAuth login is triggered on first connect. Use only
-environment-style placeholders in any committed config — never a real host embedded
-with a token.
+You can also use `/mcp` → `zero` → Authenticate. OAuth requires the server's 401 challenge,
+protected-resource metadata whose `resource` exactly matches the configured MCP URL, and
+authorization-server discovery. Cancel if the discovered issuer or scopes are unexpected.
 
-## Draft-only contract
+### Tool allowlist and write approvals
 
-Call `getServerCapabilities` first — it returns, as JSON, the hard guarantees
-`canSendMail:false`, `canPermanentlyDeleteMail:false`, `canReportSpam:false`,
-`canChangeAccountSettings:false`. The agent must stop at Gmail draft creation or outbox
-queuing; final sending belongs to a human action in Zero `/queue`.
+Copy the `permissions` object from `claude-settings.example.json` into
+`.claude/settings.json`. It allows only the bounded read tools, places
+`setActiveConnection`, `createReplyDraft`, and `updateDraft` in `permissions.ask`, and
+denies every other Zero MCP tool. Claude evaluates deny before ask before allow, so the two
+draft writes always require a visible approval prompt under this policy.
 
-## Read-only smoke test
+Do not use `bypassPermissions` with Zero MCP. Review the active account, recipients,
+subject, thread, and body at each write approval.
 
-After authenticating, prove discovery and a read-only path without touching mail. In
-Claude Code:
+Use this sequence:
 
-```
-> Use the zero MCP server: call getServerCapabilities and list the available tools.
-> Then call getConnections and listThreads on inbox (maxResults 5). Do not create any
-> draft or outbox item.
-```
+1. `getServerCapabilities`, then confirm all forbidden capabilities are `false`.
+2. Select the intended owned account with `getConnections`, `getActiveConnection`, and an
+   explicitly approved `setActiveConnection` if needed.
+3. Find a thread, then call `getThreadContext`; it returns at most 20 sanitized messages
+   and 64 KiB of text, without attachments or raw headers.
+4. Approve `createReplyDraft` with a thread ID, body, and unique 1–128 character
+   idempotency key. Recipients, subject, and threading are server-derived.
+5. Call `getDraft`, review the projection, and retain its opaque revision.
+6. Approve `updateDraft` for the same ID with that revision, revised body, and a new key.
+   A stale revision changes nothing. Review the resulting unsent draft in Zero.
 
-Expected: `getServerCapabilities` reports `canSendMail:false`; `listThreads` returns
-compact rows (subject/id/date/sender), no message bodies; no draft or outbox item is
-created.
+## Claude Desktop and hosted Claude
 
-## Draft-only smoke test
+Do not edit `claude_desktop_config.json` for this remote connector. In Claude Desktop or
+claude.ai, open **Settings → Connectors**, choose the custom connector/add-connector flow,
+and enter the exact `https://YOUR-ZERO-ORIGIN/mcp` URL. Hosted Claude surfaces require an
+interactive OAuth consent and use `https://claude.ai/api/mcp/auth_callback`; connector
+availability and who may add it depend on the workspace plan and admin policy.
 
-```
-> Use the zero MCP server. Prepare 2 pending replies on compta@: create the Gmail drafts
-> with createDraft (or enqueue them with enqueueDraftJob). Send nothing.
-```
+The local Claude Code permission file does not govern hosted connectors. Configure the
+hosted workspace's connector/tool policy separately and keep both draft writes
+human-approved.
 
-Verify draft-only output:
+## Optional AI composition
 
-- Gmail drafts were created (ids returned by `createDraft`) or outbox items exist
-  (`listOutbox` shows status `queued`/`draft_ready`).
-- Idempotency: repeating `enqueueDraftJob` with identical fields, or `createDraft` with
-  the same `idempotencyKey`, returns the same id — no duplicate.
-- Zero sends: no new Sent item; the surface exposes no send tool, so this is guaranteed
-  structurally.
+The recommended policy denies `composeEmail`. It is the only tool that may send supplied
+content to an external AI provider and permit public web search. Opt in only by moving its
+exact tool name from `deny` to `ask`, then call it with `allowWebSearch=true` after explicit
+egress approval. It returns text and creates no draft.
 
-A machine-checked local run of these two paths (with injected driver fakes, no network)
-is saved at `docs/agent/mcp-smoke.evidence.json`; see `docs/agent/mcp-smoke.md` for the
-full procedure and the live-session blocker note.
+## Verification boundary
 
-## Human approval boundary
-
-Sending is a separate human action in Zero `/queue`: a reviewer approves an outbox item
-(15 s countdown → `sent`) or cancels it (`cancelled`). No agent tool can perform or
-shortcut that send.
+The checked-in proof is local and in-process: the installed Streamable HTTP transport runs
+against realistic fakes with no OAuth consent, production credentials, provider network,
+deploy, or send path. See `mcp-smoke.md` and `mcp-smoke.evidence.json`. A hosted connector
+or live-account smoke is a separate human-authorized action.
