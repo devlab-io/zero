@@ -4,16 +4,22 @@ import { useOptimisticActions } from '@/hooks/use-optimistic-actions';
 import { type UseQueryResult } from '@tanstack/react-query';
 import { cleanNameDisplay } from './mail-list-utils';
 import type { ParsedDraft } from '@zero/types';
-import { memo, useCallback } from 'react';
-import { cn, formatDate } from '@/lib/utils';
 import { useDraft } from '@/hooks/use-drafts';
+import { cn, formatDate } from '@/lib/utils';
 import { Skeleton } from '../ui/skeleton';
-import { Trash } from '../icons/icons';
+import { memo, useCallback } from 'react';
 import { m } from '@/paraglide/messages';
+import { Trash } from '../icons/icons';
 import { Button } from '../ui/button';
 import { useQueryState } from 'nuqs';
 
-export const Draft = memo(({ message, index }: { message: { id: string }; index: number }) => {
+type DraftRowProps = {
+  message: { id: string };
+  index: number;
+  isKeyboardFocused?: boolean;
+};
+
+export const Draft = memo(({ message, index, isKeyboardFocused }: DraftRowProps) => {
   const draftQuery = useDraft(message.id) as UseQueryResult<ParsedDraft>;
   const draft = draftQuery.data;
   const [, setComposeOpen] = useQueryState('isComposeOpen');
@@ -41,11 +47,12 @@ export const Draft = memo(({ message, index }: { message: { id: string }; index:
 
   if (!draft) {
     return (
-      <div className="select-none py-1">
+      <div data-thread-id={message.id} className="select-none py-1">
         <div
           key={message.id}
           className={cn(
             'group relative mx-[8px] flex cursor-pointer flex-col items-start overflow-clip rounded-[10px] border-transparent py-3 text-left text-sm',
+            isKeyboardFocused && 'ring-primary/50 bg-primary/5 ring-2',
           )}
         >
           <div
@@ -73,11 +80,12 @@ export const Draft = memo(({ message, index }: { message: { id: string }; index:
   }
 
   return (
-    <div className="select-none py-1" onClick={handleMailClick}>
+    <div data-thread-id={message.id} className="select-none py-1" onClick={handleMailClick}>
       <div
         key={message.id}
         className={cn(
           'hover:bg-offsetLight dark:hover:bg-primary/5 group relative mx-[8px] flex cursor-pointer flex-col items-start overflow-visible rounded-[10px] border-transparent py-3 text-left text-sm hover:opacity-100',
+          isKeyboardFocused && 'ring-primary/50 bg-primary/5 ring-2',
         )}
       >
         <div
