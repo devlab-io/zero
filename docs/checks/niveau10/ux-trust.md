@@ -7,10 +7,10 @@ Spec: `docs/spec/niveau10-mailos.md` section 5 et critères responsive/accessibi
 ## RUN
 
 - RUN: `pnpm --filter @zero/mail exec vitest run components/mail/ux-trust.test.tsx components/mail/mail-list-thread.test.ts components/queue/queue-review.test.tsx` -> exit 0
-- RUN: `pnpm --filter @zero/mail exec eslint components/mail components/queue app/root.tsx app/'(routes)'/settings/shortcuts` -> exit 0
+- RUN: `pnpm --filter @zero/mail exec eslint components/mail components/queue components/create/email-composer.tsx components/create/email-composer.fields.tsx components/create/create-email.tsx hooks/use-composer-draft-persistence.ts app/root.tsx app/'(routes)'/settings/shortcuts` -> exit 0
 - RUN: `pnpm --filter @zero/server types && pnpm --filter @zero/mail types && pnpm --filter @zero/mail exec react-router typegen && TYPECHECK_BLOCKING=1 node scripts/checks/typecheck-report.mjs` -> server 0 et mail 0
 - RUN: `pnpm --filter @zero/mail exec react-router typegen && pnpm --filter @zero/mail build` -> exit 0
-- RUN: `git status --porcelain --untracked-files=all | sed 's/^...//' | awk '!/^(apps\/mail\/(app\/root\.tsx|components\/mail\/.*|components\/queue\/.*|app\/\(routes\)\/settings\/shortcuts\/.*|messages\/.*)|docs\/jobs\/niveau10\/ux-trust-01\.md)$/ {print; bad=1} END {exit bad}'` -> aucune sortie ; touch-set respecté
+- RUN: `git status --porcelain --untracked-files=all | sed 's/^...//' | awk '!/^(apps\/mail\/(app\/root\.tsx|components\/mail\/.*|components\/queue\/.*|components\/create\/(email-composer\.tsx|email-composer\.fields\.tsx|create-email\.tsx)|hooks\/use-composer-draft-persistence\.ts|app\/\(routes\)\/settings\/shortcuts\/.*|messages\/.*)|docs\/jobs\/niveau10\/ux-trust-01\.md)$/ {print; bad=1} END {exit bad}'` -> aucune sortie ; touch-set respecté
 - RUN: `git diff -U0 -- apps/mail | grep -E '^\+.*transition-all' && exit 1 || exit 0` -> aucune transition-all ajoutée (diff uniquement)
 - RUN: `git diff --check` -> exit 0
 
@@ -31,4 +31,6 @@ Spec: `docs/spec/niveau10-mailos.md` section 5 et critères responsive/accessibi
 7. JUDGE-ONLY navigateur authentifié : CLS <0,05, feedback visible <100 ms, Axe sans
    violation critique et captures aux trois viewports.
 8. Le builder ne modifie pas le hot path serveur, la spec ou les checks et ne commit/push
-   rien.
+   rien. Les seules coutures de création autorisées sont `email-composer.tsx`,
+   `email-composer.fields.tsx`, `create-email.tsx` et le hook de persistance partagé ; elles sont
+   nécessaires pour tester et corriger le vrai ordre Tab, le responsive et l'état d'autosave.
