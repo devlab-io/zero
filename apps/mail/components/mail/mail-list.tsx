@@ -3,6 +3,7 @@ import useSearchLabels, { hasActiveMailFilters } from '@/hooks/use-labels-search
 import { useCommandPalette } from '@/components/context/command-palette-context';
 import { useOptimisticActions } from '@/hooks/use-optimistic-actions';
 import { memo, useCallback, useEffect, useMemo, useRef } from 'react';
+import { resolveMailListNavigation } from './mail-list-navigation';
 import { useMailSelection } from '@/hooks/use-mail-selection';
 import { useMailListData } from '@/hooks/use-mail-list-data';
 import { selectMailListState } from '@/lib/mail-list-state';
@@ -34,6 +35,7 @@ export const MailList = memo(
     const { data: settingsData } = useSettings();
     const [, setThreadId] = useQueryState('threadId');
     const [, setDraftId] = useQueryState('draftId');
+    const [, setComposeOpen] = useQueryState('isComposeOpen');
     const [searchValue, setSearchValue] = useSearchValue();
     const { activeFilters, clearAllFilters } = useCommandPalette();
     const { labels } = useSearchLabels();
@@ -71,18 +73,25 @@ export const MailList = memo(
       return () => window.removeEventListener('refreshMailList', handleRefresh);
     }, [refetch]);
 
+    const isDraftFolder = folder === FOLDERS.DRAFT;
+    const autoRead = settingsData?.settings?.autoRead ?? true;
+
     const handleNavigateToThread = useCallback(
-      (threadId: string | null) => {
-        setThreadId(threadId);
-        return;
+      (targetId: string | null) => {
+        const navigation = resolveMailListNavigation(folder, targetId);
+        setThreadId(navigation.threadId);
+        setDraftId(navigation.draftId);
+        if (navigation.composeOpen !== undefined) setComposeOpen(navigation.composeOpen);
       },
-      [setThreadId],
+      [folder, setComposeOpen, setDraftId, setThreadId],
     );
 
     const { focusedIndex, handleMouseEnter, keyboardActive } = useMailNavigation({
       items,
       containerRef: parentRef,
       onNavigate: handleNavigateToThread,
+      openOnFocus: !isDraftFolder,
+      autoMarkAsRead: !isDraftFolder && autoRead,
     });
 
     const { getSelectMode, handleSelectMail, setAnchorIndex } = useMailSelection(itemsRef);
@@ -94,7 +103,6 @@ export const MailList = memo(
     const handleMailClick = useCallback(
       (message: ParsedMessage) => async () => {
         const mode = getSelectMode();
-        const autoRead = settingsData?.settings?.autoRead ?? true;
 
         if (mode !== 'single') {
           const messageThreadId = message.threadId ?? message.id;
@@ -123,7 +131,7 @@ export const MailList = memo(
         optimisticMarkAsRead,
         setThreadId,
         setDraftId,
-        settingsData,
+        autoRead,
         setActiveReplyId,
       ],
     );

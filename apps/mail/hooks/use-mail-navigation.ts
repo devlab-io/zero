@@ -62,12 +62,39 @@ export function runThreadRemovalNavigation({
 const PAGE_STEP = 10;
 
 export interface UseMailNavigationProps {
-  items: { id: string }[];
+  items: { id: string; unread?: boolean }[];
   containerRef: React.RefObject<HTMLDivElement | null>;
   onNavigate: (threadId: string | null) => void;
+  openOnFocus?: boolean;
+  autoMarkAsRead?: boolean;
 }
 
-export function useMailNavigation({ items, containerRef, onNavigate }: UseMailNavigationProps) {
+export type MailFocusNavigation = {
+  navigateToId: string | null;
+  markAsReadId: string | null;
+};
+
+export function resolveMailFocusNavigation(
+  item: { id: string; unread?: boolean },
+  {
+    openOnFocus,
+    autoMarkAsRead,
+  }: Pick<Required<UseMailNavigationProps>, 'openOnFocus' | 'autoMarkAsRead'>,
+): MailFocusNavigation {
+  const navigateToId = openOnFocus ? item.id : null;
+  return {
+    navigateToId,
+    markAsReadId: navigateToId && autoMarkAsRead && item.unread === true ? navigateToId : null,
+  };
+}
+
+export function useMailNavigation({
+  items,
+  containerRef,
+  onNavigate,
+  openOnFocus = true,
+  autoMarkAsRead = true,
+}: UseMailNavigationProps) {
   const [, setMail] = useMail();
   const [focusedIndex, setFocusedIndex] = useAtom(focusedIndexAtom);
   const { optimisticMarkAsRead } = useOptimisticActions();
@@ -75,7 +102,6 @@ export function useMailNavigation({ items, containerRef, onNavigate }: UseMailNa
   itemsRef.current = items;
   const onNavigateRef = useRef(onNavigate);
   onNavigateRef.current = onNavigate;
-  const [threadId] = useQueryState('threadId');
   const [isCommandPaletteOpen] = useQueryState('isCommandPaletteOpen');
 
   const hoveredMailRef = useRef<string | null>(null);
@@ -128,19 +154,20 @@ export function useMailNavigation({ items, containerRef, onNavigate }: UseMailNa
       if (index === null || !itemsRef.current[index]) return;
 
       const message = itemsRef.current[index];
-      const threadId = message.id;
+      const navigation = resolveMailFocusNavigation(message, {
+        openOnFocus,
+        autoMarkAsRead,
+      });
 
-      if (threadId) {
-        onNavigateRef.current(threadId);
-        optimisticMarkAsRead([threadId], true);
-      }
+      if (navigation.navigateToId) onNavigateRef.current(navigation.navigateToId);
+      if (navigation.markAsReadId) optimisticMarkAsRead([navigation.markAsReadId], true);
 
       setMail((prev) => ({
         ...prev,
         bulkSelected: [],
       }));
     },
-    [setMail, threadId],
+    [autoMarkAsRead, openOnFocus, optimisticMarkAsRead, setMail],
   );
 
   const getHoveredIndex = useCallback(() => {
