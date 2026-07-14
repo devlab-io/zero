@@ -23,3 +23,12 @@
 - The existing Gmail regression asserts only the JSON `threadId`, which cannot detect this defect. Judge evidence is `docs/jobs/niveau10/mcp-draft-loop-judge-2.md`.
 - The corrective builder must derive the owned source message's RFC Message-ID server-side, add injection-safe `In-Reply-To` and `References` headers to Gmail reply MIME, and test by decoding the produced raw MIME as well as asserting the API `threadId`. Missing or malformed source Message-ID must fail safely before a provider draft mutation rather than silently create an unthreaded draft.
 - No client-supplied threading header is authorised. Merge remains blocked until a fresh builder, fresh deterministic checkrun, and fresh independent judge all pass.
+
+## 2026-07-14 — Judge 3 FAIL: pre-read revision is not provider CAS
+
+- Independent judge 3 verified the provider-normalized update and Gmail MIME threading corrections and passed all six frozen RUNs, but found a time-of-check/time-of-use overwrite window.
+- `updateDraft` compares the supplied revision to a fetched projection, then performs an unconditional Gmail `drafts.update` or Outlook message patch. A provider edit between those operations can therefore be overwritten even though the caller's revision is stale.
+- The official Gmail discovery contract exposes an immutable draft ID and an unconditional content-replacing `PUT`, but no per-draft ETag/version token. Microsoft message resources expose `changeKey`, while the public message-update contract does not document an `If-Match` precondition. Sources: https://gmail.googleapis.com/$discovery/rest?version=v1 and https://learn.microsoft.com/en-us/graph/api/message-update?view=graph-rest-1.0.
+- The accepted contract is fail-closed: a driver may mutate only when it supplies a provider-native conditional-write token bound to the returned revision and the write uses that token atomically. Otherwise `updateDraft` must advertise the limitation and reject before any provider effect. A local mutex or read-check-write sequence is not provider CAS and is forbidden as a substitute.
+- Capabilities, tool output, Codex/Claude docs, snapshot, and smoke evidence must state which active provider supports safe update and instruct agents to create a new unsent draft when it does not. The smoke must cover both a CAS fake with a concurrent-edit `412` equivalent and a no-CAS fake with zero mutation.
+- Judge evidence is `docs/jobs/niveau10/mcp-draft-loop-judge-3.md`. Merge remains blocked until a fresh builder, fresh deterministic checkrun, and fresh independent judge all pass.

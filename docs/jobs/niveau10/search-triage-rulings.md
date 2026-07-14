@@ -13,3 +13,18 @@
 
 - After full Wrangler and Paraglide generation, the keyboard correction branch has no keyboard-owned TypeScript error; the only remaining mail error is the missing `idToUse` guard in `mail-list-thread.tsx:232`.
 - Builder 1 already added the required early return in the search checkpoint. The fresh search builder must retain and test it, then prove the existing global blocking mail=0 command after consuming the corrected keyboard freeze.
+
+## 2026-07-14 — Judge 1 FAIL: reset and real successor paths
+
+- Independent judge 1 passed check integrity and all five frozen RUNs, including 33 focused tests and global `server=0` / `mail=0`, but found two product gaps hidden by helper-only tests.
+- `clearAllFilters` cleared lexical text and the active-filter storage entry but not the independent label and category query states. Label-only empty results could therefore render the mailbox-empty state instead of no-results.
+- The click path selected a successor before `optimisticMoveThreadsTo`, which then cleared `threadId`; the keyboard archive path removed the item before issuing `next`, causing the navigation hook to skip the row shifted into the removed index. The helper simulation did not exercise either integration path.
+- Judge evidence is `docs/jobs/niveau10/search-triage-judge-1.md`. The authorised touch-set now includes only the concrete filter-state and navigation seams: `command-palette-context.tsx`, `mail.tsx`, `use-labels-search.ts`, `thread-display-hotkeys.tsx`, and `use-mail-navigation.ts`.
+- The corrective builder must test reset against real query-state setters and test click plus keyboard archive/snooze on the actual integration helpers for 1/2/20 rows. It must prove successor URL/focus after the mutation and distinct mailbox-empty versus filtered-no-results behavior.
+- Merge remains blocked until a fresh builder, fresh deterministic checkrun, and fresh independent judge all pass. Browser latency remains for final Computer Use verification even if the deterministic 20-event p75 test passes.
+
+## 2026-07-14 — Reset integration test belongs to the authorised seam
+
+- The judge-1 correction necessarily extends the existing `command-palette-context.test.tsx` so reset is exercised against the real label/category/query-state setters instead of another isolated helper.
+- The first expanded touch audit named `command-palette-context.tsx` but omitted its already-frozen test file. The allowlist and focused lint/format command now include exactly that sibling test; no additional product surface is authorised.
+- A fresh builder must consume the corrected check before the result can be accepted.
