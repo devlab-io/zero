@@ -1,0 +1,16 @@
+{
+  "categories": { "correctness": "off" },
+  "rules": {
+    "no-restricted-imports": [
+      "error",
+      {
+        "patterns": [
+          {
+            "group": ["**/server/src/**"],
+            "message": "Frontière front→serveur : importez les contrats partagés depuis @zero/types, pas les sources @zero/server via un chemin relatif (issue #25)."
+          }
+        ]
+      }
+    ]
+  }
+}
