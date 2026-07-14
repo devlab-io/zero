@@ -28,3 +28,45 @@ RÉELS en LOCAL (aucun push/PR/deploy sans feu vert propriétaire). Principes op
   exécution de coupe. docs/research en écriture.
 V7b (séquencé post-merge a5) : a2-nonnull-01 (84 → ≤10 par guards réels) + extension
 type-ratchet @ts-expect-error (budget 4 + RULING nommant les 4 réels).
+
+## RULING a8-weight-hunt-01 — coupes autorisées post-investigation (2026-07-13)
+
+Rapport d'investigation reçu (5 fichiers docs/research/niveau9/perf/** + rapport, zéro
+code touché, mesure gelée reproduite 435,9 KiB gz — conforme au cadre investigation-first).
+
+### Volet cold-start — verdict ENREGISTRÉ, mesure et barème INCHANGÉS
+Cold-boot serveur médian : AVANT (0e55cc09) 807,3 ms vs APRÈS (HEAD) 780,8 ms →
+Δ +26,5 ms DANS LE BRUIT (σ 46–187 ms). Le critère « −1s » N'EST PAS acquis en
+cold-start serveur mesurable. Seule défense honnête : borne de TRANSFERT client
+−1,06 s @1,5 Mbps sur le delta mesuré −193,6 KiB gz — borne arithmétique, PAS une
+mesure runtime (FCP/LCP Tahiti BLOCKED, SPA ssr:false + CORS). Aucune re-définition
+de métrique par l'orchestrateur (arbitrage propriétaire : « ne change pas la mesure
+après avoir vu l'échec juste pour passer »). La notation de ce sous-critère appartient
+au juge froid de vague puis au contre-jugement final, sur ce libellé exact.
+
+### Volet poids — ruling par lead
+- **LEAD A — AUTORISÉ (primaire).** Split du god-module email-utils : déplacer
+  `highlightText` (JSX pur) vers un module léger afin que mail-list-thread.tsx (liste
+  FROIDE) cesse de tracter zod (12,2k) + Color (9,4k). PUR CODE-MOTION. Conditions
+  opposables : (1) aucun lazy-au-mount, preload ou changement de condition de
+  chargement — f143abf9 s'applique intégralement ; (2) DOMPurify RESTE statique
+  (bimi-avatar froid, sécurité SVG) — ne pas l'évincer ; (3) aucun nouveau package,
+  aucun changement d'API publique ; (4) preuve = measure-critical.py (script INTOUCHÉ)
+  avant/après + trace réseau cold montrant l'éviction réelle ; (5) gates : tsc 0,
+  vitest mail, build. Si le résultat reste ≥420, libellé honnête obligatoire.
+- **LEAD C — AUTORISÉ (complément).** `build.target: 'es2022'` dans
+  apps/mail/vite.config.ts, un seul champ. Conditions : build + tests verts, mesure
+  avant/après consignée, revert immédiat si un gate casse.
+- **LEAD B — NON AUTORISÉ dans cette tranche.** react-hook-form via
+  nav-main→label-dialog frôle f143abf9 ; A+C suffisent à fermer le gate. Consigné
+  comme follow-up nommé, conditionné à la preuve « montage sur INTENTION » (ouverture
+  utilisateur réelle, trace cold sans le chunk) avant toute exécution future.
+- **LEAD D — REFUSÉ.** Icônes majoritairement rendues cold : éviction = gaming ou
+  casse UI.
+- **LEAD E — REFUSÉ.** Hors-fence #44 ; l'arbitrage onboarding reste propriétaire.
+
+Périmètre d'écriture a8 (exécution) : apps/mail/lib/email-utils.ts,
+apps/mail/lib/email-utils.client.tsx (nouveau), apps/mail/components/mail/
+mail-list-thread.tsx (1 import), apps/mail/vite.config.ts (build.target seul),
+docs/research/niveau9/perf/**, docs/jobs/niveau9/a8-weight-hunt-01.md. Rien d'autre.
+Builder ne committe pas ; STATUS final avec mesures + RC natifs.
