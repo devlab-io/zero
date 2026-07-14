@@ -1,3 +1,4 @@
+import { logger } from './logger';
 import {
   AIWritingAssistantEmail,
   AutoLabelingEmail,
@@ -7,9 +8,10 @@ import {
   SuperSearchEmail,
   WelcomeEmail,
 } from './react-emails/email-sequences';
-import { createAuthMiddleware, phoneNumber, jwt, bearer, mcp } from 'better-auth/plugins';
 import { type Account, betterAuth, type BetterAuthOptions } from 'better-auth';
+import { phoneNumber, jwt, bearer, mcp } from 'better-auth/plugins';
 import { getBrowserTimezone, isValidTimezone } from './timezones';
+import { APIError, createAuthMiddleware } from 'better-auth/api';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import { getZeroDB, resetConnection } from './server-utils';
 import { getSocialProviders } from './auth-providers';
@@ -17,7 +19,6 @@ import { redis, resend, twilio } from './services';
 import { dubAnalytics } from '@dub/better-auth';
 import { defaultUserSettings } from './schemas';
 import { disableBrainFunction } from './brain';
-import { APIError } from 'better-auth/api';
 import { type EProviders } from '../types';
 import { createDriver } from './driver';
 import { Autumn } from 'autumn-js';
@@ -90,7 +91,7 @@ const scheduleCampaign = (userInfo: { address: string; name: string }) =>
 
 const connectionHandlerHook = async (account: Account) => {
   if (!account.accessToken || !account.refreshToken) {
-    console.error('Missing Access/Refresh Tokens', { account });
+    logger.error('Missing Access/Refresh Tokens', { account });
     throw new APIError('EXPECTATION_FAILED', {
       message: 'Missing Access/Refresh Tokens, contact us on Discord for support',
     });
@@ -122,7 +123,7 @@ const connectionHandlerHook = async (account: Account) => {
       );
       await resetConnection(account.id);
     } catch (error) {
-      console.error('Failed to revoke tokens:', error);
+      logger.error('Failed to revoke tokens:', error);
     }
     throw new Response(null, { status: 303, headers: { Location: '/' } });
   }
@@ -157,6 +158,14 @@ const connectionHandlerHook = async (account: Account) => {
   }
 };
 
+// NOTE (issue #31, revue) : createAuth N'EST PAS mémoïsé, à dessein. better-auth capture
+// une connexion postgres-js (`createAuthConfig` → `createDb(env.HYPERDRIVE.connectionString)`
+// → `postgres(url)`) au moment de la construction. Cloudflare Workers interdit de réutiliser
+// un objet I/O (socket) entre deux invocations ; un singleton per-isolate rejouerait le socket
+// ouvert lors de la requête 1 dans la requête 2 → « Cannot perform I/O on behalf of a different
+// request ». De plus le flux réel n'appelle createAuth qu'UNE fois par requête (middleware /api
+// OU un mount /mcp|/sse|discovery — jamais cumulés), donc « multiple par requête » est faux.
+// Une connexion neuve par requête est le contrat correct en Workers. Voir rapport #31.
 export const createAuth = () => {
   const twilioClient = twilio();
 
@@ -175,7 +184,7 @@ export const createAuth = () => {
           await twilioClient.messages
             .send(phoneNumber, `Your verification code is: ${code}, do not share it with anyone.`)
             .catch((error) => {
-              console.error('Failed to send OTP', error);
+              logger.error('Failed to send OTP', error);
               throw new APIError('INTERNAL_SERVER_ERROR', {
                 message: `Failed to send OTP, ${error.message}`,
               });
@@ -208,7 +217,7 @@ export const createAuth = () => {
           try {
             await autumn.customers.delete(user.id);
           } catch (error) {
-            console.error('Failed to delete Autumn customer:', error);
+            logger.error('Failed to delete Autumn customer:', error);
             // Continue with deletion process despite Autumn failure
           }
 
@@ -240,7 +249,7 @@ export const createAuth = () => {
           });
 
           if (revokedAccounts.every((value) => !!value)) {
-            console.log('Failed to revoke some accounts');
+            logger.info('Failed to revoke some accounts');
           }
 
           await db.deleteUser();
@@ -326,23 +335,29 @@ export const createAuth = () => {
 };
 
 const createAuthConfig = () => {
-  const cache = redis();
+  // Devlab self-host: Redis optionnel — sans REDIS_URL/TOKEN, better-auth
+  // retombe sur Postgres seul (pas de secondaryStorage).
+  const cache = env.REDIS_URL && env.REDIS_TOKEN ? redis() : null;
   const { db } = createDb(env.HYPERDRIVE.connectionString);
   return {
     database: drizzleAdapter(db, { provider: 'pg' }),
-    secondaryStorage: {
-      get: async (key: string) => {
-        const value = await cache.get(key);
-        return typeof value === 'string' ? value : value ? JSON.stringify(value) : null;
-      },
-      set: async (key: string, value: string, ttl?: number) => {
-        if (ttl) await cache.set(key, value, { ex: ttl });
-        else await cache.set(key, value);
-      },
-      delete: async (key: string) => {
-        await cache.del(key);
-      },
-    },
+    ...(cache
+      ? {
+          secondaryStorage: {
+            get: async (key: string) => {
+              const value = await cache.get(key);
+              return typeof value === 'string' ? value : value ? JSON.stringify(value) : null;
+            },
+            set: async (key: string, value: string, ttl?: number) => {
+              if (ttl) await cache.set(key, value, { ex: ttl });
+              else await cache.set(key, value);
+            },
+            delete: async (key: string) => {
+              await cache.del(key);
+            },
+          },
+        }
+      : {}),
     advanced: {
       ipAddress: {
         disableIpTracking: true,
@@ -367,10 +382,11 @@ const createAuthConfig = () => {
     session: {
       cookieCache: {
         enabled: true,
-        maxAge: 60 * 60 * 24 * 30, // 30 days
+        // Bound the revocation window: cached sessions are revalidated every five minutes.
+        maxAge: 60 * 5,
       },
-      expiresIn: 60 * 60 * 24 * 30, // 30 days
-      updateAge: 60 * 60 * 24 * 3, // 1 day (every 1 day the session expiration is updated)
+      expiresIn: 60 * 60 * 24 * 7,
+      updateAge: 60 * 60 * 12,
     },
     socialProviders: getSocialProviders(env as unknown as Record<string, string>),
     account: {
@@ -382,7 +398,7 @@ const createAuthConfig = () => {
     },
     onAPIError: {
       onError: (error) => {
-        console.error('API Error', error);
+        logger.error('API Error', error);
       },
       errorURL: `${env.VITE_PUBLIC_APP_URL}/login`,
       throw: true,

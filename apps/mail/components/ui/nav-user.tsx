@@ -1,3 +1,4 @@
+import { log } from '@/lib/log';
 import {
   HelpCircle,
   LogOut,
@@ -118,12 +119,12 @@ export function NavUser() {
   const handleClearCache = useCallback(async () => {
     queryClient.clear();
     await idbClear();
-    toast.success('Cache cleared successfully');
+    toast.success(m['common.navUser.cacheCleared']());
   }, []);
 
   const handleCopyConnectionId = useCallback(async () => {
     await navigator.clipboard.writeText(activeConnection?.id || '');
-    toast.success('Connection ID copied to clipboard');
+    toast.success(m['common.navUser.connectionIdCopied']());
   }, [activeConnection]);
 
   const { data: activeAccount } = useActiveConnection();
@@ -140,7 +141,7 @@ export function NavUser() {
       queryClient.clear();
       await queryClient.refetchQueries({ queryKey: trpc.mail.listThreads.infiniteQueryKey() });
     } catch (error) {
-      console.error('Error switching accounts:', error);
+      log.error('Error switching accounts:', error);
       toast.error(m['common.navUser.failedToSwitchAccount']());
 
       await refetchActiveConnection();

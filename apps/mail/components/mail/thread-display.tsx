@@ -12,6 +12,8 @@ import {
   Trash,
   X,
 } from '../icons/icons';
+// #32 label/move picker — self-contained, driven by the `picker` query-state (l/v shortcuts).
+import { LabelMovePicker } from './label-move-picker';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -20,136 +22,51 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { useOptimisticThreadState } from '@/components/mail/optimistic-thread-state';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { useOptimisticActions } from '@/hooks/use-optimistic-actions';
 import { focusedIndexAtom } from '@/hooks/use-mail-navigation';
 import { type ThreadDestination } from '@/lib/thread-actions';
 import { handleUnsubscribe } from '@/lib/email-utils.client';
 import { useThread, useThreads } from '@/hooks/use-threads';
-import { useAISidebar } from '@/components/ui/ai-sidebar';
+import { useAISidebar } from '@/components/ui/use-ai-sidebar';
 import { EmptyStateIcon } from '../icons/empty-state-svg';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import type { ParsedMessage, Attachment } from '@/types';
+import type { Attachment } from '@/types';
 import { useAnimations } from '@/hooks/use-animations';
-import { AnimatePresence, motion } from 'motion/react';
 import { MailDisplaySkeleton } from './mail-skeleton';
 import { useTRPC } from '@/providers/query-provider';
 import { useMutation } from '@tanstack/react-query';
 import { useIsMobile } from '@/hooks/use-mobile';
-import { Button } from '@/components/ui/button';
-import { cleanHtml } from '@/lib/email-utils';
-import ReplyCompose from './reply-composer';
 import { NotesPanel } from './note-panel';
+import { selectThreadViewState } from '@/lib/thread-view-state';
+import { useIsOffline } from '@/hooks/use-online-status';
 import { cn, FOLDERS } from '@/lib/utils';
 import { m } from '@/paraglide/messages';
-import MailDisplay from './mail-display';
 import { useParams } from 'react-router';
-import { Inbox } from 'lucide-react';
+import { Inbox, RefreshCcw } from 'lucide-react';
 import { useQueryState } from 'nuqs';
-import { format } from 'date-fns';
 import { useAtom } from 'jotai';
 import { toast } from 'sonner';
 
-const formatFileSize = (size: number) => {
-  const sizeInMB = (size / (1024 * 1024)).toFixed(2);
-  return sizeInMB === '0.00' ? '' : `${sizeInMB} MB`;
-};
+import { printThread } from './thread-display.print';
+import { ThreadActionButton } from './thread-display.action-button';
+import { MessageList } from './thread-display.message-list';
+import { THREAD_TRANSITION_WRAPPER_CLASS } from './thread-display.transition';
 
-const cleanNameDisplay = (name?: string) => {
-  if (!name) return '';
-  return name.replace(/["<>]/g, '');
-};
+export { ThreadDemo } from './thread-display.demo';
 
-interface ThreadDisplayProps {
-  threadParam?: any;
-  onClose?: () => void;
-  isMobile?: boolean;
-  messages?: ParsedMessage[];
-  id?: string;
-}
+// #44 (gate A8): the motion-powered thread transition lives in a lazily-loaded sibling so
+// `motion` stays out of the critical inbox chunk. It resolves when a thread is first shown
+// with animations on (via the Suspense boundary below); a structurally-equivalent fallback is
+// rendered while it loads, so the first such thread may render without its entry animation.
+const AnimatedMessageList = lazy(() => import('./thread-display.animated-message-list'));
 
-export function ThreadDemo({ messages, isMobile }: ThreadDisplayProps) {
-  const isFullscreen = false;
-  return (
-    <div
-      className={cn(
-        'flex flex-col',
-        isFullscreen ? 'h-screen' : isMobile ? 'h-full' : 'h-[calc(100dvh-2rem)]',
-      )}
-    >
-      <div
-        className={cn(
-          'bg-offsetLight dark:bg-offsetDark relative flex flex-col overflow-hidden duration-300',
-          isMobile ? 'h-full' : 'h-full',
-          !isMobile && !isFullscreen && 'rounded-r-lg',
-          isFullscreen ? 'fixed inset-0 z-50' : '',
-        )}
-      >
-        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-          <ScrollArea className="flex-1" type="scroll">
-            <div className="pb-4">
-              {[...(messages || [])].reverse().map((message, index) => (
-                <div
-                  key={message.id}
-                  className={cn('duration-200', index > 0 && 'border-border border-t')}
-                >
-                  <MailDisplay
-                    demo
-                    emailData={message}
-                    isFullscreen={isFullscreen}
-                    isMuted={false}
-                    isLoading={false}
-                    index={index}
-                  />
-                </div>
-              ))}
-            </div>
-          </ScrollArea>
-        </div>
-      </div>
-    </div>
-  );
-}
+// #44 (gate A8): reply composer (pulls posthog-js + its shell) is loaded lazily so it stays out
+// of the critical inbox chunk. It resolves when the user opens a reply (via the Suspense below);
+// its embedded editor was already lazy, so this adds only the composer shell to that same
+// on-open resolution. The composer's own behaviour is unchanged.
+const ReplyCompose = lazy(() => import('./reply-composer'));
 
-function ThreadActionButton({
-  icon: Icon,
-  label,
-  onClick,
-  disabled = false,
-  className,
-}: {
-  icon: React.ComponentType<React.ComponentPropsWithRef<any>> & {
-    startAnimation?: () => void;
-    stopAnimation?: () => void;
-  };
-  label: string;
-  onClick?: () => void;
-  disabled?: boolean;
-  className?: string;
-}) {
-  const iconRef = useRef<any>(null);
-
-  return (
-    <TooltipProvider delayDuration={0}>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button
-            disabled={disabled}
-            onClick={onClick}
-            variant="ghost"
-            className={cn('md:h-fit md:px-2', className)}
-            onMouseEnter={() => iconRef.current?.startAnimation?.()}
-            onMouseLeave={() => iconRef.current?.stopAnimation?.()}
-          >
-            <Icon ref={iconRef} className="dark:fill-iconDark fill-iconLight" />
-            <span className="sr-only">{label}</span>
-          </Button>
-        </TooltipTrigger>
-        {/* <TooltipContent>{label}</TooltipContent> */}
-      </Tooltip>
-    </TooltipProvider>
-  );
-}
 const isFullscreen = false;
 export function ThreadDisplay() {
   const isMobile = useIsMobile();
@@ -158,7 +75,8 @@ export function ThreadDisplay() {
 
   const folder = params?.folder ?? 'inbox';
   const [id, setThreadId] = useQueryState('threadId');
-  const { data: emailData, isLoading, refetch: refetchThread } = useThread(id ?? null);
+  const { data: emailData, isLoading, isError, refetch: refetchThread } = useThread(id ?? null);
+  const isOffline = useIsOffline();
   const [, items] = useThreads();
   const [isStarred, setIsStarred] = useState(false);
   const [isImportant, setIsImportant] = useState(false);
@@ -203,7 +121,6 @@ export function ThreadDisplay() {
     if (!id || !items.length || focusedIndex === null) return setThreadId(null);
     if (focusedIndex < items.length - 1) {
       const nextIndex = Math.max(1, focusedIndex + 1);
-      //   console.log('nextIndex', nextIndex);
 
       const nextThread = items[nextIndex];
       if (nextThread) {
@@ -273,389 +190,6 @@ export function ThreadDisplay() {
     setIsStarred(newStarredState);
   }, [emailData, id, isStarred, optimisticToggleStar]);
 
-  const printThread = () => {
-    try {
-      // Create a hidden iframe for printing
-      const printFrame = document.createElement('iframe');
-      printFrame.style.position = 'absolute';
-      printFrame.style.top = '-9999px';
-      printFrame.style.left = '-9999px';
-      printFrame.style.width = '0px';
-      printFrame.style.height = '0px';
-      printFrame.style.border = 'none';
-
-      document.body.appendChild(printFrame);
-
-      // Generate clean, simple HTML content for printing
-      const printContent = `
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <meta charset="utf-8">
-          <title>Print Thread - ${emailData?.latest?.subject || 'No Subject'}</title>
-          <style>
-            * {
-              margin: 0;
-              padding: 0;
-              box-sizing: border-box;
-            }
-
-            body {
-              font-family: Arial, sans-serif;
-              line-height: 1.5;
-              color: #333;
-              background: white;
-              padding: 20px;
-              font-size: 12px;
-            }
-
-            .email-container {
-              max-width: 100%;
-              margin: 0 auto;
-              background: white;
-            }
-
-            .email-header {
-              margin-bottom: 25px;
-            }
-
-            .email-title {
-              font-size: 18px;
-              font-weight: bold;
-              color: #000;
-              margin-bottom: 15px;
-              word-wrap: break-word;
-            }
-
-            .email-meta {
-              margin-bottom: 20px;
-            }
-
-            .meta-row {
-              margin-bottom: 5px;
-              display: flex;
-              align-items: flex-start;
-            }
-
-            .meta-label {
-              font-weight: bold;
-              min-width: 60px;
-              color: #333;
-              margin-right: 10px;
-            }
-
-            .meta-value {
-              flex: 1;
-              word-wrap: break-word;
-              color: #333;
-            }
-
-            .separator {
-              width: 100%;
-              height: 1px;
-              background: #ddd;
-              margin: 20px 0;
-            }
-
-            .email-body {
-              margin: 20px 0;
-              background: white;
-            }
-
-            .email-content {
-              word-wrap: break-word;
-              overflow-wrap: break-word;
-              font-size: 12px;
-              line-height: 1.6;
-            }
-
-            .email-content img {
-              max-width: 100% !important;
-              height: auto !important;
-              display: block;
-              margin: 10px 0;
-            }
-
-            .email-content table {
-              width: 100%;
-              border-collapse: collapse;
-              margin: 10px 0;
-            }
-
-            .email-content td, .email-content th {
-              padding: 6px;
-              text-align: left;
-              font-size: 11px;
-            }
-
-            .email-content a {
-              color: #0066cc;
-              text-decoration: underline;
-            }
-
-            .attachments-section {
-              margin-top: 25px;
-              background: white;
-            }
-
-            .attachments-title {
-              font-size: 14px;
-              font-weight: bold;
-              color: #000;
-              margin-bottom: 10px;
-            }
-
-            .attachment-item {
-              margin-bottom: 5px;
-              font-size: 11px;
-              padding: 3px 0;
-            }
-
-            .attachment-name {
-              font-weight: 500;
-              color: #333;
-            }
-
-            .attachment-size {
-              color: #666;
-              font-size: 10px;
-            }
-
-            .labels-section {
-              margin: 10px 0;
-            }
-
-            .label-badge {
-              display: inline-block;
-              padding: 2px 6px;
-              background: #f5f5f5;
-              color: #333;
-              font-size: 10px;
-              margin-right: 5px;
-              margin-bottom: 3px;
-            }
-
-            @media print {
-              body {
-                margin: 0;
-                padding: 15px;
-                font-size: 11px;
-                -webkit-print-color-adjust: exact;
-                print-color-adjust: exact;
-              }
-
-              .email-container {
-                max-width: none;
-                width: 100%;
-              }
-
-              .separator {
-                background: #000 !important;
-              }
-
-              .email-content a {
-                color: #000 !important;
-              }
-
-              .label-badge {
-                background: #f0f0f0 !important;
-                border: 1px solid #ccc;
-              }
-
-              .no-print {
-                display: none !important;
-              }
-
-              * {
-                border: none !important;
-                box-shadow: none !important;
-              }
-
-              .email-header {
-                page-break-after: avoid;
-              }
-
-              .attachments-section {
-                page-break-inside: avoid;
-              }
-            }
-
-            @page {
-              margin: 0.5in;
-              size: A4;
-            }
-          </style>
-        </head>
-        <body>
-          ${emailData?.messages
-            ?.map(
-              (message, index) => `
-            <div class="email-container">
-              <div class="email-header">
-                ${index === 0 ? `<h1 class="email-title">${message.subject || 'No Subject'}</h1>` : ''}
-
-
-                ${
-                  message?.tags && message.tags.length > 0
-                    ? `
-                  <div class="labels-section">
-                    ${message.tags
-                      .map((tag) => `<span class="label-badge">${tag.name}</span>`)
-                      .join('')}
-                  </div>
-                `
-                    : ''
-                }
-
-
-                <div class="email-meta">
-                  <div class="meta-row">
-                    <span class="meta-label">From:</span>
-                    <span class="meta-value">
-                      ${cleanNameDisplay(message.sender?.name)}
-                      ${message.sender?.email ? `<${message.sender.email}>` : ''}
-                    </span>
-                  </div>
-
-
-                  ${
-                    message.to && message.to.length > 0
-                      ? `
-                    <div class="meta-row">
-                      <span class="meta-label">To:</span>
-                      <span class="meta-value">
-                        ${message.to
-                          .map(
-                            (recipient) =>
-                              `${cleanNameDisplay(recipient.name)} <${recipient.email}>`,
-                          )
-                          .join(', ')}
-                      </span>
-                    </div>
-                  `
-                      : ''
-                  }
-
-
-                  ${
-                    message.cc && message.cc.length > 0
-                      ? `
-                    <div class="meta-row">
-                      <span class="meta-label">CC:</span>
-                      <span class="meta-value">
-                        ${message.cc
-                          .map(
-                            (recipient) =>
-                              `${cleanNameDisplay(recipient.name)} <${recipient.email}>`,
-                          )
-                          .join(', ')}
-                      </span>
-                    </div>
-                  `
-                      : ''
-                  }
-
-
-                  ${
-                    message.bcc && message.bcc.length > 0
-                      ? `
-                    <div class="meta-row">
-                      <span class="meta-label">BCC:</span>
-                      <span class="meta-value">
-                        ${message.bcc
-                          .map(
-                            (recipient) =>
-                              `${cleanNameDisplay(recipient.name)} <${recipient.email}>`,
-                          )
-                          .join(', ')}
-                      </span>
-                    </div>
-                  `
-                      : ''
-                  }
-
-
-                  <div class="meta-row">
-                    <span class="meta-label">Date:</span>
-                    <span class="meta-value">${format(new Date(message.receivedOn), 'PPpp')}</span>
-                  </div>
-                </div>
-              </div>
-
-              <div class="separator"></div>
-
-              <div class="email-body">
-                <div class="email-content">
-                  ${cleanHtml(message.decodedBody ?? '<p><em>No email content available</em></p>')}
-                </div>
-              </div>
-
-
-              ${
-                message.attachments && message.attachments.length > 0
-                  ? `
-                <div class="attachments-section">
-                  <h2 class="attachments-title">Attachments (${message.attachments.length})</h2>
-                  ${message.attachments
-                    .map(
-                      (attachment) => `
-                    <div class="attachment-item">
-                      <span class="attachment-name">${attachment.filename}</span>
-                      ${formatFileSize(attachment.size) ? ` - <span class="attachment-size">${formatFileSize(attachment.size)}</span>` : ''}
-                    </div>
-                  `,
-                    )
-                    .join('')}
-                </div>
-              `
-                  : ''
-              }
-            </div>
-            ${index < emailData.messages.length - 1 ? '<div class="separator"></div>' : ''}
-          `,
-            )
-            .join('')}
-        </body>
-      </html>
-    `;
-
-      // Write content to the iframe
-      const iframeDoc = printFrame.contentDocument || printFrame.contentWindow?.document;
-      if (!iframeDoc) {
-        throw new Error('Could not access iframe document');
-      }
-      iframeDoc.open();
-      iframeDoc.write(printContent);
-      iframeDoc.close();
-
-      // Wait for content to load, then print
-      printFrame.onload = function () {
-        setTimeout(() => {
-          try {
-            // Focus the iframe and print
-            printFrame.contentWindow?.focus();
-            printFrame.contentWindow?.print();
-
-            // Clean up - remove the iframe after a delay
-            setTimeout(() => {
-              if (printFrame && printFrame.parentNode) {
-                document.body.removeChild(printFrame);
-              }
-            }, 1000);
-          } catch (error) {
-            console.error('Error during print:', error);
-            // Clean up on error
-            if (printFrame && printFrame.parentNode) {
-              document.body.removeChild(printFrame);
-            }
-          }
-        }, 500);
-      };
-    } catch (error) {
-      console.error('Error printing thread:', error);
-      toast.error('Failed to print thread. Please try again.');
-    }
-  };
 
   const handleToggleImportant = useCallback(async () => {
     if (!emailData || !id) return;
@@ -714,6 +248,16 @@ export function ThreadDisplay() {
     setNavigationDirection(null);
   }, [setNavigationDirection]);
 
+  // Honest active-thread state (issue #34): a failed fetch shows a finite error
+  // with retry/back — never an endless skeleton.
+  const threadState = selectThreadViewState({
+    hasSelection: !!id,
+    hasData: !!emailData,
+    isLoading,
+    isError,
+    isOffline,
+  });
+
   return (
     <div
       className={cn(
@@ -729,7 +273,7 @@ export function ThreadDisplay() {
           isFullscreen ? 'fixed inset-0 z-50' : '',
         )}
       >
-        {!id ? (
+        {threadState === 'no-selection' ? (
           <div className="flex h-full items-center justify-center">
             <div className="flex flex-col items-center justify-center gap-2 text-center">
               <EmptyStateIcon width={200} height={200} />
@@ -765,7 +309,7 @@ export function ThreadDisplay() {
               </div>
             </div>
           </div>
-        ) : !emailData || isLoading ? (
+        ) : threadState === 'loading' ? (
           <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
             <ScrollArea className="h-full flex-1" type="auto">
               <div className="pb-4">
@@ -773,7 +317,38 @@ export function ThreadDisplay() {
               </div>
             </ScrollArea>
           </div>
-        ) : (
+        ) : threadState === 'error' ? (
+          <div className="flex h-full items-center justify-center p-6">
+            <div className="flex max-w-md flex-col items-center justify-center gap-3 text-center">
+              <EmptyStateIcon width={160} height={160} />
+              <div>
+                <p className="text-lg">{m['states.thread.errorTitle']()}</p>
+                <p className="text-md text-muted-foreground dark:text-white/50">
+                  {isOffline
+                    ? m['states.mailList.offlineNotice']()
+                    : m['states.thread.errorDescription']()}
+                </p>
+              </div>
+              <div className="mt-1 flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => void refetchThread()}
+                  className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-md border bg-white px-3 text-sm transition-colors hover:bg-gray-100 dark:border-none dark:bg-[#313131] dark:hover:bg-[#404040]"
+                >
+                  <RefreshCcw className="h-4 w-4" />
+                  {m['states.thread.retry']()}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleClose}
+                  className="text-muted-foreground inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-md px-3 text-sm transition-colors hover:bg-gray-100 dark:hover:bg-[#313131]"
+                >
+                  {m['states.thread.back']()}
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : id && emailData ? (
           <>
             <div
               className={cn(
@@ -906,7 +481,7 @@ export function ThreadDisplay() {
                         <DropdownMenuItem
                           onClick={(e) => {
                             e.stopPropagation();
-                            printThread();
+                            printThread(emailData);
                           }}
                         >
                           <Printer className="fill-iconLight dark:fill-iconDark mr-2 h-4 w-4" />
@@ -936,61 +511,42 @@ export function ThreadDisplay() {
               </div>
             </div>
             <div className={cn('flex min-h-0 flex-1 flex-col', isMobile && 'h-full')}>
-              {animationsEnabled ? (
-                <AnimatePresence mode="wait" initial={false}>
-                  <motion.div
-                    key={id}
-                    initial={{
-                      opacity: 0,
-                      x:
-                        navigationDirection === 'previous'
-                          ? -25
-                          : navigationDirection === 'next'
-                            ? 25
-                            : 0,
-                    }}
-                    animate={{
-                      opacity: 1,
-                      x: 0,
-                    }}
-                    exit={{
-                      opacity: 0,
-                      x:
-                        navigationDirection === 'previous'
-                          ? 25
-                          : navigationDirection === 'next'
-                            ? -25
-                            : 0,
-                    }}
-                    transition={{
-                      duration: 0.08,
-                      ease: [0.4, 0, 0.2, 1],
-                    }}
-                    onAnimationComplete={handleAnimationComplete}
-                    className="h-full w-full"
+              {(() => {
+                const messageListProps = {
+                  messages: emailData.messages,
+                  isFullscreen,
+                  totalReplies: emailData?.totalReplies,
+                  allThreadAttachments,
+                  mode: mode || undefined,
+                  activeReplyId: activeReplyId || undefined,
+                  isMobile,
+                };
+                // Animations on → lazy motion wrapper (resolved on first thread render). The
+                // Suspense fallback is STRUCTURALLY EQUIVALENT to the resolved output: the animated
+                // path renders <motion.div className="h-full w-full"><MessageList/></motion.div>,
+                // and motion.div IS a <div>, so the fallback uses the same <div> + shared
+                // THREAD_TRANSITION_WRAPPER_CLASS — the transition DOM (layout/scroll box) stays
+                // stable while the chunk loads. Off → plain MessageList, exactly as before. motion
+                // is not part of this route-critical chunk.
+                return animationsEnabled ? (
+                  <Suspense
+                    fallback={
+                      <div className={THREAD_TRANSITION_WRAPPER_CLASS}>
+                        <MessageList {...messageListProps} />
+                      </div>
+                    }
                   >
-                    <MessageList
-                      messages={emailData.messages}
-                      isFullscreen={isFullscreen}
-                      totalReplies={emailData?.totalReplies}
-                      allThreadAttachments={allThreadAttachments}
-                      mode={mode || undefined}
-                      activeReplyId={activeReplyId || undefined}
-                      isMobile={isMobile}
+                    <AnimatedMessageList
+                      threadKey={id}
+                      navigationDirection={navigationDirection}
+                      onAnimationComplete={handleAnimationComplete}
+                      messageListProps={messageListProps}
                     />
-                  </motion.div>
-                </AnimatePresence>
-              ) : (
-                <MessageList
-                  messages={emailData.messages}
-                  isFullscreen={isFullscreen}
-                  totalReplies={emailData?.totalReplies}
-                  allThreadAttachments={allThreadAttachments}
-                  mode={mode || undefined}
-                  activeReplyId={activeReplyId || undefined}
-                  isMobile={isMobile}
-                />
-              )}
+                  </Suspense>
+                ) : (
+                  <MessageList {...messageListProps} />
+                );
+              })()}
 
               {mode &&
                 activeReplyId &&
@@ -999,64 +555,16 @@ export function ThreadDisplay() {
                     className="border-border bg-panelLight dark:bg-panelDark sticky bottom-0 z-10 border-t px-4 py-2"
                     id={`reply-composer-${activeReplyId}`}
                   >
-                    <ReplyCompose messageId={activeReplyId} />
+                    <Suspense fallback={null}>
+                      <ReplyCompose messageId={activeReplyId} />
+                    </Suspense>
                   </div>
                 )}
+              <LabelMovePicker />
             </div>
           </>
-        )}
+        ) : null}
       </div>
     </div>
   );
 }
-
-interface MessageListProps {
-  messages: ParsedMessage[];
-  isFullscreen: boolean;
-  totalReplies?: number;
-  allThreadAttachments?: Attachment[];
-  mode?: string;
-  activeReplyId?: string;
-  isMobile: boolean;
-}
-
-const MessageList = ({
-  messages,
-  isFullscreen,
-  totalReplies,
-  allThreadAttachments,
-  mode,
-  activeReplyId,
-  isMobile,
-}: MessageListProps) => (
-  <ScrollArea className={cn('flex-1', isMobile ? 'h-[calc(100%-1px)]' : 'h-full')} type="auto">
-    <div className="pb-4">
-      {(messages || []).map((message, index) => {
-        const isLastMessage = index === messages.length - 1;
-        const isReplyingToThisMessage = mode && activeReplyId === message.id;
-
-        return (
-          <div
-            key={message.id}
-            className={cn('duration-200', index > 0 && 'border-border border-t')}
-          >
-            <MailDisplay
-              emailData={message}
-              isFullscreen={isFullscreen}
-              isMuted={false}
-              isLoading={false}
-              index={index}
-              totalEmails={totalReplies}
-              threadAttachments={index === 0 ? allThreadAttachments : undefined}
-            />
-            {isReplyingToThisMessage && !isLastMessage && (
-              <div className="px-4 py-2" id={`reply-composer-${message.id}`}>
-                <ReplyCompose messageId={message.id} />
-              </div>
-            )}
-          </div>
-        );
-      })}
-    </div>
-  </ScrollArea>
-);

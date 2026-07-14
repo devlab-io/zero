@@ -1,3 +1,4 @@
+import { logger } from './logger';
 import type { IGetThreadResponse, IGetThreadsResponse } from './driver/types';
 import { OutgoingMessageType } from '../routes/agent/types';
 import { getContext } from 'hono/context-storage';
@@ -23,15 +24,15 @@ export const getZeroDB = async (userId: string) => {
 };
 
 class MockExecutionContext implements ExecutionContext {
-  async waitUntil(promise: Promise<any>) {
+  async waitUntil(promise: Promise<unknown>) {
     try {
       await promise;
     } catch (error) {
-      console.error('MockExecutionContext: Error in waitUntil', error);
+      logger.error('MockExecutionContext: Error in waitUntil', error);
     }
   }
   passThroughOnException(): void { }
-  props: any;
+  props: unknown;
 }
 
 const getRegistryClient = async (connectionId: string) => {
@@ -53,7 +54,7 @@ const getShardClient = async (connectionId: string, shardId: string) => {
     await shardClient.stub.setName(connectionId);
     await shardClient.stub.setupAuth();
   } catch (error) {
-    console.error(`Failed to initialize shard ${shardId} for connection ${connectionId}:`, error);
+    logger.error(`Failed to initialize shard ${shardId} for connection ${connectionId}:`, error);
     throw new Error(`Shard initialization failed: ${error}`);
   }
   return shardClient;
@@ -253,7 +254,10 @@ export const raceShardDataEffect = <T, E = never>(
     );
 
     return yield* Effect.raceAll(shardEffects).pipe(
-      Effect.catchAll(() => Effect.succeed({ result: fallbackValue, shardId: null })),
+      Effect.catchAll((error) => {
+        logger.warn('shard raceAll failed; using fallback value', { error });
+        return Effect.succeed({ result: fallbackValue, shardId: null });
+      }),
     );
   });
 };
@@ -387,7 +391,7 @@ export const reSyncThread = async (connectionId: string, threadId: string) => {
     const agent = await getZeroAgentFromShard(connectionId, shardId);
     await agent.stub.syncThread({ threadId });
   } catch (error) {
-    console.error(`[ZeroAgent] Thread not found for threadId: ${threadId}`, error);
+    logger.error(`[ZeroAgent] Thread not found for threadId: ${threadId}`, error);
   }
 };
 
@@ -504,7 +508,7 @@ export const sendDoState = async (connectionId: string) => {
 
     const cached = await agent.getCachedDoState();
     if (cached) {
-      console.log(`[sendDoState] Using cached data for connection ${connectionId}`);
+      logger.info(`[sendDoState] Using cached data for connection ${connectionId}`);
       return agent.broadcastChatMessage({
         type: OutgoingMessageType.Do_State,
         isSyncing: false,
@@ -515,7 +519,7 @@ export const sendDoState = async (connectionId: string) => {
       });
     }
 
-    console.log(`[sendDoState] Cache miss, collecting fresh data for connection ${connectionId}`);
+    logger.info(`[sendDoState] Cache miss, collecting fresh data for connection ${connectionId}`);
     const [registry, size, counts] = await Promise.all([
       getRegistryClient(connectionId),
       getDatabaseSize(connectionId),
@@ -534,7 +538,7 @@ export const sendDoState = async (connectionId: string) => {
       shards: shards.length,
     });
   } catch (error) {
-    console.error(`[sendDoState] Failed to send do state for connection ${connectionId}:`, error);
+    logger.error(`[sendDoState] Failed to send do state for connection ${connectionId}:`, error);
   }
 };
 
@@ -564,9 +568,9 @@ export const getActiveConnection = async () => {
         await auth.api.signOut({ headers: c.req.raw.headers });
       }
     } catch (err) {
-      console.warn(`[getActiveConnection] Session cleanup failed for user ${sessionUser.id}:`, err);
+      logger.warn(`[getActiveConnection] Session cleanup failed for user ${sessionUser.id}:`, err);
     }
-    console.error(`No connections found for user ${sessionUser.id}`);
+    logger.error(`No connections found for user ${sessionUser.id}`);
     throw new Error('No connections found for user');
   }
 
@@ -600,7 +604,7 @@ export const verifyToken = async (token: string) => {
     throw new Error(`Failed to verify token: ${await response.text()}`);
   }
 
-  const data = (await response.json()) as any;
+  const data = await response.json();
   return !!data;
 };
 

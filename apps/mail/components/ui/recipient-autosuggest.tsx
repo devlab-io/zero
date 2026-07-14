@@ -1,5 +1,6 @@
 'use client';
 
+import { log } from '@/lib/log';
 import { useState, useRef, useCallback, useMemo } from 'react';
 import { useController, type Control } from 'react-hook-form';
 import { useTRPC } from '@/providers/query-provider';
@@ -40,7 +41,7 @@ const isValidRecipientSuggestion = (item: unknown): item is RecipientSuggestion 
 const validateSuggestions = (data: unknown): RecipientSuggestion[] => {
   if (!Array.isArray(data)) {
     if (data !== undefined && data !== null) {
-      console.warn('Expected array for recipient suggestions, got:', typeof data);
+      log.warn('Expected array for recipient suggestions, got:', typeof data);
     }
     return [];
   }
@@ -49,7 +50,7 @@ const validateSuggestions = (data: unknown): RecipientSuggestion[] => {
   const invalid = data.length - valid.length;
   
   if (invalid > 0) {
-    console.warn(`Filtered out ${invalid} invalid recipient suggestions`);
+    log.warn(`Filtered out ${invalid} invalid recipient suggestions`);
   }
   
   return valid;

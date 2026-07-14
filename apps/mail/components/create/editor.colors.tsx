@@ -1,3 +1,4 @@
+import { log } from '@/lib/log';
 import { EditorBubbleItem, useEditor } from 'novel';
 import { Check, ChevronDown } from 'lucide-react';
 
@@ -101,7 +102,7 @@ export const ColorSelector = ({ open, onOpenChange }: ColorSelectorProps) => {
     editor.isActive('highlight', { color }),
   );
 
-  console.log('editor', editor);
+  log.debug('editor', editor);
 
   return (
     <Popover modal={true} open={open} onOpenChange={onOpenChange}>

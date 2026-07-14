@@ -1,4 +1,20 @@
+import { log } from '@/lib/log';
 import { trpcClient } from '@/providers/query-provider';
+
+/**
+ * Normalises a caught value into a display string. tRPC/fetch rejections are
+ * always `Error` instances, so this preserves the previous `error.message`
+ * behaviour for the real cases while narrowing away the former untyped catch bindings.
+ */
+const getErrorMessage = (error: unknown): string | undefined => {
+  if (error instanceof Error) return error.message;
+  if (error && typeof error === 'object' && 'message' in error) {
+    const { message } = error as { message: unknown };
+    return typeof message === 'string' ? message : String(message);
+  }
+  return undefined;
+};
+
 const getCurrentThreadId = () => {
   if (typeof window !== 'undefined') {
     const params = new URLSearchParams(window.location.search);
@@ -33,11 +49,11 @@ export const toolExecutors = {
           hasUnread: thread.hasUnread,
         })),
       };
-    } catch (error: any) {
-      return { success: false, error: error.message };
+    } catch (error) {
+      return { success: false, error: getErrorMessage(error) };
     }
   },
-  getEmail: async (params: any) => {
+  getEmail: async (params: { threadId?: string; thread_id?: string; id?: string }) => {
     try {
       // Handle various ways the AI might pass the threadId
       let threadId = null;
@@ -73,8 +89,8 @@ export const toolExecutors = {
         currentThreadId: threadId,
         message: `Retrieved email with thread ID: ${threadId}`,
       };
-    } catch (error: any) {
-      return { success: false, error: error.message };
+    } catch (error) {
+      return { success: false, error: getErrorMessage(error) };
     }
   },
   sendEmail: async (params: {
@@ -91,40 +107,40 @@ export const toolExecutors = {
         threadId: params.threadId,
       });
       return { success: true, message: 'Email sent successfully' };
-    } catch (error: any) {
-      return { success: false, error: error.message };
+    } catch (error) {
+      return { success: false, error: getErrorMessage(error) };
     }
   },
-  markAsRead: async (params: any) => {
+  markAsRead: async (params: { threadIds: string[] }) => {
     try {
       await trpcClient.mail.markAsRead.mutate({ ids: params.threadIds });
       return { success: true, message: 'Emails marked as read' };
-    } catch (error: any) {
-      return { success: false, error: error.message };
+    } catch (error) {
+      return { success: false, error: getErrorMessage(error) };
     }
   },
-  markAsUnread: async (params: any) => {
+  markAsUnread: async (params: { threadIds: string[] }) => {
     try {
       await trpcClient.mail.markAsUnread.mutate({ ids: params.threadIds });
       return { success: true, message: 'Emails marked as unread' };
-    } catch (error: any) {
-      return { success: false, error: error.message };
+    } catch (error) {
+      return { success: false, error: getErrorMessage(error) };
     }
   },
-  archiveEmails: async (params: any) => {
+  archiveEmails: async (params: { threadIds: string[] }) => {
     try {
       await trpcClient.mail.bulkArchive.mutate({ ids: params.threadIds });
       return { success: true, message: 'Emails archived' };
-    } catch (error: any) {
-      return { success: false, error: error.message };
+    } catch (error) {
+      return { success: false, error: getErrorMessage(error) };
     }
   },
-  deleteEmails: async (params: any) => {
+  deleteEmails: async (params: { threadIds: string[] }) => {
     try {
       await trpcClient.mail.bulkDelete.mutate({ ids: params.threadIds });
       return { success: true, message: 'Emails moved to trash' };
-    } catch (error: any) {
-      return { success: false, error: error.message };
+    } catch (error) {
+      return { success: false, error: getErrorMessage(error) };
     }
   },
   deleteEmail: async () => {
@@ -139,12 +155,12 @@ export const toolExecutors = {
     try {
       await trpcClient.mail.bulkDelete.mutate({ ids: [threadId] });
       return { success: true, message: 'Email deleted' };
-    } catch (error: any) {
-      return { success: false, error: error.message };
+    } catch (error) {
+      return { success: false, error: getErrorMessage(error) };
     }
   },
   createLabel: async (params: { name: string; backgroundColor: string; textColor: string }) => {
-    console.log('params:', params);
+    log.debug('params:', params);
 
     try {
       await trpcClient.labels.create.mutate({
@@ -156,14 +172,14 @@ export const toolExecutors = {
       });
 
       return { success: true, message: 'Label created' };
-    } catch (error: any) {
-      return { success: false, error: error.message };
+    } catch (error) {
+      return { success: false, error: getErrorMessage(error) };
     }
   },
-  applyLabel: async (params: any) => {
+  applyLabel: async (params: { label: string; threadIds: string[] }) => {
     try {
       const labels = await trpcClient.labels.list.query();
-      const label = labels.find((label: any) => label.name === params.label);
+      const label = labels.find((label) => label.name === params.label);
       if (!label) {
         return { success: false, error: 'Label not found' };
       }
@@ -174,11 +190,11 @@ export const toolExecutors = {
         removeLabels: [],
       });
       return { success: true, message: 'Label applied' };
-    } catch (error: any) {
-      return { success: false, error: error.message };
+    } catch (error) {
+      return { success: false, error: getErrorMessage(error) };
     }
   },
-  removeLabel: async (params: any) => {
+  removeLabel: async (params: { label: string; threadIds: string[] }) => {
     try {
       const threadId = getCurrentThreadId();
       if (!threadId) {
@@ -191,7 +207,7 @@ export const toolExecutors = {
 
       const thread = await trpcClient.mail.get.query({ id: threadId });
       const labels = thread.labels;
-      const label = labels.find((label: any) => label.name === params.label);
+      const label = labels.find((label) => label.name === params.label);
       if (!label) {
         return { success: false, error: 'Label not found' };
       }
@@ -202,11 +218,11 @@ export const toolExecutors = {
         removeLabels: [label.id],
       });
       return { success: true, message: 'Label removed' };
-    } catch (error: any) {
-      return { success: false, error: error.message };
+    } catch (error) {
+      return { success: false, error: getErrorMessage(error) };
     }
   },
-  searchEmails: async (params: any) => {
+  searchEmails: async (params: { question: string; maxResults?: number }) => {
     try {
       // just a simple search for now
       const result = await trpcClient.mail.listThreads.query({
@@ -226,12 +242,12 @@ export const toolExecutors = {
           preview: thread.snippet,
         })),
       };
-    } catch (error: any) {
-      return { success: false, error: error.message };
+    } catch (error) {
+      return { success: false, error: getErrorMessage(error) };
     }
   },
-  webSearch: async (params: any) => {
-    console.log(params);
+  webSearch: async (params: { query: string }) => {
+    log.debug(params);
     const threadId = getCurrentThreadId();
     if (!threadId) {
       return {
@@ -243,7 +259,7 @@ export const toolExecutors = {
     try {
       const thread = await trpcClient.mail.get.query({ id: threadId });
 
-      const emailContent = thread.messages?.map((m: any) => m.body).join('\n\n') || '';
+      const emailContent = thread.messages?.map((m) => m.body).join('\n\n') || '';
       const subject = thread.latest?.subject || 'No subject';
       const from = thread.latest?.sender?.email || 'Unknown sender';
       const senderName = cleanNameDisplay(thread.latest?.sender?.name);
@@ -277,8 +293,8 @@ export const toolExecutors = {
         success: true,
         result: text,
       };
-    } catch (error: any) {
-      return { success: false, error: error.message };
+    } catch (error) {
+      return { success: false, error: getErrorMessage(error) };
     }
   },
   summarizeEmail: async () => {
@@ -296,7 +312,7 @@ export const toolExecutors = {
       try {
         const thread = await trpcClient.mail.get.query({ id: threadId });
 
-        const emailContent = thread.messages?.map((m: any) => m.body).join('\n\n') || '';
+        const emailContent = thread.messages?.map((m) => m.body).join('\n\n') || '';
         const subject = thread.latest?.subject || 'No subject';
         const from = thread.latest?.sender?.email || 'Unknown sender';
         const senderName = cleanNameDisplay(thread.latest?.sender?.name);
@@ -340,14 +356,14 @@ export const toolExecutors = {
           },
         };
       } catch (error) {
-        console.error(error);
+        log.error(error);
         return {
           success: false,
           error: 'Failed to fetch email for summarization',
         };
       }
-    } catch (error: any) {
-      return { success: false, error: error.message };
+    } catch (error) {
+      return { success: false, error: getErrorMessage(error) };
     }
   },
 };

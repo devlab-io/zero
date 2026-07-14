@@ -14,10 +14,13 @@
  * Reuse or distribution of this file requires a license from Zero Email Inc.
  */
 
+import { logger } from '../logger';
 import { generateObject } from 'ai';
 import { openai } from '@ai-sdk/openai';
 import { z } from 'zod';
-import { env } from 'cloudflare:workers';
+// `../../env` is the typed ZeroEnv view of the same runtime worker env; it carries
+// OPENAI_API_KEY / OPENAI_MODEL, which are absent from the wrangler-generated Env.
+import { env } from '../../env';
 
 export interface GenerateTopicsOptions {
   sampleSize?: number;
@@ -42,7 +45,7 @@ export async function generateWhatUserCaresAbout(
   }
 
   if (!env.OPENAI_API_KEY) {
-    console.warn('OPENAI_API_KEY not configured - topics generation disabled');
+    logger.warn('OPENAI_API_KEY not configured - topics generation disabled');
     return [];
   }
 
@@ -101,7 +104,7 @@ ${sample.join('\n')}`;
 
     return object.topics;
   } catch (error) {
-    console.error('Failed to generate user topics:', error);
+    logger.error('Failed to generate user topics:', error);
     return [];
   }
 }

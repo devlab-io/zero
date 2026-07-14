@@ -1,3 +1,4 @@
+import { log } from '@/lib/log';
 import {
   ContextMenu,
   ContextMenuContent,
@@ -73,12 +74,15 @@ const LabelsList = ({ threadId, bulkSelected, onCreateLabel }: { threadId: strin
   const rightClickedThreadOptimisticState = useOptimisticThreadState(threadId);
 
   if (!labels || !thread) return null;
+  // `thread` is narrowed above, but that narrowing does not flow into the nested
+  // closures below; capture it so they use a non-null value without asserting.
+  const currentThread = thread;
 
   const handleToggleLabel = (labelId: string) => {
     if (!labelId) return;
 
     // Determine current label state considering optimistic updates
-    let hasLabel = thread!.labels?.some((l) => l.id === labelId) ?? false;
+    let hasLabel = currentThread.labels?.some((l) => l.id === labelId) ?? false;
 
     if (rightClickedThreadOptimisticState.optimisticLabels) {
       if (rightClickedThreadOptimisticState.optimisticLabels.addedLabelIds.includes(labelId)) {
@@ -112,7 +116,7 @@ const LabelsList = ({ threadId, bulkSelected, onCreateLabel }: { threadId: strin
         .filter((label) => label.id)
         .map((label) => {
           let isChecked = label.id
-            ? (thread!.labels?.some((l) => l.id === label.id) ?? false)
+            ? (currentThread.labels?.some((l) => l.id === label.id) ?? false)
             : false;
 
           if (rightClickedThreadOptimisticState.optimisticLabels) {
@@ -223,7 +227,7 @@ export function ThreadContextMenu({
         setMail({ ...mail, bulkSelected: [] });
       }
     } catch (error) {
-      console.error(`Error moving ${threadId ? 'email' : 'thread'}:`, error);
+      log.error(`Error moving ${threadId ? 'email' : 'thread'}:`, error);
       toast.error(m['common.actions.failedToMove']());
     }
   };
@@ -325,7 +329,9 @@ export function ThreadContextMenu({
         disabled: false,
       },
     ],
-    [m, handleThreadReply, handleThreadReplyAll, handleThreadForward],
+    // `m` is a module-level constant namespace; using it as a runtime value here retained
+    // the whole paraglide catalog in the bundle (kills tree-shaking of unused messages).
+    [handleThreadReply, handleThreadReplyAll, handleThreadForward],
   );
 
   const handleDelete = () => () => {
@@ -507,7 +513,7 @@ export function ThreadContextMenu({
       
       await promise;
     } catch (error) {
-      console.error('Failed to create label:', error);
+      log.error('Failed to create label:', error);
     } finally {
       setCreateLabelOpen(false);
     }
@@ -552,7 +558,9 @@ export function ThreadContextMenu({
         disabled: false,
       },
     ],
-    [isUnread, isImportant, isStarred, m, handleReadUnread, handleToggleImportant, handleFavorites],
+    // `m` is a module-level constant namespace; using it as a runtime value here retained
+    // the whole paraglide catalog in the bundle (kills tree-shaking of unused messages).
+    [isUnread, isImportant, isStarred, handleReadUnread, handleToggleImportant, handleFavorites],
   );
 
   const renderAction = (action: EmailAction) => {

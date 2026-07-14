@@ -1,0 +1,28 @@
+# Sonde deep-link / garde anti-masquage spa-fallback.ts — DEUX MOITIÉS (ruling superviseur)
+# commit gelé: 1c82b196 · worker: apps/mail/workers/spa-fallback.ts (isHtmlNavigation)
+# Contrat: substitution coquille neutre UNIQUEMENT si Sec-Fetch-Mode=navigate OU Accept~text/html.
+
+## MOITIÉ A — NAVIGATION (Accept: text/html, Sec-Fetch-Mode: navigate) → attendu 200 + coquille NEUTRE
+  navigation  /                    http=200 size=101875
+  navigation  /pricing             http=200 size=6049
+  navigation  /login               http=200 size=6049
+  navigation  /mail/inbox          http=200 size=6049
+  navigation  /settings/general    http=200 size=6049
+  navigation  /nonexistent         http=200 size=6049
+  (/=101875 landing réelle ; les autres=6049 coquille neutre __spa-fallback.html)
+
+## Preuve coquille NEUTRE = spinner, zéro HomeContent :
+  animate-spin présent dans __spa-fallback.html ? 1
+  marqueurs HomeContent (Pricing/Get Started/hero) dans la coquille ? 0
+  (0 marqueur marketing = coquille bien neutre)
+
+## MOITIÉ B — NON-NAVIGATION (Accept: */*, défaut curl) → attendu 404 ANTI-MASQUAGE (garde OK)
+  non-navigation  /pricing                 http=404 size=0
+  non-navigation  /login                   http=404 size=0
+  non-navigation  /mail/inbox              http=404 size=0
+  non-navigation  /assets/does-not-exist.js http=404 size=0
+
+## VERDICT SONDE : navigation (Accept text/html) → shell 200 neutre ; non-navigation (Accept */*)
+## → 404 anti-masquage CONFORME (garde stricte : un chunk/asset manquant surfacé comme 404, jamais
+## masqué en HTML-200). Le 404 size=0 observé initialement au curl par défaut N'EST PAS un deep-link
+## cassé — c'est la garde voulue. Deep-link RÉEL (navigateur, qui envoie Accept text/html) = shell OK.

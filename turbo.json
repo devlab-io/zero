@@ -18,6 +18,9 @@
     "lint": {
       "outputs": []
     },
+    "test": {
+      "cache": false
+    },
     "sentry:sourcemaps": {
       "cache": false
     }

@@ -1,0 +1,41 @@
+# A7 — Sécurité — évidence brute
+# commit: 1c82b196cbc87d629b18024cca3f4ac6b7372af2
+
+## pnpm audit --prod --audit-level critical:
+126 vulnerabilities found
+Severity: 14 low | 64 moderate | 48 high
+[exit pipefail non capté ci-dessus — relance dédiée:]
+exit=0  (0 = 0 critical = PASS)
+
+## check-agent-surface.mjs:
+$ node scripts/security/check-agent-surface.mjs
+Security surface check passed: least scopes, bounded session cache, draft-only MCP.
+exit=0
+
+## mail.google.com dans scopes runtime ?
+apps/server/src/lib/google-scopes.ts:5: * human-triggered send flow. The unrestricted mail.google.com scope is intentionally excluded.
+[exit: 0  (1 = absent = PASS)]
+
+## google-scopes.ts:
+/**
+ * Minimum Gmail scope union used by the interactive client.
+ *
+ * gmail.modify covers reading and mailbox triage. gmail.compose is required for drafts and the
+ * human-triggered send flow. The unrestricted mail.google.com scope is intentionally excluded.
+ */
+export const GOOGLE_OAUTH_SCOPES = [
+  'https://www.googleapis.com/auth/gmail.modify',
+  'https://www.googleapis.com/auth/gmail.compose',
+  'https://www.googleapis.com/auth/userinfo.profile',
+  'https://www.googleapis.com/auth/userinfo.email',
+] as const;
+
+export const GOOGLE_OAUTH_SCOPE_STRING = GOOGLE_OAUTH_SCOPES.join(' ');
+
+## Palier 9 (éléments) :
+- audit-triage.md présent (docs/research/niveau9/, 35k) — 75 réfs GHSA/advisory, reachability +
+  mapping advisory→override, produit par security-triage-highs-01 (#37). Audit courant à trier :
+  48 high + 64 moderate (126 vulns, 0 critical). Le juge froid exécute le check intégral security.md.
+- gitleaks CI : ci.yml:90-94, image épinglée ghcr.io/gitleaks/gitleaks:v8.30.1, config
+  scripts/checks/gitleaks.toml — SCOPE = working tree. Scan historique branche du run : réalisé
+  EN-JOB par #37 (« gitleaks 3376 commits qualifiés »), pas dans le workflow PR (scope working-tree).

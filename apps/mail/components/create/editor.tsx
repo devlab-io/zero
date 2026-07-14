@@ -1,3 +1,4 @@
+import { log } from '@/lib/log';
 import {
   EditorCommand,
   EditorCommandEmpty,
@@ -155,7 +156,7 @@ export default function Editor({
           }
         }, 0);
       } catch (error) {
-        console.error('Error setting editor content:', error);
+        log.error('Error setting editor content:', error);
       }
     }
   }, [initialValue, editor, onChange]);

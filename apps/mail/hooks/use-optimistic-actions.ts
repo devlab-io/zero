@@ -1,5 +1,7 @@
+import { log } from '@/lib/log';
 import { addOptimisticActionAtom, removeOptimisticActionAtom } from '@/store/optimistic-updates';
 import { optimisticActionsManager, type PendingAction } from '@/lib/optimistic-actions-manager';
+import { buildOptimisticFailureToast, isLastPendingOfType } from '@/lib/optimistic-recovery';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 
 import { backgroundQueueAtom } from '@/store/backgroundQueue';
@@ -10,7 +12,6 @@ import { moveThreadsTo } from '@/lib/thread-actions';
 import { m } from '@/paraglide/messages';
 import { useQueryState } from 'nuqs';
 import { useCallback } from 'react';
-import posthog from 'posthog-js';
 import { useAtom } from 'jotai';
 import { toast } from 'sonner';
 
@@ -78,6 +79,12 @@ export function useOptimisticActions() {
     return await queryClient.refetchQueries({ queryKey: trpc.labels.list.queryKey() });
   }, [queryClient]);
 
+  // Failure-only reconciliation (issue #34, check point 6): pull the thread list
+  // from the server so a failed optimistic action cannot leave the UI drifted.
+  const reconcileFailedAction = useCallback(async () => {
+    await queryClient.invalidateQueries({ queryKey: trpc.mail.listThreads.queryKey() });
+  }, [queryClient, trpc]);
+
   function createPendingAction({
     type,
     threadIds,
@@ -85,6 +92,7 @@ export function useOptimisticActions() {
     optimisticId,
     execute,
     undo,
+    retry,
     toastMessage,
   }: {
     type: keyof typeof ActionType;
@@ -93,25 +101,17 @@ export function useOptimisticActions() {
     optimisticId: string;
     execute: () => Promise<void>;
     undo: () => void;
+    retry: () => void;
     toastMessage: string;
     folders?: string[];
   }) {
     const pendingActionId = generatePendingActionId();
     optimisticActionsManager.lastActionId = pendingActionId;
-    console.log('here Generated pending action ID:', pendingActionId);
 
     if (!optimisticActionsManager.pendingActionsByType.has(type)) {
-      console.log('here Creating new Set for action type:', type);
       optimisticActionsManager.pendingActionsByType.set(type, new Set());
     }
     optimisticActionsManager.pendingActionsByType.get(type)?.add(pendingActionId);
-    console.log(
-      'here',
-      'Added pending action to type:',
-      type,
-      'Current size:',
-      optimisticActionsManager.pendingActionsByType.get(type)?.size,
-    );
 
     const pendingAction = {
       id: pendingActionId,
@@ -131,30 +131,45 @@ export function useOptimisticActions() {
     async function doAction() {
       try {
         await execute();
-        const typeActions = optimisticActionsManager.pendingActionsByType.get(type);
-        console.log('here', {
-          pendingActionsByTypeRef: optimisticActionsManager.pendingActionsByType.get(type)?.size,
-          pendingActionsRef: optimisticActionsManager.pendingActions.size,
-          typeActions: typeActions?.size,
-        });
 
         const eventName = actionEventNames[type]?.(params);
         if (eventName) {
-          posthog.capture(eventName);
+          // #44 (gate A8): posthog-js (~57 KB gz) is imported dynamically so it stays out of the
+          // critical inbox chunk. The capture remains fire-and-forget (not awaited, so it does not
+          // block the action flow); relative to the previous static import it adds an async module
+          // resolution before the capture. It runs on the shared posthog singleton (init lives in
+          // providers/posthog-analytics).
+          void import('posthog-js').then(({ default: posthog }) => posthog.capture(eventName));
         }
 
+        const typeActions = optimisticActionsManager.pendingActionsByType.get(type);
+        // Capture BEFORE removal: `typeActions` is the SAME Set that the delete below
+        // mutates, so reading its size afterwards is always one short. size === 1 here
+        // means THIS action is the last of its type → run the single success refresh.
+        // (Routed fix #35: the post-delete check left the single-action refresh dead.)
+        const isLastOfType = isLastPendingOfType(typeActions?.size ?? 0);
         optimisticActionsManager.pendingActions.delete(pendingActionId);
         optimisticActionsManager.pendingActionsByType.get(type)?.delete(pendingActionId);
-        if (typeActions?.size === 1) {
+        if (isLastOfType) {
           await refreshData();
           removeOptimisticAction(optimisticId);
         }
       } catch (error) {
-        console.error('Action failed:', error);
-        removeOptimisticAction(optimisticId);
+        log.error('Action failed:', error);
+        // Reconcile the optimistic view: undo() removes the optimistic hide AND
+        // clears any background-queue entry (MOVE/DELETE) so the thread reappears
+        // instead of vanishing silently.
+        undo();
         optimisticActionsManager.pendingActions.delete(pendingActionId);
         optimisticActionsManager.pendingActionsByType.get(type)?.delete(pendingActionId);
-        toast.error('Action failed');
+        await reconcileFailedAction();
+        // Surface a recovery action (issue #34, check point 6): retry re-applies the intent.
+        const recovery = buildOptimisticFailureToast({
+          failedLabel: m['states.actionFailed'](),
+          retryLabel: m['states.retry'](),
+          onRetry: retry,
+        });
+        toast.error(recovery.message, { action: recovery.action, duration: recovery.duration });
       }
     }
 
@@ -208,6 +223,7 @@ export function useOptimisticActions() {
         undo: () => {
           removeOptimisticAction(optimisticId);
         },
+        retry: () => optimisticMarkAsRead(threadIds, silent),
         toastMessage: silent ? '' : 'Marked as read',
       });
     },
@@ -238,6 +254,7 @@ export function useOptimisticActions() {
       undo: () => {
         removeOptimisticAction(optimisticId);
       },
+      retry: () => optimisticMarkAsUnread(threadIds),
       toastMessage: 'Marked as unread',
     });
   }
@@ -263,6 +280,7 @@ export function useOptimisticActions() {
         undo: () => {
           removeOptimisticAction(optimisticId);
         },
+        retry: () => optimisticToggleStar(threadIds, starred),
         toastMessage: starred
           ? m['common.actions.addedToFavorites']()
           : m['common.actions.removedFromFavorites'](),
@@ -329,6 +347,7 @@ export function useOptimisticActions() {
           setBackgroundQueue({ type: 'delete', threadId: `thread:${id}` });
         });
       },
+      retry: () => optimisticMoveThreadsTo(threadIds, currentFolder, destination),
       toastMessage: successMessage,
       folders: [currentFolder, destination],
     });
@@ -376,6 +395,7 @@ export function useOptimisticActions() {
           setBackgroundQueue({ type: 'delete', threadId: `thread:${id}` });
         });
       },
+      retry: () => optimisticDeleteThreads(threadIds, currentFolder),
       toastMessage: m['common.actions.movedToBin'](),
     });
   }
@@ -405,6 +425,7 @@ export function useOptimisticActions() {
         undo: () => {
           removeOptimisticAction(optimisticId);
         },
+        retry: () => optimisticToggleImportant(threadIds, isImportant),
         toastMessage: isImportant ? 'Marked as important' : 'Unmarked as important',
       });
     },
@@ -440,6 +461,7 @@ export function useOptimisticActions() {
       undo: () => {
         removeOptimisticAction(optimisticId);
       },
+      retry: () => optimisticToggleLabel(threadIds, labelId, add),
       toastMessage: add
         ? `Label added${threadIds.length > 1 ? ` to ${threadIds.length} threads` : ''}`
         : `Label removed${threadIds.length > 1 ? ` from ${threadIds.length} threads` : ''}`,
@@ -470,6 +492,7 @@ export function useOptimisticActions() {
       undo: () => {
         removeOptimisticAction(optimisticId);
       },
+      retry: () => optimisticSnooze(threadIds, currentFolder, wakeAt),
       toastMessage: `Snoozed until ${wakeAt.toLocaleString()}`,
       folders: [currentFolder, 'snoozed'],
     });
@@ -486,7 +509,7 @@ export function useOptimisticActions() {
     createPendingAction({
       type: 'UNSNOOZE',
       threadIds,
-      params: { currentFolder } as any,
+      params: { currentFolder },
       optimisticId,
       execute: async () => {
         await unsnoozeThreads({ ids: threadIds });
@@ -494,6 +517,7 @@ export function useOptimisticActions() {
       undo: () => {
         removeOptimisticAction(optimisticId);
       },
+      retry: () => optimisticUnsnooze(threadIds, currentFolder),
       toastMessage: 'Moved to Inbox',
       folders: [currentFolder, 'inbox'],
     });
@@ -510,7 +534,7 @@ export function useOptimisticActions() {
     createPendingAction({
       type: 'DELETE_DRAFT',
       threadIds: [draftId],
-      params: {} as any,
+      params: {},
       optimisticId,
       execute: async () => {
         await deleteDraft({ id: draftId });
@@ -519,6 +543,7 @@ export function useOptimisticActions() {
       undo: () => {
         removeOptimisticAction(optimisticId);
       },
+      retry: () => optimisticDeleteDraft(draftId),
       toastMessage: 'Draft deleted',
     });
   }

@@ -45,7 +45,7 @@ export function LabelDialog({
   const [isOpen, setIsOpen] = useState(false);
   const isControlled = open !== undefined;
   const dialogOpen = isControlled ? open : isOpen;
-  const setDialogOpen = isControlled ? onOpenChange! : setIsOpen;
+  const setDialogOpen = isControlled && onOpenChange ? onOpenChange : setIsOpen;
 
   const form = useForm<LabelType>({
     defaultValues: {

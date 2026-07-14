@@ -3,6 +3,9 @@ import type { ShardRegistry, ZeroAgent, ZeroDriver } from './routes/agent';
 
 import { env as _env } from 'cloudflare:workers';
 import type { QueryableHandler } from 'dormroom';
+import { assertServerEnv } from './env-schema';
+
+export { assertServerEnv, type RequiredServerEnv } from './env-schema';
 
 export type ZeroEnv = {
   ZERO_DRIVER: DurableObjectNamespace<ZeroDriver & QueryableHandler>;
@@ -104,7 +107,27 @@ export type ZeroEnv = {
   DD_API_KEY: string;
   DD_APP_KEY: string;
   DD_SITE: string;
+  /** Devlab: server-side Sentry — absent = Sentry disabled (clean no-op). */
+  SENTRY_DSN?: string;
+  /** Devlab: build/release tag attached to captured Sentry events. */
+  SENTRY_RELEASE?: string;
 };
 
-const env = _env as ZeroEnv;
+// `_env` is the wrangler-generated `Cloudflare.Env` (broad string types); `ZeroEnv`
+// is this app's typed view with narrowed literals for a few vars. The two are
+// deliberately different shapes, so assert through `unknown` (TS-suggested form).
+const env = _env as unknown as ZeroEnv;
 export { env };
+
+// --- Boot-time validation (A5) --------------------------------------------------------
+// The zod schema + `assertServerEnv` live in ./env-schema (a dependency-free module that can
+// be unit-tested in Node without the `cloudflare:workers` import). `bootEnv` is the runtime
+// guard called at first request/queue/scheduled invocation.
+let booted = false;
+
+/** Boot guard: validates the required env exactly once per isolate. Call at first request. */
+export function bootEnv(raw: Record<string, unknown> = env as unknown as Record<string, unknown>): void {
+  if (booted) return;
+  assertServerEnv(raw);
+  booted = true;
+}

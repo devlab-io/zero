@@ -1,5 +1,6 @@
 import { useOptimisticActions } from '@/hooks/use-optimistic-actions';
 import { focusedIndexAtom } from '@/hooks/use-mail-navigation';
+import { MAILLIST_HANDLED_ACTIONS } from './handler-manifest';
 import { enhancedKeyboardShortcuts } from '@/config/shortcuts';
 // import { useSearchValue } from '@/hooks/use-search-value';
 import {
@@ -17,6 +18,8 @@ import { useQueryState } from 'nuqs';
 import { useAtomValue } from 'jotai';
 import { toast } from 'sonner';
 
+// Space/shift+Space paging is NOT in this scope — it is imperative in the `list` scope
+// (use-mail-navigation.ts), which owns the scroll container.
 export function MailListHotkeys() {
   const scope = 'mail-list';
   const [mail, setMail] = useMail();
@@ -126,22 +129,22 @@ export function MailListHotkeys() {
     optimisticToggleImportant(idsToMark, true);
   }, [mail.bulkSelected, optimisticToggleImportant, shouldUseHover]);
 
-  const archiveEmail = useCallback(async () => {
+  const markAsNotImportant = useCallback(() => {
     if (shouldUseHover && hoveredEmailId.current) {
-      optimisticMoveThreadsTo([hoveredEmailId.current], folder, 'archive');
+      optimisticToggleImportant([hoveredEmailId.current], false);
       return;
     }
 
-    const idsToArchive = mail.bulkSelected;
-    if (idsToArchive.length === 0) {
+    const idsToMark = mail.bulkSelected;
+    if (idsToMark.length === 0) {
       toast.info(m['common.mail.noEmailsToSelect']());
       return;
     }
 
-    optimisticMoveThreadsTo(idsToArchive, folder, 'archive');
-  }, [mail.bulkSelected, folder, optimisticMoveThreadsTo, shouldUseHover]);
+    optimisticToggleImportant(idsToMark, false);
+  }, [mail.bulkSelected, optimisticToggleImportant, shouldUseHover]);
 
-  const bulkArchive = useCallback(() => {
+  const archiveEmail = useCallback(async () => {
     if (shouldUseHover && hoveredEmailId.current) {
       optimisticMoveThreadsTo([hoveredEmailId.current], folder, 'archive');
       return;
@@ -192,6 +195,21 @@ export function MailListHotkeys() {
       bulkSelected: [],
     }));
   }, [shouldUseHover]);
+
+  // `x` — toggle bulk selection of the focused/hovered row (Shortwave "select").
+  const toggleFocusedSelection = useCallback(() => {
+    const [targetId] = getTargetIds();
+    if (!targetId) {
+      toast.info(m['common.mail.noEmailsToSelect']());
+      return;
+    }
+    setMail((prev) => ({
+      ...prev,
+      bulkSelected: prev.bulkSelected.includes(targetId)
+        ? prev.bulkSelected.filter((existing) => existing !== targetId)
+        : [...prev.bulkSelected, targetId],
+    }));
+  }, [getTargetIds, setMail]);
 
   // Devlab — Superhuman-style keys. Open the targeted thread directly in a
   // compose mode; ThreadDisplay resolves the reply target to the latest message.
@@ -258,14 +276,15 @@ export function MailListHotkeys() {
   //   [categories, switchMailListCategory],
   // );
 
-  const handlers = useMemo(
+  const handlers: Record<(typeof MAILLIST_HANDLED_ACTIONS)[number], () => void> = useMemo(
     () => ({
       markAsRead,
       markAsUnread,
       markAsImportant,
+      markAsNotImportant,
+      toggleFocusedSelection,
       selectAll,
       archiveEmail,
-      bulkArchive,
       bulkDelete,
       bulkStar,
       exitSelectionMode,
@@ -273,21 +292,15 @@ export function MailListHotkeys() {
       replyAllToThread,
       forwardThread,
       remindThread,
-      // showImportant: () => switchCategoryByIndex(0),
-      // showAllMail: () => switchCategoryByIndex(1),
-      // showPersonal: () => switchCategoryByIndex(2),
-      // showUpdates: () => switchCategoryByIndex(3),
-      // showPromotions: () => switchCategoryByIndex(4),
-      // showUnread: () => switchCategoryByIndex(5),
     }),
     [
-      // switchCategoryByIndex,
       markAsRead,
       markAsUnread,
       markAsImportant,
+      markAsNotImportant,
+      toggleFocusedSelection,
       selectAll,
       archiveEmail,
-      bulkArchive,
       bulkDelete,
       bulkStar,
       exitSelectionMode,

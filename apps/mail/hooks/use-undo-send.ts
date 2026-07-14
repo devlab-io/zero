@@ -1,5 +1,6 @@
 import { useMutation } from '@tanstack/react-query';
 import { toast } from 'sonner';
+import { m } from '@/paraglide/messages';
 
 import { useTRPC } from '@/providers/query-provider';
 import { isSendResult } from '@/lib/email-utils';
@@ -73,15 +74,15 @@ export const useUndoSend = () => {
 
       if (timeRemaining > 5_000) {
         if (wasUserScheduled) {
-          toast.success('Email scheduled', {
+          toast.success(m['common.undoSend.emailScheduled'](), {
             action: {
-              label: 'Undo',
+              label: m['common.undoSend.undo'](),
               onClick: async () => {
                 try {
                   await unsendEmail({ messageId });
-                  toast.info('Schedule cancelled');
+                  toast.info(m['common.undoSend.scheduleCancelled']());
                 } catch {
-                  toast.error('Failed to cancel');
+                  toast.error(m['common.undoSend.failedToCancel']());
                 }
               },
             },
@@ -89,9 +90,9 @@ export const useUndoSend = () => {
             closeButton: true,
           });
         } else {
-          toast.success('Email sent', {
+          toast.success(m['common.undoSend.emailSent'](), {
             action: {
-              label: 'Undo',
+              label: m['common.undoSend.undo'](),
               onClick: async () => {
               try {
                 await unsendEmail({ messageId });
@@ -112,9 +113,9 @@ export const useUndoSend = () => {
                 url.searchParams.set('isComposeOpen', 'true');
                 window.history.replaceState({}, '', url.toString());
                 
-                toast.info('Send cancelled');
+                toast.info(m['common.undoSend.sendCancelled']());
               } catch {
-                toast.error('Failed to cancel');
+                toast.error(m['common.undoSend.failedToCancel']());
               }
               },
             },

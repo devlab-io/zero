@@ -1,9 +1,10 @@
-# Codex CLI setup for Zero MCP
+# Codex CLI setup for Zero MCP (draft-only)
 
 This guide wires a local Codex CLI agent, version 0.142 or newer, to the Zero MCP
-endpoint for the tartine draft-only workflow. The agent may inspect mail context,
-compose proposed replies, create Gmail drafts, and enqueue draft jobs. It must
-not send mail.
+endpoint for the draft-only workflow. The agent may inspect mail context, compose
+proposed replies, create Gmail drafts, and enqueue/inspect/cancel/retry reviewable
+outbox items. **It cannot send mail, permanently delete mail, report spam, or change
+account settings** — those surfaces are not registered.
 
 ## Config
 
@@ -14,103 +15,102 @@ Codex settings already in that file, then add this block:
 # ~/.codex/config.toml
 
 [mcp_servers.zero]
-url = "https://<zero-deployment-host>/mcp"
+url = "https://${ZERO_MCP_HOST}/mcp"
 ```
 
-Use the deployed Zero origin and append `/mcp` exactly, for example
-`https://zero.example.dev/mcp`. A versioned snippet is checked in at
-`docs/agent/codex-config.example.toml`.
+`${ZERO_MCP_HOST}` is a placeholder for the deployed Zero origin (for example
+`zero.example.dev`) — **never commit a real host with an embedded token**. A
+versioned snippet is checked in at `docs/agent/codex-config.example.toml`.
 
-Authenticate the MCP server through the current better-auth OIDC flow:
+Authenticate the MCP server through the current better-auth OIDC flow (this opens a
+browser login; no bearer token is stored in the config file):
 
 ```bash
 codex mcp login zero
 ```
 
-The better-auth MCP OIDC plugin is a watch item in tartine T3 and is expected to
-be deprecated in favor of the OAuth Provider Plugin, so re-check that caveat
-before changing the auth wiring.
+The better-auth MCP OIDC plugin is a watch item and is expected to be deprecated in
+favor of the OAuth Provider Plugin, so re-check that caveat before changing the auth
+wiring.
 
-## Draft-only warning
+## Draft-only contract
 
-This MCP server is draft-only: no send tool is exposed. The agent must stop at
-Gmail draft creation or outbox queuing; final sending belongs to a human action
-in Zero.
+This MCP server is draft-only. Call `getServerCapabilities` first — it returns, as
+JSON, the hard guarantees `canSendMail:false`, `canPermanentlyDeleteMail:false`,
+`canReportSpam:false`, `canChangeAccountSettings:false`. The agent must stop at Gmail
+draft creation or outbox queuing; final sending belongs to a human action in Zero.
 
-The registered MCP tool surface in `apps/server/src/routes/agent/mcp.ts` at the
-tartine wave3 base is:
+The registered MCP tool surface in `apps/server/src/routes/agent/mcp.ts` (the exact,
+machine-readable schema is committed at `docs/agent/mcp-schema.snapshot.json`) is:
 
-- `getConnections`
-- `getThreadSummary`
-- `getActiveConnection`
-- `setActiveConnection`
-- `composeEmail`
-- `createDraft` - creates a Gmail draft for later human review, with optional
-  `threadId` for replies in an existing thread.
-- `enqueueDraftJob` - queues a draft job in the outbox for later human review.
-- `listThreads`
-- `getThread`
-- `markThreadsRead`
-- `markThreadsUnread`
-- `modifyLabels`
-- `getCurrentDate`
-- `getUserLabels`
-- `getLabel`
-- `createLabel`
+Read:
 
-Deliberately absent: `sendEmail`, `sendDraft`, `drafts.send`, or any other send
-tool. `composeEmail` only returns composed text; `createDraft` creates a Gmail
-draft; `enqueueDraftJob` creates an outbox item that still requires human
-approval.
+- `getServerCapabilities` — health/capabilities + draft-only guarantees. Stores nothing.
+- `getConnections` — linked accounts (email + provider).
+- `getActiveConnection` / `setActiveConnection` — read/select the active account. Selection
+  changes no account setting.
+- `listThreads` — COMPACT thread metadata (subject/id/date/sender/unread/labels); never bodies.
+- `searchThreads` — COMPACT thread metadata for a search; never bodies.
+- `getThread` — one thread on demand (sanitized latest message text).
+- `getThreadSummary` — short AI summary for one thread.
+- `getUserLabels` / `getLabel` — list labels / one label.
+- `getCurrentDate` — server date/time.
+- `composeEmail` — returns AI-drafted body TEXT only; creates/stores/sends nothing.
+- `listOutbox` / `getOutboxItem` — inspect reviewable outbox draft jobs the user owns.
 
-## Mission prompts
+Write (draft-only, idempotent):
 
-Run missions manually with `codex exec` after login. Examples:
+- `createDraft` — creates a Gmail draft stored in Gmail Drafts for later human review,
+  with optional `threadId` for replies and an optional `idempotencyKey` (repeat calls
+  return the same draft).
+- `enqueueDraftJob` — stores a reviewable outbox job (status `queued`); duplicate calls
+  with identical fields return the same item.
+- `cancelOutboxItem` / `retryOutboxItem` — cancel a pending / retry a failed outbox job
+  (idempotent; other-user or missing ids return an identical not-found).
+
+Deliberately absent: `sendEmail`, `sendDraft`, `drafts.send`, `bulkDelete`,
+`deleteThread`, `deleteLabel`, `deleteAllSpam`, `markThreadsRead`/`markThreadsUnread`,
+`modifyLabels`, `createLabel`, or any send / permanent-delete / spam / account-setting
+tool. `composeEmail` only returns text; `createDraft` creates an unsent draft;
+`enqueueDraftJob` creates an outbox item that still requires human approval.
+
+## Read-only smoke test
+
+After `codex mcp login zero`, prove discovery and a read-only path without touching mail:
 
 ```bash
-codex exec "prépare les réponses en attente de compta@, crée les brouillons Gmail, et n'envoie rien"
-codex exec "tri les 5 derniers fils de compta@ et enqueue les réponses qui nécessitent validation humaine"
-codex exec "prépare 2 réponses en attente sur compta@ via Zero MCP, puis résume les drafts créés"
+# 1. Discovery — initialize + list tools; confirm the surface above is returned.
+codex exec "connecte-toi à Zero MCP, appelle getServerCapabilities et liste les outils disponibles"
+
+# 2. Read-only — no write tool is invoked.
+codex exec "via Zero MCP: getConnections, puis listThreads sur inbox (maxResults 5) en résumé compact — ne crée ni draft ni outbox"
 ```
 
-When a mission may touch multiple mailboxes, start by asking the agent to call
-`getConnections` and `setActiveConnection` before reading threads or creating
-drafts.
+Expected: `getServerCapabilities` reports `canSendMail:false`; `listThreads` returns
+compact rows (subject/id/date/sender), no message bodies; no draft or outbox item is
+created.
 
-## Manual E2E procedure
+## Draft-only smoke test
 
-The `/queue` view may arrive from the tartine queue-view slice after this docs
-slice. Execute this procedure once that route is available, using the behavior
-specified in `docs/spec/agent-draft-queue.md`.
+```bash
+codex exec "prépare 2 réponses en attente sur compta@ via Zero MCP, crée les brouillons Gmail (createDraft) ou enqueue (enqueueDraftJob), et n'envoie rien"
+```
 
-1. Log in to Zero MCP:
+Verify the agent stopped at draft-only output:
 
-   ```bash
-   codex mcp login zero
-   ```
+- Gmail drafts were created for the target account (ids returned by `createDraft`), or
+  matching outbox items exist (`listOutbox` shows status `queued`/`draft_ready`).
+- Idempotency: repeating the same `enqueueDraftJob` (identical fields) or a `createDraft`
+  with the same `idempotencyKey` returns the same id — no duplicate.
+- There were zero sends: no new Sent item and no send-side confirmation. The surface
+  exposes no send tool, so this is structurally guaranteed.
 
-2. Run a manual mission:
+A machine-checked local run of these two paths (with injected driver fakes, no network)
+is saved at `docs/agent/mcp-smoke.evidence.json`; see `docs/agent/mcp-smoke.md` for the
+full procedure and the live-session blocker note.
 
-   ```bash
-   codex exec "prépare 2 réponses en attente sur compta@, crée ou enqueue les brouillons, et n'envoie rien"
-   ```
+## Human approval boundary (`/queue`)
 
-3. Verify the agent stopped at draft-only output:
-
-   - Gmail drafts were created for the target account.
-   - Matching outbox items exist with status `draft_ready`.
-   - There were zero sends: no new Sent item and no send-side confirmation for
-     the drafts at this point.
-
-4. Open Zero `/queue` and review the two outbox items:
-
-   - Approve one item. It should enter the 15 second countdown and then become
-     `sent`.
-   - Undo or cancel the other during the countdown. It should become
-     `cancelled`.
-
-5. Confirm on the Gmail side:
-
-   - The approved draft was sent and appears in Sent mail.
-   - The cancelled item was not sent.
-   - There is no extra send beyond the single human-approved item.
+Sending remains a separate human action. In Zero `/queue`, a reviewer approves an
+outbox item (15 s countdown → `sent`) or cancels it (`cancelled`). No agent tool can
+perform or shortcut that send.

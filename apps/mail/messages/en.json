@@ -57,7 +57,9 @@
       "errorDeletingSpam": "Failed to delete spam emails",
       "confirmDeleteSpam": "Delete All Spam",
       "confirmDeleteSpamDescription": "Are you sure you want to delete all spam emails? This action cannot be undone.",
-      "confirmDelete": "Delete"
+      "confirmDelete": "Delete",
+      "linkCopied": "Link copied to clipboard!",
+      "errorTryAgainLater": "Error, please try again later"
     },
     "themes": {
       "dark": "Dark",
@@ -142,7 +144,9 @@
       "otherAccounts": "Other Accounts",
       "switchingAccounts": "Switching accounts...",
       "accountSwitched": "Account switched successfully",
-      "failedToSwitchAccount": "Failed to switch accounts. Please try again."
+      "failedToSwitchAccount": "Failed to switch accounts. Please try again.",
+      "cacheCleared": "Cache cleared successfully",
+      "connectionIdCopied": "Connection ID copied to clipboard"
     },
     "mailCategories": {
       "primary": "Primary",
@@ -219,7 +223,11 @@
       "cancel": "Cancel",
       "goToWebsite": "Go to website",
       "failedToUnsubscribe": "Failed to unsubscribe from mailing list",
-      "print": "Print"
+      "print": "Print",
+      "failedToDownloadAttachment": "Failed to download attachment",
+      "failedToOpenAttachment": "Failed to open attachment",
+      "emailCopied": "Email copied to clipboard",
+      "failedToPrint": "Failed to print email. Please try again."
     },
     "threadDisplay": {
       "exitFullscreen": "Exit fullscreen",
@@ -322,7 +330,9 @@
       "failedToSave": "Failed to save settings",
       "languageChanged": "Language changed to {locale}",
       "defaultEmailUpdated": "Default email alias updated in Gmail",
-      "failedToUpdateGmailAlias": "Failed to update default alias in Gmail settings"
+      "failedToUpdateGmailAlias": "Failed to update default alias in Gmail settings",
+      "promptUpdated": "Prompt updated",
+      "failedToUpdatePrompt": "Failed to update prompt"
     },
     "mail": {
       "replies": [
@@ -391,7 +401,27 @@
       "failedToUnmute": "Failed to unmute",
       "archived": "Archived",
       "failedToArchive": "Failed to archive",
-      "openInNewTab": "Open in new tab"
+      "openInNewTab": "Open in new tab",
+      "failedToTrustSender": "Failed to trust sender",
+      "snoozeFutureDate": "Please choose a future date and time.",
+      "failedToSelectAll": "Failed to select all emails",
+      "failedToSelectAllConversations": "Failed to select all conversations",
+      "selectAllConversations": "Select all conversations",
+      "conversationsSelected": [
+        {
+          "declarations": [
+            "input count",
+            "local countPlural = count: plural"
+          ],
+          "selectors": [
+            "countPlural"
+          ],
+          "match": {
+            "countPlural=one": "# conversation on this page selected.",
+            "countPlural=other": "# conversations on this page selected."
+          }
+        }
+      ]
     },
     "units": {
       "mb": "{amount} MB"
@@ -412,6 +442,60 @@
       "savingLabel": "Saving label...",
       "failedToSavingLabel": "Failed to save label",
       "saveLabelSuccess": "Label saved successfully"
+    },
+    "onboarding": {
+      "welcomeTitle": "Welcome to Zero Email!",
+      "welcomeDescription": "Your new intelligent email experience starts here.",
+      "chatTitle": "Chat with your inbox",
+      "chatDescription": "Zero allows you to chat with your inbox, and take actions on your behalf.",
+      "composeTitle": "AI Compose & Reply",
+      "composeDescription": "Our AI assistant allows you to write emails that sound like you.",
+      "labelTitle": "Label your emails",
+      "labelDescription": "Zero helps you label your emails to focus on what matters.",
+      "comingSoonTitle": "Coming Soon",
+      "comingSoonDescription": "We're excited to bring these powerful features to all users very soon!",
+      "readyTitle": "Ready to start?",
+      "readyDescription": "Click below to begin your intelligent email experience!",
+      "goBack": "Go back",
+      "getStarted": "Get Started",
+      "next": "Next"
+    },
+    "voice": {
+      "micDenied": "Microphone access denied. Please enable microphone permissions.",
+      "startFailed": "Failed to start conversation. Please try again.",
+      "endFailed": "Failed to end conversation"
+    },
+    "auth": {
+      "tryingSignup": "Trying to sign up with {email}",
+      "tryingLogin": "Trying to log in with {email}",
+      "signupAttempt": "Signup attempt",
+      "loginAttempt": "Login attempt"
+    },
+    "undoSend": {
+      "emailScheduled": "Email scheduled",
+      "scheduleCancelled": "Schedule cancelled",
+      "emailSent": "Email sent",
+      "sendCancelled": "Send cancelled",
+      "failedToCancel": "Failed to cancel",
+      "undo": "Undo"
+    },
+    "setupPhone": {
+      "codeSent": "Verification code sent to your phone",
+      "invalidCode": "Invalid verification code",
+      "verified": "Phone number verified successfully",
+      "enterValidOtp": "Please enter a valid OTP",
+      "numberCopied": "Number copied to clipboard",
+      "verifyFailed": "Failed to verify phone number",
+      "sendFailed": "Failed to send verification code"
+    },
+    "templates": {
+      "provideName": "Please provide a name",
+      "saved": "Template saved",
+      "failedToSave": "Failed to save template",
+      "deleted": "Template deleted",
+      "failedToDelete": "Failed to delete template",
+      "deleteConfirm": "Delete template \"{name}\"?",
+      "delete": "Delete"
     }
   },
   "queue": {
@@ -518,7 +602,14 @@
         "description": "Oops! The page you're looking for doesn't exist or has been moved.",
         "goBack": "Go Back"
       },
-      "settingsNotFound": "404 - Settings page not found"
+      "settingsNotFound": "404 - Settings page not found",
+      "boundary": {
+        "oops": "Oops!",
+        "error": "Error",
+        "notFoundDetails": "The requested page could not be found.",
+        "somethingWentWrong": "Something went wrong!",
+        "seeConsole": "See the console for more information."
+      }
     },
     "settings": {
       "general": {
@@ -683,6 +774,15 @@
         "externalImagesDescription": "Allow emails to display images from external sources.",
         "trustedSenders": "Trusted Senders",
         "trustedSendersDescription": "Always display images for these senders."
+      },
+      "categories": {
+        "exactlyOneDefault": "Exactly one category must be set as default",
+        "saved": "Categories saved",
+        "failedToSave": "Failed to save",
+        "cannotDeleteLast": "Cannot delete the last remaining category",
+        "defaultReassigned": "Default category reassigned to the first remaining category",
+        "resetToDefaults": "Reset to defaults",
+        "failedToReset": "Failed to reset"
       }
     },
     "createEmail": {
@@ -737,12 +837,35 @@
           "label": "Original",
           "description": "No compression, original quality"
         }
-      }
+      },
+      "scheduledTimeInPast": "Scheduled time cannot be in the past",
+      "failedToLoadDraft": "Failed to load draft",
+      "failedToRemoveAttachment": "Failed to remove attachment"
     }
   },
   "errorMessages": {
     "required_scopes_missing": "We're missing the permissions needed to craft your full experience. Please sign in again and allow the requested access.",
     "early_access_required": "Early access is required to log in",
     "unauthorized": "Zero could not load your data from the 3rd party provider. Please try again."
+  },
+  "states": {
+    "sending": "Sending…",
+    "retry": "Retry",
+    "actionFailed": "Action failed",
+    "mailList": {
+      "errorTitle": "Couldn't load your inbox",
+      "errorDescription": "We couldn't reach the server. Check your connection and try again.",
+      "offlineNotice": "You're offline — showing your saved emails.",
+      "staleNotice": "Couldn't refresh — showing your saved emails.",
+      "emptyTitle": "It's empty here",
+      "emptyDescription": "Search for another email or",
+      "clearFilters": "clear filters"
+    },
+    "thread": {
+      "errorTitle": "Couldn't open this conversation",
+      "errorDescription": "We couldn't reach the server. Check your connection and try again.",
+      "retry": "Try again",
+      "back": "Back to inbox"
+    }
   }
 }

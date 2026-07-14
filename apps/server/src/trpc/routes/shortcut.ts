@@ -14,6 +14,8 @@ export const shortcutRouter = router({
       const { sessionUser } = ctx;
       const { shortcuts } = input;
       const db = await getZeroDB(sessionUser.id);
+      // db.insertUserHotkeys is typed for full hotkey records; the router persists the
+      // validated shortcut array directly (shape gap owned by the DB layer, not types).
       await db.insertUserHotkeys(shortcuts as any);
     }),
 });

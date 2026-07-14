@@ -1,3 +1,5 @@
+import { log } from '@/lib/log';
+
 export type ImageQuality = 'low' | 'medium' | 'original';
 
 export interface ImageCompressionOptions {
@@ -90,7 +92,7 @@ export async function compressImages(
         const compressedFile = await compressImage(file, options);
         compressedFiles.push(compressedFile);
       } catch (error) {
-        console.warn(`Failed to compress ${file.name}:`, error);
+        log.warn(`Failed to compress ${file.name}:`, error);
         compressedFiles.push(file);
       }
     } else {

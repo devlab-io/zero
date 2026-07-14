@@ -13,6 +13,7 @@
  *
  * Reuse or distribution of this file requires a license from Zero Email Inc.
  */
+import { logger } from '../lib/logger';
 import { WorkflowEntrypoint, WorkflowStep } from 'cloudflare:workers';
 import { connectionToDriver } from '../lib/server-utils';
 import type { WorkflowEvent } from 'cloudflare:workers';
@@ -53,7 +54,7 @@ export class SyncThreadsCoordinatorWorkflow extends WorkflowEntrypoint<
   ): Promise<SyncThreadsCoordinatorResult> {
     const { connectionId, folder } = event.payload;
 
-    console.info(
+    logger.info(
       `[SyncThreadsCoordinatorWorkflow] Starting coordination for connection ${connectionId}, folder ${folder}`,
     );
 
@@ -90,12 +91,12 @@ export class SyncThreadsCoordinatorWorkflow extends WorkflowEntrypoint<
     const { maxCount, shouldLoop, foundConnection } = setupResult as {
       maxCount: number;
       shouldLoop: boolean;
-      foundConnection: any;
+      foundConnection: Parameters<typeof connectionToDriver>[0];
     };
     const driver = connectionToDriver(foundConnection);
 
     if (connectionId.includes('aggregate')) {
-      console.info(
+      logger.info(
         `[SyncThreadsCoordinatorWorkflow] Skipping sync for aggregate instance - folder ${folder}`,
       );
       result.message = 'Skipped aggregate instance';
@@ -103,7 +104,7 @@ export class SyncThreadsCoordinatorWorkflow extends WorkflowEntrypoint<
     }
 
     if (!driver) {
-      console.warn(`[SyncThreadsCoordinatorWorkflow] No driver available for folder ${folder}`);
+      logger.warn(`[SyncThreadsCoordinatorWorkflow] No driver available for folder ${folder}`);
       result.message = 'No driver available';
       return result;
     }
@@ -119,7 +120,7 @@ export class SyncThreadsCoordinatorWorkflow extends WorkflowEntrypoint<
       const pageResult = await step.do(
         `process-page-${pageNumber}-${folder}-${connectionId}`,
         async () => {
-          console.info(
+          logger.info(
             `[SyncThreadsCoordinatorWorkflow] Processing page ${pageNumber} for ${folder}`,
           );
 
@@ -135,16 +136,25 @@ export class SyncThreadsCoordinatorWorkflow extends WorkflowEntrypoint<
             },
           });
 
-          console.info(
+          logger.info(
             `[SyncThreadsCoordinatorWorkflow] Created workflow ${instance.id} for page ${pageNumber}`,
           );
 
-          // Simple polling to wait for completion
-          let attempts = 0;
-          const maxAttempts = 60; // 5 minutes
+          // Poll avec backoff exponentiel (issue #31) : plus de plancher plat de 5 s/page.
+          // Une page qui se termine vite rend la main en <1 s au lieu d'attendre 5 s ;
+          // l'intervalle croît 250 ms → 5 s (plafond), budget total ~5 min inchangé.
+          const pollBaseMs = 250;
+          const pollMaxMs = 5000;
+          const pollFactor = 1.6;
+          const deadline = Date.now() + 5 * 60 * 1000; // 5 minutes budget (préservé)
+          let pollAttempt = 0;
 
-          while (attempts < maxAttempts) {
-            await new Promise((resolve) => setTimeout(resolve, 5000));
+          while (Date.now() < deadline) {
+            const delayMs = Math.min(
+              pollMaxMs,
+              Math.round(pollBaseMs * Math.pow(pollFactor, pollAttempt)),
+            );
+            await new Promise((resolve) => setTimeout(resolve, delayMs));
 
             try {
               const status = await instance.status();
@@ -154,12 +164,12 @@ export class SyncThreadsCoordinatorWorkflow extends WorkflowEntrypoint<
                 throw new Error(`Workflow ${instance.id} failed`);
               }
             } catch (error) {
-              if (attempts === maxAttempts - 1) {
+              if (Date.now() >= deadline) {
                 throw error;
               }
             }
 
-            attempts++;
+            pollAttempt++;
           }
 
           throw new Error(`Workflow ${instance.id} timed out`);
@@ -168,7 +178,13 @@ export class SyncThreadsCoordinatorWorkflow extends WorkflowEntrypoint<
 
       // Update result with this page's data
       if (pageResult?.result) {
-        const workflowResult = pageResult.result as any;
+        const workflowResult = pageResult.result as {
+          synced?: number;
+          totalThreads?: number;
+          successfulSyncs?: number;
+          failedSyncs?: number;
+          nextPageToken?: string | null;
+        };
         result.pageWorkflowResults.push({
           pageNumber,
           workflowId: pageResult.workflowId,
@@ -191,12 +207,12 @@ export class SyncThreadsCoordinatorWorkflow extends WorkflowEntrypoint<
 
       // If no more pages, stop
       if (!currentPageToken) {
-        console.info(`[SyncThreadsCoordinatorWorkflow] No more pages for ${folder}`);
+        logger.info(`[SyncThreadsCoordinatorWorkflow] No more pages for ${folder}`);
         break;
       }
     } while (currentPageToken && shouldLoop);
 
-    console.info(
+    logger.info(
       `[SyncThreadsCoordinatorWorkflow] Completed ${folder}: ${result.totalSynced} synced across ${result.totalPagesProcessed} pages`,
     );
 

@@ -1,0 +1,12 @@
+{
+  "//": "Version: niveau9/agent-api-completion-01 — Claude Desktop / Claude Code MCP config.",
+  "//host": "Replace ${ZERO_MCP_HOST} with the deployed Zero origin (e.g. zero.example.dev).",
+  "//auth": "Never commit a real host+token. OAuth login (better-auth OIDC) runs on first connect.",
+  "//contract": "DRAFT-ONLY: no send / permanent-delete / spam / account-settings tool is registered.",
+  "mcpServers": {
+    "zero": {
+      "type": "http",
+      "url": "https://${ZERO_MCP_HOST}/mcp"
+    }
+  }
+}

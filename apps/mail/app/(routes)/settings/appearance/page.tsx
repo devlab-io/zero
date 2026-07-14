@@ -14,7 +14,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { SettingsCard } from '@/components/settings/settings-card';
-import { zodResolver } from '@hookform/resolvers/zod';
+import { zodResolver } from '@/lib/zod-resolver';
 import { useTRPC } from '@/providers/query-provider';
 import { useMutation } from '@tanstack/react-query';
 import { useSettings } from '@/hooks/use-settings';
@@ -32,6 +32,13 @@ const formSchema = z.object({
 });
 
 type Theme = 'dark' | 'light' | 'system';
+
+// Literal lookups keep the paraglide catalog tree-shakable (no dynamic `m[...]` access).
+const themeLabels: Record<Theme, () => string> = {
+  dark: m['common.themes.dark'],
+  light: m['common.themes.light'],
+  system: m['common.themes.system'],
+};
 
 export default function AppearancePage() {
   const [isSaving, setIsSaving] = useState(false);
@@ -126,7 +133,7 @@ export default function AppearancePage() {
                                   {theme === 'dark' && <Moon className="h-4 w-4" />}
                                   {theme === 'light' && <Sun className="h-4 w-4" />}
                                   {theme === 'system' && <Laptop className="h-4 w-4" />}
-                                  {m[`common.themes.${theme as 'dark' | 'light' | 'system'}`]()}
+                                  {themeLabels[theme as Theme]()}
                                 </div>
                               </SelectValue>
                             </SelectTrigger>

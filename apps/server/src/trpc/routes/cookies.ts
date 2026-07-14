@@ -1,3 +1,4 @@
+import { logger } from '../../lib/logger';
 import { COOKIE_CONSENT_KEY, type CookiePreferences } from '../../lib/cookies';
 import { getCookie, setCookie } from 'hono/cookie';
 import { privateProcedure, router } from '../trpc';
@@ -24,7 +25,7 @@ const getCookiePreferences = async (c: Context) => {
       necessary: true, // Always keep necessary cookies enabled
     };
   } catch (e) {
-    console.error('Failed to parse cookie preferences:', e);
+    logger.error('Failed to parse cookie preferences:', e);
     return defaultPreferences;
   }
 };

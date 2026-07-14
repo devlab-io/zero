@@ -1,3 +1,4 @@
+import { log } from '@/lib/log';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '../ui/accordion';
 import { formatFileSize, getFileIcon } from '@/lib/utils';
 import type { Attachment } from '@/types';
@@ -55,7 +56,7 @@ const AttachmentsAccordion = ({ attachments, setSelectedAttachment }: Props) => 
                             onError={(e) => {
                               const target = e.target as HTMLImageElement;
                               target.style.display = 'none';
-                              console.error('Failed to load image:', attachment.filename);
+                              log.error('Failed to load image:', attachment.filename);
                             }}
                           />
                         ) : (

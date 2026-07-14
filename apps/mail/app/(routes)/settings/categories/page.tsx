@@ -1,3 +1,4 @@
+import { log } from '@/lib/log';
 import {
   DropdownMenu,
   DropdownMenuItem,
@@ -275,16 +276,16 @@ export default function CategoriesSettingsPage() {
     try {
       const defaultCategoryCount = categories.filter((cat) => cat.isDefault).length;
       if (defaultCategoryCount !== 1) {
-        toast.error('Exactly one category must be set as default');
+        toast.error(m['pages.settings.categories.exactlyOneDefault']());
         return;
       }
       await saveUserSettings({ categories });
       queryClient.invalidateQueries({ queryKey: trpc.settings.get.queryKey() });
       setHasUnsavedChanges(false);
-      toast.success('Categories saved');
+      toast.success(m['pages.settings.categories.saved']());
     } catch (e) {
-      console.error(e);
-      toast.error('Failed to save');
+      log.error(e);
+      toast.error(m['pages.settings.categories.failedToSave']());
     }
   };
 
@@ -295,7 +296,7 @@ export default function CategoriesSettingsPage() {
       const remainingCategories = categories.filter((cat) => cat.id !== id);
 
       if (remainingCategories.length === 0) {
-        toast.error('Cannot delete the last remaining category');
+        toast.error(m['pages.settings.categories.cannotDeleteLast']());
         return;
       }
 
@@ -304,7 +305,7 @@ export default function CategoriesSettingsPage() {
       );
 
       setCategories(updatedCategories);
-      toast.success('Default category reassigned to the first remaining category');
+      toast.success(m['pages.settings.categories.defaultReassigned']());
     } else {
       const updatedCategories = categories.filter((cat) => cat.id !== id);
       setCategories(updatedCategories);
@@ -330,10 +331,10 @@ export default function CategoriesSettingsPage() {
       await saveUserSettings({ categories: defaultMailCategories });
       queryClient.invalidateQueries({ queryKey: trpc.settings.get.queryKey() });
       setHasUnsavedChanges(false);
-      toast.success('Reset to defaults');
+      toast.success(m['pages.settings.categories.resetToDefaults']());
     } catch (e) {
-      console.error(e);
-      toast.error('Failed to reset');
+      log.error(e);
+      toast.error(m['pages.settings.categories.failedToReset']());
     }
   };
 

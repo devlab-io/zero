@@ -1,28 +1,122 @@
-name: autofix.ci
+name: quality-and-security
 
 on:
   pull_request:
+  push:
+    branches: [staging]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
+env:
+  # Typecheck ratchet switch (the "commutateur"). "false" = report mode: tsc runs,
+  # its error count is compared to the frozen baseline, but the step never fails
+  # the build. Flip to "true" (one-line edit) to make a typecheck regression above
+  # baseline a hard gate — the orchestrator's call at the end of wave 1.
+  TYPECHECK_BLOCKING: "false"
+
 jobs:
-  autofix:
-    timeout-minutes: 10
-    runs-on: ${{ vars.RUNNER_IMAGE || 'ubuntu-latest' }}
+  verify:
+    timeout-minutes: 20
+    runs-on: ubuntu-latest
     steps:
-      - name: Checkout Code 🛎
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup pnpm 🌟
+      - name: Setup pnpm
         uses: pnpm/action-setup@v4
 
-      - name: Setup Node 📦
+      - name: Setup Node
         uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
 
-      - name: Install dependencies 📦
-        run: pnpm install
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile --ignore-scripts
 
-      - name: Lint JS
-        run: pnpm dlx oxlint@latest --deny-warnings
+      # wrangler types MUST run before typecheck: the worker-configuration.d.ts
+      # ambient types are what tsc resolves the Env/bindings against.
+      - name: Generate Cloudflare Worker types
+        run: |
+          pnpm --filter @zero/server types
+          pnpm --filter @zero/mail types
+          pnpm --filter @zero/mail exec react-router typegen
+
+      # Gate atteint par #43 (trpc-type-boundary, ADR 0006) : les deux apps à 0 strict.
+      # Le libellé « vert » est licite depuis le merge 9f9ac5fe (ruling #13).
+      - name: Typecheck — server 0 · mail 0 (bloquants stricts)
+        run: TYPECHECK_BLOCKING=1 node scripts/checks/typecheck-report.mjs
+
+      - name: Run unit tests
+        run: pnpm test
+
+      - name: Lint security-critical files
+        run: >-
+          pnpm dlx oxlint@1.9.0 --deny-warnings
+          apps/server/src/lib/auth.ts
+          apps/server/src/lib/auth-providers.ts
+          apps/server/src/lib/google-scopes.ts
+          apps/server/src/lib/driver/google.ts
+          apps/server/src/routes/agent/tools.ts
+          apps/server/src/routes/agent/mcp.ts
+          scripts/security/check-agent-surface.mjs
+
+      # Frontière front→serveur (issue #25 / V2.4). La règle no-restricted-imports
+      # existe dans packages/eslint-config/config.ts, mais n'était appliquée que par
+      # `pnpm --filter @zero/mail lint` en local — jamais en CI (ci ne lance pas eslint).
+      # Ce step l'EXÉCUTE réellement sur tout apps/mail via oxlint, avec une config dédiée
+      # (categories.correctness=off + la seule règle frontière) : vert sur l'arbre sain,
+      # rouge dès qu'un import relatif `**/server/src/**` réapparaît. oxlint (Rust) ~0,1 s
+      # sur 353 fichiers ; l'alternative `eslint .` coûte ~4,3 s ET remonte 142 erreurs
+      # préexistantes hors périmètre (rules react/tseslint), donc inéligible comme gate.
+      - name: Enforce front→server import boundary (A1 — apps/mail)
+        run: >-
+          pnpm dlx oxlint@1.9.0
+          --config packages/eslint-config/oxlint-frontier.json
+          apps/mail
+
+      - name: LOC ratchet (A1 — non-growing)
+        run: node scripts/checks/loc-ratchet.mjs
+
+      - name: Type (any) ratchet (A2 — non-growing)
+        run: node scripts/checks/type-ratchet.mjs
+
+      - name: Console ratchet (A5 — non-growing)
+        run: node scripts/checks/console-ratchet.mjs
+
+      - name: Migrations consistency (A6)
+        run: node scripts/checks/migrations-consistency.mjs
+
+      - name: Reject critical production advisories
+        run: pnpm audit --prod --audit-level critical
+
+      - name: Verify agent and OAuth security surface
+        run: node scripts/security/check-agent-surface.mjs
+
+      # gitleaks-action@v2 requires a GITLEAKS_LICENSE secret for org-owned repos
+      # (devlab-io/zero is org-owned) and the check forbids new secrets, so we run
+      # the pinned, MIT-licensed gitleaks image directly. Scope: working tree.
+      - name: Scan for secrets (gitleaks, pinned v8.30.1)
+        run: >-
+          docker run --rm -v "${{ github.workspace }}:/repo"
+          ghcr.io/gitleaks/gitleaks:v8.30.1
+          dir /repo --config /repo/scripts/checks/gitleaks.toml
+          --no-banner --redact --exit-code 1
+
+      - name: Build mail frontend
+        run: pnpm --filter @zero/mail build
+
+      - name: Bundle Worker without deploying (server)
+        run: >-
+          pnpm --filter @zero/server exec wrangler deploy --dry-run --env local
+          --outdir /tmp/zero-server-dry-run
+
+      - name: Bundle Worker without deploying (mail)
+        run: >-
+          pnpm --filter @zero/mail exec wrangler deploy --dry-run
+          --outdir /tmp/zero-mail-dry-run

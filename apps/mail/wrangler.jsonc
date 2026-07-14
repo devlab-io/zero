@@ -5,9 +5,11 @@
   "observability": {
     "enabled": true,
   },
+  "main": "workers/spa-fallback.ts",
   "assets": {
     "directory": "./build/client/",
-    "not_found_handling": "single-page-application",
+    "binding": "ASSETS",
+    "not_found_handling": "none",
     "html_handling": "force-trailing-slash",
   },
   "env": {
@@ -21,8 +23,8 @@
     "staging": {
       "name": "zero-staging",
       "vars": {
-        "VITE_PUBLIC_BACKEND_URL": "https://sapi.0.email",
-        "VITE_PUBLIC_APP_URL": "https://staging.0.email",
+        "VITE_PUBLIC_BACKEND_URL": "https://zero-server-staging.devlab-tahiti.workers.dev",
+        "VITE_PUBLIC_APP_URL": "https://zero-staging.devlab-tahiti.workers.dev",
       },
     },
     "production": {

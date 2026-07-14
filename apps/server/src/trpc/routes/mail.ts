@@ -1,3 +1,4 @@
+import { logger } from '../../lib/logger';
 import {
   forceReSync,
   getThreadsFromDB,
@@ -8,11 +9,10 @@ import {
   deleteAllSpam,
   reSyncThread,
 } from '../../lib/server-utils';
-import {
-  IGetThreadResponseSchema,
-  IGetThreadsResponseSchema,
-  type IGetThreadsResponse,
-} from '../../lib/driver/types';
+import { IGetThreadResponseSchema, type IGetThreadsResponse } from '../../lib/driver/types';
+// V4.1 list-projection (issue #30) : la liste sert la projection riche (superset de
+// IGetThreadsResponse). Élargit le .output() pour ne PAS stripper subject/sender/date/labels/unread.
+import { ThreadsResponseSchema } from '@zero/types';
 import { updateWritingStyleMatrix } from '../../services/writing-style-service';
 import type { DeleteAllSpamResponse, IEmailSendBatch } from '../../types';
 import { activeDriverProcedure, router, privateProcedure } from '../trpc';
@@ -81,23 +81,23 @@ export const mailRouter = router({
         labelIds: z.array(z.string()).optional().default([]),
       }),
     )
-    .output(IGetThreadsResponseSchema)
+    .output(ThreadsResponseSchema)
     .query(async ({ ctx, input }) => {
       const { folder, maxResults, cursor, q, labelIds } = input;
       const { activeConnection } = ctx;
       const executionCtx = getContext<HonoContext>().executionCtx;
       const { stub: agent } = await getZeroAgent(activeConnection.id, executionCtx);
 
-      console.debug('[listThreads] input:', { folder, maxResults, cursor, q, labelIds });
+      logger.debug('[listThreads] input:', { folder, maxResults, cursor, q, labelIds });
 
       if (folder === FOLDERS.DRAFT) {
-        console.debug('[listThreads] Listing drafts');
+        logger.debug('[listThreads] Listing drafts');
         const drafts = await agent.listDrafts({
           q,
           maxResults,
           pageToken: cursor,
         });
-        console.debug('[listThreads] Drafts result:', drafts);
+        logger.debug('[listThreads] Drafts result:', drafts);
         return drafts;
       }
 
@@ -130,7 +130,7 @@ export const mailRouter = router({
         const nowTs = Date.now();
         const filtered: ThreadItem[] = [];
 
-        console.debug('[listThreads] Filtering snoozed threads at', new Date(nowTs).toISOString());
+        logger.debug('[listThreads] Filtering snoozed threads at', new Date(nowTs).toISOString());
 
         await Promise.all(
           threadsResponse.threads.map(async (t: ThreadItem) => {
@@ -148,7 +148,7 @@ export const mailRouter = router({
                 return;
               }
 
-              console.debug('[UNSNOOZE_ON_ACCESS] Expired thread', t.id, {
+              logger.debug('[UNSNOOZE_ON_ACCESS] Expired thread', t.id, {
                 wakeAtIso,
                 now: new Date(nowTs).toISOString(),
               });
@@ -156,14 +156,14 @@ export const mailRouter = router({
               await modifyThreadLabelsInDB(activeConnection.id, t.id, ['INBOX'], ['SNOOZED']);
               await env.snoozed_emails.delete(keyName);
             } catch (error) {
-              console.error('[UNSNOOZE_ON_ACCESS] Failed for', t.id, error);
+              logger.error('[UNSNOOZE_ON_ACCESS] Failed for', t.id, error);
               filtered.push(t);
             }
           }),
         );
 
         threadsResponse.threads = filtered;
-        console.debug('[listThreads] Snoozed threads after filtering:', filtered);
+        logger.debug('[listThreads] Snoozed threads after filtering:', filtered);
       }
 
       if (threadsResponse.threads.length === 0 && folder === FOLDERS.INBOX && !q) {
@@ -181,16 +181,16 @@ export const mailRouter = router({
           getZeroAgent(activeConnection.id, executionCtx)
             .then((_agent) => {
               _agent.stub.forceReSync().catch((error) => {
-                console.error('[listThreads] Async resync failed:', error);
+                logger.error('[listThreads] Async resync failed:', error);
               });
             })
             .catch((error) => {
-              console.error('[listThreads] Failed to get agent for async resync:', error);
+              logger.error('[listThreads] Failed to get agent for async resync:', error);
             });
         }
       }
 
-      console.debug('[listThreads] Returning threadsResponse:', threadsResponse);
+      logger.debug('[listThreads] Returning threadsResponse:', threadsResponse);
       return threadsResponse;
     }),
   markAsRead: activeDriverProcedure
@@ -250,10 +250,6 @@ export const mailRouter = router({
       const { stub: agent } = await getZeroAgent(activeConnection.id, executionCtx);
       const { threadId, addLabels, removeLabels } = input;
 
-      console.log(`Server: updateThreadLabels called for thread ${threadId}`);
-      console.log(`Adding labels: ${addLabels.join(', ')}`);
-      console.log(`Removing labels: ${removeLabels.join(', ')}`);
-
       const result = await agent.normalizeIds(threadId);
       const { threadIds } = result;
 
@@ -266,7 +262,6 @@ export const mailRouter = router({
         return { success: true };
       }
 
-      console.log('Server: No label changes specified');
       return { success: false, error: 'No label changes specified' };
     }),
 
@@ -430,7 +425,7 @@ export const mailRouter = router({
         count: result.deletedCount,
       };
     } catch (error) {
-      console.error('Error deleting spam emails:', error);
+      logger.error('Error deleting spam emails:', error);
       return {
         success: false,
         message: 'Failed to delete spam emails',
@@ -488,11 +483,11 @@ export const mailRouter = router({
 
       const afterTask = async () => {
         try {
-          console.warn('Saving writing style matrix...');
+          logger.warn('Saving writing style matrix...');
           await updateWritingStyleMatrix(activeConnection.id, input.message);
-          console.warn('Saved writing style matrix.');
+          logger.warn('Saved writing style matrix.');
         } catch (error) {
-          console.error('Failed to save writing style matrix', error);
+          logger.error('Failed to save writing style matrix', error);
         }
       };
 
@@ -534,7 +529,7 @@ export const mailRouter = router({
             expirationTtl: 60 * 60 * 24,
           });
         } catch (error) {
-          console.error(`Failed to write pending status to KV for message ${messageId}`, error);
+          logger.error(`Failed to write pending status to KV for message ${messageId}`, error);
           return { success: false, error: 'Failed to schedule email status' } as const;
         }
 
@@ -550,7 +545,7 @@ export const mailRouter = router({
             expirationTtl: 60 * 60 * 24,
           });
         } catch (error) {
-          console.error(`Failed to write email payload to KV for message ${messageId}`, error);
+          logger.error(`Failed to write email payload to KV for message ${messageId}`, error);
           return { success: false, error: 'Failed to schedule email payload' } as const;
         }
 
@@ -566,7 +561,7 @@ export const mailRouter = router({
               { expirationTtl: Math.min(Math.ceil(rawDelaySeconds + 3600), 31556952) },
             );
           } catch (error) {
-            console.error(
+            logger.error(
               `Failed to write long-term schedule to KV for message ${messageId}`,
               error,
             );
@@ -582,7 +577,7 @@ export const mailRouter = router({
           try {
             await send_email_queue.send(queueBody, { delaySeconds });
           } catch (error) {
-            console.error(`Failed to enqueue email send for message ${messageId}`, error);
+            logger.error(`Failed to enqueue email send for message ${messageId}`, error);
             return { success: false, error: 'Failed to enqueue email send' } as const;
           }
         }
@@ -608,8 +603,6 @@ export const mailRouter = router({
       } else {
         await agent.stub.create(mailWithAttachments);
       }
-
-      console.log('[send] input.threadId:', input);
 
       if (input.threadId)
         ctx.c.executionCtx.waitUntil(reSyncThread(activeConnection.id, input.threadId));
@@ -642,7 +635,7 @@ export const mailRouter = router({
             } as const;
           }
         } catch (error) {
-          console.error('Failed to parse scheduled data for ownership verification:', error);
+          logger.error('Failed to parse scheduled data for ownership verification:', error);
           return { success: false, error: 'Invalid scheduled email data' } as const;
         }
       }
@@ -658,7 +651,7 @@ export const mailRouter = router({
             } as const;
           }
         } catch (error) {
-          console.error('Failed to parse payload data:', error);
+          logger.error('Failed to parse payload data:', error);
           return { success: false, error: 'Invalid payload data' } as const;
         }
       }
@@ -835,7 +828,7 @@ export const mailRouter = router({
           hasBlockedImages,
         };
       } catch (error) {
-        console.error('Error processing email content:', error);
+        logger.error('Error processing email content:', error);
         throw new TRPCError({
           code: 'INTERNAL_SERVER_ERROR',
           message: 'Failed to process email content',
@@ -864,15 +857,13 @@ export const mailRouter = router({
         const { activeConnection } = ctx;
         const { stub: agent } = await getZeroAgent(activeConnection.id);
 
-        console.log(`[VERIFY_EMAIL] Getting raw email for message ID: ${input.id}`);
         const rawEmail = await agent.getRawEmail(input.id);
 
         const { verify } = await import('../../lib/email-verification');
         const result = await verify(rawEmail);
-        console.log(`[VERIFY_EMAIL] Verification result for message ID ${input.id}:`, result);
         return result;
       } catch (error) {
-        console.error('Email verification error:', error);
+        logger.error('Email verification error:', error);
         return { isVerified: false };
       }
     }),

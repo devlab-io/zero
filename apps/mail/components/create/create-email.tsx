@@ -1,17 +1,19 @@
+import { log } from '@/lib/log';
 import { useUndoSend, type EmailData, deserializeFiles } from '@/hooks/use-undo-send';
+import { m } from '@/paraglide/messages';
 import { useActiveConnection } from '@/hooks/use-connections';
 import { Dialog, DialogClose } from '@/components/ui/dialog';
 import { useEmailAliases } from '@/hooks/use-email-aliases';
 import { cleanEmailAddresses } from '@/lib/email-utils';
+import { loadGitHubEmojis } from '@/lib/emoji-data';
 
 import { useTRPC } from '@/providers/query-provider';
 import { useMutation } from '@tanstack/react-query';
 import { useSettings } from '@/hooks/use-settings';
-import { EmailComposer } from './email-composer';
 import { useSession } from '@/lib/auth-client';
 import { serializeFiles } from '@/lib/schemas';
 import { useDraft } from '@/hooks/use-drafts';
-import { useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 
 import type { Attachment } from '@/types';
 import { useQueryState } from 'nuqs';
@@ -19,6 +21,16 @@ import { X } from '../icons/icons';
 import posthog from 'posthog-js';
 import { toast } from 'sonner';
 import './prosemirror.css';
+
+// Loaded lazily: the editor (tiptap/prosemirror) only downloads when the compose
+// dialog/page actually renders it, keeping it out of the initial mail chunk. The emoji
+// dataset (static JSON asset) is awaited too so the Emoji extension always initializes
+// with the full list (its emoticon input rules are built at editor creation).
+const EmailComposer = lazy(() =>
+  Promise.all([import('./email-composer'), loadGitHubEmojis()]).then(([mod]) => ({
+    default: mod.EmailComposer,
+  })),
+);
 
 // Define the draft type to include CC and BCC fields
 type DraftType = {
@@ -68,9 +80,9 @@ export function CreateEmail({
   // If there was an error loading the draft, set the failed state
   useEffect(() => {
     if (draftError) {
-      console.error('Error loading draft:', draftError);
+      log.error('Error loading draft:', draftError);
       setIsDraftFailed(true);
-      toast.error('Failed to load draft');
+      toast.error(m['pages.createEmail.failedToLoadDraft']());
     }
   }, [draftError]);
 
@@ -168,7 +180,7 @@ export function CreateEmail({
       
       return parsedData;
     } catch (error) {
-      console.error('Failed to parse undo email data:', error);
+      log.error('Failed to parse undo email data:', error);
       return null;
     }
   }, [isComposeOpen]);
@@ -193,7 +205,7 @@ export function CreateEmail({
       }
       return new File([byteArray], filename, { type: mimeType });
     } catch (error) {
-      console.error('Failed to convert base64 to file', error);
+      log.error('Failed to convert base64 to file', error);
       return null;
     }
   };
@@ -225,6 +237,13 @@ export function CreateEmail({
               </div>
             </div>
           ) : (
+            <Suspense
+              fallback={
+                <div className="flex h-[600px] w-[750px] items-center justify-center rounded-2xl border">
+                  <div className="mx-auto h-6 w-6 animate-spin rounded-full border-2 border-gray-300 border-t-blue-600"></div>
+                </div>
+              }
+            >
             <EmailComposer
               key={typedDraft?.id || undoEmailData?.to?.join(',') || 'composer'}
               className="mb-12 rounded-2xl border"
@@ -265,6 +284,7 @@ export function CreateEmail({
               autofocus={false}
               settingsLoading={settingsLoading}
             />
+            </Suspense>
           )}
         </div>
       </Dialog>

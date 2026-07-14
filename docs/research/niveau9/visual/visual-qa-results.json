@@ -1,0 +1,102 @@
+[
+  {
+    "name": "landing-desktop-1440x900",
+    "url": "http://localhost:3000/",
+    "viewport": "1440x900",
+    "reducedMotion": false,
+    "httpStatus": 200,
+    "scrollW": 1440,
+    "clientW": 1440,
+    "hasHorizontalOverflow": false,
+    "consoleErrors": [
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    ],
+    "file": "docs/research/niveau9/visual/landing-desktop-1440x900.png"
+  },
+  {
+    "name": "landing-mobile-390x844",
+    "url": "http://localhost:3000/",
+    "viewport": "390x844",
+    "reducedMotion": false,
+    "httpStatus": 200,
+    "scrollW": 390,
+    "clientW": 390,
+    "hasHorizontalOverflow": false,
+    "consoleErrors": [
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    ],
+    "file": "docs/research/niveau9/visual/landing-mobile-390x844.png"
+  },
+  {
+    "name": "landing-desktop-reduced-motion",
+    "url": "http://localhost:3000/",
+    "viewport": "1440x900",
+    "reducedMotion": true,
+    "httpStatus": 200,
+    "scrollW": 1440,
+    "clientW": 1440,
+    "hasHorizontalOverflow": false,
+    "consoleErrors": [
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    ],
+    "file": "docs/research/niveau9/visual/landing-desktop-reduced-motion.png"
+  },
+  {
+    "name": "deeplink-shell-inbox-desktop",
+    "url": "http://localhost:3000/mail/inbox",
+    "viewport": "1440x900",
+    "reducedMotion": false,
+    "httpStatus": 200,
+    "scrollW": 1440,
+    "clientW": 1440,
+    "hasHorizontalOverflow": false,
+    "consoleErrors": [
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "Failed to get session: [object Object] {data: null, error: Object}",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    ],
+    "file": "docs/research/niveau9/visual/deeplink-shell-inbox-desktop.png"
+  },
+  {
+    "name": "deeplink-shell-inbox-mobile",
+    "url": "http://localhost:3000/mail/inbox",
+    "viewport": "390x844",
+    "reducedMotion": false,
+    "httpStatus": 200,
+    "scrollW": 390,
+    "clientW": 390,
+    "hasHorizontalOverflow": false,
+    "consoleErrors": [
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "Failed to get session: [object Object] {data: null, error: Object}",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    ],
+    "file": "docs/research/niveau9/visual/deeplink-shell-inbox-mobile.png"
+  },
+  {
+    "name": "login-desktop",
+    "url": "http://localhost:3000/login",
+    "viewport": "1440x900",
+    "reducedMotion": false,
+    "httpStatus": 200,
+    "scrollW": 1440,
+    "clientW": 1440,
+    "hasHorizontalOverflow": false,
+    "consoleErrors": [
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "SyntaxError: Failed to execute 'json' on 'Response': Unexpected end of JSON input\n    at Ge (http://localhost:3000/assets/page-BuEhoCU9.js:1:12178)\n    at async http://localhost:3000/assets/chunk-KS7C4IRE-DAla6bF3.js:14:5407\n    at async http://localhost:3000/assets/chunk-KS7C4IRE-DAla6bF3.js:11:10335\n    at async Promise.all (index 0)\n    at async Ko (http://localhost:3000/assets/chunk-KS7C4IRE-DAla6bF3.js:11:10630)\n    at async Promise.all (index 1)\n    at async xl (http://localhost:3000/assets/chunk-KS7C4IRE-DAla6bF3.js:14:5311)\n    at async sn (http://localhost:3000/assets/chunk-KS7C4IRE-DAla6bF3.js:11:7663)\n    at async Jo (http://localhost:3000/assets/chunk-KS7C4IRE-DAla6bF3.js:11:7471)\n    at async Go (http://localhost:3000/assets/chunk-KS7C4IRE-DAla6bF3.js:11:9410)",
+      "{message: Oops!, details: An unexpected error occurred., stack: undefined}",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    ],
+    "file": "docs/research/niveau9/visual/login-desktop.png"
+  }
+]

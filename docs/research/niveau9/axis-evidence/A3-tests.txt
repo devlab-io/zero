@@ -1,0 +1,17 @@
+# A3 — Tests & vérifiabilité — évidence brute
+# commit: 1c82b196cbc87d629b18024cca3f4ac6b7372af2
+# commande gelée : pnpm test (turbo run test) à la racine — exit 0
+
+## Résultat (extrait brut de tests.log) :
+@zero/server:test:  Test Files  15 passed (15)
+@zero/server:test:       Tests  188 passed (188)
+@zero/server:test:    Duration  2.05s
+@zero/mail:test:  Test Files  23 passed (23)
+@zero/mail:test:       Tests  139 passed (139)
+@zero/mail:test:    Duration  3.40s
+=== TEST EXIT: 0 ===
+
+## TOTAL monorepo : 38 fichiers de tests, 327 tests passants (server 188 + mail 139), 0 échec.
+## Conforme référence ruling « tests 327+ ». Tâche `test` bloquante présente en CI (ci.yml:55-56 `pnpm test`).
+## Note : les 3 fichiers de tests hérités (queue-view-model, draft-outbox/state-machine, mail-sanitize)
+## sont désormais câblés à vitest (vs baseline : aucun runner). Coverage cibles ≥50% (cf. tests-core-coverage-01).

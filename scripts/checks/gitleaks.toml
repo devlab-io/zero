@@ -1,0 +1,43 @@
+# Gitleaks configuration for the CI secret-scan gate (niveau9 ci-and-deploy-gates).
+#
+# WHY a CLI/Docker config instead of gitleaks/gitleaks-action:
+# gitleaks-action@v2 requires a GITLEAKS_LICENSE secret for *organization*-owned
+# repositories (github.com/devlab-io/zero is org-owned). The acceptance check
+# forbids any new required secret ("aucun secret nouveau requis"). We therefore
+# run the pinned, MIT-licensed gitleaks CLI/Docker image directly with this config.
+#
+# Scope: filesystem scan of the working tree (`gitleaks dir`), which honours
+# .gitignore (node_modules et al. are skipped). Full git-history scanning +
+# triage of inherited fork findings is the security issue's scope (rubric A7),
+# not this CI gate.
+
+title = "zero CI secret scan"
+
+[extend]
+# Start from gitleaks' built-in ruleset, then narrow with the allowlist below.
+useDefault = true
+
+[[allowlists]]
+description = """
+i18n.lock is the generated inlang translation lock file. Its localized UI
+strings (twoFactorAuthDescription, pressKeys, releaseKeys, early_access_required)
+trip the generic-api-key rule as false positives. It contains no credentials.
+Verified 2026-07-12: all 8 findings on the tree were generic-api-key hits inside
+this single generated file.
+"""
+paths = [
+  '''(^|/)i18n\.lock$''',
+]
+
+[[allowlists]]
+description = """
+Evidence checkrun headers (docs/jobs/**/*-checkrun.md) print a git commit SHA as
+`freeze_sha: <40-hex>` right after a check filename ending in "…api.md"; the "api"
+keyword adjacent to the 40-hex string trips generic-api-key. A git SHA is never a
+secret. Scoped by the literal `freeze_sha:` label + exactly 40 lowercase-hex chars
+(regexTarget = line): pérenne for every checkrun, and cannot match a real credential.
+"""
+regexTarget = "line"
+regexes = [
+  '''freeze_sha: [0-9a-f]{40}''',
+]

@@ -13,11 +13,11 @@ export const parseHeaders = (token: string) => {
  */
 export const c = {
   env,
-  json: (data: any, status: number) => ({
+  json: (data: unknown, status: number) => ({
     data,
     status,
   }),
-  text: (data: any, status: number) => ({
+  text: (data: unknown, status: number) => ({
     data,
     status,
   }),

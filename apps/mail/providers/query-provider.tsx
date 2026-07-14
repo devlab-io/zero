@@ -1,3 +1,4 @@
+import { log } from '@/lib/log';
 import {
   PersistQueryClientProvider,
   type PersistedClient,
@@ -9,6 +10,7 @@ import { createTRPCClient, httpBatchLink } from '@trpc/client';
 import { useMemo, type PropsWithChildren } from 'react';
 import type { AppRouter } from '@zero/server/trpc';
 import { CACHE_BURST_KEY } from '@/lib/constants';
+import { readRetryDelay, shouldRetryRead } from '@/lib/query-retry';
 import { signOut } from '@/lib/auth-client';
 import { get, set, del } from 'idb-keyval';
 import superjson from 'superjson';
@@ -32,7 +34,7 @@ export const makeQueryClient = (connectionId: string | null) =>
     queryCache: new QueryCache({
       onError: (err, { meta }) => {
         if (meta && meta.noGlobalError === true) return;
-        if (meta && typeof meta.customError === 'string') console.error(meta.customError);
+        if (meta && typeof meta.customError === 'string') log.error(meta.customError);
         else if (
           err.message === 'Required scopes missing' ||
           err.message.includes('Invalid connection')
@@ -45,18 +47,23 @@ export const makeQueryClient = (connectionId: string | null) =>
               },
             },
           });
-        } else console.error(err.message || 'Something went wrong');
+        } else log.error(err.message || 'Something went wrong');
       },
     }),
     defaultOptions: {
       queries: {
-        retry: false,
+        // Reads (idempotent) retry at most twice with capped exponential jitter
+        // (issue #34, check point 4). Mutations are non-idempotent and keep the
+        // react-query default of zero retries — see `mutations` below.
+        retry: shouldRetryRead,
+        retryDelay: readRetryDelay,
         refetchOnWindowFocus: false,
         queryKeyHashFn: (queryKey) => hashKey([{ connectionId }, ...queryKey]),
         gcTime: 1000 * 60 * 60 * 24, // 24 hours,
       },
       mutations: {
-        onError: (err) => console.error(err.message),
+        // No `retry` here on purpose: non-idempotent mutations must not auto-retry.
+        onError: (err) => log.error(err.message),
       },
     },
   });

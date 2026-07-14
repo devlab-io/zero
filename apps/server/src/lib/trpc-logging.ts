@@ -1,3 +1,4 @@
+import { logger } from './logger';
 import type { TRPCCallLog } from '../types/logging';
 import { LoggingService } from './logging-service';
 import { getContext } from 'hono/context-storage';
@@ -32,6 +33,8 @@ export const createLoggingMiddleware = () => {
     return async (opts: {
         path: string;
         type: 'query' | 'mutation' | 'subscription';
+        // tRPC's MiddlewareBuilder passes concrete generics here; these stay loose to
+        // remain assignable to that contract (the internal sanitizer below is typed).
         next: () => Promise<any>;
         input: any;
         ctx: any;
@@ -51,10 +54,12 @@ export const createLoggingMiddleware = () => {
                 loggingService = new LoggingService(c.env);
                 loggingService.initializeSession(sessionId, userId);
             } catch (error) {
-                console.error('Failed to initialize logging service:', error);
+                logger.error('Failed to initialize logging service:', error);
             }
         }
 
+        // Holds the tRPC `next()` result; kept loose so the middleware return type stays
+        // assignable to tRPC's MiddlewareBuilder contract.
         let output: any;
         let error: string | undefined;
 
@@ -83,58 +88,58 @@ export const createLoggingMiddleware = () => {
                 });
             }
 
-            // Sanitize output to remove non-serializable objects
-            const sanitizeOutput = (obj: any): any => {
-                if (obj === null || obj === undefined) return obj;
-                if (typeof obj !== 'object') return obj;
-                if (Array.isArray(obj)) return obj.map(sanitizeOutput);
-
-                const sanitized: any = {};
-                for (const [key, value] of Object.entries(obj)) {
-                    // Skip known non-serializable fields
-                    if (key === 'ctx' && value && typeof value === 'object') {
-                        continue;
-                    }
-
-                    try {
-                        structuredClone(value);
-                        sanitized[key] = sanitizeOutput(value);
-                    } catch (err) {
-                        // If it can't be serialized, replace with a description
-                        console.log('[TRACE DEBUG] Non-serializable value:', err);
-                        sanitized[key] = `[Non-serializable: ${value?.constructor?.name || typeof value}]`;
-                    }
-                }
-                return sanitized;
-            };
-
-            // Log successful call
-            const callData: TRPCCallLog = {
-                id: crypto.randomUUID(),
-                timestamp: startTime,
-                userId: userId || 'anonymous',
-                sessionId,
-                procedure: opts.path,
-                input: opts.input,
-                output: sanitizeOutput(output),
-                duration: Date.now() - startTime,
-                metadata: {
-                    method: opts.type,
-                    userAgent: c.req.header('User-Agent'),
-                    ip: hashIpAddress(c.req.header('CF-Connecting-IP') || c.req.header('X-Forwarded-For')),
-                    referer: c.req.header('Referer'),
-                    origin: c.req.header('Origin'),
-                    acceptLanguage: c.req.header('Accept-Language'),
-                    acceptEncoding: c.req.header('Accept-Encoding'),
-                    requestId: c.req.header('X-Request-Id') || crypto.randomUUID(),
-                    timestamp: new Date().toISOString(),
-                    startTime,
-                    endTime: Date.now(),
-                },
-            };
-
             // Log using the new logging service
             if (loggingService) {
+                // Sanitize output to remove non-serializable objects — deep clone,
+                // only worth paying when a logging service is actually exporting.
+                const sanitizeOutput = (obj: unknown): unknown => {
+                    if (obj === null || obj === undefined) return obj;
+                    if (typeof obj !== 'object') return obj;
+                    if (Array.isArray(obj)) return obj.map(sanitizeOutput);
+
+                    const sanitized: Record<string, unknown> = {};
+                    for (const [key, value] of Object.entries(obj)) {
+                        // Skip known non-serializable fields
+                        if (key === 'ctx' && value && typeof value === 'object') {
+                            continue;
+                        }
+
+                        try {
+                            structuredClone(value);
+                            sanitized[key] = sanitizeOutput(value);
+                        } catch {
+                            // If it can't be serialized, replace with a description
+                            sanitized[key] = `[Non-serializable: ${value?.constructor?.name || typeof value}]`;
+                        }
+                    }
+                    return sanitized;
+                };
+
+                // Log successful call
+                const callData: TRPCCallLog = {
+                    id: crypto.randomUUID(),
+                    timestamp: startTime,
+                    userId: userId || 'anonymous',
+                    sessionId,
+                    procedure: opts.path,
+                    input: opts.input,
+                    output: sanitizeOutput(output),
+                    duration: Date.now() - startTime,
+                    metadata: {
+                        method: opts.type,
+                        userAgent: c.req.header('User-Agent'),
+                        ip: hashIpAddress(c.req.header('CF-Connecting-IP') || c.req.header('X-Forwarded-For')),
+                        referer: c.req.header('Referer'),
+                        origin: c.req.header('Origin'),
+                        acceptLanguage: c.req.header('Accept-Language'),
+                        acceptEncoding: c.req.header('Accept-Encoding'),
+                        requestId: c.req.header('X-Request-Id') || crypto.randomUUID(),
+                        timestamp: new Date().toISOString(),
+                        startTime,
+                        endTime: Date.now(),
+                    },
+                };
+
                 const { getRequestTrace } = await import('./trace-context');
 
                 // Get the complete trace for this request
@@ -158,7 +163,7 @@ export const createLoggingMiddleware = () => {
 
                 // Log using the new service which will immediately log to Datadog
                 loggingService.logCall(callData).catch((err) => {
-                    console.error('Failed to log TRPC call:', err);
+                    logger.error('Failed to log TRPC call:', err);
                 });
 
                 // Complete the trace after logging
@@ -179,33 +184,33 @@ export const createLoggingMiddleware = () => {
                 }, error);
             }
 
-            // Log failed call
-            const callData: TRPCCallLog = {
-                id: crypto.randomUUID(),
-                timestamp: startTime,
-                userId: userId || 'anonymous',
-                sessionId,
-                procedure: opts.path,
-                input: opts.input,
-                error,
-                duration: Date.now() - startTime,
-                metadata: {
-                    method: opts.type,
-                    userAgent: c.req.header('User-Agent'),
-                    ip: hashIpAddress(c.req.header('CF-Connecting-IP') || c.req.header('X-Forwarded-For')),
-                    referer: c.req.header('Referer'),
-                    origin: c.req.header('Origin'),
-                    acceptLanguage: c.req.header('Accept-Language'),
-                    acceptEncoding: c.req.header('Accept-Encoding'),
-                    requestId: c.req.header('X-Request-Id') || crypto.randomUUID(),
-                    timestamp: new Date().toISOString(),
-                    startTime,
-                    endTime: Date.now(),
-                },
-            };
-
             // Log error using the new logging service
             if (loggingService) {
+                // Log failed call
+                const callData: TRPCCallLog = {
+                    id: crypto.randomUUID(),
+                    timestamp: startTime,
+                    userId: userId || 'anonymous',
+                    sessionId,
+                    procedure: opts.path,
+                    input: opts.input,
+                    error,
+                    duration: Date.now() - startTime,
+                    metadata: {
+                        method: opts.type,
+                        userAgent: c.req.header('User-Agent'),
+                        ip: hashIpAddress(c.req.header('CF-Connecting-IP') || c.req.header('X-Forwarded-For')),
+                        referer: c.req.header('Referer'),
+                        origin: c.req.header('Origin'),
+                        acceptLanguage: c.req.header('Accept-Language'),
+                        acceptEncoding: c.req.header('Accept-Encoding'),
+                        requestId: c.req.header('X-Request-Id') || crypto.randomUUID(),
+                        timestamp: new Date().toISOString(),
+                        startTime,
+                        endTime: Date.now(),
+                    },
+                };
+
                 const { getRequestTrace } = await import('./trace-context');
 
                 // Get the complete trace for this request
@@ -229,7 +234,7 @@ export const createLoggingMiddleware = () => {
 
                 // Log using the new service which will immediately log to Datadog
                 loggingService.logCall(callData).catch((logErr) => {
-                    console.error('Failed to log TRPC error:', logErr);
+                    logger.error('Failed to log TRPC error:', logErr);
                 });
 
                 // Complete the trace after logging error

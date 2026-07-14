@@ -53,10 +53,14 @@ apps/mail/scripts.ts
 worker-configuration.d.ts
 
 .dev.vars.*
+# ...but the committed template (no secrets) is opt-in, per the note above.
+!.dev.vars.example
 .react-router
 
 # devcontainer
 .pnpm-store
 tsx-0/
 
-tools.json.architect/
+tools.json
+.architect/
+.gstack/

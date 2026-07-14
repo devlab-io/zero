@@ -1,0 +1,85 @@
+# A1 — Frontières & modularité — évidence brute
+# commit: 1c82b196cbc87d629b18024cca3f4ac6b7372af2
+# date de mesure: 2026-07-13T16:09:43-10:00
+
+## Commande gelée LOC (top 30):
+$ find apps/mail/app apps/mail/components apps/mail/lib apps/mail/hooks apps/mail/store apps/server/src \( -name "*.ts" -o -name "*.tsx" \) ! -name "*.d.ts" ! -name "*.test.*" -exec wc -l {} + | sort -rn | head -30
+
+   68548 total
+    1291 apps/server/src/lib/driver/microsoft.ts
+     873 apps/server/src/pipelines.ts
+     870 apps/server/src/trpc/routes/mail.ts
+     850 apps/mail/components/mail/mail.tsx
+     787 apps/mail/components/create/email-composer.tsx
+     774 apps/mail/components/mail/mail-display.tsx
+     768 apps/server/src/thread-workflow-utils/workflow-functions.ts
+     756 apps/mail/app/(full-width)/contributors.tsx
+     663 apps/mail/components/ui/nav-user.tsx
+     631 apps/mail/lib/utils.ts
+     630 apps/mail/components/queue/queue-review.tsx
+     623 apps/server/src/lib/server-utils.ts
+     622 apps/mail/components/context/thread-context.tsx
+     616 apps/mail/components/ui/sidebar.tsx
+     586 apps/server/src/lib/prompts.ts
+     585 apps/mail/hooks/use-optimistic-actions.ts
+     574 apps/mail/components/context/command-palette-views.tsx
+     572 apps/mail/components/context/command-palette-dialog.tsx
+     571 apps/mail/components/mail/thread-display.tsx
+     551 apps/server/src/services/writing-style-service.ts
+     537 apps/server/src/db/durable-objects.ts
+     514 apps/server/src/routes/agent/mcp-tools.ts
+     506 apps/server/src/routes/agent/db/index.ts
+     500 apps/server/src/lib/email-verification.ts
+     497 apps/server/src/routes/agent/zero-driver.ts
+     487 apps/mail/components/create/ai-chat.tsx
+     479 apps/server/src/lib/react-emails/email-sequences.tsx
+     458 apps/mail/components/mail/mail-list-thread.tsx
+     450 apps/server/src/routes/agent/projection.ts
+
+## Fichiers >1200 LOC (palier 7):
+    1291 apps/server/src/lib/driver/microsoft.ts
+
+## Fichiers >800 LOC (palier 9):
+    1291 apps/server/src/lib/driver/microsoft.ts
+     873 apps/server/src/pipelines.ts
+     870 apps/server/src/trpc/routes/mail.ts
+     850 apps/mail/components/mail/mail.tsx
+
+## Commande gelée frontière (imports profonds ../server/src depuis apps/mail):
+$ grep -rnE "(\.\./)+server/src" apps/mail --include="*.ts" --include="*.tsx"
+[exit grep frontière: 1  (1 = aucun résultat = PASS)]
+
+## Palier 9 (compléments A1) :
+### règle ESLint no-restricted-imports active :
+packages/eslint-config/config.ts:27:      'no-restricted-imports': [
+### package @zero/types présent + dans deps des 2 apps :
+packages/types
+apps/server/package.json:55:    "@zero/types": "workspace:*",
+apps/mail/package.json:65:    "@zero/types": "workspace:*",
+### imports réels @zero/types :
+apps/mail/components/ui/prompts-dialog.tsx
+apps/mail/components/ui/ai-sidebar.tsx
+apps/mail/components/mail/mail-list-draft.tsx
+apps/mail/components/mail/mail-list-thread-projection.ts
+apps/mail/hooks/use-threads.ts
+apps/mail/lib/trpc-boundary.test-d.ts
+apps/server/src/types.ts
+apps/server/src/trpc/routes/mail.ts
+apps/server/src/lib/brain.fallback.prompts.ts
+apps/server/src/lib/driver/types.ts
+### inventaire de routes committé :
+.rw-r--r--@ 5,9k thomasverdenne 13 juil. 16:10 -- docs/adr/route-inventory-after.json
+.rw-r--r--@ 6,1k thomasverdenne 13 juil. 16:10 -- docs/adr/route-inventory-before.json
+.rw-r--r--@  17k thomasverdenne 13 juil. 16:10 -- scripts/checks/route-inventory.mjs
+### components/ organisé par domaine avec index :
+ai-toggle-button.tsx
+connection
+context
+cookies
+create
+home
+icons
+keyboard-layout-indicator.tsx
+labels
+magicui
+---index.ts?---

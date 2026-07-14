@@ -1,0 +1,62 @@
+# ⚠️ A10 — ÉTAT AU GEL 1c82b196, AVANT #39 — PHOTO D'ÉTAT, PAS UN VERDICT D'AXE
+#
+# RULING FAN-IN A10 (superviseur, factory 8c643c12) : ce gel (1c82b196) PRÉCÈDE la création
+# d'ARCHITECTURE.md / FORK.md / LICENSE-NOTES.md par #39 (exécutée EN PARALLÈLE). L'absence
+# constatée ci-dessous est ATTENDUE et correcte pour CE commit, mais N'EST PAS RECEVABLE comme
+# verdict d'axe A10. Le juge froid final RE-EXÉCUTERA A10 sur le HEAD FUSIONNÉ post-#39+#40
+# (rerun obligatoire, consigné). Ne jamais présenter cette photo comme la note d'axe finale.
+# ---------------------------------------------------------------------------------------------
+
+# ÉTIQUETTE ORCHESTRATEUR (ruling 8c643c12) : évidence A10 **pre-#39** —
+# état au gel 1c82b196, AVANT la création d'ARCHITECTURE.md/FORK.md/LICENSE-NOTES.md
+# par #39 (parallèle). NON RECEVABLE comme verdict d'axe : photo d'état uniquement.
+# Le juge froid final RÉ-EXÉCUTE obligatoirement A10/docs-governance sur le HEAD
+# fusionné post-#39+#40.
+#
+# A10 — Docs, gouvernance & conformité — évidence brute
+# commit: 1c82b196cbc87d629b18024cca3f4ac6b7372af2
+
+## Fichiers de gouvernance racine:
+"ARCHITECTURE.md": No such file or directory (os error 2)
+"LICENSE-NOTES.md": No such file or directory (os error 2)
+"FORK.md": No such file or directory (os error 2)
+.rw-r--r--@ 10k thomasverdenne 13 juil. 16:10 -- README.md
+
+## ADRs (docs/adr ou docs/adrs):
+docs/adr
+docs/adr/0003-tracing-strategy.md
+docs/adr/0004-shared-types-package.md
+docs/adr/0006-trpc-type-boundary.md
+docs/adr/route-inventory-after.json
+docs/adr/route-inventory-before.json
+docs/adr/0005-server-sentry.md
+docs/adr/0004-structured-logger.md
+docs/adr/0001-second-drizzle-config-durable-objects-sqlite.md
+docs/adr/0002-routing-hono-vs-trpc.md
+docs/jobs/niveau9/docs-architecture-adr-01-rulings.md
+---
+"docs/adrs/": No such file or directory (os error 2)
+.rw-r--r--@ 5,2k thomasverdenne 13 juil. 16:10 -- 0001-second-drizzle-config-durable-objects-sqlite.md
+.rw-r--r--@ 7,4k thomasverdenne 13 juil. 16:10 -- 0002-routing-hono-vs-trpc.md
+.rw-r--r--@ 2,4k thomasverdenne 13 juil. 16:10 -- 0003-tracing-strategy.md
+.rw-r--r--@ 9,1k thomasverdenne 13 juil. 16:10 -- 0004-shared-types-package.md
+.rw-r--r--@ 2,2k thomasverdenne 13 juil. 16:10 -- 0004-structured-logger.md
+.rw-r--r--@ 3,6k thomasverdenne 13 juil. 16:10 -- 0005-server-sentry.md
+.rw-r--r--@ 9,4k thomasverdenne 13 juil. 16:10 -- 0006-trpc-type-boundary.md
+.rw-r--r--@ 5,9k thomasverdenne 13 juil. 16:10 -- route-inventory-after.json
+.rw-r--r--@ 6,1k thomasverdenne 13 juil. 16:10 -- route-inventory-before.json
+
+## README Tech Stack (première mention stack):
+33:- **Frontend**: Next.js, React, TypeScript, TailwindCSS, Shadcn UI
+34:- **Backend**: Node.js, Drizzle ORM
+35:- **Database**: PostgreSQL
+55:- [Node.js](https://nodejs.org/en/download) (v18 or higher)
+216:Zero uses PostgreSQL for storing data. Here's how to set it up:
+220:   Run this command to start a local PostgreSQL instance:
+229:   - Username: `postgres`
+230:   - Password: `postgres`
+240:   DATABASE_URL="postgresql://postgres:postgres@localhost:5432/zerodotemail"
+272:We're now storing the user's emails in their Durable Object & an R2 bucket. This allow us to speed things up, a lot.
+274:`DROP_AGENT_TABLES`: should the durable object drop the threads table before starting a sync
+297:  <a href="https://orm.drizzle.team" style="text-decoration: none;">
+298:    <img src="public/drizzle-orm.png" alt="Drizzle ORM" width="96"/>

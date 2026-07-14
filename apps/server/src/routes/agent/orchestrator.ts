@@ -1,3 +1,4 @@
+import { logger } from '../../lib/logger';
 import { streamText, tool, type DataStreamWriter, type ToolSet } from 'ai';
 import { perplexity } from '@ai-sdk/perplexity';
 
@@ -29,6 +30,8 @@ export class ToolOrchestrator {
   /**
    * Creates a streaming agent wrapper for tools that should stream responses directly
    */
+  // originalTool is a passthrough AI SDK tool; typing it as ToolSet[string] over-narrows
+  // the wrapper's return union, so keep it loose at this boundary.
   createStreamingAgent(toolName: string, originalTool: any) {
     if (!this.isStreamingTool(toolName)) {
       return originalTool;
@@ -60,7 +63,7 @@ export class ToolOrchestrator {
             // Return a placeholder result since the actual streaming happens above
             return { type: 'streaming_response', toolName, toolCallId };
           } catch (error) {
-            console.error('Error searching the web:', error);
+            logger.error('Error searching the web:', error);
             throw new Error('Failed to search the web');
           }
         },

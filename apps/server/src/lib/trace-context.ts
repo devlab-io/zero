@@ -1,3 +1,4 @@
+import { logger } from './logger';
 export interface TraceSpan {
     id: string;
     name: string;
@@ -72,7 +73,7 @@ class TraceContextClass {
 
         // Log cleanup statistics in development
         if (tracesToDelete.length > 0 || this.traces.size > this.MAX_TRACES * 0.8) {
-            console.debug(`Trace cleanup: removed ${tracesToDelete.length} stale traces, ${this.traces.size} traces remaining`);
+            logger.debug(`Trace cleanup: removed ${tracesToDelete.length} stale traces, ${this.traces.size} traces remaining`);
         }
     }
 
@@ -186,8 +187,19 @@ class TraceContextClass {
 
 export const TraceContext = new TraceContextClass();
 
+// Minimal structural view of the request context these helpers read defensively
+// (Hono `Context` plus a couple of non-standard header accessors used as fallbacks).
+type TraceableContext = {
+    var?: { traceId?: string };
+    get?: (key: string) => string | undefined;
+    req?: {
+        header?: (name: string) => string | undefined;
+        headers?: { get?: (name: string) => string | null };
+    };
+};
+
 // Helper function to safely get trace from request context using context variables
-export function getRequestTrace(c: any): RequestTrace | undefined {
+export function getRequestTrace(c: TraceableContext): RequestTrace | undefined {
     // Try to get trace ID from context variables (set in main.ts)
     const traceId = c?.var?.traceId || c?.get?.('traceId');
 
@@ -209,12 +221,12 @@ export function getRequestTrace(c: any): RequestTrace | undefined {
 }
 
 // Helper function to get trace ID from context variables or headers
-export function getTraceId(c: any): string | undefined {
+export function getTraceId(c: TraceableContext): string | undefined {
     return c?.var?.traceId || c?.get?.('traceId') || c.req?.header?.('X-Trace-ID') || c.req?.header?.('x-trace-id');
 }
 
 // Helper function to safely add span to current request
-export function addRequestSpan(c: any, name: string, metadata?: Record<string, any>, tags?: Record<string, string>): TraceSpan | undefined {
+export function addRequestSpan(c: TraceableContext, name: string, metadata?: Record<string, unknown>, tags?: Record<string, string>): TraceSpan | undefined {
     const traceId = getTraceId(c);
     if (!traceId) return undefined;
 
@@ -222,7 +234,7 @@ export function addRequestSpan(c: any, name: string, metadata?: Record<string, a
 }
 
 // Helper function to complete span in current request
-export function completeRequestSpan(c: any, spanId: string, metadata?: Record<string, any>, error?: string): void {
+export function completeRequestSpan(c: TraceableContext, spanId: string, metadata?: Record<string, unknown>, error?: string): void {
     const traceId = getTraceId(c);
     if (!traceId) return;
 

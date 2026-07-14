@@ -338,45 +338,8 @@
       "migrations": [
         {
           "tag": "v1",
-          "new_classes": ["DurableMailbox"],
+          "new_sqlite_classes": ["ZeroAgent", "ZeroMCP", "ZeroDB", "ZeroDriver", "ThinkingMCP", "WorkflowRunner", "ThreadSyncWorker", "ShardRegistry"],
         },
-        {
-          "tag": "v2",
-          "new_sqlite_classes": ["ZeroAgent", "ZeroMCP"],
-        },
-        {
-          "tag": "v3",
-          "new_classes": ["ZeroDB"],
-        },
-        {
-          "tag": "v4",
-          "new_sqlite_classes": ["ZeroAgent"],
-        },
-        {
-          "tag": "v5",
-          "deleted_classes": ["DurableMailbox"],
-        },
-        {
-          "tag": "v6",
-          "new_sqlite_classes": ["ZeroDriver"],
-        },
-        {
-          "tag": "v7",
-          "new_sqlite_classes": ["ThinkingMCP"],
-        },
-        {
-          "tag": "v8",
-          "new_sqlite_classes": ["WorkflowRunner"],
-        },
-        {
-          "tag": "v9",
-          "new_sqlite_classes": ["ThreadSyncWorker"],
-        },
-        {
-          "tag": "v10",
-          "new_sqlite_classes": ["ShardRegistry"],
-        },
-
       ],
       "observability": {
         "enabled": true,
@@ -384,18 +347,19 @@
       "hyperdrive": [
         {
           "binding": "HYPERDRIVE",
-          "id": "57834ddb6716440496c8836f6d99bc9a",
+          "id": "bc89379070a04303830ea394e786477b",
           "localConnectionString": "postgresql://postgres:postgres@localhost:5433/zerodotemail",
         },
       ],
       "vars": {
         "NODE_ENV": "development",
-        "COOKIE_DOMAIN": "0.email",
-        "VITE_PUBLIC_BACKEND_URL": "https://sapi.0.email",
-        "VITE_PUBLIC_APP_URL": "https://staging.0.email",
+        "COOKIE_DOMAIN": "devlab-tahiti.workers.dev",
+        "FORCE_GOOGLE_AUTH": "true",
+        "VITE_PUBLIC_BACKEND_URL": "https://zero-server-staging.devlab-tahiti.workers.dev",
+        "VITE_PUBLIC_APP_URL": "https://zero-staging.devlab-tahiti.workers.dev",
         "DISABLE_CALLS": "",
         "DROP_AGENT_TABLES": "false",
-        "THREAD_SYNC_MAX_COUNT": "60",
+        "THREAD_SYNC_MAX_COUNT": "2000",
         "THREAD_SYNC_LOOP": "true",
         "DISABLE_WORKFLOWS": "false",
         "OTEL_EXPORTER_OTLP_ENDPOINT": "https://api.axiom.co/v1/traces",
@@ -407,43 +371,43 @@
       "kv_namespaces": [
         {
           "binding": "gmail_history_id",
-          "id": "4e814c70e35d413d99c923029928efae",
+          "id": "16b1c2a90d684583a84e8fbc88e3ae66",
         },
         {
           "binding": "gmail_processing_threads",
-          "id": "b7db3a98a80f4e16a8b6edc5fa8c7b76",
+          "id": "72aae61ec0094fbe826975d396a0741c",
         },
         {
           "binding": "subscribed_accounts",
-          "id": "7e6eadacf19c4c56a9ec3c357adb584a",
+          "id": "edc27cfb8e8144c49564e694fc7892a9",
         },
         {
           "binding": "connection_labels",
-          "id": "4d3a28d3265a4388aae2e9e9b534d019",
+          "id": "22ddecc97d3a45c7b5f37d07d1c785ca",
         },
         {
           "binding": "prompts_storage",
-          "id": "620e710aaea744e59df4788f9ec18ff9",
+          "id": "5d03a107f7594890b577db42aadcf7ce",
         },
         {
           "binding": "gmail_sub_age",
-          "id": "c55e692bb71d4e5bae23dded092b09d5",
+          "id": "f267089c237440e58c3a6d34d317e053",
         },
         {
           "binding": "pending_emails_status",
-          "id": "7f277903ebab4b4d89f5d59b1f531073",
+          "id": "4a2d6a589c7143d5ada395a7a3acc31d",
         },
         {
           "binding": "pending_emails_payload",
-          "id": "d5da698931524da9992fe398e095fc32",
+          "id": "a029abe09ac5437392ffa67aed83e14b",
         },
         {
           "binding": "scheduled_emails",
-          "id": "444cad0e54114635b5199ffae9542bd5",
+          "id": "7811276f65e84df89a7ff97b2054ef69",
         },
         {
           "binding": "snoozed_emails",
-          "id": "f3a30ed7198542d890db172536bade33",
+          "id": "73ed5aa54daa451aaad292ee1809e2b7",
         },
       ],
     },
