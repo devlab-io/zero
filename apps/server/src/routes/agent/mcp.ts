@@ -24,7 +24,9 @@ import {
   handleCancelOutboxItem,
   handleRetryOutboxItem,
   mcpToolDescriptions as descriptions,
+  mcpToolAnnotations as annotations,
   mcpToolSchemas as schemas,
+  MCP_SERVER_INSTRUCTIONS,
   MCP_SERVER_INFO,
   MCP_TOOL_DEFINITIONS,
   PayloadBoundIdempotency,
@@ -37,12 +39,15 @@ import {
   listDraftOutboxItems,
   retryDraftOutboxJob,
 } from '../../lib/draft-outbox';
+import { unsupportedProviderDraftUpdate } from '../../lib/driver/draft-update-capability';
+import { ActiveAccountResolver, withManagedResource } from './mcp-account';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { getThread, getZeroAgent } from '../../lib/server-utils';
 import { sanitizeMailContent } from '../../lib/mail-sanitize';
 import { composeEmail } from '../../trpc/routes/ai/compose';
-import type { ThreadsResponse } from '@zero/types';
 import { getCurrentDateContext } from '../../lib/prompts';
+import { registerDraftLoopTools } from './mcp-draft-loop';
+import type { ThreadsResponse } from '@zero/types';
 import { connection } from '../../db/schema';
 import { logger } from '../../lib/logger';
 import { env } from 'cloudflare:workers';
@@ -50,7 +55,6 @@ import { eq, and } from 'drizzle-orm';
 import { McpAgent } from 'agents/mcp';
 import { createDb } from '../../db';
 import type { DB } from '../../db';
-import { ActiveAccountResolver, withManagedResource } from './mcp-account';
 
 const formatDraftRecipient = (recipient: DraftRecipient) => {
   if (!recipient.name) return recipient.email;
@@ -63,29 +67,45 @@ const formatDraftRecipients = (recipients: DraftRecipient[]) =>
 /** Single-text-block MCP tool result. */
 const text = (value: string) => ({ content: [{ type: 'text' as const, text: value }] });
 
+const isProviderNotFound = (error: unknown) => {
+  const candidate = error as {
+    code?: unknown;
+    status?: unknown;
+    statusCode?: unknown;
+    originalError?: { code?: unknown; status?: unknown; statusCode?: unknown };
+  };
+  return [
+    candidate?.code,
+    candidate?.status,
+    candidate?.statusCode,
+    candidate?.originalError?.code,
+    candidate?.originalError?.status,
+    candidate?.originalError?.statusCode,
+  ].some((value) => value === 404 || value === '404' || value === 'not_found');
+};
+
 export class ZeroMCP extends McpAgent<typeof env, Record<string, unknown>, { userId: string }> {
-  server = new McpServer({
-    name: MCP_SERVER_INFO.name,
-    version: MCP_SERVER_INFO.version,
-    description: 'Zero draft-only mail MCP (no send / delete / spam / account-settings surface)',
-  });
+  server = new McpServer(
+    {
+      name: MCP_SERVER_INFO.name,
+      version: MCP_SERVER_INFO.version,
+      description: 'Zero draft-only mail MCP (no send / delete / spam / account-settings surface)',
+    },
+    {
+      instructions: MCP_SERVER_INSTRUCTIONS,
+    },
+  );
 
   private async withDb<T>(use: (db: DB) => Promise<T>): Promise<T> {
-    return withManagedResource(
-      () => {
-        const { db, conn } = createDb(env.HYPERDRIVE.connectionString);
-        return { value: db, close: () => conn.end() };
-      },
-      use,
-    );
+    return withManagedResource(() => {
+      const { db, conn } = createDb(env.HYPERDRIVE.connectionString);
+      return { value: db, close: () => conn.end() };
+    }, use);
   }
 
   private async getOwnedConnection(db: DB, connectionId: string) {
     const active = await db.query.connection.findFirst({
-      where: and(
-        eq(connection.id, connectionId),
-        eq(connection.userId, this.props.userId),
-      ),
+      where: and(eq(connection.id, connectionId), eq(connection.userId, this.props.userId)),
     });
     if (!active) throw new Error('Connection not found');
     return active;
@@ -119,15 +139,16 @@ export class ZeroMCP extends McpAgent<typeof env, Record<string, unknown>, { use
     // --- health / capabilities ------------------------------------------------
     this.server.registerTool(
       'getServerCapabilities',
-      { description: descriptions.getServerCapabilities, inputSchema: schemas.getServerCapabilities },
+      {
+        description: descriptions.getServerCapabilities,
+        inputSchema: schemas.getServerCapabilities,
+        annotations: annotations.getServerCapabilities,
+      },
       async () => {
+        const active = await accountResolver.getActiveConnection();
         const capabilities = buildCapabilities(
-          MCP_TOOL_DEFINITIONS.map((d) => ({
-            name: d.name,
-            category: d.category,
-            mutates: d.mutates,
-            idempotent: d.idempotent,
-          })),
+          MCP_TOOL_DEFINITIONS,
+          unsupportedProviderDraftUpdate(active.providerId),
         );
         return text(JSON.stringify(capabilities, null, 2));
       },
@@ -136,7 +157,11 @@ export class ZeroMCP extends McpAgent<typeof env, Record<string, unknown>, { use
     // --- accounts / connections ----------------------------------------------
     this.server.registerTool(
       'getConnections',
-      { description: descriptions.getConnections, inputSchema: schemas.getConnections },
+      {
+        description: descriptions.getConnections,
+        inputSchema: schemas.getConnections,
+        annotations: annotations.getConnections,
+      },
       async () => {
         const connections = await this.withDb((db) =>
           db.query.connection.findMany({ where: eq(connection.userId, this.props.userId) }),
@@ -152,7 +177,11 @@ export class ZeroMCP extends McpAgent<typeof env, Record<string, unknown>, { use
 
     this.server.registerTool(
       'getActiveConnection',
-      { description: descriptions.getActiveConnection, inputSchema: schemas.getActiveConnection },
+      {
+        description: descriptions.getActiveConnection,
+        inputSchema: schemas.getActiveConnection,
+        annotations: annotations.getActiveConnection,
+      },
       async () => {
         const active = await accountResolver.getActiveConnection();
         return text(`Email: ${active.email} | Provider: ${active.providerId}`);
@@ -161,7 +190,11 @@ export class ZeroMCP extends McpAgent<typeof env, Record<string, unknown>, { use
 
     this.server.registerTool(
       'setActiveConnection',
-      { description: descriptions.setActiveConnection, inputSchema: schemas.setActiveConnection },
+      {
+        description: descriptions.setActiveConnection,
+        inputSchema: schemas.setActiveConnection,
+        annotations: annotations.setActiveConnection,
+      },
       async (s) => {
         // Ownership-scoped: an unknown or other-user address is "not found" — existence is
         // never revealed (spec §"Cross-user ... identifiers are rejected without revealing").
@@ -173,7 +206,11 @@ export class ZeroMCP extends McpAgent<typeof env, Record<string, unknown>, { use
     // --- read: threads (compact) ---------------------------------------------
     this.server.registerTool(
       'listThreads',
-      { description: descriptions.listThreads, inputSchema: schemas.listThreads },
+      {
+        description: descriptions.listThreads,
+        inputSchema: schemas.listThreads,
+        annotations: annotations.listThreads,
+      },
       async (s) => {
         const { agent } = await accountResolver.getActiveAgent();
         const response = (await agent.getThreadsFromDB({
@@ -189,7 +226,11 @@ export class ZeroMCP extends McpAgent<typeof env, Record<string, unknown>, { use
 
     this.server.registerTool(
       'searchThreads',
-      { description: descriptions.searchThreads, inputSchema: schemas.searchThreads },
+      {
+        description: descriptions.searchThreads,
+        inputSchema: schemas.searchThreads,
+        annotations: annotations.searchThreads,
+      },
       async (s) => {
         const { agent } = await accountResolver.getActiveAgent();
         const response = (await agent.getThreadsFromDB({
@@ -204,7 +245,11 @@ export class ZeroMCP extends McpAgent<typeof env, Record<string, unknown>, { use
 
     this.server.registerTool(
       'getThread',
-      { description: descriptions.getThread, inputSchema: schemas.getThread },
+      {
+        description: descriptions.getThread,
+        inputSchema: schemas.getThread,
+        annotations: annotations.getThread,
+      },
       async (s) => {
         const active = await accountResolver.getActiveConnection();
         const { result: thread } = await getThread(active.id, s.threadId);
@@ -215,7 +260,10 @@ export class ZeroMCP extends McpAgent<typeof env, Record<string, unknown>, { use
               type: 'text' as const,
               text: `Latest Message Received: ${thread.latest?.receivedOn ?? 'unknown'}`,
             },
-            { type: 'text' as const, text: `Latest Message Sender: ${formatSender(thread.latest?.sender)}` },
+            {
+              type: 'text' as const,
+              text: `Latest Message Sender: ${formatSender(thread.latest?.sender)}`,
+            },
             {
               type: 'text' as const,
               text: `Latest Message Sanitized Content: ${
@@ -230,7 +278,11 @@ export class ZeroMCP extends McpAgent<typeof env, Record<string, unknown>, { use
 
     this.server.registerTool(
       'getThreadSummary',
-      { description: descriptions.getThreadSummary, inputSchema: schemas.getThreadSummary },
+      {
+        description: descriptions.getThreadSummary,
+        inputSchema: schemas.getThreadSummary,
+        annotations: annotations.getThreadSummary,
+      },
       async (s) => {
         const active = await accountResolver.getActiveConnection();
         const response = await env.VECTORIZE.getByIds([s.id]);
@@ -240,12 +292,9 @@ export class ZeroMCP extends McpAgent<typeof env, Record<string, unknown>, { use
           if (result.connection !== active.id) {
             return text('No summary found for this connection');
           }
-          const shortResponse = await env.AI.run('@cf/facebook/bart-large-cnn', {
-            input_text: result.summary,
-          });
           return {
             content: [
-              { type: 'text' as const, text: shortResponse.summary as string },
+              { type: 'text' as const, text: result.summary },
               { type: 'text' as const, text: `Subject: ${thread.latest?.subject}` },
               { type: 'text' as const, text: `Sender: ${formatSender(thread.latest?.sender)}` },
               { type: 'text' as const, text: `Date: ${thread.latest?.receivedOn}` },
@@ -259,19 +308,29 @@ export class ZeroMCP extends McpAgent<typeof env, Record<string, unknown>, { use
     // --- read: labels ---------------------------------------------------------
     this.server.registerTool(
       'getUserLabels',
-      { description: descriptions.getUserLabels, inputSchema: schemas.getUserLabels },
+      {
+        description: descriptions.getUserLabels,
+        inputSchema: schemas.getUserLabels,
+        annotations: annotations.getUserLabels,
+      },
       async () => {
         const { agent } = await accountResolver.getActiveAgent();
         const labels = await agent.getUserLabels();
         return text(
-          labels.map((label) => `Name: ${label.name} ID: ${label.id} Color: ${label.color}`).join('\n'),
+          labels
+            .map((label) => `Name: ${label.name} ID: ${label.id} Color: ${label.color}`)
+            .join('\n'),
         );
       },
     );
 
     this.server.registerTool(
       'getLabel',
-      { description: descriptions.getLabel, inputSchema: schemas.getLabel },
+      {
+        description: descriptions.getLabel,
+        inputSchema: schemas.getLabel,
+        annotations: annotations.getLabel,
+      },
       async (s) => {
         const { agent } = await accountResolver.getActiveAgent();
         const label = await agent.getLabel(s.id);
@@ -287,13 +346,21 @@ export class ZeroMCP extends McpAgent<typeof env, Record<string, unknown>, { use
     // --- read: utilities ------------------------------------------------------
     this.server.registerTool(
       'getCurrentDate',
-      { description: descriptions.getCurrentDate, inputSchema: schemas.getCurrentDate },
+      {
+        description: descriptions.getCurrentDate,
+        inputSchema: schemas.getCurrentDate,
+        annotations: annotations.getCurrentDate,
+      },
       async () => text(getCurrentDateContext()),
     );
 
     this.server.registerTool(
       'composeEmail',
-      { description: descriptions.composeEmail, inputSchema: composeEmailInputSchema },
+      {
+        description: descriptions.composeEmail,
+        inputSchema: composeEmailInputSchema,
+        annotations: annotations.composeEmail,
+      },
       async (data) => {
         const active = await accountResolver.getActiveConnection();
         const newBody = await composeEmail({
@@ -312,7 +379,11 @@ export class ZeroMCP extends McpAgent<typeof env, Record<string, unknown>, { use
     // --- read: outbox inspect -------------------------------------------------
     this.server.registerTool(
       'listOutbox',
-      { description: descriptions.listOutbox, inputSchema: schemas.listOutbox },
+      {
+        description: descriptions.listOutbox,
+        inputSchema: schemas.listOutbox,
+        annotations: annotations.listOutbox,
+      },
       async (s) => {
         const active = await accountResolver.getActiveConnection();
         const items = await this.withDb(async (db) => {
@@ -329,7 +400,11 @@ export class ZeroMCP extends McpAgent<typeof env, Record<string, unknown>, { use
 
     this.server.registerTool(
       'getOutboxItem',
-      { description: descriptions.getOutboxItem, inputSchema: schemas.getOutboxItem },
+      {
+        description: descriptions.getOutboxItem,
+        inputSchema: schemas.getOutboxItem,
+        annotations: annotations.getOutboxItem,
+      },
       async (s) => {
         const active = await accountResolver.getActiveConnection();
         const item = await this.withDb(async (db) => {
@@ -347,7 +422,11 @@ export class ZeroMCP extends McpAgent<typeof env, Record<string, unknown>, { use
     // --- write: draft (idempotent) -------------------------------------------
     this.server.registerTool(
       'createDraft',
-      { description: descriptions.createDraft, inputSchema: createDraftInputSchema },
+      {
+        description: descriptions.createDraft,
+        inputSchema: createDraftInputSchema,
+        annotations: annotations.createDraft,
+      },
       async (data) => {
         const active = await accountResolver.getActiveConnection();
         const result = await idempotency.execute({
@@ -375,9 +454,7 @@ export class ZeroMCP extends McpAgent<typeof env, Record<string, unknown>, { use
         });
         const suffix = result.deduped ? ' (idempotent: existing draft)' : '';
         return text(
-          result.value.id
-            ? `Draft created: ${result.value.id}${suffix}`
-            : `Draft created${suffix}`,
+          result.value.id ? `Draft created: ${result.value.id}${suffix}` : `Draft created${suffix}`,
         );
       },
     );
@@ -385,7 +462,11 @@ export class ZeroMCP extends McpAgent<typeof env, Record<string, unknown>, { use
     // --- write: reviewable outbox (idempotent) -------------------------------
     this.server.registerTool(
       'enqueueDraftJob',
-      { description: descriptions.enqueueDraftJob, inputSchema: schemas.enqueueDraftJob },
+      {
+        description: descriptions.enqueueDraftJob,
+        inputSchema: schemas.enqueueDraftJob,
+        annotations: annotations.enqueueDraftJob,
+      },
       async (data) => {
         const active = await accountResolver.getActiveConnection();
         const result = await idempotency.execute({
@@ -410,7 +491,11 @@ export class ZeroMCP extends McpAgent<typeof env, Record<string, unknown>, { use
 
     this.server.registerTool(
       'cancelOutboxItem',
-      { description: descriptions.cancelOutboxItem, inputSchema: schemas.cancelOutboxItem },
+      {
+        description: descriptions.cancelOutboxItem,
+        inputSchema: schemas.cancelOutboxItem,
+        annotations: annotations.cancelOutboxItem,
+      },
       async (s) => {
         const active = await accountResolver.getActiveConnection();
         const result = await idempotency.execute({
@@ -439,7 +524,11 @@ export class ZeroMCP extends McpAgent<typeof env, Record<string, unknown>, { use
 
     this.server.registerTool(
       'retryOutboxItem',
-      { description: descriptions.retryOutboxItem, inputSchema: schemas.retryOutboxItem },
+      {
+        description: descriptions.retryOutboxItem,
+        inputSchema: schemas.retryOutboxItem,
+        annotations: annotations.retryOutboxItem,
+      },
       async (s) => {
         const active = await accountResolver.getActiveConnection();
         const result = await idempotency.execute({
@@ -464,6 +553,48 @@ export class ZeroMCP extends McpAgent<typeof env, Record<string, unknown>, { use
         });
         return text(result.value);
       },
+    );
+
+    registerDraftLoopTools(
+      this.server,
+      {
+        getActiveConnection: () => accountResolver.getActiveConnection(),
+        getThread: async (connectionId, threadId) => {
+          const { stub } = await getZeroAgent(connectionId);
+          const thread = await stub.getThread(threadId, false);
+          return thread.messages.length ? thread : null;
+        },
+        getEmailAliases: async (connectionId) => {
+          const { stub } = await getZeroAgent(connectionId);
+          return stub.getEmailAliases();
+        },
+        listDrafts: async (connectionId, params) => {
+          const { stub } = await getZeroAgent(connectionId);
+          return stub.listDrafts(params);
+        },
+        getDraft: async (connectionId, draftId) => {
+          const { stub } = await getZeroAgent(connectionId);
+          try {
+            return await stub.getDraft(draftId);
+          } catch (error) {
+            if (isProviderNotFound(error)) return null;
+            throw new Error(`Failed to read draft ${draftId} from the active account`, {
+              cause: error,
+            });
+          }
+        },
+        createDraft: async (connectionId, data) => {
+          const { stub } = await getZeroAgent(connectionId);
+          return stub.createDraft(data);
+        },
+        getDraftUpdateCapability: async (connectionId) => {
+          const active = await accountResolver.getActiveConnection();
+          if (active.id !== connectionId) throw new Error('Connection not found');
+          return unsupportedProviderDraftUpdate(active.providerId);
+        },
+        sanitizeMailContent,
+      },
+      idempotency,
     );
 
     logger.info('[ZeroMCP] draft-only surface registered', {

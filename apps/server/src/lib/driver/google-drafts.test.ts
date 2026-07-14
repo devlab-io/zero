@@ -228,10 +228,11 @@ describe('GmailDrafts.createDraft', () => {
         },
       }),
     });
-    const res = await new GmailDrafts(asT(t), noMessages()).createDraft(base({ cc: 'cc@e.com', bcc: 'bcc@e.com' }));
+    const res = await new GmailDrafts(asT(t), noMessages()).createDraft(base({ cc: 'cc@e.com', bcc: 'bcc@e.com', threadId: 'thread-owned' }));
     expect(res).toEqual({ id: 'created' });
-    const rb = createParams?.requestBody as { message?: { raw?: string } };
+    const rb = createParams?.requestBody as { message?: { raw?: string; threadId?: string } };
     expect(rb?.message?.raw).toMatch(/^[A-Za-z0-9_-]+$/); // URL-safe, sans +, / ni =
+    expect(rb?.message?.threadId).toBe('thread-owned');
   });
 
   it('avec id → met à jour le brouillon existant', async () => {

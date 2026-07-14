@@ -1,74 +1,47 @@
-# Zero MCP — draft-only smoke evidence (Claude + Codex)
+# Zero MCP revisable-draft smoke
 
-Scope: prove the draft-only "Claude and Codex API" surface for both client
-configurations — a read-only path and a draft-only path — **without sending a
-message**. Issue devlab-io/zero#36.
+This proof is local, deterministic, and in-process. It does not use OAuth consent,
+production credentials, network mail access, a deploy, or a real mailbox mutation.
 
-Artifacts in this folder:
+`apps/server/src/routes/agent/mcp-draft-loop.test.ts` constructs the installed MCP SDK's
+Web Standard Streamable HTTP transport and sends actual HTTP `Request` objects through this
+sequence:
 
-- `mcp-schema.snapshot.json` — committable snapshot of the whole tool surface
-  (name, category, mutates, idempotent, description, JSON input schema). Regenerated
-  and drift-guarded by `apps/server/src/routes/agent/mcp-tools.test.ts`.
-- `mcp-smoke.evidence.json` — machine-checked local run of the read-only and
-  draft-only paths (see below).
-- `codex-setup.md` / `codex-config.example.toml` — Codex client config + smokes.
-- `claude-setup.md` / `claude-config.example.json` — Claude client config + smokes.
+1. `initialize` with MCP protocol `2025-11-25`;
+2. `notifications/initialized`;
+3. `tools/list`;
+4. `tools/call(getThreadContext)`;
+5. `tools/call(createReplyDraft)`;
+6. `tools/call(getDraft)`;
+7. `tools/call(updateDraft)` through a provider-native atomic CAS fake;
+8. repeat `getDraft`/`updateDraft` with a provider that advertises no CAS.
 
-All configs use environment-style placeholders (`${ZERO_MCP_HOST}`) and never a real
-token.
+The server and provider dependencies are realistic in-memory fakes. The smoke asserts:
 
-## What was executed (local, deterministic)
+- server instructions are present in initialization;
+- the five draft-loop tools are listed with no send, approve, delete, spam, or settings
+  tool;
+- thread context contains at most 20 messages and 64 KiB of sanitized text, without raw
+  attachments or headers;
+- reply recipients, subject, and thread identity come from the owned thread/account;
+- the CAS fake binds the opaque revision to its provider token, and a successful update
+  retains the same provider draft ID while returning a fresh revision;
+- a provider edit injected between read and conditional write produces a 412-equivalent,
+  preserves the concurrent provider body, and causes zero overwrite;
+- the no-CAS fake advertises `supported: false` and rejects before idempotency reservation,
+  provider read, conditional-write attempt, or mutation, with advice to create a new unsent draft;
+- the revised body is refetched from provider state;
+- the fake exposes no send dependency and observes zero send calls.
 
-`mcp-smoke.evidence.json` is produced by the test suite in Node with injected driver
-fakes — no network, no OAuth-console, no production data. It exercises the actual
-handler code from `mcp-tools.ts`:
+Focused tests around the same handlers separately prove 20 concurrent same-key create and
+CAS-update calls produce one provider effect, changed-payload key reuse conflicts before a
+second effect, stale and concurrently changed revisions produce no overwrite, no-CAS updates
+produce no reservation or provider effect, and missing/other-user draft IDs return the same
+result.
 
-- **Read-only**: `getServerCapabilities` (reports `canSendMail:false`), `listThreads`
-  compact projection (metadata only, no bodies), `getOutboxItem` inspect.
-- **Draft-only + idempotency**: `createDraft` called twice with the same
-  `idempotencyKey` → **one** logical Gmail draft (`distinctGmailDraftsCreated: 1`),
-  `sendCallsObserved: 0`.
+`mcp-smoke.evidence.json` is the compact assertion manifest for this test. The committed
+tool/schema snapshot is drift-checked by `mcp-tools.test.ts` against the single TypeScript
+catalogue.
 
-The evidence asserts `oneLogicalDraftPerKey`, `zeroSends`, and `draftOnlyGuaranteed`.
-Regenerate with:
-
-```bash
-cd apps/server && UPDATE_MCP_SNAPSHOTS=1 pnpm test src/routes/agent/mcp-tools.test.ts
-```
-
-Without the flag, `pnpm test` re-derives both artifacts and fails on any drift.
-
-## Live end-to-end against local/staging — BLOCKER (documented, not worked around)
-
-A fully live run (real Claude/Codex client → `/mcp` over HTTP) additionally requires an
-**interactive better-auth OIDC login** (`codex mcp login zero`, or Claude `/mcp →
-Authenticate`). The `/mcp` mount rejects any request without a valid `getMcpSession`
-(`routes/index.ts`). No interactive OIDC session, OAuth-console access, or production
-credential is available in this sandbox, and the task hard-stops forbid creating one.
-
-Consequently the live-session portion is **documented, not executed** here (same
-precedent as prior waves #28/#40). To complete it on a workstation once a login is
-available:
-
-### Codex
-
-1. `codex mcp login zero`
-2. Read-only: `codex exec "connecte-toi à Zero MCP, appelle getServerCapabilities et listThreads inbox (5) — ne crée rien"`
-3. Draft-only: `codex exec "prépare 2 réponses sur compta@ via Zero MCP, createDraft ou enqueueDraftJob, n'envoie rien"`
-
-### Claude Code / Desktop
-
-1. `claude mcp add --transport http zero "https://${ZERO_MCP_HOST}/mcp"` then `/mcp → Authenticate`
-2. Read-only: "call getServerCapabilities and listThreads inbox (5); create nothing"
-3. Draft-only: "prepare 2 replies on compta@: createDraft or enqueueDraftJob; send nothing"
-
-### Expected in both
-
-- Discovery/list-tools returns the surface in `mcp-schema.snapshot.json`.
-- `getServerCapabilities.canSendMail === false`.
-- Drafts/outbox items created; **no new Sent message**; repeating with the same
-  idempotency key yields the same id.
-
-The structural guarantee holds regardless of the live run: the surface registers **no**
-send / permanent-delete / spam / account-settings tool, asserted by
-`scripts/security/check-agent-surface.mjs`.
+No live or hosted smoke is claimed. A real Codex/Claude OAuth login, hosted connector, or
+mailbox draft remains a separate human-authorized operation described in the setup guides.

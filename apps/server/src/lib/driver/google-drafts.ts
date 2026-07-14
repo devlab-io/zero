@@ -1,15 +1,20 @@
+import { assertServerDerivedReplyHeaders, type ServerDerivedReplyHeaders } from './agent-drafts';
+import { sanitizeTipTapHtml } from '../sanitize-tip-tap-html';
 import { parseMessage, parseOutgoing } from './google-parse';
 import type { GmailTransport } from './google-transport';
 import type { GmailMessages } from './google-messages';
+import type { IOutgoingMessage } from '../../types';
 import { normalizeSearch } from './google-threads';
 import { type gmail_v1 } from '@googleapis/gmail';
 import type { CreateDraftData } from '../schemas';
-import { sanitizeTipTapHtml } from '../sanitize-tip-tap-html';
-import type { IOutgoingMessage } from '../../types';
 import { createMimeMessage } from 'mimetext';
 import { fromBinary } from './utils';
 import { logger } from '../logger';
 import * as he from 'he';
+
+type GmailDraftCreateData = CreateDraftData & {
+  serverDerivedReplyHeaders?: ServerDerivedReplyHeaders;
+};
 
 export class GmailDrafts {
   constructor(
@@ -119,7 +124,7 @@ export class GmailDrafts {
               return {
                 ...parsed,
                 id: draft.id,
-                threadId: draft.message?.id,
+                threadId: message.threadId,
                 receivedOn: date || new Date().toISOString(),
               };
             } catch {
@@ -149,7 +154,7 @@ export class GmailDrafts {
     );
   }
 
-  public createDraft(data: CreateDraftData) {
+  public createDraft(data: GmailDraftCreateData) {
     return this.t.withErrorHandler(
       'createDraft',
       async () => {
@@ -172,6 +177,11 @@ export class GmailDrafts {
           msg.setBcc(data.bcc?.split(', ').map((recipient: string) => ({ addr: recipient })));
 
         msg.setSubject(data.subject);
+        if (data.serverDerivedReplyHeaders) {
+          const replyHeaders = assertServerDerivedReplyHeaders(data.serverDerivedReplyHeaders);
+          msg.setHeader('In-Reply-To', replyHeaders.inReplyTo);
+          msg.setHeader('References', replyHeaders.references);
+        }
         msg.addMessage({
           contentType: 'text/html',
           data: message || '',
@@ -195,7 +205,10 @@ export class GmailDrafts {
         if (data.attachments && data.attachments?.length > 0) {
           for (const attachment of data.attachments) {
             let base64Data: string | undefined;
-            const att = attachment as { base64?: unknown; arrayBuffer?: () => Promise<ArrayBuffer> };
+            const att = attachment as {
+              base64?: unknown;
+              arrayBuffer?: () => Promise<ArrayBuffer>;
+            };
             if (typeof att.base64 === 'string') base64Data = att.base64;
             else if (typeof att.arrayBuffer === 'function') {
               const buffer = Buffer.from(await att.arrayBuffer());

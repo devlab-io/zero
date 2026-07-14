@@ -5,7 +5,6 @@ import {
   sanitizeContext,
   StandardizedError,
 } from './utils';
-import { logger } from '../logger';
 import type {
   OutlookCategory as Category,
   MailFolder,
@@ -13,12 +12,13 @@ import type {
   User,
 } from '@microsoft/microsoft-graph-types';
 import type { IOutgoingMessage, Label, ParsedMessage } from '../../types';
+import type { MailManager, ManagerConfig, ParsedDraft } from './types';
 import { sanitizeTipTapHtml } from '../sanitize-tip-tap-html';
 import { Client } from '@microsoft/microsoft-graph-client';
-import type { MailManager, ManagerConfig, ParsedDraft } from './types';
 import { getContext } from 'hono/context-storage';
 import type { CreateDraftData } from '../schemas';
 import type { HonoContext } from '../../ctx';
+import { logger } from '../logger';
 import * as he from 'he';
 
 export class OutlookMailManager implements MailManager {
@@ -76,8 +76,12 @@ export class OutlookMailManager implements MailManager {
     );
   }
   // MailManager methods the Gmail driver implements but the Outlook driver does not (yet).
-  public getRawEmail(_id: string): Promise<string> { return Promise.reject(new Error('getRawEmail not implemented for Outlook driver')); }
-  public getMessageAttachments(_id: string): ReturnType<MailManager['getMessageAttachments']> { return Promise.reject(new Error('getMessageAttachments not implemented for Outlook driver')); }
+  public getRawEmail(_id: string): Promise<string> {
+    return Promise.reject(new Error('getRawEmail not implemented for Outlook driver'));
+  }
+  public getMessageAttachments(_id: string): ReturnType<MailManager['getMessageAttachments']> {
+    return Promise.reject(new Error('getMessageAttachments not implemented for Outlook driver'));
+  }
   public getEmailAliases() {
     return this.withErrorHandler('getEmailAliases', async () => {
       const user: User = await this.graphClient.api('/me').select('mail,userPrincipalName').get();
@@ -548,7 +552,7 @@ export class OutlookMailManager implements MailManager {
       async () => {
         const draftMessage: Message = await this.graphClient
           .api(`/me/messages/${draftId}`) // Drafts are messages in the drafts folder
-          .select('id,subject,body,from,toRecipients,ccRecipients,bccRecipients')
+          .select('id,conversationId,subject,body,from,toRecipients,ccRecipients,bccRecipients')
           .get();
 
         if (!draftMessage) {
@@ -586,7 +590,7 @@ export class OutlookMailManager implements MailManager {
         // }
 
         request = request.select(
-          'id,subject,from,toRecipients,ccRecipients,bccRecipients,sentDateTime,receivedDateTime,isRead,internetMessageId',
+          'id,conversationId,subject,from,toRecipients,ccRecipients,bccRecipients,sentDateTime,receivedDateTime,isRead,internetMessageId',
         );
         // request = request.orderby('receivedDateTime desc');
         request = request.top(maxResults);
@@ -720,22 +724,26 @@ export class OutlookMailManager implements MailManager {
         let res;
 
         if (data.id) {
-          try {
-            res = await this.graphClient
-              .api(`/me/mailfolders/drafts/messages/${data.id}`)
-              .patch(outlookMessage);
-          } catch (error) {
-            logger.warn(`Failed to update draft ${data.id}, creating a new one`, error);
-            try {
-              await this.graphClient.api(`/me/mailfolders/drafts/messages/${data.id}`).delete();
-            } catch (deleteError) {
-              logger.error(`Failed to delete draft ${data.id}`, deleteError);
-            }
-
-            res = await this.graphClient
-              .api('/me/mailfolders/drafts/messages')
-              .post(outlookMessage);
+          res = await this.graphClient
+            .api(`/me/mailfolders/drafts/messages/${data.id}`)
+            .patch(outlookMessage);
+          if (res?.id && res.id !== data.id) {
+            throw new Error(`Provider changed draft id during update: expected ${data.id}`);
           }
+        } else if ('replyToMessageId' in data && typeof data.replyToMessageId === 'string') {
+          const reply = await this.graphClient
+            .api(`/me/messages/${data.replyToMessageId}/createReply`)
+            .post(undefined);
+          if (!reply?.id) {
+            throw new Error('Provider created an Outlook reply draft without returning its id');
+          }
+          const patched = await this.graphClient
+            .api(`/me/messages/${reply.id}`)
+            .patch(outlookMessage);
+          if (patched?.id && patched.id !== reply.id) {
+            throw new Error(`Provider changed reply draft id during update: expected ${reply.id}`);
+          }
+          res = { ...patched, id: reply.id };
         } else {
           res = await this.graphClient.api('/me/mailfolders/drafts/messages').post(outlookMessage);
         }

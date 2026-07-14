@@ -24,6 +24,7 @@
 
 import {
   MCP_TOOL_DEFINITIONS,
+  MCP_SERVER_INSTRUCTIONS,
   MCP_SEND_GUARANTEES,
   OUTBOX_NOT_FOUND,
   buildCapabilities,
@@ -43,6 +44,9 @@ import {
 import type { DraftOutboxItem, DraftOutboxStatus } from '../../lib/draft-outbox/state-machine';
 import type { ThreadsResponse } from '@zero/types';
 import { describe, it, expect, vi } from 'vitest';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { readFileSync } from 'node:fs';
 import { z } from 'zod';
 
 const seedItem = (status: DraftOutboxStatus): DraftOutboxItem => ({
@@ -173,12 +177,18 @@ describe('outbox inspect / cancel / retry — ownership-scoped + idempotent', ()
       'Outbox item outbox-1 re-queued for regeneration',
     );
     expect(box.current.status).toBe('queued');
-    expect(await handleRetryOutboxItem(box, 'outbox-1')).toMatch(/already queued; retry is a no-op/);
+    expect(await handleRetryOutboxItem(box, 'outbox-1')).toMatch(
+      /already queued; retry is a no-op/,
+    );
   });
 
   it('formatOutboxItem never leaks send internals', () => {
     const parsed = JSON.parse(formatOutboxItem(seedItem('draft_ready')));
-    expect(parsed).toMatchObject({ id: 'outbox-1', status: 'draft_ready', gmailDraftId: 'gdraft-1' });
+    expect(parsed).toMatchObject({
+      id: 'outbox-1',
+      status: 'draft_ready',
+      gmailDraftId: 'gdraft-1',
+    });
     expect(Object.keys(parsed)).not.toContain('idempotencyKey');
   });
 });
@@ -189,21 +199,21 @@ describe('surface guarantees — draft-only whitelist', () => {
     'enqueueDraftJob',
     'cancelOutboxItem',
     'retryOutboxItem',
+    'createReplyDraft',
+    'updateDraft',
   ]);
 
   it('capabilities state that sending is impossible', () => {
-    const caps = buildCapabilities(
-      MCP_TOOL_DEFINITIONS.map((d) => ({
-        name: d.name,
-        category: d.category,
-        mutates: d.mutates,
-        idempotent: d.idempotent,
-      })),
-    );
+    const caps = buildCapabilities(MCP_TOOL_DEFINITIONS);
     expect(caps.canSendMail).toBe(false);
     expect(caps.canPermanentlyDeleteMail).toBe(false);
     expect(caps.canReportSpam).toBe(false);
     expect(caps.canChangeAccountSettings).toBe(false);
+    expect(caps.draftUpdate).toMatchObject({
+      provider: 'unknown',
+      supported: false,
+      concurrencyControl: 'unavailable',
+    });
     expect(caps.statement).toMatch(/no tool can send mail/i);
     expect(MCP_SEND_GUARANTEES.canSendMail).toBe(false);
   });
@@ -231,6 +241,26 @@ describe('surface guarantees — draft-only whitelist', () => {
       if (def.mutates) expect(def.idempotent).toBe(true);
     }
   });
+
+  it('publishes self-contained draft-only instructions and truthful annotations', () => {
+    expect(MCP_SERVER_INSTRUCTIONS.slice(0, 512)).toMatch(/draft-only/i);
+    expect(MCP_SERVER_INSTRUCTIONS.slice(0, 512)).toMatch(/create an unsent reply draft/i);
+    expect(MCP_SERVER_INSTRUCTIONS.slice(0, 512)).toMatch(/provider-native atomic CAS/i);
+    expect(MCP_SERVER_INSTRUCTIONS.slice(0, 512)).toMatch(/create a new unsent draft/i);
+    for (const definition of MCP_TOOL_DEFINITIONS) {
+      expect(definition.annotations.readOnlyHint).toBe(
+        definition.name === 'setActiveConnection' ? false : !definition.mutates,
+      );
+      expect(definition.annotations.idempotentHint).toBe(true);
+    }
+    expect(
+      MCP_TOOL_DEFINITIONS.find((definition) => definition.name === 'updateDraft')?.annotations,
+    ).toMatchObject({ destructiveHint: true, openWorldHint: true });
+    expect(
+      MCP_TOOL_DEFINITIONS.find((definition) => definition.name === 'createReplyDraft')
+        ?.annotations,
+    ).toMatchObject({ destructiveHint: false, openWorldHint: true });
+  });
 });
 
 describe('schema snapshot is a valid, stable JSON schema', () => {
@@ -249,6 +279,37 @@ describe('schema snapshot is a valid, stable JSON schema', () => {
     const required = (createDraft.inputSchema as { required?: string[] }).required ?? [];
     expect(required).toContain('subject');
     expect(required).toContain('idempotencyKey');
+    expect(snap.instructions).toBe(MCP_SERVER_INSTRUCTIONS);
+    expect(snap.draftUpdatePolicy).toMatchObject({
+      requiredConcurrencyControl: 'provider-native-atomic-cas',
+      failClosed: true,
+      knownProviders: {
+        google: { supported: false },
+        microsoft: { supported: false },
+      },
+    });
+    for (const requiredTool of [
+      'getThreadContext',
+      'createReplyDraft',
+      'listDrafts',
+      'getDraft',
+      'updateDraft',
+    ]) {
+      expect(snap.tools.some((tool) => tool.name === requiredTool)).toBe(true);
+    }
+    const reply = snap.tools.find((tool) => tool.name === 'createReplyDraft')!;
+    expect(reply.inputSchema).toMatchObject({
+      properties: {
+        idempotencyKey: { type: 'string', minLength: 1, maxLength: 128 },
+        threadId: { type: 'string', minLength: 1, maxLength: 512 },
+      },
+    });
+    const drafts = snap.tools.find((tool) => tool.name === 'listDrafts')!;
+    expect(drafts.inputSchema).toMatchObject({
+      properties: {
+        maxResults: { type: 'integer', minimum: 1, maximum: 50 },
+      },
+    });
   });
 
   it('enum schema round-trips (outbox status filter)', () => {
@@ -256,6 +317,19 @@ describe('schema snapshot is a valid, stable JSON schema', () => {
       properties: { status: { enum?: string[] } };
     };
     expect(node.properties.status.enum).toContain('draft_ready');
+  });
+
+  it('matches the committed deterministic schema snapshot', () => {
+    const committed = JSON.parse(
+      readFileSync(
+        resolve(
+          dirname(fileURLToPath(import.meta.url)),
+          '../../../../../docs/agent/mcp-schema.snapshot.json',
+        ),
+        'utf8',
+      ),
+    );
+    expect(committed).toEqual(buildMcpSchemaSnapshot());
   });
 });
 
@@ -280,7 +354,8 @@ describe('strict MCP input bounds', () => {
       }).success,
     ).toBe(false);
     expect(
-      createDraftInputSchema.safeParse({ ...validDraft, subject: 'Hello\r\nBcc: attacker' }).success,
+      createDraftInputSchema.safeParse({ ...validDraft, subject: 'Hello\r\nBcc: attacker' })
+        .success,
     ).toBe(false);
   });
 
@@ -322,6 +397,7 @@ describe('strict MCP input bounds', () => {
     });
     const input = {
       prompt: 'Draft a reply',
+      allowWebSearch: true as const,
       threadMessages: [contextMessage(25, 25)],
     };
     const driver = vi.fn();
@@ -338,9 +414,20 @@ describe('strict MCP input bounds', () => {
     expect(driver).toHaveBeenCalledTimes(1);
   });
 
+  it('requires explicit web-search consent before composeEmail can dispatch', () => {
+    expect(
+      composeEmailInputSchema.safeParse({ prompt: 'Draft this', allowWebSearch: true }).success,
+    ).toBe(true);
+    expect(composeEmailInputSchema.safeParse({ prompt: 'Draft this' }).success).toBe(false);
+    expect(
+      composeEmailInputSchema.safeParse({ prompt: 'Draft this', allowWebSearch: false }).success,
+    ).toBe(false);
+  });
+
   it('requires mutation keys from 1 through 128 trimmed characters', () => {
-    expect(createDraftInputSchema.safeParse({ ...validDraft, idempotencyKey: 'k'.repeat(128) }).success)
-      .toBe(true);
+    expect(
+      createDraftInputSchema.safeParse({ ...validDraft, idempotencyKey: 'k'.repeat(128) }).success,
+    ).toBe(true);
     for (const key of [undefined, '', '   ', 'k'.repeat(129)]) {
       expect(createDraftInputSchema.safeParse({ ...validDraft, idempotencyKey: key }).success).toBe(
         false,
@@ -350,6 +437,8 @@ describe('strict MCP input bounds', () => {
       mcpToolSchemas.enqueueDraftJob,
       mcpToolSchemas.cancelOutboxItem,
       mcpToolSchemas.retryOutboxItem,
+      mcpToolSchemas.createReplyDraft,
+      mcpToolSchemas.updateDraft,
     ]) {
       expect(z.object(shape).safeParse({ id: 'item-1' }).success).toBe(false);
     }

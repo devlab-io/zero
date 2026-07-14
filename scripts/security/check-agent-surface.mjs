@@ -2,15 +2,19 @@ import { readFile } from 'node:fs/promises';
 
 const read = (path) => readFile(new URL(`../../${path}`, import.meta.url), 'utf8');
 
-const [toolRegistry, mcp, mcpTools, scopes, auth, prompt, legacyPrompt] = await Promise.all([
-  read('apps/server/src/routes/agent/tools.ts'),
-  read('apps/server/src/routes/agent/mcp.ts'),
-  read('apps/server/src/routes/agent/mcp-tools.ts'),
-  read('apps/server/src/lib/google-scopes.ts'),
-  read('apps/server/src/lib/auth.ts'),
-  read('apps/server/src/lib/prompts.ts'),
-  read('apps/server/src/services/call-service/system-prompt.ts'),
-]);
+const [toolRegistry, mcp, mcpDraftLoop, mcpTools, scopes, auth, prompt, legacyPrompt] =
+  await Promise.all([
+    read('apps/server/src/routes/agent/tools.ts'),
+    read('apps/server/src/routes/agent/mcp.ts'),
+    read('apps/server/src/routes/agent/mcp-draft-loop.ts'),
+    read('apps/server/src/routes/agent/mcp-tools.ts'),
+    read('apps/server/src/lib/google-scopes.ts'),
+    read('apps/server/src/lib/auth.ts'),
+    read('apps/server/src/lib/prompts.ts'),
+    read('apps/server/src/services/call-service/system-prompt.ts'),
+  ]);
+
+const registeredMcp = `${mcp}\n${mcpDraftLoop}`;
 
 const failures = [];
 const assert = (condition, message) => {
@@ -52,8 +56,16 @@ for (const requiredMcpTool of [
   "'getOutboxItem'",
   "'cancelOutboxItem'",
   "'retryOutboxItem'",
+  "'getThreadContext'",
+  "'createReplyDraft'",
+  "'listDrafts'",
+  "'getDraft'",
+  "'updateDraft'",
 ]) {
-  assert(mcp.includes(requiredMcpTool), `MCP is missing required tool ${requiredMcpTool}`);
+  assert(
+    registeredMcp.includes(requiredMcpTool),
+    `MCP is missing required tool ${requiredMcpTool}`,
+  );
 }
 
 // (b) No send / permanent-delete / spam / account-settings surface, and the mutation
@@ -71,14 +83,9 @@ for (const forbiddenMcpTool of [
   "'createLabel'",
   "'approveDraft'",
   "'approveOutboxItem'",
-  "'getThreadContext'",
-  "'createReplyDraft'",
-  "'listDrafts'",
-  "'getDraft'",
-  "'updateDraft'",
 ]) {
   assert(
-    !mcp.includes(forbiddenMcpTool) && !mcpTools.includes(`name: ${forbiddenMcpTool}`),
+    !registeredMcp.includes(forbiddenMcpTool) && !mcpTools.includes(`name: ${forbiddenMcpTool}`),
     `MCP exposes forbidden/retired/out-of-slice tool ${forbiddenMcpTool}`,
   );
 }
@@ -89,7 +96,8 @@ for (const genericProviderEscapeHatch of [
   "'rawProviderRequest'",
 ]) {
   assert(
-    !mcp.includes(genericProviderEscapeHatch) && !mcpTools.includes(genericProviderEscapeHatch),
+    !registeredMcp.includes(genericProviderEscapeHatch) &&
+      !mcpTools.includes(genericProviderEscapeHatch),
     `MCP exposes generic provider escape hatch ${genericProviderEscapeHatch}`,
   );
 }
@@ -107,15 +115,20 @@ for (const guarantee of [
   );
 }
 
-const tools = [...mcpTools.matchAll(
-  /\{\s*name:\s*'([^']+)',\s*category:\s*'(read|write)',\s*mutates:\s*(true|false),\s*idempotent:\s*(true|false),/g,
-)].map((match) => ({
+const tools = [
+  ...mcpTools.matchAll(
+    /\{\s*name:\s*'([^']+)',\s*category:\s*'(read|write)',\s*mutates:\s*(true|false),\s*idempotent:\s*(true|false),/g,
+  ),
+].map((match) => ({
   name: match[1],
   category: match[2],
   mutates: match[3] === 'true',
   idempotent: match[4] === 'true',
 }));
-assert(tools.length === 18, `MCP live catalogue must contain exactly 18 tools, found ${tools.length}`);
+assert(
+  tools.length === 23,
+  `MCP live catalogue must contain exactly 23 tools, found ${tools.length}`,
+);
 
 const toolNames = new Set(tools.map((tool) => tool.name));
 const writeWhitelist = new Set([
@@ -123,6 +136,8 @@ const writeWhitelist = new Set([
   'enqueueDraftJob',
   'cancelOutboxItem',
   'retryOutboxItem',
+  'createReplyDraft',
+  'updateDraft',
 ]);
 for (const tool of tools) {
   if (tool.category === 'write') {
@@ -144,8 +159,14 @@ for (const requiredRead of [
   'getThread',
   'getUserLabels',
   'getLabel',
+  'getThreadContext',
+  'listDrafts',
+  'getDraft',
 ]) {
-  assert(toolNames.has(requiredRead), `MCP live catalogue is missing required read tool ${requiredRead}`);
+  assert(
+    toolNames.has(requiredRead),
+    `MCP live catalogue is missing required read tool ${requiredRead}`,
+  );
 }
 
 assert(!scopes.includes('https://mail.google.com/'), 'unrestricted Gmail scope is present');

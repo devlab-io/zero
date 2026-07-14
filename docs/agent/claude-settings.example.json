@@ -1,0 +1,30 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__zero__getServerCapabilities",
+      "mcp__zero__getConnections",
+      "mcp__zero__getActiveConnection",
+      "mcp__zero__listThreads",
+      "mcp__zero__searchThreads",
+      "mcp__zero__getThread",
+      "mcp__zero__getThreadContext",
+      "mcp__zero__listDrafts",
+      "mcp__zero__getDraft"
+    ],
+    "ask": ["mcp__zero__setActiveConnection", "mcp__zero__createReplyDraft"],
+    "deny": [
+      "mcp__zero__getThreadSummary",
+      "mcp__zero__getUserLabels",
+      "mcp__zero__getLabel",
+      "mcp__zero__getCurrentDate",
+      "mcp__zero__composeEmail",
+      "mcp__zero__listOutbox",
+      "mcp__zero__getOutboxItem",
+      "mcp__zero__createDraft",
+      "mcp__zero__updateDraft",
+      "mcp__zero__enqueueDraftJob",
+      "mcp__zero__cancelOutboxItem",
+      "mcp__zero__retryOutboxItem"
+    ]
+  }
+}
