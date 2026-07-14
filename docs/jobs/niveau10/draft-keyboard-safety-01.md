@@ -74,7 +74,7 @@ RESULT: build client et SSR vert, `0` erreur, `3` warnings Oxlint hérités.
 
 ### Format et hygiène
 
-COMMAND: `pnpm exec prettier --check <6 fichiers> && git diff --check`
+COMMAND: `pnpm exec prettier --check <8 fichiers> && git diff --check`
 
 EXIT: `0`
 
@@ -82,12 +82,26 @@ Le premier run du worktree frais, lancé avant la génération Paraglide, n'est 
 preuve. Après `react-router typegen`, toutes les preuves ci-dessus ont été rejouées
 séquentiellement avec succès.
 
+## Rejeu Computer Use après intégration
+
+- Route initiale : `http://localhost:3001/mail/draft`, sans `threadId` ni composeur ouvert.
+- `j`, `j`, `k` conservent exactement `/mail/draft` et déplacent le repère visuel de focus dans la
+  liste.
+- Une fenêtre de logs backend vidée juste avant le scénario ne contient aucun appel
+  `/api/trpc/mail.markAsRead` et aucun appel d'envoi après la navigation.
+- Entrée ouvre la ligne focalisée sur
+  `/mail/draft?draftId=r-2047745557640053781&isComposeOpen=true` ; aucun `threadId` n'est créé.
+- Le composeur expose bien destinataire, sujet et corps, puis Échap le referme sur `/mail/draft`.
+- Une seconde fenêtre de logs backend ne contient ni `mail.markAsRead` ni `mail.send`.
+
+RESULT: PASS — navigation Brouillons locale, visible et sans mutation fournisseur.
+
 ## Frontières conservées
 
 - Aucun envoi ou suppression d'email.
 - Aucun consentement OAuth Codex/Claude.
 - Aucune migration ou écriture de base de données.
 - Aucun déploiement.
-- Le rejeu Computer Use après intégration est une étape distincte.
+- Aucun bouton d'envoi ou de suppression n'a été activé pendant le rejeu.
 
-STATUS: MECHANICAL PASS — COMPUTER USE PENDING
+STATUS: COMPLETE

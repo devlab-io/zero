@@ -81,12 +81,25 @@ Un essai antérieur lançant simultanément les tests mail et le build a provoqu
 fichiers générés Paraglide. Cette exécution n'est pas retenue comme preuve ; toutes les preuves
 ci-dessus ont été rejouées séquentiellement avec succès.
 
+## Rejeu Lighthouse et Computer Use après intégration
+
+- Lighthouse sur la messagerie locale authentifiée : accessibilité `100`, bonnes pratiques `92`,
+  SEO `92`, CLS `0`.
+- L'arbre d'accessibilité nomme les contrôles critiques, le titre `Email composer` et sa
+  description, et expose le contenu principal.
+- `/` ouvre la palette de recherche, `Shift+?` l'aide clavier localisée et `c` le composeur ; Échap
+  referme le composeur vide.
+- La page Queue échoue de façon finie et actionnable avec `Queue could not load` et `Refresh` tant
+  que la migration locale n'est pas autorisée.
+
+RESULT: PASS — cible Lighthouse atteinte et parcours clavier confirmé dans Chrome réel.
+
 ## Frontières conservées
 
 - Aucun appel fournisseur, envoi ou suppression d'email.
 - Aucun consentement OAuth persistant Codex/Claude.
 - Aucune migration ou écriture de base de données.
 - Aucun déploiement.
-- Le rejeu Lighthouse/Computer Use après intégration est une étape de validation distincte.
+- Aucun bouton d'envoi ou de suppression n'a été activé pendant le rejeu.
 
-STATUS: MECHANICAL PASS — COMPUTER USE PENDING
+STATUS: COMPLETE
