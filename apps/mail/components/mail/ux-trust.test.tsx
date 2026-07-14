@@ -1,5 +1,11 @@
+import {
+  canRetryComposerSave,
+  ComposerAutosaveRevisions,
+  reduceComposerSaveStatus,
+  runVersionedComposerSave,
+  shouldScheduleComposerAutosave,
+} from './composer-trust';
 import { draftStorageKey, loadLocalDraft, saveLocalDraft } from '@/lib/draft-storage';
-import { canRetryComposerSave, reduceComposerSaveStatus } from './composer-trust';
 import { MailListSkeleton, ReplyComposerSkeleton } from './mail-skeleton';
 import { selectThreadViewState } from '@/lib/thread-view-state';
 import { selectMailListState } from '@/lib/mail-list-state';
@@ -48,6 +54,51 @@ describe('mail UX trust contracts', () => {
     expect([local, saving, failed]).toEqual(['local', 'saving', 'error']);
     expect(canRetryComposerSave(failed)).toBe(true);
     expect(reduceComposerSaveStatus(failed, { type: 'SAVE_SUCCEEDED' })).toBe('server');
+  });
+
+  it('keeps edit B local after suspended save A succeeds, then acknowledges B itself', async () => {
+    const revisions = new ComposerAutosaveRevisions();
+    let resolveA!: (value: { id: string }) => void;
+    const deferredA = new Promise<{ id: string }>((resolve) => {
+      resolveA = resolve;
+    });
+
+    revisions.markEdited(); // snapshot A
+    const saveA = runVersionedComposerSave(revisions, () => deferredA);
+
+    revisions.markEdited(); // snapshot B while A is still in flight
+    resolveA({ id: 'draft-1' });
+    const resultA = await saveA;
+
+    expect(resultA.ok).toBe(true);
+    expect(resultA.decision).toEqual({ effect: 'local', dirty: true });
+    expect(
+      shouldScheduleComposerAutosave({
+        dirty: true,
+        status: 'local',
+        inFlight: false,
+      }),
+    ).toBe(true);
+
+    let resolveB!: (value: { id: string }) => void;
+    const deferredB = new Promise<{ id: string }>((resolve) => {
+      resolveB = resolve;
+    });
+    const saveB = runVersionedComposerSave(revisions, () => deferredB);
+    let saveBSettled = false;
+    void saveB.then(() => {
+      saveBSettled = true;
+    });
+
+    await Promise.resolve();
+    expect(saveBSettled).toBe(false);
+
+    resolveB({ id: 'draft-1' });
+    const resultB = await saveB;
+
+    expect(resultB.ok).toBe(true);
+    expect(resultB.revision).toBeGreaterThan(resultA.revision);
+    expect(resultB.decision).toEqual({ effect: 'server', dirty: false });
   });
 
   it('restores recipients, subject and body from the durable local snapshot', () => {

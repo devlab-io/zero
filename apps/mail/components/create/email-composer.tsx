@@ -30,7 +30,11 @@ import { z } from 'zod';
 
 import {
   canRetryComposerSave,
+  ComposerAutosaveRevisions,
   reduceComposerSaveStatus,
+  runVersionedComposerSave,
+  shouldScheduleComposerAutosave,
+  type ComposerSaveDecision,
   type ComposerSaveStatus,
 } from '@/components/mail/composer-trust';
 import {
@@ -100,6 +104,17 @@ export function EmailComposer({
   );
   const [activeReplyId] = useQueryState('activeReplyId');
   const [toggleToolbar, setToggleToolbar] = useState(false);
+  const [snapshotTick, setSnapshotTick] = useState(0);
+  const autosaveRevisionsRef = useRef<ComposerAutosaveRevisions | null>(null);
+  const saveInFlightRef = useRef(false);
+  if (!autosaveRevisionsRef.current) {
+    autosaveRevisionsRef.current = new ComposerAutosaveRevisions();
+  }
+  const markComposerEdited = useCallback(() => {
+    autosaveRevisionsRef.current?.markEdited();
+    setHasUnsavedChanges(true);
+    setSnapshotTick((current) => current + 1);
+  }, []);
   // Durable local draft persistence (issue #34, check point 5): survives unmount,
   // pagehide/reload and a failed server autosave; restored on mount. The callbacks
   // are key-stable, so the persist effect only fires on real content changes.
@@ -225,6 +240,14 @@ export function EmailComposer({
   const attachments = watch('attachments');
   const fromEmail = watch('fromEmail');
 
+  useEffect(() => {
+    const subscription = watch((_values, { name }) => {
+      if (name === 'fromEmail') return;
+      markComposerEdited();
+    });
+    return () => subscription.unsubscribe();
+  }, [markComposerEdited, watch]);
+
   const handleAttachment = async (newFiles: File[]) => {
     if (newFiles && newFiles.length > 0) {
       const newOriginals = [...originalAttachments, ...newFiles];
@@ -243,8 +266,8 @@ export function EmailComposer({
   const editor = useComposeEditor({
     initialValue: restoredDraft?.message ?? initialMessage,
     isReadOnly: isLoading,
+    onChange: () => markComposerEdited(),
     onLengthChange: (length) => {
-      setHasUnsavedChanges(true);
       setMessageLength(length);
     },
     onModEnter: () => {
@@ -412,10 +435,29 @@ export function EmailComposer({
     }
   };
 
+  const applySaveDecision = (decision: ComposerSaveDecision) => {
+    switch (decision.effect) {
+      case 'server':
+        setHasUnsavedChanges(false);
+        dispatchSaveStatus({ type: 'SAVE_SUCCEEDED' });
+        break;
+      case 'local':
+        setHasUnsavedChanges(true);
+        dispatchSaveStatus({ type: 'LOCAL_PERSISTED' });
+        break;
+      case 'error':
+        setHasUnsavedChanges(true);
+        dispatchSaveStatus({ type: 'SAVE_FAILED' });
+        break;
+      case 'none':
+        break;
+    }
+  };
+
   const saveDraft = async (): Promise<boolean> => {
     const values = getValues();
 
-    if (!hasUnsavedChanges) return false;
+    if (!hasUnsavedChanges || saveInFlightRef.current) return false;
     const messageText = editor.getText();
     const localPersisted = persistDraftSnapshot({
       to: values.to,
@@ -441,10 +483,14 @@ export function EmailComposer({
       return false;
     }
     if (aiGeneratedMessage || aiIsLoading || isGeneratingSubject) return false;
+    const autosaveRevisions = autosaveRevisionsRef.current;
+    if (!autosaveRevisions) return false;
 
-    try {
-      setIsSavingDraft(true);
-      dispatchSaveStatus({ type: 'SAVE_STARTED' });
+    saveInFlightRef.current = true;
+    setIsSavingDraft(true);
+    dispatchSaveStatus({ type: 'SAVE_STARTED' });
+
+    const result = await runVersionedComposerSave(autosaveRevisions, async () => {
       const draftData = {
         to: values.to.join(', '),
         cc: values.cc?.join(', '),
@@ -457,22 +503,26 @@ export function EmailComposer({
         fromEmail: values.fromEmail ? values.fromEmail : null,
       };
 
-      const response = await createDraft(draftData);
+      return createDraft(draftData);
+    });
 
-      if (response?.id && response.id !== draftId) {
-        setDraftId(response.id);
+    try {
+      if (result.ok) {
+        if (result.value?.id && result.value.id !== draftId) {
+          setDraftId(result.value.id);
+        }
+        applySaveDecision(result.decision);
+        return result.decision.effect === 'server';
       }
-      setHasUnsavedChanges(false);
-      dispatchSaveStatus({ type: 'SAVE_SUCCEEDED' });
-      return true;
-    } catch (error) {
-      log.error('Error saving draft:', error);
-      toast.error('Failed to save draft');
-      // Keep the dirty bit and local snapshot: the visible Retry action owns the
-      // next server attempt and failure is never announced as saved.
-      dispatchSaveStatus({ type: 'SAVE_FAILED' });
+
+      log.error('Error saving draft:', result.error);
+      if (result.decision.effect === 'error') {
+        toast.error('Failed to save draft');
+      }
+      applySaveDecision(result.decision);
       return false;
     } finally {
+      saveInFlightRef.current = false;
       setIsSavingDraft(false);
     }
   };
@@ -544,7 +594,17 @@ export function EmailComposer({
       message: editor.getHTML(),
       savedAt: Date.now(),
     };
-    const signature = JSON.stringify({ ...snapshot, savedAt: 0 });
+    const signature = JSON.stringify({
+      ...snapshot,
+      savedAt: 0,
+      fromEmail,
+      attachments: (attachments ?? []).map((file) => ({
+        name: file.name,
+        size: file.size,
+        type: file.type,
+        lastModified: file.lastModified,
+      })),
+    });
     const changed = lastSnapshotRef.current !== null && lastSnapshotRef.current !== signature;
     lastSnapshotRef.current = signature;
 
@@ -553,7 +613,18 @@ export function EmailComposer({
       setHasUnsavedChanges(true);
       dispatchSaveStatus({ type: persisted ? 'LOCAL_PERSISTED' : 'SAVE_FAILED' });
     }
-  }, [toEmails, ccEmails, bccEmails, subjectInput, messageLength, editor, persistDraftSnapshot]);
+  }, [
+    toEmails,
+    ccEmails,
+    bccEmails,
+    subjectInput,
+    messageLength,
+    snapshotTick,
+    attachments,
+    fromEmail,
+    editor,
+    persistDraftSnapshot,
+  ]);
 
   // A restored draft that carried cc/bcc reveals those rows so they are not silently dropped.
   useEffect(() => {
@@ -562,14 +633,22 @@ export function EmailComposer({
   }, [restoredDraft]);
 
   useEffect(() => {
-    if (!hasUnsavedChanges || saveStatus === 'error') return;
+    if (
+      !shouldScheduleComposerAutosave({
+        dirty: hasUnsavedChanges,
+        status: saveStatus,
+        inFlight: isSavingDraft,
+      })
+    ) {
+      return;
+    }
 
     const autoSaveTimer = setTimeout(() => {
       void saveDraft();
     }, 3000);
 
     return () => clearTimeout(autoSaveTimer);
-  }, [hasUnsavedChanges, saveDraft, saveStatus]);
+  }, [hasUnsavedChanges, isSavingDraft, saveDraft, saveStatus, snapshotTick]);
 
   useEffect(() => {
     const handlePasteFiles = (event: ClipboardEvent) => {
@@ -679,8 +758,8 @@ export function EmailComposer({
           aliases={aliases}
           fromEmail={fromEmail || ''}
           onFromChange={(value) => {
-            setValue('fromEmail', value);
-            setHasUnsavedChanges(true);
+            setValue('fromEmail', value, { shouldDirty: true });
+            markComposerEdited();
           }}
         />
 
