@@ -158,3 +158,22 @@ builds disjoints, frontière front→serveur non percée — règle a1). Signatu
 ### Libellé gate a2 : tant que le correctif a3 n'est pas mergé, a2 rapporte le
 type-ratchet avec « rouge any pré-existant attribué (fixture a3, correctif en
 cours) » — jamais « PASSED » global. Vert intégral exigé au fan-in post-rebase.
+
+### RULING LEAD F (a8, 2026-07-13) — zod runtime mort de config/shortcuts.ts : AUTORISÉ
+Vérifié orchestrateur avant ruling : `shortcutSchema` (config/shortcuts.ts:20) n'a
+AUCUN usage hors `z.infer` (l.31, même fichier) ; aucun `.parse`/`.safeParse` nulle
+part ; aucun check gelé ni spec ne référence le schéma (le contrat clavier #32 vit
+dans le registre + bindings, pas dans le schéma). zod y est donc du poids runtime
+mort ancré froid via lib/hotkeys. État post-LEAD A+C : 426,6 KiB gz, gate ≤420
+NON atteint (−6,6), libellé honnête conforme.
+LEAD F autorisé : remplacer schéma+infer par `interface Shortcut` explicite champ à
+champ (union 'single'|'combination'|'sequence', optionnels préservés, commentaires
+conservés dont la doc `ignore`), dériver ShortcutType, retirer `import { z }`.
+RIEN d'autre ne change dans le fichier. Conditions : (1) comportement runtime
+IDENTIQUE (rien n'était parsé) ; (2) vérif read-only que lib/hotkeys + settings ne
+consomment que type/registre ; (3) preuve = measure-critical.py INTOUCHÉ
+avant(426,6)/après + trace closure confirmant l'éviction réelle de zod du cold —
+si zod reste ancré ailleurs, libellé honnête et STOP (pas de coupe supplémentaire
+sans ruling) ; (4) gates tsc mail 0 / vitest mail / build, RC natifs.
+Extension de périmètre : + apps/mail/config/shortcuts.ts. LEAD B toujours NON
+autorisé.
