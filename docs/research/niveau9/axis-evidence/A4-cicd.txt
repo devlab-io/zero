@@ -1,0 +1,72 @@
+# A4 — CI/CD & gates — évidence brute (lecture de config)
+# commit: 1c82b196cbc87d629b18024cca3f4ac6b7372af2
+
+## Workflows présents:
+.rw-r--r--@ 3,8k thomasverdenne 13 juil. 16:10 -- ci.yml
+.rw-r--r--@ 2,5k thomasverdenne 13 juil. 16:10 -- close-conflicted-prs.yml
+.rw-r--r--@  536 thomasverdenne 13 juil. 16:10 -- close-stale-issues.yml
+.rw-r--r--@ 2,7k thomasverdenne 13 juil. 16:10 -- deploy-to-prod-command.yml
+.rw-r--r--@ 1,0k thomasverdenne 13 juil. 16:10 -- lingo-dev.yml
+.rw-r--r--@  990 thomasverdenne 13 juil. 16:10 -- sync-production.yml
+
+## ci.yml — étapes (grep run/uses/name):
+1:name: quality-and-security
+24:    timeout-minutes: 20
+27:      - name: Checkout
+28:        uses: actions/checkout@v4
+30:      - name: Setup pnpm
+31:        uses: pnpm/action-setup@v4
+33:      - name: Setup Node
+34:        uses: actions/setup-node@v4
+39:      - name: Install locked dependencies
+40:        run: pnpm install --frozen-lockfile --ignore-scripts
+44:      - name: Generate Cloudflare Worker types
+45:        run: |
+52:      - name: Typecheck — server 0 · mail 0 (bloquants stricts)
+53:        run: TYPECHECK_BLOCKING=1 node scripts/checks/typecheck-report.mjs
+55:      - name: Run unit tests
+56:        run: pnpm test
+58:      - name: Lint security-critical files
+59:        run: >-
+69:      - name: LOC ratchet (A1 — non-growing)
+70:        run: node scripts/checks/loc-ratchet.mjs
+72:      - name: Type (any) ratchet (A2 — non-growing)
+73:        run: node scripts/checks/type-ratchet.mjs
+75:      - name: Console ratchet (A5 — non-growing)
+76:        run: node scripts/checks/console-ratchet.mjs
+78:      - name: Migrations consistency (A6)
+79:        run: node scripts/checks/migrations-consistency.mjs
+81:      - name: Reject critical production advisories
+82:        run: pnpm audit --prod --audit-level critical
+84:      - name: Verify agent and OAuth security surface
+85:        run: node scripts/security/check-agent-surface.mjs
+90:      - name: Scan for secrets (gitleaks, pinned v8.30.1)
+91:        run: >-
+97:      - name: Build mail frontend
+98:        run: pnpm --filter @zero/mail build
+100:      - name: Bundle Worker without deploying (server)
+101:        run: >-
+105:      - name: Bundle Worker without deploying (mail)
+106:        run: >-
+
+## deploy-to-prod-command.yml — gate CI verte ?
+24:      # Deploy gate: the SHA about to be force-pushed to main (staging's tip) MUST
+25:      # have a green `quality-and-security` CI run. Without this, `/deploy` could
+26:      # ship a red commit to production. Hard stop (exit 1) if CI is not success.
+29:      - name: Require green CI on staging before deploy
+37:          echo "Deploy gate: verifying CI (quality-and-security) is green on staging@$SHA"
+38:          CONCLUSION="$(gh api "repos/$REPO/actions/workflows/ci.yml/runs?head_sha=$SHA&status=completed" --jq '.workflow_runs[0].conclusion // "none"')"
+39:          echo "Latest completed CI conclusion for $SHA: $CONCLUSION"
+41:            echo "::error::Refusing to deploy: CI on staging@$SHA is '$CONCLUSION' (must be 'success'). Force-push to main blocked."
+44:          echo "CI is green on staging@$SHA — deploy may proceed."
+67:        run: git push --force-with-lease origin main
+
+## Husky pre-commit + lint-staged:
+--- .husky/pre-commit ---
+pnpm dlx lint-staged@17.0.8
+--- lint-staged config (package.json / .lintstagedrc) ---
+lint-staged: {"*.{ts,tsx}":["pnpm dlx oxlint@1.9.0 --deny-warnings","prettier --write"],"*.{js,jsx,mjs,cjs,json,jsonc,md,mdx,css,html,yml,yaml}":["prettier --write"]}
+(eval):12: no matches found: .lintstagedrc*
+
+## oxlint version épinglée hook vs CI:
+.github/workflows/ci.yml:60:          pnpm dlx oxlint@1.9.0 --deny-warnings

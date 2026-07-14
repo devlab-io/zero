@@ -1,0 +1,41 @@
+# A5 — Observabilité & erreurs — évidence brute (commandes gelées)
+# commit: 1c82b196cbc87d629b18024cca3f4ac6b7372af2
+
+## console serveur (palier 7 ≤60 / cible 8,5 ≤20):
+$ grep -rE "console\." apps/server/src --include="*.ts" --exclude="*.test.*" --exclude="*.d.ts" | wc -l
+       8
+
+## console front (cible 8,5 ≤40):
+$ grep -rE "console\." apps/mail/{app,components,lib,hooks,store} --include="*.ts" --include="*.tsx" --exclude="*.test.*" --exclude="*.d.ts" | wc -l
+     121
+
+## catch strictement vide (palier 7 = 0):
+$ grep -rnE "catch\s*\([^)]*\)\s*\{\s*\}" apps/server/src apps/mail (ts/tsx)
+[exit: 1  (1 = 0 catch vide = PASS)]
+
+## Sentry côté Worker (init + capture):
+$ grep -rnE "Sentry|@sentry|toucan|withSentry" apps/server/src --include="*.ts" | head -20
+apps/server/src/env.ts:110:  /** Devlab: server-side Sentry — absent = Sentry disabled (clean no-op). */
+apps/server/src/env.ts:112:  /** Devlab: build/release tag attached to captured Sentry events. */
+apps/server/src/lib/sentry.ts:1:// lib/sentry.ts — server-side error capture to Sentry (A5).
+apps/server/src/lib/sentry.ts:3:// @sentry/cloudflare@9.43.0 is a project dependency, but importing its SDK anywhere in the
+apps/server/src/lib/sentry.ts:12:// So we capture to Sentry directly with a minimal, dependency-free client that speaks the
+apps/server/src/lib/sentry.ts:13:// Sentry envelope protocol — same observable outcome as the SDK: exceptions captured with a
+apps/server/src/lib/sentry.ts:14:// release tag, POSTed to the Sentry ingest transport, and a clean no-op without a DSN.
+apps/server/src/lib/sentry.ts:19:export interface ServerSentryOptions {
+apps/server/src/lib/sentry.ts:26:export function buildSentryOptions(env: ZeroEnv): ServerSentryOptions | undefined {
+apps/server/src/lib/sentry.ts:54:export interface SentryEvent {
+apps/server/src/lib/sentry.ts:79:  options: ServerSentryOptions,
+apps/server/src/lib/sentry.ts:81:): SentryEvent {
+apps/server/src/lib/sentry.ts:95:/** Serialises a single-event Sentry envelope (newline-delimited). */
+apps/server/src/lib/sentry.ts:96:export function buildEnvelope(event: SentryEvent, dsn: string): string {
+apps/server/src/lib/sentry.ts:103:export interface SentryTransport {
+apps/server/src/lib/sentry.ts:107:const defaultTransport: SentryTransport = {
+apps/server/src/lib/sentry.ts:118: * Captures an exception to Sentry with the configured release. No-op (returns null) when no
+apps/server/src/lib/sentry.ts:126:  transport: SentryTransport = defaultTransport,
+apps/server/src/lib/sentry.ts:128:  const options = buildSentryOptions(env);
+apps/server/src/lib/logger.ts:8:// Deliberately dependency-free (no @sentry import): unhandled errors on the request path
+[exit: 0]
+
+## console-ratchet en CI:
+.github/workflows/ci.yml:76:        run: node scripts/checks/console-ratchet.mjs

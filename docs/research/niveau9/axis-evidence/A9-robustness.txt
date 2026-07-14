@@ -1,0 +1,21 @@
+# A9 — Robustesse — évidence brute
+# commit: 1c82b196cbc87d629b18024cca3f4ac6b7372af2
+
+## Palier 7 — inbox distingue loading/empty/stale/error (baseline : échec lecture → boîte vide) :
+## mail-list.tsx destructure désormais isError (l.41) et calcule un viewState avec branche 'error'
+## DISTINCTE de 'empty' :
+##   l.206 : viewState === 'error' ?  → <EmptyStateIcon> + message d'erreur
+##   l.228 : viewState === 'empty' ?  → titre/description empty honnêtes
+##   l.146 commentaire code : "empty and cached rows survive a failed refresh."
+## → Le défaut baseline (un échec de lecture retombait sur l'état vide, isError non destructuré) est CORRIGÉ.
+##   (job w2b-robustness #34 : « 4 états honnêtes liste/thread, empty mensonger + skeleton infini morts,
+##    retry lectures ≤2 expo+jitter, brouillon durable, reprise optimiste, soak 30min 1797 iters ».)
+
+## Preuve visuelle runtime (surface non-auth atteignable, cf. docs/research/niveau9/visual/) :
+##  - deep-link /mail/inbox sans session → page 404 propre et lisible (« Page Not Found » + Go Back),
+##    ni page blanche ni skeleton infini.
+##  - /login sans backend → ErrorBoundary lisible (« Something went wrong » + JSON diagnostic +
+##    boutons Refresh / Log Out and Refresh) : état d'erreur distinct, lisible, avec récupération.
+
+## BLOCKED (authentifié) : loading/empty/stale/error des surfaces inbox/thread/composer RÉELLES
+## (données authentifiées) ; soak 30 min live ; idempotence mutations runtime. Cf. demandes superviseur.

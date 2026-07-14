@@ -1,0 +1,28 @@
+# A2 — Type safety — évidence brute (comptages gelés)
+# commit: 1c82b196cbc87d629b18024cca3f4ac6b7372af2
+
+## Comptage gelé 'any' (cible ≤40 ; mail ≤25, server ≤15):
+$ grep -rE ":\s*any|as any|<any>|any\[\]" <dirs> --include="*.ts" --include="*.tsx" --exclude="*.d.ts" --exclude="*.test.*" | wc -l
+TOTAL any:       37
+  dont mail:       23
+  dont server:       14
+
+## @ts-nocheck (budget 0):        0
+## @ts-expect-error:        4
+## @ts-ignore:        1
+## Non-null assertions (heuristique '![.);,] ' — budget ≤10):       34
+
+## Palier 7 — typecheck bloquant (commandes gelées, après wrangler types ×2) :
+$ pnpm --filter @zero/server exec tsc --noEmit   → 0 erreur (5,97s)
+$ pnpm --filter @zero/mail   exec tsc --noEmit   → 0 erreur (8,71s)
+$ TYPECHECK_BLOCKING=1 node scripts/checks/typecheck-report.mjs :
+    server: 0 errors (baseline 0)
+    mail:   0 errors (baseline 0)
+    typecheck-report OK — no regression above baseline. (exit 0)
+→ tsc 0/0 CONFIRMÉ (conforme référence). Étape typecheck bloquante en CI : ci.yml:52-53.
+
+## Note méthodo non-null : le comptage 34 est une HEURISTIQUE grep (\w!\.|\w!\)|\w!;|\w!,) —
+## imprécise (sur/sous-compte selon contexte, ex. `expr!` en fin de ligne ou avant `[` non capté).
+## Cible barème ≤10 : dépassée sous cette heuristique, mais un comptage exact exige un parse AST.
+## À traiter comme signal, non comme mesure gelée. @ts-nocheck=0 (budget 0, ACQUIS) ;
+## @ts-expect-error=4 / @ts-ignore=1 (à confronter au budget RULING au jugement).
