@@ -1,15 +1,16 @@
-import { createContext, lazy, Suspense, useCallback, useContext, useEffect, useState } from 'react';
-import { getMainSearchTerm } from '@/lib/utils';
-import { useSearchValue } from '@/hooks/use-search-value';
-import { useLocation } from 'react-router';
-import { Loader2 } from 'lucide-react';
-import { useQueryState } from 'nuqs';
-import { type ActiveFilter } from './command-registry';
 import {
   clearActiveFilters,
   readActiveFilters,
   writeActiveFilters,
 } from './command-palette-storage';
+import { createContext, lazy, Suspense, useCallback, useContext, useEffect, useState } from 'react';
+import useSearchLabels, { clearMailQueryFilters } from '@/hooks/use-labels-search';
+import { useSearchValue } from '@/hooks/use-search-value';
+import { type ActiveFilter } from './command-registry';
+import { getMainSearchTerm } from '@/lib/utils';
+import { useLocation } from 'react-router';
+import { Loader2 } from 'lucide-react';
+import { useQueryState } from 'nuqs';
 
 // #44 (gate A8): the heavy palette body (state, command/search logic, cmdk CommandDialog + views
 // with the react-day-picker calendar) is dynamic-imported only when the palette is open. This
@@ -72,6 +73,8 @@ export function CommandPaletteProvider({ children }: { children: React.ReactNode
   const [open, setOpen] = useQueryState('isCommandPaletteOpen');
   const [activeFilters, setActiveFilters] = useState<ActiveFilter[]>([]);
   const [searchValue, setSearchValue] = useSearchValue();
+  const { setLabels } = useSearchLabels();
+  const [, setCategory] = useQueryState('category');
   const { pathname } = useLocation();
 
   // Restore persisted filters on mount and reflect them into the shared search value. Eager so a
@@ -95,13 +98,14 @@ export function CommandPaletteProvider({ children }: { children: React.ReactNode
   const clearAllFilters = useCallback(() => {
     setActiveFilters([]);
     clearActiveFilters();
+    clearMailQueryFilters({ setLabels, setCategory });
     setSearchValue({
       value: '',
       highlight: '',
       folder: searchValue.folder,
       isAISearching: false,
     });
-  }, [searchValue.folder, setSearchValue]);
+  }, [searchValue.folder, setCategory, setLabels, setSearchValue]);
 
   const addFilter = useCallback((filter: ActiveFilter) => {
     setActiveFilters((prev) => {

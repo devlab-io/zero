@@ -1,4 +1,3 @@
-import { log } from '@/lib/log';
 import {
   DropdownMenu,
   DropdownMenuItem,
@@ -6,13 +5,13 @@ import {
   DropdownMenuTrigger,
 } from '../ui/dropdown-menu';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { ThreadReaderSurface, PricingDialogSurface } from '@/components/mail/mail-lazy-surfaces';
 import { Bell, Lightning, Mail, ScanEye, Tag, User, X, Search } from '../icons/icons';
 import { useCategorySettings, useDefaultCategoryId } from '@/hooks/use-categories';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable';
 import { useCommandPalette } from '../context/command-palette-context';
 import { useHotkeys, useHotkeysContext } from 'react-hotkeys-hook';
-import { ThreadReaderSurface, PricingDialogSurface } from '@/components/mail/mail-lazy-surfaces';
-import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { useActiveConnection } from '@/hooks/use-connections';
 import { Check, ChevronDown, RefreshCcw } from 'lucide-react';
 import { useMediaQuery } from '../../hooks/use-media-query';
@@ -21,8 +20,9 @@ import { MailList } from '@/components/mail/mail-list';
 import { useNavigate, useParams } from 'react-router';
 import { useMail } from '@/components/mail/use-mail';
 import { SidebarToggle } from '../ui/sidebar-toggle';
-import { clearBulkSelectionAtom } from './use-mail';
 import { loadGitHubEmojis } from '@/lib/emoji-data';
+import { clearBulkSelectionAtom } from './use-mail';
+import { log } from '@/lib/log';
 // Loaded lazily so the AI sidebar bundle (AIChat, livekit/elevenlabs, agents) is only
 // fetched when the mail surface renders it, not as part of the initial route chunk.
 // The AI chat embeds a compose editor, so the emoji dataset (static JSON asset) is
@@ -523,7 +523,7 @@ export function MailLayout() {
                     onClick={handleRefetchThreads}
                     variant="ghost"
                     size="icon"
-                    className="border-none bg-transparent hover:bg-accent/50 h-10 w-10 rounded-lg backdrop-blur-sm"
+                    className="hover:bg-accent/50 h-10 w-10 rounded-lg border-none bg-transparent backdrop-blur-sm"
                   >
                     <RefreshCcw className="text-muted-foreground h-4 w-4" />
                   </Button>

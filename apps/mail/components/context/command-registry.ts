@@ -11,8 +11,8 @@ import {
   User,
   Users,
 } from 'lucide-react';
-import { Pencil2 } from '../icons/icons';
 import type { ComponentType } from 'react';
+import { Pencil2 } from '../icons/icons';
 
 /**
  * Command registry — machine-readable, data-only surface of the command palette.
@@ -67,7 +67,7 @@ export interface CommandGroupData {
 export interface QuickSearchThread {
   id?: string;
   subject?: string;
-  from?: { name?: string; email?: string } | null;
+  sender?: { name?: string; email?: string } | null;
   snippet?: string;
 }
 

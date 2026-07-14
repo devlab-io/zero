@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { act } from 'react';
 
 // Tell React this is an act() environment so effects flush deterministically inside act().
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -22,6 +22,8 @@ const h = vi.hoisted(() => ({
   searchValue: { value: '', highlight: '', folder: 'inbox', isAISearching: false } as any,
   writes: [] as any[],
   cleared: 0,
+  queryInitial: { labels: 'customer', category: 'updates' } as Record<string, string | null>,
+  queryWrites: [] as { key: string; value: string | null }[],
 }));
 
 // Heavy dialog mocked. When h.holdDialog is set it SUSPENDS (throws a pending promise) so the
@@ -60,7 +62,20 @@ vi.mock('./command-palette-storage', () => ({
 vi.mock('nuqs', async () => {
   const React = await import('react');
   return {
-    useQueryState: (_key: string) => React.useState<string | null>(null),
+    useQueryState: (key: string) => {
+      const [value, setValue] = React.useState<string | null>(h.queryInitial[key] ?? null);
+      const writeValue = React.useCallback(
+        (next: string | null | ((previous: string | null) => string | null)) => {
+          setValue((previous) => {
+            const resolved = typeof next === 'function' ? next(previous) : next;
+            h.queryWrites.push({ key, value: resolved });
+            return resolved;
+          });
+        },
+        [key],
+      );
+      return [value, writeValue] as const;
+    },
   };
 });
 
@@ -105,6 +120,8 @@ beforeEach(() => {
   h.searchValue = { value: '', highlight: '', folder: 'inbox', isAISearching: false };
   h.writes = [];
   h.cleared = 0;
+  h.queryInitial = { labels: 'customer', category: 'updates' };
+  h.queryWrites = [];
   captured = null;
   localStorage.clear();
 });
@@ -155,7 +172,7 @@ describe('CommandPaletteProvider — split contracts (#44)', () => {
     expect(h.searchValue.value).toBe('from:x'); // reflected into the shared search value
   });
 
-  it('contract: clearAllFilters empties context, storage and search value', () => {
+  it('contract: clearAllFilters uses the real label/category setters and clears every source', () => {
     h.storedFilters = [{ id: 'f1', type: 'search', value: 'from:x', display: 'From X' }];
     render();
     expect(captured!.activeFilters).toHaveLength(1);
@@ -164,6 +181,8 @@ describe('CommandPaletteProvider — split contracts (#44)', () => {
     expect(captured!.activeFilters).toHaveLength(0);
     expect(h.cleared).toBeGreaterThan(0); // clearActiveFilters (localStorage) called
     expect(h.searchValue.value).toBe(''); // search reset
+    expect(h.queryWrites).toContainEqual({ key: 'labels', value: null });
+    expect(h.queryWrites).toContainEqual({ key: 'category', value: null });
   });
 
   it('contract: a route change clears active filters', () => {

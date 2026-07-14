@@ -3,6 +3,7 @@ import {
   threadRowPropsAreEqual,
   type ThreadRowProps,
 } from './mail-list-thread-projection';
+import { focusedIndexAtom, runThreadRemovalNavigation } from '@/hooks/use-mail-navigation';
 import { useOptimisticThreadState } from '@/components/mail/optimistic-thread-state';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { ThreadContextMenu } from '@/components/context/thread-context';
@@ -10,7 +11,6 @@ import { useOptimisticActions } from '@/hooks/use-optimistic-actions';
 import { highlightText } from '@/lib/email-utils-highlight.client';
 import { useMail, type Config } from '@/components/mail/use-mail';
 import { ThreadHoverActions } from './mail-list-thread-actions';
-import { focusedIndexAtom } from '@/hooks/use-mail-navigation';
 import { type ThreadDestination } from '@/lib/thread-actions';
 import { useThread, useThreads } from '@/hooks/use-threads';
 import { GroupPeople, PencilCompose } from '../icons/icons';
@@ -62,8 +62,8 @@ export const Thread = memo(function Thread({
   const getThreadData = isProjected ? projectedData : thread.data;
   const isGroupThread = isProjected ? false : thread.isGroupThread;
   const latestDraft = isProjected ? undefined : thread.latestDraft;
-  const [id, setThreadId] = useQueryState('threadId');
-  const [focusedIndex, setFocusedIndex] = useAtom(focusedIndexAtom);
+  const [, setThreadId] = useQueryState('threadId');
+  const [, setFocusedIndex] = useAtom(focusedIndexAtom);
 
   const { latestMessage, idToUse, cleanName } = useMemo(() => {
     const latestMessage = getThreadData?.latest;
@@ -163,28 +163,18 @@ export const Thread = memo(function Thread({
     [getThreadData, idToUse, displayImportant, optimisticToggleImportant],
   );
 
-  const handleNext = useCallback(
-    (id: string) => {
-      if (!id || !threads.length || focusedIndex === null) return setThreadId(null);
-      if (focusedIndex < threads.length - 1) {
-        const nextThread = threads[focusedIndex];
-        if (nextThread) {
-          setThreadId(nextThread.id);
-          // Don't clear activeReplyId - let ThreadDisplay handle Reply All auto-opening
-          setFocusedIndex(focusedIndex);
-        }
-      }
-    },
-    [threads, id, focusedIndex],
-  );
-
   const moveThreadTo = useCallback(
     async (destination: ThreadDestination) => {
       if (!idToUse) return;
-      handleNext(idToUse);
-      optimisticMoveThreadsTo([idToUse], folder ?? '', destination);
+      runThreadRemovalNavigation({
+        items: threads,
+        currentId: idToUse,
+        mutate: () => optimisticMoveThreadsTo([idToUse], folder ?? '', destination),
+        setThreadId,
+        setFocusedIndex,
+      });
     },
-    [idToUse, folder, optimisticMoveThreadsTo, handleNext],
+    [idToUse, threads, folder, optimisticMoveThreadsTo, setThreadId, setFocusedIndex],
   );
 
   const { labels: threadLabels } = useThreadLabels(
@@ -228,6 +218,7 @@ export const Thread = memo(function Thread({
           window.dispatchEvent(new CustomEvent('emailHover', { detail: { id: idToUse } }));
           if (hoverPrefetchTimer.current) clearTimeout(hoverPrefetchTimer.current);
           hoverPrefetchTimer.current = setTimeout(() => {
+            if (!idToUse) return;
             void queryClient.prefetchQuery(
               trpc.mail.get.queryOptions({ id: idToUse }, { staleTime: 1000 * 60 * 60 }),
             );

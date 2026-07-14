@@ -1,14 +1,57 @@
-
 import { isTypingOrModalTarget } from '@/lib/hotkeys/use-hotkey-utils';
-import { useCallback, useEffect, useRef } from 'react';
 import { useOptimisticActions } from './use-optimistic-actions';
+import { useCallback, useEffect, useRef } from 'react';
 import { useMail } from '@/components/mail/use-mail';
 import { useHotkeys } from 'react-hotkeys-hook';
 import { atom, useAtom } from 'jotai';
 import { useQueryState } from 'nuqs';
 
 export const focusedIndexAtom = atom<number | null>(null);
-export const mailNavigationCommandAtom = atom<null | 'next' | 'previous'>(null);
+
+export type ThreadRemovalDirection = 'next' | 'previous';
+
+export type ThreadRemovalNavigation = {
+  threadId: string | null;
+  focusedIndex: number | null;
+};
+
+type RunThreadRemovalNavigationOptions = {
+  items: readonly { id: string }[];
+  currentId: string;
+  direction?: ThreadRemovalDirection;
+  mutate: () => void;
+  setThreadId: (threadId: string | null) => void;
+  setFocusedIndex: (index: number | null) => void;
+};
+
+/**
+ * Resolve the target from the immutable pre-mutation list, run the mutation (which may clear the
+ * active thread internally), then restore URL identity and focus from the precomputed target.
+ */
+export function runThreadRemovalNavigation({
+  items,
+  currentId,
+  direction = 'next',
+  mutate,
+  setThreadId,
+  setFocusedIndex,
+}: RunThreadRemovalNavigationOptions): ThreadRemovalNavigation {
+  const currentIndex = items.findIndex((item) => item.id === currentId);
+  const targetIndex =
+    currentIndex < 0 ? -1 : direction === 'next' ? currentIndex + 1 : currentIndex - 1;
+  const target = targetIndex < 0 ? undefined : items[targetIndex];
+  const navigation = target
+    ? {
+        threadId: target.id,
+        focusedIndex: direction === 'next' ? currentIndex : currentIndex - 1,
+      }
+    : { threadId: null, focusedIndex: null };
+
+  mutate();
+  setThreadId(navigation.threadId);
+  setFocusedIndex(navigation.focusedIndex);
+  return navigation;
+}
 
 // The imperative `list` scope (registry rows flagged `ignore`) is bound below via
 // react-hotkeys-hook — not through the generic registry binder — because these keys need
@@ -27,7 +70,6 @@ export interface UseMailNavigationProps {
 export function useMailNavigation({ items, containerRef, onNavigate }: UseMailNavigationProps) {
   const [, setMail] = useMail();
   const [focusedIndex, setFocusedIndex] = useAtom(focusedIndexAtom);
-  const [command, setCommand] = useAtom(mailNavigationCommandAtom);
   const { optimisticMarkAsRead } = useOptimisticActions();
   const itemsRef = useRef(items);
   itemsRef.current = items;
@@ -100,72 +142,6 @@ export function useMailNavigation({ items, containerRef, onNavigate }: UseMailNa
     },
     [setMail, threadId],
   );
-
-  const navigateNext = useCallback(() => {
-    setFocusedIndex((prevIndex) => {
-      if (prevIndex === null) {
-        if (itemsRef.current.length > 0) {
-          const firstItem = itemsRef.current[0];
-          if (firstItem) {
-            onNavigateRef.current(firstItem.id);
-          }
-          scrollIntoView(0, 'auto');
-          return 0;
-        }
-        onNavigateRef.current(null);
-        return null;
-      }
-
-      if (prevIndex < itemsRef.current.length - 1) {
-        const newIndex = prevIndex;
-        const nextItem = itemsRef.current[prevIndex + 1];
-        if (nextItem) {
-          onNavigateRef.current(nextItem.id);
-        }
-        scrollIntoView(newIndex, 'auto');
-        return newIndex;
-      } else {
-        const newIndex = itemsRef.current.length > 1 ? prevIndex - 1 : null;
-
-        if (newIndex !== null) {
-          const nextItem = itemsRef.current[newIndex];
-          if (nextItem) {
-            onNavigateRef.current(nextItem.id);
-          }
-          scrollIntoView(newIndex, 'auto');
-          return newIndex;
-        } else {
-          onNavigateRef.current(null);
-          return null;
-        }
-      }
-    });
-  }, [onNavigateRef, scrollIntoView, setFocusedIndex]);
-
-  const navigatePrevious = useCallback(() => {
-    setFocusedIndex((prevIndex) => {
-      const { length } = itemsRef.current;
-      if (length === 0) {
-        onNavigateRef.current(null);
-        return null;
-      }
-      const newIndex = prevIndex === null ? 0 : Math.max(0, prevIndex - 1);
-      const target = itemsRef.current[newIndex];
-      if (target) onNavigateRef.current(target.id);
-      scrollIntoView(newIndex, 'auto');
-      return newIndex;
-    });
-  }, [onNavigateRef, scrollIntoView, setFocusedIndex]);
-
-  useEffect(() => {
-    if (command === 'next') {
-      navigateNext();
-      setCommand(null);
-    } else if (command === 'previous') {
-      navigatePrevious();
-      setCommand(null);
-    }
-  }, [command, navigateNext, navigatePrevious, setCommand]);
 
   const getHoveredIndex = useCallback(() => {
     if (!hoveredMailRef.current) return -1;
@@ -279,7 +255,10 @@ export function useMailNavigation({ items, containerRef, onNavigate }: UseMailNa
   useHotkeys('k', handleArrowUp, { enabled: !isCommandPaletteOpen });
   useHotkeys('Enter', handleEnter, { preventDefault: true, enabled: !isCommandPaletteOpen });
   useHotkeys('Escape', handleEscape, { preventDefault: true, enabled: !isCommandPaletteOpen });
-  useHotkeys('ArrowLeft', handleCloseLeft, { preventDefault: true, enabled: !isCommandPaletteOpen });
+  useHotkeys('ArrowLeft', handleCloseLeft, {
+    preventDefault: true,
+    enabled: !isCommandPaletteOpen,
+  });
   useHotkeys('space', handlePageDown, { preventDefault: true, enabled: !isCommandPaletteOpen });
   useHotkeys('shift+space', handlePageUp, { preventDefault: true, enabled: !isCommandPaletteOpen });
 

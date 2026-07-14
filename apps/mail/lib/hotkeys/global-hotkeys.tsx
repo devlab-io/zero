@@ -1,15 +1,15 @@
-import { useCommandPalette } from '@/components/context/command-palette-context';
-import { useSidebar } from '@/components/context/sidebar-context';
-import { useOptimisticActions } from '@/hooks/use-optimistic-actions';
-import { GLOBAL_HANDLED_ACTIONS } from './handler-manifest';
-import { enhancedKeyboardShortcuts } from '@/config/shortcuts';
-import { useShortcuts } from './use-hotkey-utils';
 import { ContextualShortcutSheet } from '@/app/(routes)/settings/shortcuts/contextual-shortcut-sheet';
+import { useCommandPalette } from '@/components/context/command-palette-context';
+import { useOptimisticActions } from '@/hooks/use-optimistic-actions';
+import { useSidebar } from '@/components/context/sidebar-context';
+import { enhancedKeyboardShortcuts } from '@/config/shortcuts';
+import { GLOBAL_HANDLED_ACTIONS } from './handler-manifest';
+import { useHotkeysContext } from 'react-hotkeys-hook';
+import { useShortcuts } from './use-hotkey-utils';
 import { useNavigate } from 'react-router';
 import { useTheme } from 'next-themes';
 import { useQueryState } from 'nuqs';
 import { useState } from 'react';
-import { useHotkeysContext } from 'react-hotkeys-hook';
 
 export function GlobalHotkeys() {
   const navigate = useNavigate();
@@ -18,6 +18,7 @@ export function GlobalHotkeys() {
   const [, setComposeOpen] = useQueryState('isComposeOpen');
   const { clearAllFilters } = useCommandPalette();
   const [, setIsCommandPaletteOpen] = useQueryState('isCommandPaletteOpen');
+  const [, setIsLexicalSearchOpen] = useQueryState('isLexicalSearchOpen');
   const { undoLastAction } = useOptimisticActions();
   const { activeScopes } = useHotkeysContext();
   const [isShortcutHelpOpen, setShortcutHelpOpen] = useState(false);
@@ -25,9 +26,12 @@ export function GlobalHotkeys() {
 
   const handlers: Record<(typeof GLOBAL_HANDLED_ACTIONS)[number], () => void> = {
     newEmail: () => setComposeOpen('true'),
-    // `/` opens the command palette — Zero's fast lexical search surface (its dialog
-    // auto-focuses the search input). There is no standalone /mail/search route.
-    search: () => setIsCommandPaletteOpen('true'),
+    // `/` stays on the certified registry path. Set the target view first so the palette's
+    // initial render mounts the lexical input directly and its autoFocus is observable.
+    search: () => {
+      setIsLexicalSearchOpen('true');
+      setIsCommandPaletteOpen('true');
+    },
     commandPalette: () => setIsCommandPaletteOpen('true'),
     helpWithShortcuts: () => setShortcutHelpOpen(true),
     goToSettings: () => navigate('/settings'),
@@ -43,5 +47,11 @@ export function GlobalHotkeys() {
 
   useShortcuts(globalShortcuts, handlers, { scope });
 
-  return <ContextualShortcutSheet open={isShortcutHelpOpen} onOpenChange={setShortcutHelpOpen} activeScopes={activeScopes} />;
+  return (
+    <ContextualShortcutSheet
+      open={isShortcutHelpOpen}
+      onOpenChange={setShortcutHelpOpen}
+      activeScopes={activeScopes}
+    />
+  );
 }

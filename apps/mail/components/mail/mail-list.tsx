@@ -1,20 +1,22 @@
-import { memo, useCallback, useEffect, useMemo, useRef } from 'react';
 import { focusedIndexAtom, useMailNavigation } from '@/hooks/use-mail-navigation';
-import { useMailListData } from '@/hooks/use-mail-list-data';
-import { useMailSelection } from '@/hooks/use-mail-selection';
+import useSearchLabels, { hasActiveMailFilters } from '@/hooks/use-labels-search';
+import { useCommandPalette } from '@/components/context/command-palette-context';
 import { useOptimisticActions } from '@/hooks/use-optimistic-actions';
+import { memo, useCallback, useEffect, useMemo, useRef } from 'react';
+import { useMailSelection } from '@/hooks/use-mail-selection';
+import { useMailListData } from '@/hooks/use-mail-list-data';
+import { selectMailListState } from '@/lib/mail-list-state';
 import { useSearchValue } from '@/hooks/use-search-value';
 import { EmptyStateIcon } from '../icons/empty-state-svg';
-import type { ParsedMessage } from '@/types';
-import { useSettings } from '@/hooks/use-settings';
-import { selectMailListState } from '@/lib/mail-list-state';
 import { useIsOffline } from '@/hooks/use-online-status';
+import { useSettings } from '@/hooks/use-settings';
 import { VList, type VListHandle } from 'virtua';
-import { RefreshCcw } from 'lucide-react';
-import { m } from '@/paraglide/messages';
-import { cn, FOLDERS } from '@/lib/utils';
+import type { ParsedMessage } from '@/types';
 import { Thread } from './mail-list-thread';
 import { Draft } from './mail-list-draft';
+import { RefreshCcw } from 'lucide-react';
+import { cn, FOLDERS } from '@/lib/utils';
+import { m } from '@/paraglide/messages';
 import { useParams } from 'react-router';
 import { useQueryState } from 'nuqs';
 import { useAtom } from 'jotai';
@@ -31,6 +33,9 @@ export const MailList = memo(
     const [, setThreadId] = useQueryState('threadId');
     const [, setDraftId] = useQueryState('draftId');
     const [searchValue, setSearchValue] = useSearchValue();
+    const { activeFilters, clearAllFilters } = useCommandPalette();
+    const { labels } = useSearchLabels();
+    const [category] = useQueryState('category');
 
     const {
       items,
@@ -121,7 +126,12 @@ export const MailList = memo(
       ],
     );
 
-    const isFiltering = searchValue.value.trim().length > 0;
+    const isFiltering = hasActiveMailFilters({
+      searchText: searchValue.value,
+      labels,
+      category,
+      activeFilterCount: activeFilters.length,
+    });
 
     useEffect(() => {
       if (isFiltering && !isLoading) {
@@ -133,11 +143,7 @@ export const MailList = memo(
     }, [isLoading, isFiltering, setSearchValue]);
 
     const clearFilters = () => {
-      setSearchValue({
-        value: '',
-        highlight: '',
-        folder: '',
-      });
+      clearAllFilters();
     };
 
     const filteredItems = useMemo(() => items.filter((item) => item.id), [items]);
@@ -165,7 +171,8 @@ export const MailList = memo(
               index={index}
               onClick={handleMailClick}
             />
-            {index === filteredItems.length - 1 && (isFetchingNextPage || isFetchingThreadBodies) ? (
+            {index === filteredItems.length - 1 &&
+            (isFetchingNextPage || isFetchingThreadBodies) ? (
               <div className="flex w-full justify-center py-4">
                 <div className="h-4 w-4 animate-spin rounded-full border-2 border-neutral-900 border-t-transparent dark:border-white dark:border-t-transparent" />
               </div>
@@ -230,12 +237,26 @@ export const MailList = memo(
                 <div className="flex flex-col items-center justify-center gap-2 text-center">
                   <EmptyStateIcon width={200} height={200} />
                   <div className="mt-5">
-                    <p className="text-lg">{m['states.mailList.emptyTitle']()}</p>
+                    <p className="text-lg">
+                      {isFiltering
+                        ? 'No messages match these filters'
+                        : m['states.mailList.emptyTitle']()}
+                    </p>
                     <p className="text-md text-muted-foreground dark:text-white/50">
-                      {m['states.mailList.emptyDescription']()}{' '}
-                      <button type="button" className="underline cursor-pointer" onClick={clearFilters}>
-                        {m['states.mailList.clearFilters']()}
-                      </button>
+                      {isFiltering ? (
+                        <>
+                          Try another search or{' '}
+                          <button
+                            type="button"
+                            className="cursor-pointer underline"
+                            onClick={clearFilters}
+                          >
+                            {m['states.mailList.clearFilters']()}
+                          </button>
+                        </>
+                      ) : (
+                        m['states.mailList.emptyDescription']()
+                      )}
                     </p>
                   </div>
                 </div>

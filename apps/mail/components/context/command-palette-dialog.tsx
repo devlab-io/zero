@@ -1,10 +1,19 @@
-import { log } from '@/lib/log';
-import { Clock, Loader2, Mail, Paperclip, Star } from 'lucide-react';
+import {
+  PALETTE_COMMANDS,
+  type ActiveFilter,
+  type CommandGroupData,
+  type CommandItem,
+  type CommandView,
+  type PaletteCommandTarget,
+} from './command-registry';
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
-import { CommandDialog } from '@/components/ui/command';
+import { getRecentSearches, saveRecentSearch } from './command-palette-storage';
 import { getMainSearchTerm, parseNaturalLanguageSearch } from '@/lib/utils';
 import { DialogDescription, DialogTitle } from '@/components/ui/dialog';
+import { type CommandPaletteViewProps } from './command-palette-views';
+import { Clock, Loader2, Mail, Paperclip, Star } from 'lucide-react';
 import { useSearchValue } from '@/hooks/use-search-value';
+import { CommandDialog } from '@/components/ui/command';
 import { useLocation, useNavigate } from 'react-router';
 import { navigationConfig } from '@/config/navigation';
 import { useTRPC } from '@/providers/query-provider';
@@ -15,17 +24,8 @@ import { format, subDays } from 'date-fns';
 import { VisuallyHidden } from 'radix-ui';
 import { m } from '@/paraglide/messages';
 import { useQueryState } from 'nuqs';
+import { log } from '@/lib/log';
 import { toast } from 'sonner';
-import {
-  PALETTE_COMMANDS,
-  type ActiveFilter,
-  type CommandGroupData,
-  type CommandItem,
-  type CommandView,
-  type PaletteCommandTarget,
-} from './command-registry';
-import { getRecentSearches, saveRecentSearch } from './command-palette-storage';
-import { type CommandPaletteViewProps } from './command-palette-views';
 
 // #44 (gate A8): the heavy command-palette body — its state, command/search logic, cmdk
 // CommandDialog and views (with the react-day-picker calendar) — lives here and is dynamic-imported
@@ -66,7 +66,10 @@ export function CommandPaletteDialog({
   clearAllFilters,
 }: CommandPaletteDialogProps) {
   const [, setIsComposeOpen] = useQueryState('isComposeOpen');
-  const [currentView, setCurrentView] = useState<CommandView>('main');
+  const [isLexicalSearchOpen, setIsLexicalSearchOpen] = useQueryState('isLexicalSearchOpen');
+  const [currentView, setCurrentView] = useState<CommandView>(
+    isLexicalSearchOpen ? 'search' : 'main',
+  );
   const [selectedDateFilter, setSelectedDateFilter] = useState<string | null>(null);
   const [selectedDate, setSelectedDate] = useState<Date | undefined>(undefined);
   const [dateRangeStart, setDateRangeStart] = useState<Date | undefined>(undefined);
@@ -329,7 +332,15 @@ export function CommandPaletteDialog({
         setIsProcessing(false);
       }
     },
-    [activeFilters, searchValue.folder, isProcessing, addFilter, generateSearchQuery, setOpen, setSearchValue],
+    [
+      activeFilters,
+      searchValue.folder,
+      isProcessing,
+      addFilter,
+      generateSearchQuery,
+      setOpen,
+      setSearchValue,
+    ],
   );
 
   const quickSearchResults = useMemo(() => {
@@ -348,14 +359,14 @@ export function CommandPaletteDialog({
 
             const snippet = thread.snippet?.toString() || '';
             const subject = thread.subject?.toString() || '';
-            const fromName = thread.from?.name?.toString() || '';
-            const fromEmail = thread.from?.email?.toString() || '';
+            const senderName = thread.sender?.name?.toString() || '';
+            const senderEmail = thread.sender?.email?.toString() || '';
 
             return (
               snippet.toLowerCase().includes(query) ||
               subject.toLowerCase().includes(query) ||
-              fromName.toLowerCase().includes(query) ||
-              fromEmail.toLowerCase().includes(query)
+              senderName.toLowerCase().includes(query) ||
+              senderEmail.toLowerCase().includes(query)
             );
           } catch (err) {
             log.error('Error filtering thread:', err);
@@ -368,6 +379,13 @@ export function CommandPaletteDialog({
       return [];
     }
   }, [searchQuery, threads]);
+
+  useEffect(() => {
+    if (isLexicalSearchOpen) {
+      setCurrentView('search');
+      setIsLexicalSearchOpen(null);
+    }
+  }, [isLexicalSearchOpen, setIsLexicalSearchOpen]);
 
   const allCommands = useMemo<CommandGroupData[]>(() => {
     const searchCommands: CommandItem[] = [];
