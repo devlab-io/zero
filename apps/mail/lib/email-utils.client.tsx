@@ -1,3 +1,4 @@
+import { log } from '@/lib/log';
 import { Html, Head, Body, Container, Section, Column, Row } from '@react-email/components';
 import { getListUnsubscribeAction } from '@/lib/email-utils';
 import { trpcClient } from '@/providers/query-provider';
@@ -56,7 +57,7 @@ export const handleUnsubscribe = async ({ emailData }: { emailData: ParsedMessag
       }
     }
   } catch (error) {
-    console.warn('Error unsubscribing', emailData);
+    log.warn('Error unsubscribing', emailData);
     throw error;
   }
 };
@@ -86,7 +87,7 @@ export const highlightText = (text: string, highlight: string) => {
       );
     });
   } catch (error) {
-    console.warn('Error highlighting text:', error);
+    log.warn('Error highlighting text:', error);
     return text;
   }
 };
@@ -238,22 +239,16 @@ export const addStyleTags = (html: string) => {
 };
 
 export const template = async (html: string, imagesEnabled: boolean = false) => {
-  console.time('[template] template');
   if (typeof DOMParser === 'undefined') return html;
   const nonce = generateNonce();
   let processedHtml = forceExternalLinks(html);
 
   if (imagesEnabled) {
-    console.time('[template] proxyImageUrls');
     processedHtml = proxyImageUrls(processedHtml);
-    console.timeEnd('[template] proxyImageUrls');
   }
 
-  console.time('[template] renderToString');
   const emailHtml = renderToString(
     <EmailTemplate content={processedHtml} imagesEnabled={imagesEnabled} nonce={nonce} />,
   );
-  console.timeEnd('[template] renderToString');
-  console.timeEnd('[template] template');
   return emailHtml;
 };

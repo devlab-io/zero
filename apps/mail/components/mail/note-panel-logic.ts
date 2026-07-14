@@ -1,3 +1,4 @@
+import { log } from '@/lib/log';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   type DragEndEvent,
@@ -140,7 +141,7 @@ export function useNotesPanel(threadId: string) {
       await deleteNote({ noteId });
       await refetch();
     } catch (error) {
-      console.error('Failed to delete note:', error);
+      log.error('Failed to delete note:', error);
       throw error;
     }
   };

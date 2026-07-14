@@ -1,3 +1,4 @@
+import { log } from '@/lib/log';
 import {
   PersistQueryClientProvider,
   type PersistedClient,
@@ -33,7 +34,7 @@ export const makeQueryClient = (connectionId: string | null) =>
     queryCache: new QueryCache({
       onError: (err, { meta }) => {
         if (meta && meta.noGlobalError === true) return;
-        if (meta && typeof meta.customError === 'string') console.error(meta.customError);
+        if (meta && typeof meta.customError === 'string') log.error(meta.customError);
         else if (
           err.message === 'Required scopes missing' ||
           err.message.includes('Invalid connection')
@@ -46,7 +47,7 @@ export const makeQueryClient = (connectionId: string | null) =>
               },
             },
           });
-        } else console.error(err.message || 'Something went wrong');
+        } else log.error(err.message || 'Something went wrong');
       },
     }),
     defaultOptions: {
@@ -62,7 +63,7 @@ export const makeQueryClient = (connectionId: string | null) =>
       },
       mutations: {
         // No `retry` here on purpose: non-idempotent mutations must not auto-retry.
-        onError: (err) => console.error(err.message),
+        onError: (err) => log.error(err.message),
       },
     },
   });

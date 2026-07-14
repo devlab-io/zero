@@ -1,3 +1,4 @@
+import { log } from '@/lib/log';
 import {
   DropdownMenu,
   DropdownMenuItem,
@@ -283,7 +284,7 @@ export default function CategoriesSettingsPage() {
       setHasUnsavedChanges(false);
       toast.success(m['pages.settings.categories.saved']());
     } catch (e) {
-      console.error(e);
+      log.error(e);
       toast.error(m['pages.settings.categories.failedToSave']());
     }
   };
@@ -332,7 +333,7 @@ export default function CategoriesSettingsPage() {
       setHasUnsavedChanges(false);
       toast.success(m['pages.settings.categories.resetToDefaults']());
     } catch (e) {
-      console.error(e);
+      log.error(e);
       toast.error(m['pages.settings.categories.failedToReset']());
     }
   };

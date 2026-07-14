@@ -1,3 +1,4 @@
+import { log } from '@/lib/log';
 import { useState, useEffect, useCallback } from 'react';
 import { useQueryState } from 'nuqs';
 
@@ -45,11 +46,11 @@ export function useAIFullScreen() {
         // Use setTimeout to ensure the state update happens in the next tick
         // This helps prevent the need for double-clicking
         setTimeout(() => {
-          setIsFullScreenQuery(null).catch(console.error);
+          setIsFullScreenQuery(null).catch(log.error);
         }, 0);
       } else {
         // For entering fullscreen, we can use the normal flow
-        setIsFullScreenQuery('true').catch(console.error);
+        setIsFullScreenQuery('true').catch(log.error);
 
         // Save to localStorage for persistence across sessions
         if (typeof window !== 'undefined') {
@@ -130,10 +131,10 @@ export function useAISidebar() {
           localStorage.removeItem('ai-sidebar-open');
         }
         setTimeout(() => {
-          setOpenQuery(null).catch(console.error);
+          setOpenQuery(null).catch(log.error);
         }, 0);
       } else {
-        setOpenQuery('true').catch(console.error);
+        setOpenQuery('true').catch(log.error);
         if (typeof window !== 'undefined') {
           localStorage.setItem('ai-sidebar-open', 'true');
         }

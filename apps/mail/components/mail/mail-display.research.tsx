@@ -1,3 +1,4 @@
+import { log } from '@/lib/log';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../ui/dialog';
 import { useCallback, useEffect, useState } from 'react';
 import { useTRPC } from '@/providers/query-provider';
@@ -114,7 +115,7 @@ export const MoreAboutPerson = ({
       if (!sources) return text;
       const sourcesRegex = /\[(\d+)\]/g;
       return text.replaceAll(sourcesRegex, (match, p1) => {
-        console.log('p1', p1);
+        log.debug('p1', p1);
         const source = findSource(p1);
         return source ? `SOURCE HERE` : match;
       });

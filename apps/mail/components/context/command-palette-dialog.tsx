@@ -1,3 +1,4 @@
+import { log } from '@/lib/log';
 import { Clock, Loader2, Mail, Paperclip, Star } from 'lucide-react';
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { CommandDialog } from '@/components/ui/command';
@@ -184,7 +185,7 @@ export function CommandPaletteDialog({
         isAISearching: isNaturalLanguage,
       });
 
-      console.warn('Search applied', {
+      log.warn('Search applied', {
         description: finalQuery,
       });
     },
@@ -316,13 +317,13 @@ export function CommandPaletteDialog({
           isLoading: true,
         });
 
-        console.warn('Search applied', {
+        log.warn('Search applied', {
           description: finalQuery,
         });
 
         setOpen(null);
       } catch (error) {
-        console.error('Search error:', error);
+        log.error('Search error:', error);
         toast.error('Failed to process search');
       } finally {
         setIsProcessing(false);
@@ -357,13 +358,13 @@ export function CommandPaletteDialog({
               fromEmail.toLowerCase().includes(query)
             );
           } catch (err) {
-            console.error('Error filtering thread:', err);
+            log.error('Error filtering thread:', err);
             return false;
           }
         })
         .slice(0, 5);
     } catch (error) {
-      console.error('Error processing search results:', error);
+      log.error('Error processing search results:', error);
       return [];
     }
   }, [searchQuery, threads]);

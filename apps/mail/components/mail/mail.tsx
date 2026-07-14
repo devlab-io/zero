@@ -1,3 +1,4 @@
+import { log } from '@/lib/log';
 import {
   DropdownMenu,
   DropdownMenuItem,
@@ -390,7 +391,7 @@ export function MailLayout() {
         // This ensures we don't keep the email content in the URL
         navigator.registerProtocolHandler('mailto', `/api/mailto-handler?mailto=%s`);
       } catch (error) {
-        console.error('Failed to register protocol handler:', error);
+        log.error('Failed to register protocol handler:', error);
       }
     }
   }, []);

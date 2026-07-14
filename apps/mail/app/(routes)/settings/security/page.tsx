@@ -37,7 +37,6 @@ export default function SecurityPage() {
 
     // TODO: Save settings in user's account
     setTimeout(() => {
-      console.log(values);
       setIsSaving(false);
     }, 1000);
   }

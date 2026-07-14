@@ -37,7 +37,6 @@ export const useShortcutCache = () => {
   //       // Update cache only after successful server update
   //       await mutate(newShortcuts, false);
   //     } catch (error) {
-  //       console.error('Error updating shortcuts:', error);
   //       throw error;
   //     }
   //   },

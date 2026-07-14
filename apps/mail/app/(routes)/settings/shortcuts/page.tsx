@@ -90,7 +90,6 @@ export default function ShortcutsPage() {
         //           await Promise.all(keyboardShortcuts.map((shortcut) => updateShortcut(shortcut)));
         //           toast.success('Shortcuts reset to defaults');
         //         } catch (error) {
-        //           console.error('Failed to reset shortcuts:', error);
         //           toast.error('Failed to reset shortcuts');
         //         }
         //       }}
@@ -175,7 +174,6 @@ function ShortcutItem({ children, keys }: { children: ReactNode; keys: string[] 
   //     await updateShortcut(updatedShortcut);
   //     toast.success('Shortcut saved successfully');
   //   } catch (error) {
-  //     console.error('Failed to save shortcut:', error);
   //     toast.error('Failed to save shortcut');
   //   }
   // };

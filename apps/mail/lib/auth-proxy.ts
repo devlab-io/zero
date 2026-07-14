@@ -1,3 +1,4 @@
+import { log } from '@/lib/log';
 import { createAuthClient } from 'better-auth/client';
 
 const authClient = createAuthClient({
@@ -15,7 +16,7 @@ export const authProxy = {
         fetchOptions: { headers, credentials: 'include' },
       });
       if (session.error) {
-        console.error(`Failed to get session: ${session.error}`, session);
+        log.error(`Failed to get session: ${session.error}`, session);
         return null;
       }
       return session.data;

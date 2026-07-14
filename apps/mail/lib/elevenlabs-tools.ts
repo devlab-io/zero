@@ -1,3 +1,4 @@
+import { log } from '@/lib/log';
 import { trpcClient } from '@/providers/query-provider';
 
 /**
@@ -159,7 +160,7 @@ export const toolExecutors = {
     }
   },
   createLabel: async (params: { name: string; backgroundColor: string; textColor: string }) => {
-    console.log('params:', params);
+    log.debug('params:', params);
 
     try {
       await trpcClient.labels.create.mutate({
@@ -246,7 +247,7 @@ export const toolExecutors = {
     }
   },
   webSearch: async (params: { query: string }) => {
-    console.log(params);
+    log.debug(params);
     const threadId = getCurrentThreadId();
     if (!threadId) {
       return {
@@ -355,7 +356,7 @@ export const toolExecutors = {
           },
         };
       } catch (error) {
-        console.error(error);
+        log.error(error);
         return {
           success: false,
           error: 'Failed to fetch email for summarization',

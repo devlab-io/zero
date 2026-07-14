@@ -1,3 +1,4 @@
+import { log } from '@/lib/log';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { defaultUserSettings } from '@zero/server/schemas';
@@ -172,7 +173,7 @@ export function MailContent({ id, html, senderEmail }: MailContentProps) {
               try {
                 await trustSender();
               } catch (error) {
-                console.error('Error trusting sender:', error);
+                log.error('Error trusting sender:', error);
               }
             }}
             className="ml-2 cursor-pointer underline"

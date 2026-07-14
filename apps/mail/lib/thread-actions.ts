@@ -1,3 +1,4 @@
+import { log } from '@/lib/log';
 import { trpcClient } from '@/providers/query-provider';
 import { LABELS, FOLDERS } from '@/lib/utils';
 
@@ -94,7 +95,7 @@ export async function moveThreadsTo({ threadIds, currentFolder, destination }: M
     }
 
     if (!addLabel && !removeLabel) {
-      console.warn('No labels to modify, skipping API call');
+      log.warn('No labels to modify, skipping API call');
       return;
     }
 
@@ -104,7 +105,7 @@ export async function moveThreadsTo({ threadIds, currentFolder, destination }: M
       removeLabels: removeLabel ? [removeLabel] : [],
     });
   } catch (error) {
-    console.error(`Error moving thread(s):`, error);
+    log.error(`Error moving thread(s):`, error);
     throw error;
   }
 }

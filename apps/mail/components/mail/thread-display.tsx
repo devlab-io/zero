@@ -121,7 +121,6 @@ export function ThreadDisplay() {
     if (!id || !items.length || focusedIndex === null) return setThreadId(null);
     if (focusedIndex < items.length - 1) {
       const nextIndex = Math.max(1, focusedIndex + 1);
-      //   console.log('nextIndex', nextIndex);
 
       const nextThread = items[nextIndex];
       if (nextThread) {

@@ -1,3 +1,4 @@
+import { log } from '@/lib/log';
 import { SidebarGroup, SidebarMenu, SidebarMenuButton, SidebarMenuItem } from './sidebar';
 import { Collapsible, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { useCommandPalette } from '../context/command-palette-context.jsx';
@@ -180,7 +181,7 @@ export function NavMain({ items }: NavMainProps) {
       
       await promise;
     } catch (error) {
-      console.error('Failed to create label:', error);
+      log.error('Failed to create label:', error);
     }
   };
 

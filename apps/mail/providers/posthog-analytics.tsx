@@ -1,3 +1,4 @@
+import { log } from '@/lib/log';
 import { useSession } from '@/lib/auth-client';
 import { useEffect } from 'react';
 
@@ -22,7 +23,7 @@ export function PostHogAnalytics() {
           capture_pageview: true,
         });
       } catch (error) {
-        console.error('Error initializing PostHog:', error);
+        log.error('Error initializing PostHog:', error);
       }
     });
   }, []);

@@ -1,3 +1,4 @@
+import { log } from '@/lib/log';
 import { m } from '@/paraglide/messages';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { ImageCompressionSettings } from './image-compression-settings';
@@ -122,7 +123,7 @@ export function ComposerAttachments({
                                 try {
                                   await onRemove(index);
                                 } catch (error) {
-                                  console.error('Failed to remove attachment:', error);
+                                  log.error('Failed to remove attachment:', error);
                                   toast.error(m['pages.createEmail.failedToRemoveAttachment']());
                                 }
                               }}

@@ -1,3 +1,4 @@
+import { log } from '@/lib/log';
 import React, {
   createContext,
   forwardRef,
@@ -377,7 +378,7 @@ const CollapseButton = forwardRef<
   }, []);
 
   useEffect(() => {
-    console.log(expandAll);
+    log.debug(expandAll);
     if (expandAll) {
       expendAllTree(elements);
     }

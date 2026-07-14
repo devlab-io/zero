@@ -1,3 +1,4 @@
+import { log } from '@/lib/log';
 import type { ActiveFilter } from './command-registry';
 
 /**
@@ -24,7 +25,7 @@ export const saveRecentSearch = (search: string) => {
     const updated = [search, ...searches.filter((s) => s !== search)].slice(0, 10);
     localStorage.setItem(RECENT_SEARCHES_KEY, JSON.stringify(updated));
   } catch (error) {
-    console.error('Failed to save recent search:', error);
+    log.error('Failed to save recent search:', error);
   }
 };
 
@@ -36,7 +37,7 @@ export const readActiveFilters = (): ActiveFilter[] | null => {
     const parsed = JSON.parse(saved);
     return Array.isArray(parsed) ? (parsed as ActiveFilter[]) : null;
   } catch (error) {
-    console.error('Failed to load active filters:', error);
+    log.error('Failed to load active filters:', error);
     return null;
   }
 };
@@ -45,7 +46,7 @@ export const writeActiveFilters = (filters: ActiveFilter[]) => {
   try {
     localStorage.setItem(ACTIVE_FILTERS_KEY, JSON.stringify(filters));
   } catch (error) {
-    console.error('Failed to save filters:', error);
+    log.error('Failed to save filters:', error);
   }
 };
 
@@ -53,6 +54,6 @@ export const clearActiveFilters = () => {
   try {
     localStorage.removeItem(ACTIVE_FILTERS_KEY);
   } catch (error) {
-    console.error('Failed to clear filters:', error);
+    log.error('Failed to clear filters:', error);
   }
 };

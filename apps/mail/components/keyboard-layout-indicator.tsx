@@ -3,6 +3,7 @@
  * Shows the current detected keyboard layout and confidence
  */
 
+import { log } from '@/lib/log';
 import { keyboardLayoutMapper, type LayoutDetectionResult } from '@/utils/keyboard-layout-map';
 import { KeyboardIcon } from 'lucide-react';
 import { useEffect, useState } from 'react';
@@ -40,7 +41,7 @@ export function useKeyboardLayout() {
     const updateLayoutInfo = () => {
       const info = keyboardLayoutMapper.getDetectedLayout();
       setLayoutInfo(info);
-      console.log('Detected keyboard layout:', info);
+      log.debug('Detected keyboard layout:', info);
     };
 
     updateLayoutInfo();
@@ -48,7 +49,7 @@ export function useKeyboardLayout() {
     const handleFocus = () => {
       setTimeout(() => {
         updateLayoutInfo();
-        console.log('Window focused, updated keyboard layout');
+        log.debug('Window focused, updated keyboard layout');
       }, 100);
     };
 

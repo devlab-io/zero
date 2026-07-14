@@ -1,3 +1,4 @@
+import { log } from '@/lib/log';
 import type { ParsedMessage } from '@/types';
 import { cleanHtml } from '@/lib/email-utils';
 import { format } from 'date-fns';
@@ -200,7 +201,7 @@ export function printThread(emailData: ParsedThreadData) {
               }
             }, 1000);
           } catch (error) {
-            console.error('Error during print:', error);
+            log.error('Error during print:', error);
             // Clean up on error
             if (printFrame && printFrame.parentNode) {
               document.body.removeChild(printFrame);
@@ -209,7 +210,7 @@ export function printThread(emailData: ParsedThreadData) {
         }, 500);
       };
     } catch (error) {
-      console.error('Error printing thread:', error);
+      log.error('Error printing thread:', error);
       toast.error('Failed to print thread. Please try again.');
     }
   };

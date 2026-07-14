@@ -1,3 +1,4 @@
+import { log } from '@/lib/log';
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip';
 import { m } from '@/paraglide/messages';
 import { ArrowsPointingIn, PanelLeftOpen, Phone } from '../icons/icons';
@@ -224,7 +225,7 @@ function AISidebar({ className }: AISidebarProps) {
           setDoState({ isSyncing, syncingFolders, storageSize, counts: counts ?? [], shards });
         }
       } catch (error) {
-        console.error('error parsing party message', error, { rawMessage: message.data });
+        log.error('error parsing party message', error, { rawMessage: message.data });
       }
     },
     [queryClient, trpc, labels, searchValue.value, setDoState],
@@ -234,7 +235,7 @@ function AISidebar({ className }: AISidebarProps) {
     agent: 'ZeroAgent',
     name: activeConnection?.id ? String(activeConnection.id) : 'general',
     host: `${import.meta.env.VITE_PUBLIC_BACKEND_URL}`,
-    onError: (e) => console.log(e),
+    onError: (e) => log.error(e),
     onMessage,
   });
 
@@ -250,7 +251,7 @@ function AISidebar({ className }: AISidebarProps) {
       currentFilter: searchValue.value ?? undefined,
     },
     onError(error) {
-      console.error('Error in useChat', error);
+      log.error('Error in useChat', error);
       posthog.capture('AI Chat Error', {
         error: error.message,
         threadId: threadId ?? undefined,
@@ -273,7 +274,7 @@ function AISidebar({ className }: AISidebarProps) {
       }
     },
     async onToolCall({ toolCall }) {
-      console.warn('toolCall', toolCall);
+      log.warn('toolCall', toolCall);
       posthog.capture('AI Chat Tool Call', {
         toolCall,
         threadId: threadId ?? undefined,
@@ -295,7 +296,7 @@ function AISidebar({ className }: AISidebarProps) {
         case Tools.MarkThreadsUnread:
         case Tools.ModifyLabels:
         case Tools.BulkDelete:
-          console.log('modifyLabels', toolCall.args);
+          log.debug('modifyLabels', toolCall.args);
           await refetchLabels();
           await Promise.all(
             (toolCall.args as { threadIds: string[] }).threadIds.map((id) =>

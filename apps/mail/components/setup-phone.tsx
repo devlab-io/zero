@@ -1,3 +1,4 @@
+import { log } from '@/lib/log';
 import {
   Dialog,
   DialogContent,
@@ -47,7 +48,7 @@ export const SetupInboxDialog = () => {
       const maskedPart = '*'.repeat(Math.max(0, phone.length - 4));
       return `${maskedPart}${lastFour}`;
     } catch (error) {
-      console.error('Error masking phone number:', error);
+      log.error('Error masking phone number:', error);
       return phone;
     }
   };
@@ -78,7 +79,7 @@ export const SetupInboxDialog = () => {
           phoneNumber: data.phoneNumber,
           code: data.otp,
         });
-        console.log('isVerified', isVerified);
+        log.debug('isVerified', isVerified);
 
         if (isVerified.error) {
           toast.error(m['common.setupPhone.invalidCode']());
@@ -90,7 +91,7 @@ export const SetupInboxDialog = () => {
         toast.error(m['common.setupPhone.enterValidOtp']());
       }
     } catch (error) {
-      console.error(error);
+      log.error(error);
       toast.error(
         showOtpInput
           ? m['common.setupPhone.verifyFailed']()

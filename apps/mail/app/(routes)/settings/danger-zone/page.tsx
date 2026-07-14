@@ -1,3 +1,4 @@
+import { log } from '@/lib/log';
 import {
   Dialog,
   DialogContent,
@@ -57,14 +58,14 @@ function DeleteAccountDialog() {
           refetch();
           await clear();
         } catch (error) {
-          console.error('Failed to delete account:', error);
+          log.error('Failed to delete account:', error);
           toast.error(m['pages.settings.dangerZone.error']());
         }
         toast.success(m['pages.settings.dangerZone.deleted']());
         window.location.href = '/';
       },
       onError: (error) => {
-        console.error('Failed to delete account:', error);
+        log.error('Failed to delete account:', error);
         toast.error(m['pages.settings.dangerZone.error']());
       },
       onSettled: () => form.reset(),
