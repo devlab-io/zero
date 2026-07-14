@@ -52,6 +52,7 @@ export const Draft = memo(({ message, index, isKeyboardFocused }: DraftRowProps)
           key={message.id}
           className={cn(
             'group relative mx-[8px] flex cursor-pointer flex-col items-start overflow-clip rounded-[10px] border-transparent py-3 text-left text-sm',
+            isKeyboardFocused && 'ring-primary/50 bg-primary/5 ring-2',
           )}
         >
           <div

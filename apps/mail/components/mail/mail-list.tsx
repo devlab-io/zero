@@ -1,9 +1,9 @@
+import { isMailAutoReadEnabled, resolveMailListNavigation } from './mail-list-navigation';
 import { focusedIndexAtom, useMailNavigation } from '@/hooks/use-mail-navigation';
 import useSearchLabels, { hasActiveMailFilters } from '@/hooks/use-labels-search';
 import { useCommandPalette } from '@/components/context/command-palette-context';
 import { useOptimisticActions } from '@/hooks/use-optimistic-actions';
 import { memo, useCallback, useEffect, useMemo, useRef } from 'react';
-import { resolveMailListNavigation } from './mail-list-navigation';
 import { useMailSelection } from '@/hooks/use-mail-selection';
 import { useMailListData } from '@/hooks/use-mail-list-data';
 import { selectMailListState } from '@/lib/mail-list-state';
@@ -74,7 +74,7 @@ export const MailList = memo(
     }, [refetch]);
 
     const isDraftFolder = folder === FOLDERS.DRAFT;
-    const autoRead = settingsData?.settings?.autoRead ?? true;
+    const autoRead = isMailAutoReadEnabled(settingsData);
 
     const handleNavigateToThread = useCallback(
       (targetId: string | null) => {

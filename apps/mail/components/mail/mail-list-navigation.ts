@@ -1,10 +1,20 @@
 import { FOLDERS } from '@/lib/utils';
 
+type MailSettingsData = {
+  settings?: {
+    autoRead?: boolean | null;
+  } | null;
+} | null;
+
 export type MailListNavigationTarget = {
   threadId: string | null;
   draftId: string | null;
   composeOpen: 'true' | null | undefined;
 };
+
+export function isMailAutoReadEnabled(data: MailSettingsData | undefined): boolean {
+  return data?.settings?.autoRead === true;
+}
 
 export function resolveMailListNavigation(
   folder: string | undefined,

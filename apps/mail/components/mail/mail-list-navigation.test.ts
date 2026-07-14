@@ -1,8 +1,15 @@
-import { resolveMailListNavigation } from './mail-list-navigation';
+import { isMailAutoReadEnabled, resolveMailListNavigation } from './mail-list-navigation';
 import { describe, expect, it } from 'vitest';
 import { FOLDERS } from '@/lib/utils';
 
 describe('mail list navigation target', () => {
+  it('keeps auto-read fail-closed until settings explicitly enable it', () => {
+    expect(isMailAutoReadEnabled(undefined)).toBe(false);
+    expect(isMailAutoReadEnabled({ settings: null })).toBe(false);
+    expect(isMailAutoReadEnabled({ settings: { autoRead: false } })).toBe(false);
+    expect(isMailAutoReadEnabled({ settings: { autoRead: true } })).toBe(true);
+  });
+
   it('opens a selected draft through draftId and the compose surface', () => {
     expect(resolveMailListNavigation(FOLDERS.DRAFT, 'draft-1')).toEqual({
       threadId: null,

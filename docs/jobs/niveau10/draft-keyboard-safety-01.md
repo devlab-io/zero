@@ -23,6 +23,8 @@ API, provider, base de données, OAuth, envoi ou déploiement
 - Les lignes Brouillons exposent `data-thread-id` au moteur de scroll et un anneau de focus.
 - Dans les dossiers normaux, l'ouverture sur déplacement est conservée, mais l'auto-read ne part
   que si le message est réellement non lu et que le réglage `autoRead` est actif.
+- Tant que les réglages ne sont pas hydratés, l'auto-read reste fail-closed.
+- Le repère de focus est présent sur une ligne chargée comme sur son skeleton.
 
 ## Preuves mécaniques séquentielles
 
@@ -35,14 +37,15 @@ EXIT: `0`
 ```text
 @zero/server:test: Test Files  27 passed (27)
 @zero/server:test: Tests       324 passed (324)
-@zero/mail:test:   Test Files  32 passed (32)
-@zero/mail:test:   Tests       205 passed (205)
+@zero/mail:test:   Test Files  33 passed (33)
+@zero/mail:test:   Tests       207 passed (207)
 Tasks: 2 successful, 2 total
-TOTAL: 529/529 tests
+TOTAL: 531/531 tests
 ```
 
-Les six nouveaux scénarios couvrent le focus local Brouillons, l'ouverture par Entrée, l'absence
-d'auto-read et la conservation du comportement normal pour un thread non lu.
+Les huit nouveaux scénarios couvrent le focus local Brouillons, le skeleton focalisé, l'ouverture
+par Entrée, l'absence d'auto-read, le réglage fail-closed et la conservation du comportement normal
+pour un thread non lu.
 
 ### Lint ciblé
 
