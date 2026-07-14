@@ -33,3 +33,19 @@
 - The corrective builder must provide explicit English and French catalog labels for every active contextual action and add a regression proving no active action falls back to its identifier.
 - The MAY TOUCH boundary and frozen touch audit now include only `apps/mail/messages/en.json` and `apps/mail/messages/fr.json` in addition to the prior keyboard/settings surface. No other message catalog or product area is authorised.
 - Merge remains blocked until a fresh builder, fresh checkrun under the new freeze, and fresh independent judge all pass.
+
+## 2026-07-14 — Judge 3 FAIL: `thread-display` action omitted
+
+- Independent judge 3 verified the AltGr correction, the in-place `Shift+?` sheet, the four labels from judge 2, and all five frozen RUNs.
+- Its exhaustive registry audit found a fifty-fifth inbox action: `archivePrevious` is active in the `thread-display` scope whenever a thread is open, but it is absent from the contextual label map and from both EN/FR catalogs.
+- Because the sheet now correctly fails loudly on an unknown action, this omission crashes contextual help instead of rendering a complete localized sheet for that valid scope.
+- The corrective builder must add an explicit `archivePrevious` mapping and EN/FR labels, then replace the partial `global` + `navigation` regression with an exhaustive assertion over every canonical action that the inbox can activate, including `thread-display`.
+- The v6 MAY TOUCH boundary and frozen commands already authorize the required component, catalogs, and test changes; no check-contract amendment or scope expansion is needed.
+- Merge remains blocked until a fresh builder, fresh deterministic checkrun, and fresh independent judge all pass.
+
+## 2026-07-14 — Generated-type gate exposed a test-global error
+
+- The downstream search slice ran the blocking mail typecheck after `react-router typegen` and exposed `TS7017` on `globalThis.IS_REACT_ACT_ENVIRONMENT` in `keyboard-runtime.test.tsx`.
+- The keyboard production build and focused Vitest suite did not typecheck test globals, so the earlier frozen keyboard command could not detect it.
+- The keyboard frozen build command now runs `tsc --noEmit` after type generation and before the production build. A fresh correction builder may change only the test-global assignment required to satisfy that gate.
+- Search/triage remains blocked until this owner-slice correction is independently checked and integrated into a new freeze.

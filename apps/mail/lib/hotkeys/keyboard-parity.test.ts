@@ -9,6 +9,7 @@ import {
   COMPOSE_HANDLED_ACTIONS,
   LIST_IMPERATIVE_ACTIONS,
   COMPOSER_EXTERNAL_ACTIONS,
+  QUEUE_HANDLED_ACTIONS,
 } from './handler-manifest';
 import { isTypingOrModalTarget } from './use-hotkey-utils';
 
@@ -18,6 +19,7 @@ const HANDLED_BY_SCOPE: Record<string, readonly string[]> = {
   'thread-display': THREAD_DISPLAY_HANDLED_ACTIONS,
   'mail-list': MAILLIST_HANDLED_ACTIONS,
   compose: COMPOSE_HANDLED_ACTIONS,
+  queue: QUEUE_HANDLED_ACTIONS,
 };
 
 // Actions of registry rows flagged `ignore` (bound imperatively / externally), by scope.

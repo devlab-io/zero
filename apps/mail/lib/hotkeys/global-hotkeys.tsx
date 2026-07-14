@@ -4,9 +4,12 @@ import { useOptimisticActions } from '@/hooks/use-optimistic-actions';
 import { GLOBAL_HANDLED_ACTIONS } from './handler-manifest';
 import { enhancedKeyboardShortcuts } from '@/config/shortcuts';
 import { useShortcuts } from './use-hotkey-utils';
+import { ContextualShortcutSheet } from '@/app/(routes)/settings/shortcuts/contextual-shortcut-sheet';
 import { useNavigate } from 'react-router';
 import { useTheme } from 'next-themes';
 import { useQueryState } from 'nuqs';
+import { useState } from 'react';
+import { useHotkeysContext } from 'react-hotkeys-hook';
 
 export function GlobalHotkeys() {
   const navigate = useNavigate();
@@ -16,6 +19,8 @@ export function GlobalHotkeys() {
   const { clearAllFilters } = useCommandPalette();
   const [, setIsCommandPaletteOpen] = useQueryState('isCommandPaletteOpen');
   const { undoLastAction } = useOptimisticActions();
+  const { activeScopes } = useHotkeysContext();
+  const [isShortcutHelpOpen, setShortcutHelpOpen] = useState(false);
   const scope = 'global';
 
   const handlers: Record<(typeof GLOBAL_HANDLED_ACTIONS)[number], () => void> = {
@@ -24,7 +29,7 @@ export function GlobalHotkeys() {
     // auto-focuses the search input). There is no standalone /mail/search route.
     search: () => setIsCommandPaletteOpen('true'),
     commandPalette: () => setIsCommandPaletteOpen('true'),
-    helpWithShortcuts: () => navigate('/settings/shortcuts'),
+    helpWithShortcuts: () => setShortcutHelpOpen(true),
     goToSettings: () => navigate('/settings'),
     toggleTheme: () => setTheme(theme === 'dark' ? 'light' : 'dark'),
     toggleSidebar: () => toggleSidebar(),
@@ -38,5 +43,5 @@ export function GlobalHotkeys() {
 
   useShortcuts(globalShortcuts, handlers, { scope });
 
-  return null;
+  return <ContextualShortcutSheet open={isShortcutHelpOpen} onOpenChange={setShortcutHelpOpen} activeScopes={activeScopes} />;
 }

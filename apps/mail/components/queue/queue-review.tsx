@@ -13,7 +13,7 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useShortcuts } from '@/lib/hotkeys/use-hotkey-utils';
 import { useHotkeysContext } from 'react-hotkeys-hook';
 import { useTRPC, useTRPCClient } from '@/providers/query-provider';
-import type { Shortcut } from '@/config/shortcuts';
+import { enhancedKeyboardShortcuts } from '@/config/shortcuts';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { useNavigate } from 'react-router';
@@ -236,46 +236,7 @@ export function QueueReview() {
     await retryMutation.mutateAsync({ id: item.id });
   };
 
-  const queueShortcuts = useMemo<Shortcut[]>(
-    () => [
-      {
-        keys: ['d'],
-        action: 'approveSelected',
-        type: 'single',
-        description: m['queue.keyboardApprove'](),
-        scope: 'queue',
-      },
-      {
-        keys: ['a'],
-        action: 'approveSelected',
-        type: 'single',
-        description: m['queue.keyboardApprove'](),
-        scope: 'queue',
-      },
-      {
-        keys: ['r'],
-        action: 'rejectSelected',
-        type: 'single',
-        description: m['queue.keyboardReject'](),
-        scope: 'queue',
-      },
-      {
-        keys: ['f'],
-        action: 'openSelected',
-        type: 'single',
-        description: m['queue.keyboardOpen'](),
-        scope: 'queue',
-      },
-      {
-        keys: ['h'],
-        action: 'openSelected',
-        type: 'single',
-        description: m['queue.keyboardOpen'](),
-        scope: 'queue',
-      },
-    ],
-    [],
-  );
+  const queueShortcuts = enhancedKeyboardShortcuts.filter((shortcut) => shortcut.scope === 'queue');
 
   const shortcutHandlers = useMemo(
     () => ({

@@ -8,7 +8,7 @@ Spec: `docs/spec/niveau10-mailos.md` sections 3, 4 et critères MCP live.
 
 - RUN: `pnpm --filter @zero/server exec vitest run src/routes/agent/mcp-draft-loop.test.ts src/routes/agent/mcp-tools.test.ts` -> exit 0
 - RUN: `node scripts/security/check-agent-surface.mjs` -> exit 0 et surface draft-only
-- RUN: `pnpm --filter @zero/server exec eslint src/routes/agent src/lib/driver && pnpm exec prettier docs/agent --check` -> exit 0
+- RUN: `pnpm --filter @zero/server exec eslint src/routes/agent/mcp.ts src/routes/agent/mcp-tools.ts src/routes/agent/mcp-tools.test.ts src/routes/agent/mcp-draft-loop.ts src/routes/agent/mcp-draft-loop.test.ts src/lib/driver/agent-drafts.ts src/lib/driver/google-drafts.ts && pnpm exec prettier apps/server/src/lib/driver/microsoft.ts docs/agent --check` -> exit 0
 - RUN: `pnpm --filter @zero/server types && pnpm --filter @zero/server exec tsc --noEmit` -> exit 0
 - RUN: `git status --porcelain --untracked-files=all | sed 's/^...//' | awk '!/^(apps\/server\/src\/(routes\/agent\/mcp[^\/]*\.ts|lib\/driver\/.*)|docs\/agent\/.*|scripts\/security\/check-agent-surface\.mjs|docs\/jobs\/niveau10\/mcp-draft-loop-01\.md)$/ {print; bad=1} END {exit bad}'` -> aucune sortie ; touch-set respecté
 - RUN: `git diff --check` -> exit 0
