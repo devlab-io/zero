@@ -28,6 +28,7 @@ import {
   OUTBOX_NOT_FOUND,
   buildCapabilities,
   buildMcpSchemaSnapshot,
+  composeEmailInputSchema,
   createDraftInputSchema,
   formatCompactThread,
   formatCompactThreadList,
@@ -41,7 +42,7 @@ import {
 } from './mcp-tools';
 import type { DraftOutboxItem, DraftOutboxStatus } from '../../lib/draft-outbox/state-machine';
 import type { ThreadsResponse } from '@zero/types';
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { z } from 'zod';
 
 const seedItem = (status: DraftOutboxStatus): DraftOutboxItem => ({
@@ -309,6 +310,32 @@ describe('strict MCP input bounds', () => {
       createDraftInputSchema.safeParse({ ...validDraft, message: 'é'.repeat(1024 * 1024 + 1) })
         .success,
     ).toBe(false);
+  });
+
+  it('rejects a 51-recipient context message before composeEmail can dispatch, while 50 is valid', () => {
+    const contextMessage = (to: number, cc: number) => ({
+      from: 'sender@example.com',
+      to: Array.from({ length: to }, () => 'to@example.com'),
+      cc: Array.from({ length: cc }, () => 'cc@example.com'),
+      subject: 'Context',
+      body: 'Prior message',
+    });
+    const input = {
+      prompt: 'Draft a reply',
+      threadMessages: [contextMessage(25, 25)],
+    };
+    const driver = vi.fn();
+
+    const dispatch = (value: unknown) => {
+      const parsed = composeEmailInputSchema.safeParse(value);
+      if (parsed.success) driver(parsed.data);
+      return parsed.success;
+    };
+
+    expect(dispatch(input)).toBe(true);
+    expect(driver).toHaveBeenCalledTimes(1);
+    expect(dispatch({ ...input, threadMessages: [contextMessage(25, 26)] })).toBe(false);
+    expect(driver).toHaveBeenCalledTimes(1);
   });
 
   it('requires mutation keys from 1 through 128 trimmed characters', () => {

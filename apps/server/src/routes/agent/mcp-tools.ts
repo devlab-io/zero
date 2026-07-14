@@ -477,6 +477,17 @@ export const composeEmailInputSchema = z.object(mcpToolSchemas.composeEmail).sup
       path: ['to'],
     });
   }
+
+  value.threadMessages?.forEach((message, index) => {
+    const contextualRecipientCount = message.to.length + (message.cc?.length ?? 0);
+    if (contextualRecipientCount > 50) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Each composition context message must not contain more than 50 total recipients',
+        path: ['threadMessages', index, 'to'],
+      });
+    }
+  });
 });
 
 export type McpToolName = keyof typeof mcpToolSchemas;
