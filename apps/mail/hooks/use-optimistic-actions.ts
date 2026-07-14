@@ -11,7 +11,6 @@ import { moveThreadsTo } from '@/lib/thread-actions';
 import { m } from '@/paraglide/messages';
 import { useQueryState } from 'nuqs';
 import { useCallback } from 'react';
-import posthog from 'posthog-js';
 import { useAtom } from 'jotai';
 import { toast } from 'sonner';
 
@@ -134,7 +133,12 @@ export function useOptimisticActions() {
 
         const eventName = actionEventNames[type]?.(params);
         if (eventName) {
-          posthog.capture(eventName);
+          // #44 (gate A8): posthog-js (~57 KB gz) is imported dynamically so it stays out of the
+          // critical inbox chunk. The capture remains fire-and-forget (not awaited, so it does not
+          // block the action flow); relative to the previous static import it adds an async module
+          // resolution before the capture. It runs on the shared posthog singleton (init lives in
+          // providers/posthog-analytics).
+          void import('posthog-js').then(({ default: posthog }) => posthog.capture(eventName));
         }
 
         const typeActions = optimisticActionsManager.pendingActionsByType.get(type);

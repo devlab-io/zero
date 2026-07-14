@@ -124,6 +124,16 @@ export default defineConfig({
             id.includes('/node_modules/framer-motion/')
           )
             return 'motion';
+          // #44 (gate A8): keep React in its own chunk, separate from `motion`, so that once the
+          // last critical importer of motion is de-anchored the motion chunk can leave the inbox
+          // closure without dragging (or being pinned by) the always-critical React runtime.
+          if (
+            id.includes('/node_modules/react/') ||
+            id.includes('/node_modules/react-dom/') ||
+            id.includes('/node_modules/react-is/') ||
+            id.includes('/node_modules/scheduler/')
+          )
+            return 'react';
         },
       },
     },

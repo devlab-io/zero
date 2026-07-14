@@ -1,56 +1,56 @@
-import { forwardRef, useCallback, useImperativeHandle, useRef } from 'react';
-import { motion, useAnimation } from 'motion/react';
-import type { Variants } from 'motion/react';
-import type { HTMLAttributes } from 'react';
+import { forwardRef, useCallback, useImperativeHandle, useRef, useState } from 'react';
+import type { HTMLAttributes, MouseEvent as ReactMouseEvent } from 'react';
 
 export interface SunIconHandle {
   startAnimation: () => void;
   stopAnimation: () => void;
 }
 
-const pathVariants: Variants = {
-  normal: { opacity: 1 },
-  animate: (i: number) => ({
-    opacity: [0, 1],
-    transition: { delay: i * 0.1, duration: 0.3 },
-  }),
-};
+const RAYS = [
+  'M12 2v2',
+  'm19.07 4.93-1.41 1.41',
+  'M20 12h2',
+  'm17.66 17.66 1.41 1.41',
+  'M12 20v2',
+  'm6.34 17.66-1.41 1.41',
+  'M2 12h2',
+  'm4.93 4.93 1.41 1.41',
+];
 
+// #44 (gate A8): motion/react removed so this icon no longer pulls the `motion` chunk into the
+// critical inbox path. The staggered ray fade-in is implemented with a self-contained CSS keyframe.
+// `runId` increments on every start/hover-enter and keys the animated paths, so a keyed remount
+// re-runs the CSS animation from the start on each call — even when it is already running. The
+// SunIconHandle (startAnimation/stopAnimation) and the mouse-enter/leave triggers are retained.
 const SunIcon = forwardRef<SunIconHandle, HTMLAttributes<HTMLDivElement>>(
   ({ onMouseEnter, onMouseLeave, ...props }, ref) => {
-    const controls = useAnimation();
+    const [runId, setRunId] = useState(0);
     const isControlledRef = useRef(false);
 
     useImperativeHandle(ref, () => {
       isControlledRef.current = true;
-
       return {
-        startAnimation: () => controls.start('animate'),
-        stopAnimation: () => controls.start('normal'),
+        startAnimation: () => setRunId((n) => n + 1),
+        stopAnimation: () => setRunId(0),
       };
     });
 
     const handleMouseEnter = useCallback(
-      (e: React.MouseEvent<HTMLDivElement>) => {
-        if (!isControlledRef.current) {
-          controls.start('animate');
-        } else {
-          onMouseEnter?.(e);
-        }
+      (e: ReactMouseEvent<HTMLDivElement>) => {
+        if (!isControlledRef.current) setRunId((n) => n + 1);
+        else onMouseEnter?.(e);
       },
-      [controls, onMouseEnter],
+      [onMouseEnter],
     );
 
     const handleMouseLeave = useCallback(
-      (e: React.MouseEvent<HTMLDivElement>) => {
-        if (!isControlledRef.current) {
-          controls.start('normal');
-        } else {
-          onMouseLeave?.(e);
-        }
+      (e: ReactMouseEvent<HTMLDivElement>) => {
+        if (!isControlledRef.current) setRunId(0);
+        else onMouseLeave?.(e);
       },
-      [controls, onMouseLeave],
+      [onMouseLeave],
     );
+
     return (
       <div
         className="hover:bg-accent flex cursor-pointer select-none items-center justify-center rounded-md p-2 transition-colors duration-200"
@@ -58,6 +58,7 @@ const SunIcon = forwardRef<SunIconHandle, HTMLAttributes<HTMLDivElement>>(
         onMouseLeave={handleMouseLeave}
         {...props}
       >
+        <style>{'@keyframes zero-sun-ray-fade{from{opacity:0}to{opacity:1}}'}</style>
         <svg
           xmlns="http://www.w3.org/2000/svg"
           width="15"
@@ -70,22 +71,15 @@ const SunIcon = forwardRef<SunIconHandle, HTMLAttributes<HTMLDivElement>>(
           strokeLinejoin="round"
         >
           <circle cx="12" cy="12" r="4" />
-          {[
-            'M12 2v2',
-            'm19.07 4.93-1.41 1.41',
-            'M20 12h2',
-            'm17.66 17.66 1.41 1.41',
-            'M12 20v2',
-            'm6.34 17.66-1.41 1.41',
-            'M2 12h2',
-            'm4.93 4.93 1.41 1.41',
-          ].map((d, index) => (
-            <motion.path
-              key={d}
+          {RAYS.map((d, index) => (
+            <path
+              key={`${d}-${runId}`}
               d={d}
-              animate={controls}
-              variants={pathVariants}
-              custom={index + 1}
+              style={
+                runId > 0
+                  ? { animation: `zero-sun-ray-fade 0.3s ease ${(index + 1) * 0.1}s both` }
+                  : undefined
+              }
             />
           ))}
         </svg>

@@ -12,7 +12,6 @@ import { authClient } from '@/lib/auth-client';
 import { Plus, UserPlus } from 'lucide-react';
 import { useLocation } from 'react-router';
 import { m } from '@/paraglide/messages';
-import { motion } from 'motion/react';
 import { Button } from '../ui/button';
 import { cn } from '@/lib/utils';
 import { useMemo } from 'react';
@@ -88,22 +87,28 @@ export const AddConnectionDialog = ({
             </Button>
           </div>
         )}
-        <motion.div
-          className="mt-4 grid grid-cols-2 gap-4"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ duration: 0.3 }}
-        >
+        {/* #44 (gate A8): motion/react removed here so this dialog no longer pulls the `motion`
+            chunk into the critical inbox path. The entrance (grid opacity fade + per-tile
+            opacity/translate stagger) uses self-contained CSS keyframes; the slide uses the CSS
+            `translate` property so it does not clobber the hover/active `transform: scale`. Honours
+            prefers-reduced-motion. Rendered only when the connection dialog is open. */}
+        <style>
+          {
+            '@keyframes zero-conn-grid{from{opacity:0}to{opacity:1}}' +
+              '@keyframes zero-conn-tile{from{opacity:0;translate:0 20px}to{opacity:1;translate:0 0}}' +
+              '.zero-conn-grid{animation:zero-conn-grid .3s ease both}' +
+              '.zero-conn-tile{animation:zero-conn-tile .3s ease both;animation-delay:var(--zero-conn-delay,0s)}' +
+              '@media (prefers-reduced-motion:reduce){.zero-conn-grid,.zero-conn-tile{animation:none}}'
+          }
+        </style>
+        <div className="zero-conn-grid mt-4 grid grid-cols-2 gap-4">
           {emailProviders.map((provider, index) => {
             const Icon = provider.icon;
             return (
-              <motion.div
+              <div
                 key={provider.name}
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: index * 0.1, duration: 0.3 }}
-                whileHover={{ scale: 1.03 }}
-                whileTap={{ scale: 0.97 }}
+                className="zero-conn-tile transition-transform hover:scale-[1.03] active:scale-[0.97]"
+                style={{ '--zero-conn-delay': `${index * 0.1}s` } as React.CSSProperties}
               >
                 <Button
                   disabled={!canCreateConnection}
@@ -119,15 +124,12 @@ export const AddConnectionDialog = ({
                   <Icon className="size-6!" />
                   <span className="text-xs">{provider.name}</span>
                 </Button>
-              </motion.div>
+              </div>
             );
           })}
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: emailProviders.length * 0.1, duration: 0.3 }}
-            whileHover={{ scale: 1.03 }}
-            whileTap={{ scale: 0.97 }}
+          <div
+            className="zero-conn-tile transition-transform hover:scale-[1.03] active:scale-[0.97]"
+            style={{ '--zero-conn-delay': `${emailProviders.length * 0.1}s` } as React.CSSProperties}
           >
             <Button
               variant="outline"
@@ -136,8 +138,8 @@ export const AddConnectionDialog = ({
               <Plus className="h-12 w-12" />
               <span className="text-xs">{m['pages.settings.connections.moreComingSoon']()}</span>
             </Button>
-          </motion.div>
-        </motion.div>
+          </div>
+        </div>
       </DialogContent>
     </Dialog>
   );

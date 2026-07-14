@@ -1,8 +1,15 @@
 import type { Attachment, ParsedMessage } from '@/types';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import ReplyCompose from './reply-composer';
+import { lazy, Suspense } from 'react';
 import MailDisplay from './mail-display';
 import { cn } from '@/lib/utils';
+
+// #44 (gate A8): the reply composer statically pulls posthog-js (+ its own shell) into the
+// critical inbox chunk. It only renders when the user is actively replying, so load it lazily;
+// it resolves on reply-open via the Suspense boundary below. Its embedded editor was already
+// lazy, so this adds only the composer shell to that same on-open resolution. The composer's
+// own behaviour is unchanged.
+const ReplyCompose = lazy(() => import('./reply-composer'));
 
 // Thread message list, extracted verbatim from thread-display.tsx (behaviour unchanged).
 
@@ -47,7 +54,9 @@ export const MessageList = ({
             />
             {isReplyingToThisMessage && !isLastMessage && (
               <div className="px-4 py-2" id={`reply-composer-${message.id}`}>
-                <ReplyCompose messageId={message.id} />
+                <Suspense fallback={null}>
+                  <ReplyCompose messageId={message.id} />
+                </Suspense>
               </div>
             )}
           </div>

@@ -1,10 +1,8 @@
 import { connection as connectionSchema } from '../../db/schema';
 import { connectionToDriver } from '../../lib/server-utils';
-import { withRetry } from '../../lib/gmail-rate-limit';
 import { DurableObject } from 'cloudflare:workers';
 import type { ParsedMessage } from '../../types';
 import type { ZeroEnv } from '../../env';
-import { Effect } from 'effect';
 
 export class ThreadSyncWorker extends DurableObject<ZeroEnv> {
   constructor(state: DurableObjectState, env: ZeroEnv) {
@@ -22,9 +20,13 @@ export class ThreadSyncWorker extends DurableObject<ZeroEnv> {
     const driver = connectionToDriver(connection);
     if (!driver) throw new Error('No driver available');
 
-    const thread = await Effect.runPromise(
-      withRetry(Effect.tryPromise(() => driver.get(threadId))),
-    );
+    // #44 (cold-start / hot-path): the flat 60 s retry wrapper (lib/gmail-rate-limit.ts) is
+    // removed as redundant. On the Gmail path driver.get() now goes through the transport
+    // backoff (expo + jitter, 429/403-rate/5xx — google-transport.ts, #31); on non-Gmail
+    // paths the old wrapper was a no-op anyway (its rate-limit classifier only matched Gmail
+    // error shapes, so recurWhile stopped immediately). Behaviour of the retry semantics is
+    // preserved; only the obsolete 60 s ceiling is gone.
+    const thread = await driver.get(threadId);
 
     await this.env.THREADS_BUCKET.put(
       this.getThreadKey(connection.id, threadId),

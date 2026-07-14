@@ -1,43 +1,25 @@
-import { Clock, Mail, Paperclip, Star } from 'lucide-react';
-import { createContext, Suspense, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import { CommandDialog } from '@/components/ui/command';
-import { getMainSearchTerm, parseNaturalLanguageSearch } from '@/lib/utils';
-import { DialogDescription, DialogTitle } from '@/components/ui/dialog';
+import { createContext, lazy, Suspense, useCallback, useContext, useEffect, useState } from 'react';
+import { getMainSearchTerm } from '@/lib/utils';
 import { useSearchValue } from '@/hooks/use-search-value';
-import { useLocation, useNavigate } from 'react-router';
-import { navigationConfig } from '@/config/navigation';
-import { useTRPC } from '@/providers/query-provider';
-import { useMutation } from '@tanstack/react-query';
-import { useThreads } from '@/hooks/use-threads';
-import { useLabels } from '@/hooks/use-labels';
-import { format, subDays } from 'date-fns';
-import { VisuallyHidden } from 'radix-ui';
-import { m } from '@/paraglide/messages';
+import { useLocation } from 'react-router';
+import { Loader2 } from 'lucide-react';
 import { useQueryState } from 'nuqs';
-import { toast } from 'sonner';
-import {
-  PALETTE_COMMANDS,
-  type ActiveFilter,
-  type CommandGroupData,
-  type CommandItem,
-  type CommandView,
-  type PaletteCommandTarget,
-} from './command-registry';
+import { type ActiveFilter } from './command-registry';
 import {
   clearActiveFilters,
-  getRecentSearches,
   readActiveFilters,
-  saveRecentSearch,
   writeActiveFilters,
 } from './command-palette-storage';
-import {
-  HelpView,
-  LabelsView,
-  MainView,
-  SearchView,
-  type CommandPaletteViewProps,
-} from './command-palette-views';
-import { FilterView } from './command-palette-filter-view';
+
+// #44 (gate A8): the heavy palette body (state, command/search logic, cmdk CommandDialog + views
+// with the react-day-picker calendar) is dynamic-imported only when the palette is open. This
+// lightweight provider stays eager and keeps the always-needed surface out of the lazy chunk:
+// activeFilters + clearAllFilters (read by mail/nav-main via context), addFilter/removeFilter, the
+// persisted-filter restore on mount, the clear-on-route-change, and the ⌘/Ctrl+K open toggle (which
+// therefore works before the dialog chunk has loaded).
+const CommandPaletteDialog = lazy(() =>
+  import('./command-palette-dialog').then((mod) => ({ default: mod.CommandPaletteDialog })),
+);
 
 type CommandPaletteContext = {
   activeFilters: ActiveFilter[];
@@ -54,34 +36,47 @@ export function useCommandPalette() {
   return context;
 }
 
-export function CommandPalette({ children }: { children: React.ReactNode }) {
+// Real, visible, accessible modal shown while the palette dialog chunk resolves after ⌘K (not an
+// empty Suspense) — a top-centred card + named spinner, positioned like the palette itself. It
+// installs its OWN Escape handler for the brief load window so Escape still closes the palette
+// before the dialog chunk (which owns Escape → view→main / close) has mounted. The handler lives
+// only while this fallback is mounted, so it never coexists with the dialog's Escape handling.
+function CommandPaletteLoadingModal({ onClose }: { onClose: () => void }) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        onClose();
+      }
+    };
+    document.addEventListener('keydown', onKey, { capture: true });
+    return () => document.removeEventListener('keydown', onKey, { capture: true });
+  }, [onClose]);
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Loading commands"
+      className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 pt-[20vh]"
+    >
+      <div className="flex h-32 w-[min(90vw,640px)] items-center justify-center rounded-xl border bg-white shadow-lg dark:border-none dark:bg-[#1c1c1c]">
+        <Loader2 aria-hidden="true" className="text-muted-foreground h-5 w-5 animate-spin" />
+        <span className="sr-only">Loading commands</span>
+      </div>
+    </div>
+  );
+}
+
+export function CommandPaletteProvider({ children }: { children: React.ReactNode }) {
   const [open, setOpen] = useQueryState('isCommandPaletteOpen');
-  const [, setIsComposeOpen] = useQueryState('isComposeOpen');
-  const [currentView, setCurrentView] = useState<CommandView>('main');
-  const [selectedDateFilter, setSelectedDateFilter] = useState<string | null>(null);
-  const [selectedDate, setSelectedDate] = useState<Date | undefined>(undefined);
-  const [dateRangeStart, setDateRangeStart] = useState<Date | undefined>(undefined);
-  const [dateRangeEnd, setDateRangeEnd] = useState<Date | undefined>(undefined);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [searchValue, setSearchValue] = useSearchValue();
-  const [, threads] = useThreads();
   const [activeFilters, setActiveFilters] = useState<ActiveFilter[]>([]);
-  const [recentSearches, setRecentSearches] = useState<string[]>([]);
-  const [emailSuggestions, setEmailSuggestions] = useState<string[]>([]);
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [commandInputValue, setCommandInputValue] = useState('');
-  const navigate = useNavigate();
+  const [searchValue, setSearchValue] = useSearchValue();
   const { pathname } = useLocation();
 
-  const { userLabels = [] } = useLabels();
-  const trpc = useTRPC();
-  const { mutateAsync: generateSearchQuery } = useMutation(
-    trpc.ai.generateSearchQuery.mutationOptions(),
-  );
-
+  // Restore persisted filters on mount and reflect them into the shared search value. Eager so a
+  // returning user's active filters are applied without opening the palette.
   useEffect(() => {
-    setRecentSearches(getRecentSearches());
-
     const filters = readActiveFilters();
     if (filters) {
       setActiveFilters(filters);
@@ -94,72 +89,19 @@ export function CommandPalette({ children }: { children: React.ReactNode }) {
         });
       }
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  useEffect(() => {
-    if (threads && Array.isArray(threads)) {
-      const emails = new Set<string>();
-      // NOTE: useThreads yields a minimal thread shape ({ id, historyId }); the
-      // `from`/`to` reads below resolve to undefined at runtime (pre-existing —
-      // see job report "bugs réels"). Kept `any` to preserve that behaviour.
-      threads.forEach((thread: any) => {
-        if (thread?.from?.email) emails.add(thread.from.email);
-        if (thread?.to && Array.isArray(thread.to)) {
-          thread.to.forEach((recipient: { email?: string } | null) => {
-            if (recipient?.email) emails.add(recipient.email);
-          });
-        }
-      });
-      setEmailSuggestions(Array.from(emails).slice(0, 20));
-    }
-  }, [threads]);
-
-  useEffect(() => {
-    if (!open) {
-      setCurrentView('main');
-      setSearchQuery('');
-      setCommandInputValue('');
-    }
-  }, [open]);
-
-  useEffect(() => {
-    const down = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
-        e.preventDefault();
-        setOpen((prevOpen) => (prevOpen ? null : 'true'));
-      }
-
-      if (open) {
-        if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'f') {
-          e.preventDefault();
-          setCurrentView('filter');
-        }
-
-        if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') {
-          e.preventDefault();
-          setCurrentView('search');
-        }
-
-        if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'l') {
-          e.preventDefault();
-          setCurrentView('labels');
-        }
-
-        if (e.key === 'Escape' && currentView !== 'main') {
-          e.preventDefault();
-          setCurrentView('main');
-        }
-      }
-    };
-
-    document.addEventListener('keydown', down, { capture: true });
-    return () => document.removeEventListener('keydown', down, { capture: true });
-  }, [open, currentView]);
-
-  const runCommand = useCallback((command: () => unknown) => {
-    setOpen(null);
-    command();
-  }, []);
+  const clearAllFilters = useCallback(() => {
+    setActiveFilters([]);
+    clearActiveFilters();
+    setSearchValue({
+      value: '',
+      highlight: '',
+      folder: searchValue.folder,
+      isAISearching: false,
+    });
+  }, [searchValue.folder, setSearchValue]);
 
   const addFilter = useCallback((filter: ActiveFilter) => {
     setActiveFilters((prev) => {
@@ -177,421 +119,28 @@ export function CommandPalette({ children }: { children: React.ReactNode }) {
     });
   }, []);
 
+  const closePalette = useCallback(() => setOpen(null), [setOpen]);
+
   useEffect(() => {
     if (pathname && activeFilters.length) {
       clearAllFilters();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pathname]);
 
-  const clearAllFilters = useCallback(() => {
-    setActiveFilters([]);
-    clearActiveFilters();
-    setSearchValue({
-      value: '',
-      highlight: '',
-      folder: searchValue.folder,
-      isAISearching: false,
-    });
-  }, [searchValue.folder, setSearchValue]);
-
-  const executeSearch = useCallback(
-    (query: string, isNaturalLanguage = false) => {
-      setOpen(null);
-
-      if (query && query.trim()) {
-        saveRecentSearch(query);
-        setRecentSearches(getRecentSearches());
+  // ⌘/Ctrl+K toggles the palette open. Eager (functional setter, no `open` dependency) so it works
+  // before the dialog chunk is loaded.
+  useEffect(() => {
+    const down = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setOpen((prevOpen) => (prevOpen ? null : 'true'));
       }
-
-      let finalQuery = query;
-
-      if (isNaturalLanguage) {
-        const semanticQuery = parseNaturalLanguageSearch(query);
-        finalQuery = semanticQuery || query;
-      }
-
-      const isFilterSyntax = /^(from:|to:|subject:|has:|is:|after:|before:|label:)/.test(
-        query.trim(),
-      );
-      if (query.trim() && !isFilterSyntax) {
-        const searchFilter: ActiveFilter = {
-          id: `search-${Date.now()}`,
-          type: 'search',
-          value: query,
-          display: `Search: "${query}"`,
-        };
-        addFilter(searchFilter);
-      }
-
-      const filterQuery = activeFilters.map((f) => f.value).join(' ');
-      if (filterQuery) {
-        finalQuery = `${finalQuery} ${filterQuery}`.trim();
-      }
-
-      setSearchValue({
-        value: finalQuery,
-        highlight: getMainSearchTerm(finalQuery),
-        folder: searchValue.folder,
-        isAISearching: isNaturalLanguage,
-      });
-
-      console.warn('Search applied', {
-        description: finalQuery,
-      });
-    },
-    [activeFilters, searchValue.folder, setSearchValue, addFilter],
-  );
-
-  const quickFilterOptions = useMemo(
-    () => [
-      {
-        title: 'Unread Emails',
-        icon: Mail,
-        onClick: () => {
-          const filter: ActiveFilter = {
-            id: 'quick-unread',
-            type: 'status',
-            value: 'is:unread',
-            display: 'Unread',
-          };
-          addFilter(filter);
-          executeSearch('is:unread');
-        },
-      },
-      {
-        title: 'Starred Emails',
-        icon: Star,
-        onClick: () => {
-          const filter: ActiveFilter = {
-            id: 'quick-starred',
-            type: 'status',
-            value: 'is:starred',
-            display: 'Starred',
-          };
-          addFilter(filter);
-          executeSearch('is:starred');
-        },
-      },
-      {
-        title: 'With Attachments',
-        icon: Paperclip,
-        onClick: () => {
-          const filter: ActiveFilter = {
-            id: 'quick-attachment',
-            type: 'attachment',
-            value: 'has:attachment',
-            display: 'Has Attachment',
-          };
-          addFilter(filter);
-          executeSearch('has:attachment');
-        },
-      },
-      {
-        title: 'Last 7 Days',
-        icon: Clock,
-        onClick: () => {
-          const date = format(subDays(new Date(), 7), 'yyyy/MM/dd');
-          const filter: ActiveFilter = {
-            id: 'quick-recent',
-            type: 'date',
-            value: `after:${date}`,
-            display: 'Last 7 days',
-          };
-          addFilter(filter);
-          executeSearch(`after:${date}`);
-        },
-      },
-    ],
-    [addFilter, executeSearch],
-  );
-
-  const handleSearch = useCallback(
-    async (query: string, useNaturalLanguage = true) => {
-      if (isProcessing) return;
-      setIsProcessing(true);
-
-      try {
-        let finalQuery = query;
-
-        if (useNaturalLanguage) {
-          const result = await generateSearchQuery({ query });
-          finalQuery = result.query;
-
-          const searchFilter: ActiveFilter = {
-            id: `ai-search-${Date.now()}`,
-            type: 'search',
-            value: finalQuery,
-            display: `AI Search: "${query}"`,
-          };
-          addFilter(searchFilter);
-
-          setOpen(null);
-
-          return setSearchValue({
-            value: finalQuery,
-            highlight: getMainSearchTerm(query),
-            folder: searchValue.folder,
-            isAISearching: useNaturalLanguage,
-            isLoading: true,
-          });
-        }
-
-        const isFilterSyntax = /^(from:|to:|subject:|has:|is:|after:|before:|label:)/.test(
-          query.trim(),
-        );
-        if (query.trim() && !isFilterSyntax) {
-          const searchFilter: ActiveFilter = {
-            id: `search-${Date.now()}`,
-            type: 'search',
-            value: query,
-            display: `Search: "${query}"`,
-          };
-          addFilter(searchFilter);
-        }
-
-        const filterQuery = activeFilters.map((f) => f.value).join(' ');
-        if (filterQuery) {
-          finalQuery = `${finalQuery} ${filterQuery}`.trim();
-        }
-
-        if (query && query.trim()) {
-          saveRecentSearch(query);
-          setRecentSearches(getRecentSearches());
-        }
-
-        setSearchValue({
-          value: finalQuery,
-          highlight: getMainSearchTerm(query),
-          folder: searchValue.folder,
-          isAISearching: useNaturalLanguage,
-          isLoading: true,
-        });
-
-        console.warn('Search applied', {
-          description: finalQuery,
-        });
-
-        setOpen(null);
-      } catch (error) {
-        console.error('Search error:', error);
-        toast.error('Failed to process search');
-      } finally {
-        setIsProcessing(false);
-      }
-    },
-    [activeFilters, searchValue.folder, isProcessing],
-  );
-
-  const quickSearchResults = useMemo(() => {
-    try {
-      if (!searchQuery || searchQuery.length < 2 || !threads) return [];
-
-      const validThreads = Array.isArray(threads) ? threads.filter(Boolean) : [];
-      if (validThreads.length === 0) return [];
-
-      return validThreads
-        .filter((thread: any) => {
-          try {
-            if (!thread || typeof thread !== 'object') return false;
-
-            const query = searchQuery.toLowerCase();
-
-            const snippet = thread.snippet?.toString() || '';
-            const subject = thread.subject?.toString() || '';
-            const fromName = thread.from?.name?.toString() || '';
-            const fromEmail = thread.from?.email?.toString() || '';
-
-            return (
-              snippet.toLowerCase().includes(query) ||
-              subject.toLowerCase().includes(query) ||
-              fromName.toLowerCase().includes(query) ||
-              fromEmail.toLowerCase().includes(query)
-            );
-          } catch (err) {
-            console.error('Error filtering thread:', err);
-            return false;
-          }
-        })
-        .slice(0, 5);
-    } catch (error) {
-      console.error('Error processing search results:', error);
-      return [];
-    }
-  }, [searchQuery, threads]);
-
-  const allCommands = useMemo<CommandGroupData[]>(() => {
-    const searchCommands: CommandItem[] = [];
-    const mailCommands: CommandItem[] = [];
-    const settingsCommands: CommandItem[] = [];
-    const otherCommands: Record<string, CommandItem[]> = {};
-
-    const makeOnClick = (target: PaletteCommandTarget): (() => unknown) => {
-      if (target.kind === 'compose') return () => setIsComposeOpen('true');
-      return () => setCurrentView(target.view);
     };
 
-    for (const cmd of PALETTE_COMMANDS) {
-      if (cmd.group === 'mail') {
-        mailCommands.push({
-          title: cmd.title,
-          icon: cmd.icon,
-          shortcut: cmd.shortcut,
-          onClick: makeOnClick(cmd.target),
-        });
-      } else if (cmd.group === 'search') {
-        searchCommands.push({
-          title: cmd.title,
-          icon: cmd.icon,
-          shortcut: cmd.shortcut,
-          onClick: makeOnClick(cmd.target),
-        });
-      }
-      // 'help' group commands are rendered separately in the main view.
-    }
-
-    quickFilterOptions.forEach((option) => {
-      searchCommands.push({
-        title: option.title,
-        icon: option.icon,
-        onClick: option.onClick,
-      });
-    });
-
-    for (const sectionKey in navigationConfig) {
-      const section = navigationConfig[sectionKey];
-
-      section?.sections.forEach((group) => {
-        group.items.forEach((navItem) => {
-          if (navItem.disabled) return;
-          const item: CommandItem = {
-            title: navItem.title,
-            icon: navItem.icon,
-            url: navItem.url,
-            shortcut: navItem.shortcut,
-            isBackButton: navItem.isBackButton,
-            disabled: navItem.disabled,
-          };
-
-          if (sectionKey === 'mail') {
-            mailCommands.push(item);
-          } else if (sectionKey === 'settings') {
-            if (!item.isBackButton || pathname.startsWith('/settings')) {
-              settingsCommands.push(item);
-            }
-          } else {
-            if (!otherCommands[sectionKey]) {
-              otherCommands[sectionKey] = [];
-            }
-            otherCommands[sectionKey].push(item);
-          }
-        });
-      });
-    }
-
-    const result: CommandGroupData[] = [
-      {
-        group: 'Search',
-        items: searchCommands,
-      },
-      {
-        group: 'Mail',
-        items: mailCommands,
-      },
-      {
-        group: 'Settings',
-        items: settingsCommands,
-      },
-    ];
-
-    // Literal lookups keep the paraglide catalog tree-shakable (no dynamic `m[...]` access).
-    const groupTitles: Record<string, () => string> = {
-      mail: m['common.commandPalette.groups.mail'],
-      settings: m['common.commandPalette.groups.settings'],
-      actions: m['common.commandPalette.groups.actions'],
-      help: m['common.commandPalette.groups.help'],
-      navigation: m['common.commandPalette.groups.navigation'],
-    };
-
-    Object.entries(otherCommands).forEach(([groupKey, items]) => {
-      if (items.length > 0) {
-        let groupTitle = groupKey;
-        try {
-          groupTitle = groupTitles[groupKey]?.() || groupKey;
-        } catch {}
-
-        result.push({
-          group: groupTitle,
-          items,
-        });
-      }
-    });
-
-    return result;
-  }, [pathname, setIsComposeOpen, quickFilterOptions]);
-
-  const hasMatchingCommands = useMemo(() => {
-    if (!commandInputValue.trim()) return true;
-
-    const searchTerm = commandInputValue.toLowerCase();
-
-    return allCommands.some((group) =>
-      group.items.some(
-        (item) =>
-          item.title.toLowerCase().includes(searchTerm) ||
-          (item.description && item.description.toLowerCase().includes(searchTerm)) ||
-          (item.keywords &&
-            item.keywords.some((keyword) => keyword.toLowerCase().includes(searchTerm))),
-      ),
-    );
-  }, [commandInputValue, allCommands]);
-
-  const viewProps: CommandPaletteViewProps = {
-    activeFilters,
-    commandInputValue,
-    isProcessing,
-    hasMatchingCommands,
-    allCommands,
-    searchQuery,
-    recentSearches,
-    quickSearchResults,
-    userLabels,
-    selectedDateFilter,
-    selectedDate,
-    dateRangeStart,
-    dateRangeEnd,
-    emailSuggestions,
-    setCommandInputValue,
-    setCurrentView,
-    setSearchQuery,
-    setSelectedDateFilter,
-    setSelectedDate,
-    setDateRangeStart,
-    setDateRangeEnd,
-    clearAllFilters,
-    removeFilter,
-    addFilter,
-    executeSearch,
-    handleSearch,
-    runCommand,
-    navigate,
-  };
-
-  const renderView = () => {
-    switch (currentView) {
-      case 'search':
-        return <SearchView {...viewProps} />;
-      case 'filter':
-        return <FilterView {...viewProps} />;
-      case 'dateRange':
-        return <FilterView {...viewProps} />;
-      case 'labels':
-        return <LabelsView {...viewProps} />;
-      case 'help':
-        return <HelpView {...viewProps} />;
-      default:
-        return <MainView {...viewProps} />;
-    }
-  };
+    document.addEventListener('keydown', down, { capture: true });
+    return () => document.removeEventListener('keydown', down, { capture: true });
+  }, [setOpen]);
 
   return (
     <CommandPaletteContext.Provider
@@ -600,31 +149,19 @@ export function CommandPalette({ children }: { children: React.ReactNode }) {
         clearAllFilters,
       }}
     >
-      <CommandDialog
-        open={!!open}
-        onOpenChange={(isOpen) => {
-          if (!isOpen && currentView !== 'main') {
-            setCurrentView('main');
-            return;
-          }
-          setOpen(isOpen ? 'true' : null);
-        }}
-      >
-        <VisuallyHidden.VisuallyHidden>
-          <DialogTitle>{m['common.commandPalette.title']()}</DialogTitle>
-          <DialogDescription>{m['common.commandPalette.description']()}</DialogDescription>
-        </VisuallyHidden.VisuallyHidden>
-        {renderView()}
-      </CommandDialog>
+      {open ? (
+        <Suspense fallback={<CommandPaletteLoadingModal onClose={closePalette} />}>
+          <CommandPaletteDialog
+            open={open}
+            setOpen={setOpen}
+            activeFilters={activeFilters}
+            addFilter={addFilter}
+            removeFilter={removeFilter}
+            clearAllFilters={clearAllFilters}
+          />
+        </Suspense>
+      ) : null}
       {children}
     </CommandPaletteContext.Provider>
-  );
-}
-
-export function CommandPaletteProvider({ children }: { children: React.ReactNode }) {
-  return (
-    <Suspense>
-      <CommandPalette>{children}</CommandPalette>
-    </Suspense>
   );
 }
