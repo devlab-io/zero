@@ -145,7 +145,6 @@
           "tag": "v9",
           "new_sqlite_classes": ["ShardRegistry"],
         },
-
       ],
 
       "observability": {
@@ -287,7 +286,6 @@
             "name": "SHARD_REGISTRY",
             "class_name": "ShardRegistry",
           },
-
         ],
       },
       "workflows": [
@@ -338,7 +336,16 @@
       "migrations": [
         {
           "tag": "v1",
-          "new_sqlite_classes": ["ZeroAgent", "ZeroMCP", "ZeroDB", "ZeroDriver", "ThinkingMCP", "WorkflowRunner", "ThreadSyncWorker", "ShardRegistry"],
+          "new_sqlite_classes": [
+            "ZeroAgent",
+            "ZeroMCP",
+            "ZeroDB",
+            "ZeroDriver",
+            "ThinkingMCP",
+            "WorkflowRunner",
+            "ThreadSyncWorker",
+            "ShardRegistry",
+          ],
         },
       ],
       "observability": {
@@ -425,7 +432,7 @@
       "r2_buckets": [
         {
           "binding": "THREADS_BUCKET",
-          "bucket_name": "threads",
+          "bucket_name": "threads-prod",
         },
       ],
       "ai": {
@@ -434,11 +441,11 @@
       "vectorize": [
         {
           "binding": "VECTORIZE",
-          "index_name": "threads-vector",
+          "index_name": "threads-vector-prod",
         },
         {
           "binding": "VECTORIZE_MESSAGE",
-          "index_name": "messages-vector",
+          "index_name": "messages-vector-prod",
         },
       ],
       "observability": {
@@ -447,7 +454,7 @@
       "hyperdrive": [
         {
           "binding": "HYPERDRIVE",
-          "id": "b1be316b45fb439a9e54b74ecc20aa21",
+          "id": "f19b86606445468283e985335ddf9c0f",
           "localConnectionString": "postgresql://postgres:postgres@localhost:5433/zerodotemail",
         },
       ],
@@ -485,7 +492,6 @@
             "name": "SHARD_REGISTRY",
             "class_name": "ShardRegistry",
           },
-
         ],
       },
       "workflows": [
@@ -530,56 +536,29 @@
       "migrations": [
         {
           "tag": "v1",
-          "new_classes": ["DurableMailbox"],
+          "new_sqlite_classes": [
+            "ZeroAgent",
+            "ZeroMCP",
+            "ZeroDB",
+            "ZeroDriver",
+            "ThinkingMCP",
+            "WorkflowRunner",
+            "ThreadSyncWorker",
+            "ShardRegistry",
+          ],
         },
-        {
-          "tag": "v2",
-          "new_sqlite_classes": ["ZeroAgent", "ZeroMCP"],
-        },
-        {
-          "tag": "v3",
-          "new_classes": ["ZeroDB"],
-        },
-        {
-          "tag": "v4",
-          "new_sqlite_classes": ["ZeroAgent"],
-        },
-        {
-          "tag": "v5",
-          "deleted_classes": ["DurableMailbox"],
-        },
-        {
-          "tag": "v6",
-          "new_sqlite_classes": ["ZeroDriver"],
-        },
-        {
-          "tag": "v7",
-          "new_sqlite_classes": ["ThinkingMCP"],
-        },
-        {
-          "tag": "v8",
-          "new_sqlite_classes": ["WorkflowRunner"],
-        },
-        {
-          "tag": "v9",
-          "new_sqlite_classes": ["ThreadSyncWorker"],
-        },
-        {
-          "tag": "v10",
-          "new_sqlite_classes": ["ShardRegistry"],
-        },
-
       ],
       "vars": {
         "NODE_ENV": "production",
-        "COOKIE_DOMAIN": "0.email",
-        "VITE_PUBLIC_BACKEND_URL": "https://api.0.email",
-        "VITE_PUBLIC_APP_URL": "https://0.email",
-        "DISABLE_CALLS": "true",
+        "COOKIE_DOMAIN": "devlab-tahiti.workers.dev",
+        "FORCE_GOOGLE_AUTH": "true",
+        "VITE_PUBLIC_BACKEND_URL": "https://zero-server-production.devlab-tahiti.workers.dev",
+        "VITE_PUBLIC_APP_URL": "https://zero-production.devlab-tahiti.workers.dev",
+        "DISABLE_CALLS": "",
         "DROP_AGENT_TABLES": "false",
-        "THREAD_SYNC_MAX_COUNT": "60",
+        "THREAD_SYNC_MAX_COUNT": "2000",
         "THREAD_SYNC_LOOP": "true",
-        "DISABLE_WORKFLOWS": "true",
+        "DISABLE_WORKFLOWS": "false",
         "OTEL_EXPORTER_OTLP_ENDPOINT": "https://api.axiom.co/v1/traces",
         "OTEL_SERVICE_NAME": "zero-email-server-production",
         "DD_API_KEY": "",
@@ -589,43 +568,43 @@
       "kv_namespaces": [
         {
           "binding": "gmail_history_id",
-          "id": "10005d74e84f4f18a17c9618d9e9cecf",
+          "id": "34bcd247a4374828b3f24862080ce7a1",
         },
         {
           "binding": "gmail_processing_threads",
-          "id": "3348ff0976284269a8d8a5e6e4c04c56",
+          "id": "ba33df8381714b089b984c39c31156b0",
         },
         {
           "binding": "subscribed_accounts",
-          "id": "5902b3b948ff4c4ba1aedbbbbe25503d",
+          "id": "2d922d4e5df64770ab3cb03342060fbf",
         },
         {
           "binding": "connection_labels",
-          "id": "9a13290a55ad4f62824c67005dd66f6f",
+          "id": "b2bf1fdd67a44ab1bcb6b15284a8e236",
         },
         {
           "binding": "prompts_storage",
-          "id": "2a4ebda553f3456085cfcf92cc0f570f",
+          "id": "fb8190946f214bbbb419ef279ee2cc86",
         },
         {
           "binding": "gmail_sub_age",
-          "id": "0591e91fffcc4675aaf00f909bee77d2",
+          "id": "2740bafc062945ce9bdd6e12a6c2129a",
         },
         {
           "binding": "pending_emails_status",
-          "id": "e65f8f72441d4eadb9d5ae36269316c9",
+          "id": "cc1857197bef497487c4bdb3ec778446",
         },
         {
           "binding": "pending_emails_payload",
-          "id": "e65f8f72441d4eadb9d5ae36269316c9_payload",
+          "id": "cbe79b0e3c794e7da5a3eb80eeb2a127",
         },
         {
           "binding": "scheduled_emails",
-          "id": "e65f8f72441d4eadb9d5ae36269316c9_scheduled",
+          "id": "35dcdbbf44a74a21a1941a72872770b0",
         },
         {
           "binding": "snoozed_emails",
-          "id": "f0952e9c3b024cb499c4b9dfe8bb603e",
+          "id": "122652e6ab3c45169caf2c5823a99dd8",
         },
       ],
     },
