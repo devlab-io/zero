@@ -1,6 +1,9 @@
 ### Zero MCP
 
-## Capabilties
+The MCP surface is implemented in `apps/server/src/routes/agent/mcp.ts` (the `ZeroMCP` Durable
+Object) and `apps/server/src/routes/agent/mcp-tools.ts` (draft-only tool surface, issue #36).
+
+## Capabilities
 
 Zero MCP provides the following capabilities:
 
@@ -39,7 +42,7 @@ Zero MCP provides the following capabilities:
 
 ## How to use?
 
-You can connecto ZeroMCP using two methods:
+You can connect to ZeroMCP using two methods:
 
 1. Better Auth session token
 2. OAuth (Coming soon)
