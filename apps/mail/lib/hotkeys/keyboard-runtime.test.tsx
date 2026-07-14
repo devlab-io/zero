@@ -298,7 +298,9 @@ describe('keyboard runtime', () => {
       dialog.setAttribute('role', 'dialog');
       const dialogButton = document.createElement('button');
       dialog.appendChild(dialogButton);
-      document.body.append(input, editor, dialog);
+      document.body.appendChild(input);
+      document.body.appendChild(editor);
+      document.body.appendChild(dialog);
 
       for (const target of [input, editor, dialogButton]) {
         for (const init of [

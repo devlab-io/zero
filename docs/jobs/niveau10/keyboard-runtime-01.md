@@ -1,3 +1,100 @@
+MIRROR: CORRECTION 5 keyboard-test-dom-04
+
+BASELINE / FREEZE: `56e5caf40fb25c489fbe184a194f1ca5bb4cf39d`
+
+RULING: `docs/jobs/niveau10/keyboard-runtime-rulings.md` — appel DOM de test incompatible
+avec les types Workers
+
+SCOPE: correction test-only de l'ajout des cibles DOM et mise à jour du rapport ; spec, check,
+rulings et produit inchangés ; aucun commit/push
+
+## PHASE 0 — correction 5
+
+- Le gate global UX préparant les types Workers expose `TS2554` sur l'appel multi-arguments
+  `document.body.append(input, editor, dialog)` du probe queue.
+- Plan exécuté : remplacer uniquement cet appel par trois `appendChild` unitaires, puis exécuter
+  et inspecter les cinq RUNs du check corrigé avec la préparation Workers complète.
+- Aucun désaccord avec le ruling.
+
+## Correction DOM Workers
+
+- `keyboard-runtime.test.tsx` ajoute désormais `input`, `editor` et `dialog` au body avec trois
+  appels `appendChild` unitaires.
+- Le scénario, ses cibles, ses événements et ses assertions sont inchangés.
+- Aucun fichier produit n'est modifié.
+
+## Préparation du worktree
+
+- Premier RUN tests : exit 254, `vitest` absent du worktree frais.
+- `pnpm install --frozen-lockfile` : exit 0, lockfile inchangé.
+- Premier RUN après installation : exit 1 avec 39/40 tests ; les artefacts générés
+  `@/paraglide/messages` étaient absents.
+- `pnpm --filter @zero/mail exec react-router typegen` : exit 0, compilation Paraglide terminée.
+- Les résultats autoritatifs ci-dessous sont les cinq RUNs relancés après cette préparation.
+
+## RUNs gelés — correction 5
+
+COMMAND: pnpm --filter @zero/mail exec vitest run lib/hotkeys/keyboard-runtime.test.tsx lib/hotkeys/keyboard-parity.test.ts components/mail/reply-recipients.test.ts
+
+EXIT: 0
+
+OUTPUT:
+
+```text
+✓ components/mail/reply-recipients.test.ts (18 tests) 3ms
+✓ lib/hotkeys/keyboard-parity.test.ts (12 tests) 7ms
+✓ lib/hotkeys/keyboard-runtime.test.tsx (10 tests) 1204ms
+Test Files  3 passed (3)
+Tests  40 passed (40)
+Duration  1.72s
+```
+
+COMMAND: pnpm --filter @zero/mail exec eslint config/shortcuts.ts lib/hotkeys components/mail/reply-recipients.ts components/mail/reply-composer.tsx components/create/email-composer.tsx components/queue/queue-review.tsx app/'(routes)'/settings/shortcuts
+
+EXIT: 0
+
+OUTPUT:
+
+```text
+Warning: React version not specified in eslint-plugin-react settings.
+components/create/email-composer.tsx: 3 inherited react-hooks/exhaustive-deps warnings
+components/queue/queue-review.tsx: 3 inherited react-hooks/exhaustive-deps warnings
+lib/hotkeys/mail-list-hotkeys.tsx: 2 inherited react-hooks/exhaustive-deps warnings
+✖ 8 problems (0 errors, 8 warnings)
+```
+
+COMMAND: pnpm --filter @zero/server types && pnpm --filter @zero/mail types && pnpm --filter @zero/mail exec react-router typegen && (pnpm --filter @zero/mail exec tsc --noEmit --pretty false > /tmp/zero-niveau10-keyboard-tsc.log 2>&1 || true) && ! rg '^(lib/hotkeys/|app/\(routes\)/settings/shortcuts/|components/mail/reply-|components/create/email-composer\.tsx|components/queue/queue-review\.tsx|config/shortcuts\.ts).\*error TS' /tmp/zero-niveau10-keyboard-tsc.log && cat /tmp/zero-niveau10-keyboard-tsc.log && pnpm --filter @zero/mail build
+
+EXIT: 0
+
+OUTPUT:
+
+```text
+@zero/server types: worker-configuration.d.ts generated
+@zero/mail types: worker-configuration.d.ts generated
+✔ [paraglide-js] Compilation complete (message-modules)
+Owner-scope TypeScript log: empty
+Oxlint: 3 inherited warnings, 0 errors
+Client build: ✓ built in 10.87s
+SSR build: ✓ built in 7.22s
+```
+
+COMMAND: git status --porcelain --untracked-files=all | sed 's/^...//' | awk '!/^(apps\/mail\/(config\/shortcuts\.ts|lib\/hotkeys\/._|components\/mail\/(reply-recipients(\.test)?\.ts|reply-composer\.tsx)|components\/create\/email-composer\.tsx|components\/queue\/queue-review\.tsx|app\/\(routes\)\/settings\/shortcuts\/._|messages\/(en|fr)\.json)|docs\/jobs\/niveau10\/keyboard-runtime-01\.md)$/ {print; bad=1} END {exit bad}'
+
+EXIT: 0
+
+OUTPUT: vide
+
+COMMAND: git diff --check
+
+EXIT: 0
+
+OUTPUT: vide
+
+STATUS: COMPLETE
+
+---
+
 MIRROR: CORRECTION 4 keyboard-queue-nav-03
 
 BASELINE HEAD: `968b0a5e44f36b07ef2fb91583e6bd6243a088f7`
