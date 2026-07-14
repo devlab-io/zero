@@ -108,3 +108,14 @@ optionnel, jamais requis), et nonNull ≤ valeur post-job (cible ≤10).
   mail types, react-router typegen) ; tsc 0/0 ; suites mail + server vertes ;
   type-ratchet PASSED (any 23/15/38 INCHANGÉS + nouveaux compteurs) ; console-ratchet
   8/6 PASSED ; loc-ratchet PASSED. RC natifs. Builder ne committe pas.
+
+### Amendement périmètre LEAD A (a8, 2026-07-13) — vérifié orchestrateur
+`lib/email-utils.client.tsx` EXISTE déjà (foyer de handleUnsubscribe, importé par
+thread-display.tsx:29, lazy donc non-froid) et `highlightText` y vit (l.65), avec un
+unique consommateur froid mail-list-thread.tsx:17. Le périmètre d'écriture LEAD A
+devient : **apps/mail/lib/email-utils-highlight.client.tsx (NOUVEAU, foyer léger de
+highlightText seul)** ; email-utils.client.tsx (retrait du seul export highlightText) ;
+mail-list-thread.tsx (1 import) ; email-utils.ts possiblement INTOUCHÉ. Toutes les
+conditions du ruling initial (f143abf9, DOMPurify statique, preuves, gates)
+inchangées. Anti-collision a2 : le nouveau fichier est réputé appartenir au
+périmètre a8 jusqu'au fan-in.
