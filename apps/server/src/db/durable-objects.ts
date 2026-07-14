@@ -23,8 +23,8 @@ import {
 import { DurableObject, RpcTarget } from 'cloudflare:workers';
 import { eq, and, desc, asc, inArray } from 'drizzle-orm';
 import { defaultUserSettings } from '../lib/schemas';
-import { EProviders } from '../types';
 import { createDb, type DB } from './index';
+import { EProviders } from '../types';
 import type { ZeroEnv } from '../env';
 
 export class DbRpcDO extends RpcTarget {
@@ -177,8 +177,49 @@ export class DbRpcDO extends RpcTarget {
 export class ZeroDB extends DurableObject<ZeroEnv> {
   db: DB = createDb(this.env.HYPERDRIVE.connectionString).db;
 
+  // Ce DO est dédié à un utilisateur (idFromName(userId)) et toutes les écritures
+  // user/connection transitent par lui : un cache mémoire local invalidé par ces
+  // écritures est donc sûr. Il évite 2 à 3 requêtes Postgres séquentielles sur
+  // chaque requête authentifiée.
+  private activeConnectionCache: {
+    userId: string;
+    data: typeof connection.$inferSelect;
+    expiresAt: number;
+  } | null = null;
+  private static readonly ACTIVE_CONNECTION_TTL_MS = 60_000;
+
+  private invalidateActiveConnectionCache() {
+    this.activeConnectionCache = null;
+  }
+
   async setMetaData(userId: string) {
     return new DbRpcDO(this, userId);
+  }
+
+  /**
+   * Connexion active (défaut de l'utilisateur, sinon première) en UN SEUL RPC.
+   * Remplace la cascade setMetaData → findUser → findUserConnection du chemin chaud.
+   */
+  async getActiveConnection(userId: string): Promise<typeof connection.$inferSelect | undefined> {
+    const cached = this.activeConnectionCache;
+    if (cached && cached.userId === userId && cached.expiresAt > Date.now()) {
+      return cached.data;
+    }
+
+    const userData = await this.findUser(userId);
+    let active = userData?.defaultConnectionId
+      ? await this.findUserConnection(userId, userData.defaultConnectionId)
+      : undefined;
+    if (!active) active = await this.findFirstConnection(userId);
+
+    if (active) {
+      this.activeConnectionCache = {
+        userId,
+        data: active,
+        expiresAt: Date.now() + ZeroDB.ACTIVE_CONNECTION_TTL_MS,
+      };
+    }
+    return active;
   }
 
   async findUser(userId: string): Promise<typeof user.$inferSelect | undefined> {
@@ -197,10 +238,12 @@ export class ZeroDB extends DurableObject<ZeroEnv> {
   }
 
   async updateUser(userId: string, data: Partial<typeof user.$inferInsert>) {
+    this.invalidateActiveConnectionCache();
     return await this.db.update(user).set(data).where(eq(user.id, userId));
   }
 
   async deleteConnection(connectionId: string, userId: string) {
+    this.invalidateActiveConnectionCache();
     const connections = await this.findManyConnections(userId);
     if (connections.length <= 1) {
       throw new Error('Cannot delete the last connection. At least one connection is required.');
@@ -314,6 +357,7 @@ export class ZeroDB extends DurableObject<ZeroEnv> {
   }
 
   async deleteUser(userId: string) {
+    this.invalidateActiveConnectionCache();
     return await this.db.transaction(async (tx) => {
       await tx.delete(connection).where(eq(connection.userId, userId));
       await tx.delete(account).where(eq(account.userId, userId));
@@ -392,6 +436,7 @@ export class ZeroDB extends DurableObject<ZeroEnv> {
       scope: string;
     },
   ): Promise<{ id: string }[]> {
+    this.invalidateActiveConnectionCache();
     return await this.db
       .insert(connection)
       .values({
@@ -479,6 +524,7 @@ export class ZeroDB extends DurableObject<ZeroEnv> {
   }
 
   async deleteActiveConnection(userId: string, connectionId: string) {
+    this.invalidateActiveConnectionCache();
     return await this.db
       .delete(connection)
       .where(and(eq(connection.userId, userId), eq(connection.id, connectionId)));
@@ -488,6 +534,7 @@ export class ZeroDB extends DurableObject<ZeroEnv> {
     connectionId: string,
     updatingInfo: Partial<typeof connection.$inferInsert>,
   ) {
+    this.invalidateActiveConnectionCache();
     return await this.db
       .update(connection)
       .set(updatingInfo)

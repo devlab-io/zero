@@ -1,4 +1,3 @@
-import { logger } from './logger';
 import type { IGetThreadResponse, IGetThreadsResponse } from './driver/types';
 import { OutgoingMessageType } from '../routes/agent/types';
 import { getContext } from 'hono/context-storage';
@@ -7,6 +6,7 @@ import { defaultPageSize } from './utils';
 import type { HonoContext } from '../ctx';
 import { createClient } from 'dormroom';
 import { createDriver } from './driver';
+import { logger } from './logger';
 import { eq } from 'drizzle-orm';
 import { createDb } from '../db';
 import { Effect } from 'effect';
@@ -16,6 +16,23 @@ const mbToBytes = (mb: number) => mb * 1024 * 1024;
 
 // 8GB
 const MAX_SHARD_SIZE = mbToBytes(8192);
+
+// Caches par isolate. Les stubs DO ne survivent pas d'une requête à l'autre,
+// mais ces données simples oui — elles éliminent les sauts réseau séquentiels
+// (registre, sondes, handshakes) qui dominaient la latence des requêtes chaudes.
+// Le DO ZeroDriver se ré-initialise seul depuis son storage après éviction,
+// donc sauter le handshake une fois qu'il a eu lieu est sûr.
+const shardHandshakeDone = new Set<string>();
+const activeShardCache = new Map<string, { shardId: string; expiresAt: number }>();
+const shardListCache = new Map<string, { shards: { shard_id: string }[]; expiresAt: number }>();
+// La topologie des shards ne change que lorsqu'un shard approche 8 GB ; 60 s de
+// staleness inter-isolate sont sans conséquence (fenêtre bornée, lecture seule).
+const SHARD_TOPOLOGY_TTL_MS = 60_000;
+
+const invalidateShardTopology = (connectionId: string) => {
+  activeShardCache.delete(connectionId);
+  shardListCache.delete(connectionId);
+};
 
 export const getZeroDB = async (userId: string) => {
   const stub = env.ZERO_DB.get(env.ZERO_DB.idFromName(userId));
@@ -31,7 +48,7 @@ class MockExecutionContext implements ExecutionContext {
       logger.error('MockExecutionContext: Error in waitUntil', error);
     }
   }
-  passThroughOnException(): void { }
+  passThroughOnException(): void {}
   props: unknown;
 }
 
@@ -50,12 +67,16 @@ const getShardClient = async (connectionId: string, shardId: string) => {
     ctx: new MockExecutionContext(),
     configs: [{ name: `connection:${connectionId}:shard:${shardId}` }],
   });
-  try {
-    await shardClient.stub.setName(connectionId);
-    await shardClient.stub.setupAuth();
-  } catch (error) {
-    logger.error(`Failed to initialize shard ${shardId} for connection ${connectionId}:`, error);
-    throw new Error(`Shard initialization failed: ${error}`);
+  const handshakeKey = `${connectionId}:${shardId}`;
+  if (!shardHandshakeDone.has(handshakeKey)) {
+    try {
+      // setName exécute déjà setupAuth sous blockConcurrencyWhile : un seul RPC.
+      await shardClient.stub.setName(connectionId);
+      shardHandshakeDone.add(handshakeKey);
+    } catch (error) {
+      logger.error(`Failed to initialize shard ${shardId} for connection ${connectionId}:`, error);
+      throw new Error(`Shard initialization failed: ${error}`);
+    }
   }
   return shardClient;
 };
@@ -66,6 +87,15 @@ type ShardClient = Awaited<ReturnType<typeof getShardClient>>;
 const listShards = async (registry: RegistryClient): Promise<{ shard_id: string }[]> => [
   ...(await registry.exec(`SELECT * FROM shards`)).array,
 ];
+
+const listShardsCached = async (connectionId: string): Promise<{ shard_id: string }[]> => {
+  const cached = shardListCache.get(connectionId);
+  if (cached && cached.expiresAt > Date.now()) return cached.shards;
+  const registry = await getRegistryClient(connectionId);
+  const shards = await listShards(registry);
+  shardListCache.set(connectionId, { shards, expiresAt: Date.now() + SHARD_TOPOLOGY_TTL_MS });
+  return shards;
+};
 
 const insertShard = (registry: RegistryClient, shardId: string) =>
   registry.exec(`INSERT INTO shards (shard_id) VALUES (?)`, [shardId]);
@@ -96,14 +126,8 @@ export const aggregateShardDataEffect = <T, E = never>(
   aggregator: (results: T[]) => T,
 ) => {
   return Effect.gen(function* () {
-    const registry = yield* Effect.tryPromise({
-      try: () => getRegistryClient(connectionId),
-      catch: (error) =>
-        new Error(`Failed to get registry client for connection ${connectionId}: ${error}`),
-    });
-
     const allShards = yield* Effect.tryPromise({
-      try: () => listShards(registry),
+      try: () => listShardsCached(connectionId),
       catch: (error) => new Error(`Failed to list shards for connection ${connectionId}: ${error}`),
     });
 
@@ -175,14 +199,8 @@ export const aggregateShardDataSequentialEffect = <T, A, E = never>(
   finalizer: (accumulator: A) => T,
 ) => {
   return Effect.gen(function* () {
-    const registry = yield* Effect.tryPromise({
-      try: () => getRegistryClient(connectionId),
-      catch: (error) =>
-        new Error(`Failed to get registry client for connection ${connectionId}: ${error}`),
-    });
-
     const allShards = yield* Effect.tryPromise({
-      try: () => listShards(registry),
+      try: () => listShardsCached(connectionId),
       catch: (error) => new Error(`Failed to list shards for connection ${connectionId}: ${error}`),
     });
 
@@ -221,14 +239,8 @@ export const raceShardDataEffect = <T, E = never>(
   fallbackValue: T,
 ) => {
   return Effect.gen(function* () {
-    const registry = yield* Effect.tryPromise({
-      try: () => getRegistryClient(connectionId),
-      catch: (error) =>
-        new Error(`Failed to get registry client for connection ${connectionId}: ${error}`),
-    });
-
     const allShards = yield* Effect.tryPromise({
-      try: () => listShards(registry),
+      try: () => listShardsCached(connectionId),
       catch: (error) => new Error(`Failed to list shards for connection ${connectionId}: ${error}`),
     });
 
@@ -290,15 +302,15 @@ export const getThread: (
   connectionId: string,
   threadId: string,
 ) => {
-    const result = await Effect.runPromise(getThreadEffect(connectionId, threadId));
-    if (!result.result) {
-      throw new Error(`Thread ${threadId} not found`);
-    }
-    if (!result.shardId) {
-      throw new Error(`Thread ${threadId} not found in any shard`);
-    }
-    return { result: result.result, shardId: result.shardId };
-  };
+  const result = await Effect.runPromise(getThreadEffect(connectionId, threadId));
+  if (!result.result) {
+    throw new Error(`Thread ${threadId} not found`);
+  }
+  if (!result.shardId) {
+    throw new Error(`Thread ${threadId} not found in any shard`);
+  }
+  return { result: result.result, shardId: result.shardId };
+};
 
 export const modifyThreadLabelsInDB = async (
   connectionId: string,
@@ -317,13 +329,25 @@ export const modifyThreadLabelsInDB = async (
 };
 
 const getActiveShardId = async (connectionId: string) => {
-  const registry = await getRegistryClient(connectionId);
-  const allShards = await listShards(registry);
+  const cached = activeShardCache.get(connectionId);
+  if (cached && cached.expiresAt > Date.now()) return cached.shardId;
+
+  const rememberActiveShard = (shardId: string) => {
+    activeShardCache.set(connectionId, {
+      shardId,
+      expiresAt: Date.now() + SHARD_TOPOLOGY_TTL_MS,
+    });
+    return shardId;
+  };
+
+  const allShards = await listShardsCached(connectionId);
 
   if (allShards.length === 0) {
+    const registry = await getRegistryClient(connectionId);
     const newShardId = crypto.randomUUID();
     await insertShard(registry, newShardId);
-    return newShardId;
+    shardListCache.delete(connectionId);
+    return rememberActiveShard(newShardId);
   }
 
   let selectedShardId: string | null = null;
@@ -341,12 +365,14 @@ const getActiveShardId = async (connectionId: string) => {
   );
 
   if (selectedShardId) {
-    return selectedShardId;
+    return rememberActiveShard(selectedShardId);
   }
 
+  const registry = await getRegistryClient(connectionId);
   const newShardId = crypto.randomUUID();
   await insertShard(registry, newShardId);
-  return newShardId;
+  shardListCache.delete(connectionId);
+  return rememberActiveShard(newShardId);
 };
 
 export const getZeroAgent = async (connectionId: string, executionCtx?: ExecutionContext) => {
@@ -365,6 +391,7 @@ export const getZeroAgentFromShard = async (connectionId: string, shardId: strin
 };
 
 export const forceReSync = async (connectionId: string) => {
+  invalidateShardTopology(connectionId);
   const registry = await getRegistryClient(connectionId);
   const allShards = await listShards(registry);
 
@@ -380,6 +407,7 @@ export const forceReSync = async (connectionId: string) => {
   );
 
   await deleteAllShards(registry);
+  invalidateShardTopology(connectionId);
 
   const agent = await getZeroAgent(connectionId);
   return agent.stub.forceReSync();
@@ -552,29 +580,22 @@ export const getActiveConnection = async () => {
   const { sessionUser, auth } = c.var;
   if (!sessionUser) throw new Error('Session Not Found');
 
-  const db = await getZeroDB(sessionUser.id);
-  const userData = await db.findUser();
+  // Un seul RPC : la logique défaut-sinon-première vit dans le DO ZeroDB, qui
+  // mémorise le résultat en local (invalidé par ses propres écritures).
+  const stub = env.ZERO_DB.get(env.ZERO_DB.idFromName(sessionUser.id));
+  const activeConnection = await stub.getActiveConnection(sessionUser.id);
+  if (activeConnection) return activeConnection;
 
-  if (userData?.defaultConnectionId) {
-    const activeConnection = await db.findUserConnection(userData.defaultConnectionId);
-    if (activeConnection) return activeConnection;
-  }
-
-  const firstConnection = await db.findFirstConnection();
-  if (!firstConnection) {
-    try {
-      if (auth) {
-        await auth.api.revokeSession({ headers: c.req.raw.headers });
-        await auth.api.signOut({ headers: c.req.raw.headers });
-      }
-    } catch (err) {
-      logger.warn(`[getActiveConnection] Session cleanup failed for user ${sessionUser.id}:`, err);
+  try {
+    if (auth) {
+      await auth.api.revokeSession({ headers: c.req.raw.headers });
+      await auth.api.signOut({ headers: c.req.raw.headers });
     }
-    logger.error(`No connections found for user ${sessionUser.id}`);
-    throw new Error('No connections found for user');
+  } catch (err) {
+    logger.warn(`[getActiveConnection] Session cleanup failed for user ${sessionUser.id}:`, err);
   }
-
-  return firstConnection;
+  logger.error(`No connections found for user ${sessionUser.id}`);
+  throw new Error('No connections found for user');
 };
 
 export const connectionToDriver = (activeConnection: typeof connection.$inferSelect) => {
@@ -607,8 +628,6 @@ export const verifyToken = async (token: string) => {
   const data = await response.json();
   return !!data;
 };
-
-
 
 export const resetConnection = async (connectionId: string) => {
   const { db, conn } = createDb(env.HYPERDRIVE.connectionString);

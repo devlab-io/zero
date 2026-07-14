@@ -14,41 +14,32 @@
  * Reuse or distribution of this file requires a license from Zero Email Inc.
  */
 
-import { logger } from '../../lib/logger';
-import {
-  countThreads,
-  countThreadsByLabels,
-  deleteSpamThreads,
-  type DB,
-} from './db';
-import type {
-  IGetThreadResponse,
-  IGetThreadsResponse,
-  MailManager,
-} from '../../lib/driver/types';
+import type { IGetThreadResponse, IGetThreadsResponse, MailManager } from '../../lib/driver/types';
+import { countThreads, countThreadsByLabels, deleteSpamThreads, type DB } from './db';
 import { connectionToDriver, getZeroSocketAgent } from '../../lib/server-utils';
 import type { IOutgoingMessage, ISnoozeBatch, Sender } from '../../types';
+import { OutgoingMessageType, type OutgoingMessage } from './types';
 import type { UserTopic } from '../../lib/analyze/interests';
 import { Migratable, Queryable, Transfer } from 'dormroom';
 import type { CreateDraftData } from '../../lib/schemas';
 import { drizzle } from 'drizzle-orm/durable-sqlite';
-import { DurableObject } from 'cloudflare:workers';
 import type { ZeroDriverInternal } from './internal';
+import { DurableObject } from 'cloudflare:workers';
 import migrations from './db/drizzle/migrations';
-import { OutgoingMessageType, type OutgoingMessage } from './types';
 import type { ThreadSyncResult } from './errors';
-import { connection } from '../../db/schema';
 import type { ZeroAgent } from './chat-agent';
+import { connection } from '../../db/schema';
+import { logger } from '../../lib/logger';
 import { type ZeroEnv } from '../../env';
 import * as schema from './db/schema';
 import { threads } from './db/schema';
 import { createDb } from '../../db';
 import { eq } from 'drizzle-orm';
 
-import * as projection from './projection';
 import * as recipients from './recipients';
-import * as outbox from './outbox';
+import * as projection from './projection';
 import * as topics from './topics';
+import * as outbox from './outbox';
 import * as labels from './labels';
 import * as sync from './sync';
 
@@ -82,9 +73,24 @@ export class ZeroDriver extends DurableObject<ZeroEnv> {
     super(ctx, env);
     this.sql = ctx.storage.sql;
     this.db = drizzle(ctx.storage, { schema });
+    // Ré-initialisation autonome après éviction : le Worker peut ainsi sauter le
+    // handshake setName/setupAuth sur le chemin chaud une fois le premier contact
+    // établi. Toute erreur dégrade vers l'init paresseuse via setName.
+    ctx.blockConcurrencyWhile(async () => {
+      try {
+        const storedName = await ctx.storage.get<string>(outbox.DRAFT_OUTBOX_CONNECTION_ID_KEY);
+        if (storedName && storedName !== 'general') {
+          this.name = storedName;
+          await this.setupAuth();
+        }
+      } catch (error) {
+        console.error('[ZeroDriver] Self-init from storage failed, deferring to setName:', error);
+      }
+    });
   }
 
   async setName(name: string) {
+    if (this.name === name && this.driver) return;
     this.name = name;
     await this.ctx.storage.put(outbox.DRAFT_OUTBOX_CONNECTION_ID_KEY, name);
     await this.ctx.blockConcurrencyWhile(async () => {
@@ -208,7 +214,10 @@ export class ZeroDriver extends DurableObject<ZeroEnv> {
     pageToken?: string;
     // Serializable return: IGetThreadsResponse's `$raw?: unknown` is not Rpc.Serializable,
     // so the DO stub otherwise collapses this method's return to `never`. Runtime unchanged.
-  }): Promise<{ threads: { id: string; historyId: string | null }[]; nextPageToken: string | null }> {
+  }): Promise<{
+    threads: { id: string; historyId: string | null }[];
+    nextPageToken: string | null;
+  }> {
     if (!this.driver) {
       throw new Error('No driver available');
     }
@@ -405,7 +414,12 @@ export class ZeroDriver extends DurableObject<ZeroEnv> {
     addLabelNames: string[],
     removeLabelNames: string[],
   ) {
-    return labels.modifyThreadLabelsByName(internal(this), threadId, addLabelNames, removeLabelNames);
+    return labels.modifyThreadLabelsByName(
+      internal(this),
+      threadId,
+      addLabelNames,
+      removeLabelNames,
+    );
   }
 
   async modifyThreadLabelsInDB(threadId: string, addLabels: string[], removeLabels: string[]) {
