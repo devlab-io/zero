@@ -236,13 +236,6 @@
     {
       "idx": 33,
       "version": "7",
-      "when": 1750648088006,
-      "tag": "0032_add_image_compression_setting",
-      "breakpoints": true
-    },
-    {
-      "idx": 33,
-      "version": "7",
       "when": 1750885796261,
       "tag": "0033_first_bastion",
       "breakpoints": true
@@ -273,6 +266,13 @@
       "version": "7",
       "when": 1751568728663,
       "tag": "0035_uneven_shiva",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1783301933899,
+      "tag": "0038_famous_malcolm_colcord",
       "breakpoints": true
     }
   ]

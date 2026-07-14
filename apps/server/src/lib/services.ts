@@ -1,3 +1,4 @@
+import { logger } from './logger';
 import { env } from '../env';
 import { Redis } from '@upstash/redis';
 import { Resend } from 'resend';
@@ -5,7 +6,7 @@ import { Resend } from 'resend';
 export const resend = () =>
   env.RESEND_API_KEY
     ? new Resend(env.RESEND_API_KEY)
-    : { emails: { send: async (...args: unknown[]) => console.log(args) } };
+    : { emails: { send: async (...args: unknown[]) => logger.info(args) } };
 
 export const redis = () => new Redis({ url: env.REDIS_URL, token: env.REDIS_TOKEN });
 
@@ -14,13 +15,20 @@ export const twilio = () => {
   //     return {
   //       messages: {
   //         send: async (to: string, body: string) =>
-  //           console.log(`[TWILIO:MOCK] Sending message to ${to}: ${body}`),
+  //           logger.info(`[TWILIO:MOCK] Sending message to ${to}: ${body}`),
   //       },
   //     };
   //   }
 
   if (!env.TWILIO_ACCOUNT_SID || !env.TWILIO_AUTH_TOKEN || !env.TWILIO_PHONE_NUMBER) {
-    throw new Error('Twilio is not configured correctly');
+    // Devlab: Twilio is optional in self-host — phone-OTP login is unused.
+    // Fall back to a mock sender instead of breaking the whole auth flow.
+    return {
+      messages: {
+        send: async (to: string, body: string) =>
+          logger.info(`[TWILIO:MOCK] Would send SMS to ${to}: ${body}`),
+      },
+    };
   }
 
   const send = async (to: string, body: string) => {

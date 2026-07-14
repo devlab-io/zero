@@ -1,3 +1,4 @@
+import { log } from '@/lib/log';
 import { cleanEmailAddresses } from '../lib/email-utils';
 import { trpcClient } from '@/providers/query-provider';
 import type { Route } from './+types/mailto-handler';
@@ -79,17 +80,17 @@ async function parseMailtoUrl(mailtoUrl: string) {
           bcc = rawBcc;
         }
       } catch (e) {
-        console.error('Error parsing query parameters:', e);
+        log.error('Error parsing query parameters:', e);
       }
     }
 
     // Return the parsed data if email is valid - handle multiple recipients
     if (toEmail) {
-      console.log('Parsed mailto data:', { to: toEmail, subject, body, cc, bcc });
+      log.debug('Parsed mailto data:', { to: toEmail, subject, body, cc, bcc });
       return { to: toEmail, subject, body, cc, bcc };
     }
   } catch (error) {
-    console.error('Failed to parse mailto URL:', error);
+    log.error('Failed to parse mailto URL:', error);
   }
 
   return null;
@@ -107,8 +108,7 @@ async function createDraftFromMailto(mailtoData: {
   const RETRY_DELAY = 1000; // 1 second
 
   // Helper function to handle Invalid To header errors by toggling format
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const handleInvalidToHeader = (draftData: any) => {
+  const handleInvalidToHeader = (draftData: { to: string | string[] }) => {
     if (Array.isArray(draftData.to)) {
       // Convert array to comma-separated string
       draftData.to = draftData.to.join(',');
@@ -181,7 +181,7 @@ async function createDraftFromMailto(mailtoData: {
       draftData.bcc = '';
     }
 
-    console.log('Creating draft with data:', {
+    log.debug('Creating draft with data:', {
       to: draftData.to,
       cc: draftData.cc,
       bcc: draftData.bcc,
@@ -192,15 +192,15 @@ async function createDraftFromMailto(mailtoData: {
     // Try to create the draft with retries
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
       try {
-        console.log(`Attempt ${attempt} to create draft...`);
+        log.debug(`Attempt ${attempt} to create draft...`);
 
         const result = await trpcClient.drafts.create.mutate(draftData);
 
         if (result?.id) {
-          console.log('Draft created successfully with ID:', result.id);
+          log.debug('Draft created successfully with ID:', result.id);
           return result.id;
         } else {
-          console.error(
+          log.error(
             `Draft creation failed (attempt ${attempt}):`,
             result?.error || 'Unknown error',
           );
@@ -222,8 +222,8 @@ async function createDraftFromMailto(mailtoData: {
           }
         }
       } catch (error) {
-        console.error(`Error creating draft (attempt ${attempt}):`, error);
-        console.error('Error details:', error instanceof Error ? error.message : String(error));
+        log.error(`Error creating draft (attempt ${attempt}):`, error);
+        log.error('Error details:', error instanceof Error ? error.message : String(error));
 
         // If the error is related to "Invalid To header", try to fix the format for the next attempt
         if (attempt < MAX_RETRIES) {
@@ -240,7 +240,7 @@ async function createDraftFromMailto(mailtoData: {
       }
     }
   } catch (error) {
-    console.error('Error creating draft from mailto:', error);
+    log.error('Error creating draft from mailto:', error);
   }
 
   return null;

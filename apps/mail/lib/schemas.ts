@@ -15,7 +15,7 @@ export const serializeFiles = async (files: File[]) => {
       const base64 = await new Promise<string>((resolve) => {
         reader.onloadend = () => {
           const base64String = reader.result as string;
-          resolve(base64String.split(',')[1]!); // Remove the data URL prefix
+          resolve(base64String.split(',')[1] ?? ''); // Remove the data URL prefix
         };
         reader.readAsDataURL(file);
       });

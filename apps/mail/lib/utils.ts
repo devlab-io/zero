@@ -1,8 +1,10 @@
+import { log } from '@/lib/log';
 import { isToday, isThisMonth, differenceInCalendarMonths } from 'date-fns';
 import { getBrowserTimezone } from './timezones';
 import { formatInTimeZone } from 'date-fns-tz';
 import { MAX_URL_LENGTH } from './constants';
 import { clsx, type ClassValue } from 'clsx';
+import type { Customer } from 'autumn-js';
 import { twMerge } from 'tailwind-merge';
 import type { Sender } from '@/types';
 import LZString from 'lz-string';
@@ -82,13 +84,13 @@ export const parseAndValidateDate = (dateString: string): Date | null => {
 
     // Check if the date is valid
     if (isNaN(dateObj.getTime())) {
-      console.error('Invalid date', dateString);
+      log.error('Invalid date', dateString);
       return null;
     }
 
     return dateObj;
   } catch (error) {
-    console.error('Error parsing date', error);
+    log.error('Error parsing date', error);
     return null;
   }
 };
@@ -168,7 +170,7 @@ export function formatDate(dateInput: string | Date | number): string {
     // Otherwise show the date in MM/DD/YY format
     return formatInTimeZone(dateObj, timezone, 'MM/dd/yy');
   } catch (error) {
-    console.error('Error formatting date', error);
+    log.error('Error formatting date', error);
     return '';
   }
 }
@@ -185,7 +187,7 @@ export const formatTime = (date: string) => {
     // Always return the time in h:mm a format
     return formatInTimeZone(dateObj, timezone, 'h:mm a');
   } catch (error) {
-    console.error('Error formatting time', error);
+    log.error('Error formatting time', error);
     return '';
   }
 };
@@ -596,15 +598,16 @@ export const withExponentialBackoff = async <T>(
   while (true) {
     try {
       return await operation();
-    } catch (error: any) {
+    } catch (error) {
       if (retries >= maxRetries) {
         throw error;
       }
 
+      const apiError = error as { code?: number; errors?: { reason?: string }[] };
       const isRateLimit =
-        error?.code === 429 ||
-        error?.errors?.[0]?.reason === 'rateLimitExceeded' ||
-        error?.errors?.[0]?.reason === 'userRateLimitExceeded';
+        apiError?.code === 429 ||
+        apiError?.errors?.[0]?.reason === 'rateLimitExceeded' ||
+        apiError?.errors?.[0]?.reason === 'userRateLimitExceeded';
 
       if (!isRateLimit) {
         throw error;
@@ -616,4 +619,14 @@ export const withExponentialBackoff = async <T>(
       retries++;
     }
   }
+};
+
+const PRO_PLANS = ['pro-example', 'pro_annual', 'team', 'enterprise'] as const;
+
+export const isProCustomer = (customer: Customer) => {
+  return customer?.products && Array.isArray(customer.products)
+    ? customer.products.some((product) =>
+        PRO_PLANS.some((plan) => product.id?.includes(plan) || product.name?.includes(plan)),
+      )
+    : false;
 };

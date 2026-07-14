@@ -1,3 +1,4 @@
+import { logger } from '../../lib/logger';
 import { router, privateProcedure } from '../trpc';
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
@@ -46,7 +47,7 @@ const fetchDnsRecord = async (domain: string): Promise<string | null> => {
 
     return bimiRecord.data.replace(/"/g, '');
   } catch (error) {
-    console.error(`Error fetching BIMI record for ${domain}:`, error);
+    logger.error(`Error fetching BIMI record for ${domain}:`, error);
     return null;
   }
 };
@@ -81,7 +82,7 @@ const fetchLogoContent = async (logoUrl: string): Promise<string | null> => {
 
     return svgContent;
   } catch (error) {
-    console.error(`Error fetching logo from ${logoUrl}:`, error);
+    logger.error(`Error fetching logo from ${logoUrl}:`, error);
     return null;
   }
 };

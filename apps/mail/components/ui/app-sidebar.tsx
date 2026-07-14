@@ -7,41 +7,58 @@ import {
 } from '@/components/ui/dialog';
 import { Sidebar, SidebarContent, SidebarFooter, SidebarHeader } from '@/components/ui/sidebar';
 import { navigationConfig, bottomNavItems } from '@/config/navigation';
-import React, { useMemo, useState } from 'react';
-import { useSession } from '@/lib/auth-client';
-
+import { useTRPC } from '@/providers/query-provider';
 import { useSidebar } from '@/components/ui/sidebar';
-import { CreateEmail } from '../create/create-email';
+// import { useMutation } from '@tanstack/react-query';
+import { ComposeSurface } from '../create/compose-surface';
 import { PencilCompose, X } from '../icons/icons';
+import { useQuery } from '@tanstack/react-query';
 import { useBilling } from '@/hooks/use-billing';
 import { useIsMobile } from '@/hooks/use-mobile';
+import React, { useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { useAIFullScreen } from './ai-sidebar';
+import { useSession } from '@/lib/auth-client';
+import { useAIFullScreen } from './use-ai-sidebar';
 import { useStats } from '@/hooks/use-stats';
 import { useLocation } from 'react-router';
-
+import { cn, FOLDERS } from '@/lib/utils';
 import { m } from '@/paraglide/messages';
-import { FOLDERS } from '@/lib/utils';
+// import { Video } from 'lucide-react';
 import { NavUser } from './nav-user';
 import { NavMain } from './nav-main';
 import { useQueryState } from 'nuqs';
+// import { toast } from 'sonner';
+
+// #44 (gate A8): the compose surface (CreateEmail, which statically pulled posthog-js) is
+// dynamic-imported via ComposeSurface (mail-lazy-surfaces) and only rendered inside the compose
+// DialogContent, which Radix mounts when the dialog opens. It is warmed by explicit user intent —
+// hover/focus of the compose button (see preloadCompose) — never on mount. create-email is unchanged.
+const preloadCompose = () => {
+  void import('../create/create-email');
+};
 
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const { isPro, isLoading } = useBilling();
+  //   const trpc = useTRPC();
+  //   const { mutateAsync: createMeet } = useMutation(trpc.meet.create.mutationOptions());
   const [showUpgrade, setShowUpgrade] = useState(() => {
     if (typeof window !== 'undefined') {
       return localStorage.getItem('hideUpgradeCard') !== 'true';
     }
     return true;
   });
-  const [, setPricingDialog] = useQueryState('pricingDialog');
-
   const { isFullScreen } = useAIFullScreen();
-
   const { data: stats } = useStats();
-
   const location = useLocation();
   const { data: session } = useSession();
+  const trpc = useTRPC();
+  const { data: pendingQueueItems } = useQuery(
+    trpc.outbox.list.queryOptions(
+      { status: 'draft_ready' },
+      { enabled: !!session?.user?.id, staleTime: 15_000 },
+    ),
+  );
+  const pendingQueueCount = pendingQueueItems?.length ?? 0;
   const { currentSection, navItems } = useMemo(() => {
     // Find which section we're in based on the pathname
     const section = Object.entries(navigationConfig).find(([, config]) =>
@@ -50,7 +67,10 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
 
     const currentSection = section?.[0] || 'mail';
     if (navigationConfig[currentSection]) {
-      const items = [...navigationConfig[currentSection].sections];
+      const items = navigationConfig[currentSection].sections.map((section) => ({
+        ...section,
+        items: section.items.map((item) => ({ ...item })),
+      }));
 
       if (currentSection === 'mail' && stats && stats.length) {
         if (items[0]?.items[0]) {
@@ -62,6 +82,23 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
             stats.find((stat) => stat.label?.toLowerCase() === FOLDERS.SENT)?.count ?? 0;
         }
       }
+      if (currentSection === 'mail' && pendingQueueCount > 0) {
+        const queueItem = items.flatMap((item) => item.items).find((item) => item.id === 'queue');
+        if (queueItem) {
+          const BaseIcon = queueItem.icon;
+          queueItem.icon = React.forwardRef<SVGSVGElement, React.SVGProps<SVGSVGElement>>(
+            ({ className, ...iconProps }, ref) => (
+              <span className={cn('relative inline-flex shrink-0', className)}>
+                <BaseIcon {...iconProps} ref={ref} className="h-4 w-4" />
+                <span className="absolute -right-2 -top-2 flex h-4 min-w-4 items-center justify-center rounded-full bg-emerald-600 px-1 text-[10px] font-semibold leading-none text-white">
+                  {pendingQueueCount > 99 ? '99+' : pendingQueueCount}
+                </span>
+              </span>
+            ),
+          );
+          queueItem.icon.displayName = 'QueueNavIconWithBadge';
+        }
+      }
 
       return { currentSection, navItems: items };
     } else {
@@ -70,10 +107,22 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         navItems: [],
       };
     }
-  }, [location.pathname, stats]);
+  }, [location.pathname, stats, pendingQueueCount]);
 
   const showComposeButton = currentSection === 'mail';
   const { state } = useSidebar();
+
+  //   const handleCreateMeet = async () => {
+  //     try {
+  //       const {
+  //         data: { id },
+  //       } = await createMeet();
+  //       navigator.clipboard.writeText(`https://meet.0.email/${id}`);
+  //       toast.success('Meeting linked copied to clipboard');
+  //     } catch (error) {
+  //       toast.error('Failed to create meeting');
+  //     }
+  //   };
 
   return (
     <div>
@@ -89,8 +138,18 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
             {session && <NavUser />}
 
             {showComposeButton && (
-              <div>
-                <ComposeButton />
+              <div className="flex gap-1">
+                <div className={cn('w-full')}>
+                  <ComposeButton />
+                </div>
+                {/* {isPro ? (
+                  <button
+                    onClick={handleCreateMeet}
+                    className="hover:bg-muted-foreground/10 inline-flex h-8 w-[20%] items-center justify-center gap-1 overflow-hidden rounded-lg border bg-white px-1.5 dark:border-none dark:bg-[#313131]"
+                  >
+                    <Video className="text-muted-foreground h-4 w-4" />
+                  </button>
+                ) : null} */}
               </div>
             )}
           </SidebarHeader>
@@ -127,16 +186,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                   </p>
                 </div>
               </div>
-              <button
-                onClick={() => setPricingDialog('true')}
-                className="mt-3 inline-flex h-7 w-full items-center justify-center gap-0.5 overflow-hidden rounded-lg bg-[#8B5CF6] px-2"
-              >
-                <div className="flex items-center justify-center gap-2.5 px-0.5">
-                  <div className="justify-start whitespace-nowrap text-xs leading-none text-white md:text-sm">
-                    Start 7 day free trial
-                  </div>
-                </div>
-              </button>
+              <PricingTrialButton />
             </div>
           )}
 
@@ -149,7 +199,25 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   );
 }
 
-function ComposeButton() {
+// #44 (gate A8): the pricing trigger, extracted as a real, exported component so it can be tested
+// driving useQueryState('pricingDialog') → 'true'. Behaviour unchanged (same button, same setter).
+export function PricingTrialButton() {
+  const [, setPricingDialog] = useQueryState('pricingDialog');
+  return (
+    <button
+      onClick={() => setPricingDialog('true')}
+      className="mt-3 inline-flex h-7 w-full items-center justify-center gap-0.5 overflow-hidden rounded-lg bg-[#8B5CF6] px-2"
+    >
+      <div className="flex items-center justify-center gap-2.5 px-0.5">
+        <div className="justify-start whitespace-nowrap text-xs leading-none text-white md:text-sm">
+          Start 7 day free trial
+        </div>
+      </div>
+    </button>
+  );
+}
+
+export function ComposeButton() {
   const { state } = useSidebar();
   const isMobile = useIsMobile();
 
@@ -176,7 +244,14 @@ function ComposeButton() {
       <DialogDescription></DialogDescription>
 
       <DialogTrigger asChild>
-        <button className="relative mb-1.5 inline-flex h-8 w-full items-center justify-center gap-1 self-stretch overflow-hidden rounded-lg border border-gray-200 bg-[#006FFE] text-black dark:border-none dark:text-white">
+        {/* #44 (gate A8): warm the lazy compose chunk on explicit user intent (hover/focus),
+            never on mount. */}
+        <button
+          type="button"
+          onPointerEnter={preloadCompose}
+          onFocus={preloadCompose}
+          className="relative mb-1.5 inline-flex h-8 w-full items-center justify-center gap-1 self-stretch overflow-hidden rounded-lg border border-gray-200 bg-[#006FFE] text-black dark:border-none dark:text-white cursor-pointer hover:bg-[#0056CC] dark:hover:bg-[#0056CC] transition-colors"
+        >
           {state === 'collapsed' && !isMobile ? (
             <PencilCompose className="mt-0.5 fill-white text-black" />
           ) : (
@@ -191,7 +266,7 @@ function ComposeButton() {
       </DialogTrigger>
 
       <DialogContent className="h-screen w-screen max-w-none border-none bg-[#FAFAFA] p-0 shadow-none dark:bg-[#141414]">
-        <CreateEmail />
+        <ComposeSurface />
       </DialogContent>
     </Dialog>
   );

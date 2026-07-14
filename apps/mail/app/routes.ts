@@ -23,6 +23,7 @@ export default [
 
   layout('(routes)/layout.tsx', [
     route('/developer', '(routes)/developer/page.tsx'),
+    route('/queue', '(routes)/queue/page.tsx'),
     layout(
       '(routes)/mail/layout.tsx',
       prefix('/mail', [
@@ -42,7 +43,7 @@ export default [
         route('/danger-zone', '(routes)/settings/danger-zone/page.tsx'),
         route('/general', '(routes)/settings/general/page.tsx'),
         route('/labels', '(routes)/settings/labels/page.tsx'),
-        // route('/categories', '(routes)/settings/categories/page.tsx'),
+        route('/categories', '(routes)/settings/categories/page.tsx'),
         route('/notifications', '(routes)/settings/notifications/page.tsx'),
         route('/privacy', '(routes)/settings/privacy/page.tsx'),
         route('/security', '(routes)/settings/security/page.tsx'),

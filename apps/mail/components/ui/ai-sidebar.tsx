@@ -1,24 +1,27 @@
+import { log } from '@/lib/log';
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip';
+import { m } from '@/paraglide/messages';
 import { ArrowsPointingIn, PanelLeftOpen, Phone } from '../icons/icons';
 import { useActiveConnection } from '@/hooks/use-connections';
 import { ResizablePanel } from '@/components/ui/resizable';
 import { useSearchValue } from '@/hooks/use-search-value';
 import { useState, useEffect, useCallback } from 'react';
+import useSearchLabels from '@/hooks/use-labels-search';
 import { useQueryClient } from '@tanstack/react-query';
 import { AIChat } from '@/components/create/ai-chat';
 import { useTRPC } from '@/providers/query-provider';
-import { Tools } from '../../../server/src/types';
+import { Tools } from '@zero/types';
+import { useDoState } from '../mail/use-do-state';
 import { useBilling } from '@/hooks/use-billing';
 import { PromptsDialog } from './prompts-dialog';
 import { Button } from '@/components/ui/button';
 import { useHotkeys } from 'react-hotkeys-hook';
 import { useLabels } from '@/hooks/use-labels';
-
 import { useAgentChat } from 'agents/ai-react';
 import { X, Expand, Plus } from 'lucide-react';
+import { IncomingMessageType } from '../party';
 import { Gauge } from '@/components/ui/gauge';
 import { useParams } from 'react-router';
-
 import { useAgent } from 'agents/react';
 import { useQueryState } from 'nuqs';
 import { cn } from '@/lib/utils';
@@ -174,164 +177,11 @@ interface AISidebarProps {
   className?: string;
 }
 
-type ViewMode = 'sidebar' | 'popup' | 'fullscreen';
-
-export function useAIFullScreen() {
-  const [isFullScreenQuery, setIsFullScreenQuery] = useQueryState('isFullScreen');
-
-  // Initialize isFullScreen state from query parameter or localStorage
-  const [isFullScreen, setIsFullScreenState] = useState<boolean>(() => {
-    // First check query parameter
-    if (isFullScreenQuery) {
-      return isFullScreenQuery === 'true';
-    }
-
-    // Then check localStorage if on client
-    if (typeof window !== 'undefined') {
-      const savedFullScreen = localStorage.getItem('ai-fullscreen');
-      if (savedFullScreen) {
-        return savedFullScreen === 'true';
-      }
-    }
-
-    return false;
-  });
-
-  // Update both query parameter and localStorage when fullscreen state changes
-  const setIsFullScreen = useCallback(
-    (value: boolean) => {
-      // Immediately update local state for faster UI response
-      setIsFullScreenState(value);
-
-      // For exiting fullscreen, we need to be extra careful to ensure state is updated properly
-      if (!value) {
-        // Force immediate removal from localStorage for faster response
-        if (typeof window !== 'undefined') {
-          localStorage.removeItem('ai-fullscreen');
-        }
-
-        // Use setTimeout to ensure the state update happens in the next tick
-        // This helps prevent the need for double-clicking
-        setTimeout(() => {
-          setIsFullScreenQuery(null).catch(console.error);
-        }, 0);
-      } else {
-        // For entering fullscreen, we can use the normal flow
-        setIsFullScreenQuery('true').catch(console.error);
-
-        // Save to localStorage for persistence across sessions
-        if (typeof window !== 'undefined') {
-          localStorage.setItem('ai-fullscreen', 'true');
-        }
-      }
-    },
-    [setIsFullScreenQuery],
-  );
-
-  // Sync with query parameter on mount or when it changes
-  useEffect(() => {
-    const queryValue = isFullScreenQuery === 'true';
-    if (isFullScreenQuery !== null && queryValue !== isFullScreen) {
-      setIsFullScreenState(queryValue);
-    }
-  }, [isFullScreenQuery, isFullScreen]);
-
-  // Initialize from localStorage on mount if query parameter is not set
-  useEffect(() => {
-    if (typeof window !== 'undefined' && !isFullScreenQuery) {
-      const savedFullScreen = localStorage.getItem('ai-fullscreen');
-      if (savedFullScreen === 'true') {
-        setIsFullScreenQuery('true');
-      }
-    }
-
-    // Force a re-render when exiting fullscreen mode
-    if (isFullScreenQuery === null && isFullScreen) {
-      setIsFullScreenState(false);
-    }
-  }, [isFullScreenQuery, setIsFullScreenQuery, isFullScreen]);
-
-  return {
-    isFullScreen,
-    setIsFullScreen,
-  };
-}
-
-export function useAISidebar() {
-  const [open, setOpenQuery] = useQueryState('aiSidebar');
-  const [viewModeQuery, setViewModeQuery] = useQueryState('viewMode');
-  const { isFullScreen, setIsFullScreen } = useAIFullScreen();
-
-  // Initialize viewMode from query parameter, localStorage, or default to 'sidebar'
-  const [viewMode, setViewModeState] = useState<ViewMode>(() => {
-    if (viewModeQuery) return viewModeQuery as ViewMode;
-
-    // Check localStorage for saved state if on client
-    if (typeof window !== 'undefined') {
-      const savedViewMode = localStorage.getItem('ai-viewmode');
-      if (savedViewMode && (savedViewMode === 'sidebar' || savedViewMode === 'popup')) {
-        return savedViewMode as ViewMode;
-      }
-    }
-
-    return 'popup';
-  });
-
-  // Update query parameter and localStorage when viewMode changes
-  const setViewMode = useCallback(
-    (mode: ViewMode) => {
-      setViewModeState(mode);
-      setViewModeQuery(mode === 'popup' ? null : mode);
-
-      // Save to localStorage for persistence across sessions
-      if (typeof window !== 'undefined') {
-        localStorage.setItem('ai-viewmode', mode);
-      }
-    },
-    [setViewModeQuery],
-  );
-
-  const setOpen = useCallback(
-    (openState: boolean) => {
-      if (!openState) {
-        if (typeof window !== 'undefined') {
-          localStorage.removeItem('ai-sidebar-open');
-        }
-        setTimeout(() => {
-          setOpenQuery(null).catch(console.error);
-        }, 0);
-      } else {
-        setOpenQuery('true').catch(console.error);
-        if (typeof window !== 'undefined') {
-          localStorage.setItem('ai-sidebar-open', 'true');
-        }
-      }
-    },
-    [setOpenQuery],
-  );
-
-  const toggleOpen = useCallback(() => setOpen(open !== 'true'), [open, setOpen]);
-
-  useEffect(() => {
-    if (viewModeQuery && viewModeQuery !== viewMode) {
-      setViewModeState(viewModeQuery as ViewMode);
-    }
-  }, [viewModeQuery, viewMode]);
-
-  return {
-    open: !!open,
-    viewMode,
-    setViewMode,
-    setOpen,
-    toggleOpen,
-    toggleViewMode: () => setViewMode(viewMode === 'popup' ? 'sidebar' : 'popup'),
-    isFullScreen,
-    setIsFullScreen,
-    // Add convenience boolean flags for each state
-    isSidebar: viewMode === 'sidebar',
-    isPopup: viewMode === 'popup',
-  };
-}
+// The lightweight state hooks (useAISidebar / useAIFullScreen) live in ./use-ai-sidebar
+// so that their many consumers (app-sidebar, thread-display, mail, ai-toggle-button, ...)
+// do not statically pull this heavy module (AIChat, livekit/elevenlabs, agents) into the
+// initial bundle. This module is itself loaded via React.lazy at its render site.
+import { useAISidebar } from './use-ai-sidebar';
 
 function AISidebar({ className }: AISidebarProps) {
   const { open, setOpen, isFullScreen, setIsFullScreen, toggleViewMode, isSidebar, isPopup } =
@@ -344,12 +194,49 @@ function AISidebar({ className }: AISidebarProps) {
   const { refetch: refetchLabels } = useLabels();
   const [searchValue] = useSearchValue();
   const { data: activeConnection } = useActiveConnection();
+  const [, setDoState] = useDoState();
+  const { labels } = useSearchLabels();
+
+  const onMessage = useCallback(
+    (message: { data: string }) => {
+      try {
+        const parsedData = JSON.parse(message.data);
+        const { type } = parsedData;
+        if (type === IncomingMessageType.Mail_Get) {
+          const { threadId } = parsedData;
+          queryClient.invalidateQueries({
+            queryKey: trpc.mail.get.queryKey({ id: threadId }),
+          });
+        } else if (type === IncomingMessageType.Mail_List) {
+          const { folder } = parsedData;
+          queryClient.invalidateQueries({
+            queryKey: trpc.mail.listThreads.infiniteQueryKey({
+              folder,
+              labelIds: labels,
+              q: searchValue.value,
+            }),
+          });
+        } else if (type === IncomingMessageType.User_Topics) {
+          queryClient.invalidateQueries({
+            queryKey: trpc.labels.list.queryKey(),
+          });
+        } else if (type === IncomingMessageType.Do_State) {
+          const { isSyncing, syncingFolders, storageSize, counts, shards } = parsedData;
+          setDoState({ isSyncing, syncingFolders, storageSize, counts: counts ?? [], shards });
+        }
+      } catch (error) {
+        log.error('error parsing party message', error, { rawMessage: message.data });
+      }
+    },
+    [queryClient, trpc, labels, searchValue.value, setDoState],
+  );
 
   const agent = useAgent({
     agent: 'ZeroAgent',
     name: activeConnection?.id ? String(activeConnection.id) : 'general',
     host: `${import.meta.env.VITE_PUBLIC_BACKEND_URL}`,
-    onError: (e) => console.log(e),
+    onError: (e) => log.error(e),
+    onMessage,
   });
 
   const chatState = useAgentChat({
@@ -364,7 +251,7 @@ function AISidebar({ className }: AISidebarProps) {
       currentFilter: searchValue.value ?? undefined,
     },
     onError(error) {
-      console.error('Error in useChat', error);
+      log.error('Error in useChat', error);
       posthog.capture('AI Chat Error', {
         error: error.message,
         threadId: threadId ?? undefined,
@@ -372,7 +259,7 @@ function AISidebar({ className }: AISidebarProps) {
         currentFilter: searchValue.value ?? undefined,
         messages: chatState.messages,
       });
-      toast.error('Error, please try again later');
+      toast.error(m['common.actions.errorTryAgainLater']());
     },
     onResponse: (response) => {
       posthog.capture('AI Chat Response', {
@@ -387,7 +274,7 @@ function AISidebar({ className }: AISidebarProps) {
       }
     },
     async onToolCall({ toolCall }) {
-      console.warn('toolCall', toolCall);
+      log.warn('toolCall', toolCall);
       posthog.capture('AI Chat Tool Call', {
         toolCall,
         threadId: threadId ?? undefined,
@@ -409,7 +296,7 @@ function AISidebar({ className }: AISidebarProps) {
         case Tools.MarkThreadsUnread:
         case Tools.ModifyLabels:
         case Tools.BulkDelete:
-          console.log('modifyLabels', toolCall.args);
+          log.debug('modifyLabels', toolCall.args);
           await refetchLabels();
           await Promise.all(
             (toolCall.args as { threadIds: string[] }).threadIds.map((id) =>

@@ -1,10 +1,11 @@
 import { Form, FormControl, FormField, FormItem, FormLabel } from '@/components/ui/form';
-import { zodResolver } from '@hookform/resolvers/zod';
+import { zodResolver } from '@/lib/zod-resolver';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useForm } from 'react-hook-form';
 import { Link } from 'react-router';
 import { toast } from 'sonner';
+import { m } from '@/paraglide/messages';
 import { z } from 'zod';
 
 const formSchema = z.object({
@@ -23,8 +24,8 @@ export default function LoginZero() {
 
   function onSubmit(values: z.infer<typeof formSchema>) {
     // Use the correct sonner toast API
-    toast.success(`Trying to log in with ${values.email}`, {
-      description: 'Login attempt',
+    toast.success(m['common.auth.tryingLogin']({ email: values.email }), {
+      description: m['common.auth.loginAttempt'](),
     });
 
     // Here you would typically handle authentication

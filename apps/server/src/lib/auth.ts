@@ -1,3 +1,4 @@
+import { logger } from './logger';
 import {
   AIWritingAssistantEmail,
   AutoLabelingEmail,
@@ -7,21 +8,20 @@ import {
   SuperSearchEmail,
   WelcomeEmail,
 } from './react-emails/email-sequences';
-import { createAuthMiddleware, phoneNumber, jwt, bearer, mcp } from 'better-auth/plugins';
 import { type Account, betterAuth, type BetterAuthOptions } from 'better-auth';
+import { phoneNumber, jwt, bearer, mcp } from 'better-auth/plugins';
 import { getBrowserTimezone, isValidTimezone } from './timezones';
+import { APIError, createAuthMiddleware } from 'better-auth/api';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
+import { getZeroDB, resetConnection } from './server-utils';
 import { getSocialProviders } from './auth-providers';
 import { redis, resend, twilio } from './services';
-import { getContext } from 'hono/context-storage';
 import { dubAnalytics } from '@dub/better-auth';
 import { defaultUserSettings } from './schemas';
 import { disableBrainFunction } from './brain';
-import { APIError } from 'better-auth/api';
-import { getZeroDB } from './server-utils';
 import { type EProviders } from '../types';
-import type { HonoContext } from '../ctx';
 import { createDriver } from './driver';
+import { Autumn } from 'autumn-js';
 import { createDb } from '../db';
 import { Effect } from 'effect';
 import { env } from '../env';
@@ -91,8 +91,10 @@ const scheduleCampaign = (userInfo: { address: string; name: string }) =>
 
 const connectionHandlerHook = async (account: Account) => {
   if (!account.accessToken || !account.refreshToken) {
-    console.error('Missing Access/Refresh Tokens', { account });
-    throw new APIError('EXPECTATION_FAILED', { message: 'Missing Access/Refresh Tokens' });
+    logger.error('Missing Access/Refresh Tokens', { account });
+    throw new APIError('EXPECTATION_FAILED', {
+      message: 'Missing Access/Refresh Tokens, contact us on Discord for support',
+    });
   }
 
   const driver = createDriver(account.providerId, {
@@ -104,13 +106,26 @@ const connectionHandlerHook = async (account: Account) => {
     },
   });
 
-  const userInfo = await driver.getUserInfo().catch(() => {
-    throw new APIError('UNAUTHORIZED', { message: 'Failed to get user info' });
+  const userInfo = await driver.getUserInfo().catch(async () => {
+    if (account.accessToken) {
+      await driver.revokeToken(account.accessToken);
+      await resetConnection(account.id);
+    }
+    throw new Response(null, { status: 301, headers: { Location: '/' } });
   });
 
   if (!userInfo?.address) {
-    console.error('Missing email in user info:', { userInfo });
-    throw new APIError('BAD_REQUEST', { message: 'Missing "email" in user info' });
+    try {
+      await Promise.allSettled(
+        [account.accessToken, account.refreshToken]
+          .filter(Boolean)
+          .map((t) => driver.revokeToken(t as string)),
+      );
+      await resetConnection(account.id);
+    } catch (error) {
+      logger.error('Failed to revoke tokens:', error);
+    }
+    throw new Response(null, { status: 303, headers: { Location: '/' } });
   }
 
   const updatingInfo = {
@@ -143,15 +158,22 @@ const connectionHandlerHook = async (account: Account) => {
   }
 };
 
+// NOTE (issue #31, revue) : createAuth N'EST PAS mémoïsé, à dessein. better-auth capture
+// une connexion postgres-js (`createAuthConfig` → `createDb(env.HYPERDRIVE.connectionString)`
+// → `postgres(url)`) au moment de la construction. Cloudflare Workers interdit de réutiliser
+// un objet I/O (socket) entre deux invocations ; un singleton per-isolate rejouerait le socket
+// ouvert lors de la requête 1 dans la requête 2 → « Cannot perform I/O on behalf of a different
+// request ». De plus le flux réel n'appelle createAuth qu'UNE fois par requête (middleware /api
+// OU un mount /mcp|/sse|discovery — jamais cumulés), donc « multiple par requête » est faux.
+// Une connexion neuve par requête est le contrat correct en Workers. Voir rapport #31.
 export const createAuth = () => {
   const twilioClient = twilio();
-  const dub = new Dub();
 
   return betterAuth({
     plugins: [
-      dubAnalytics({
-        dubClient: dub,
-      }),
+      // Devlab: Dub attribution analytics is opt-in — only wire the plugin when a
+      // DUB_API_KEY is configured; otherwise auth events tried to phone dub.co.
+      ...(env.DUB_API_KEY ? [dubAnalytics({ dubClient: new Dub() })] : []),
       mcp({
         loginPage: env.VITE_PUBLIC_APP_URL + '/login',
       }),
@@ -162,7 +184,7 @@ export const createAuth = () => {
           await twilioClient.messages
             .send(phoneNumber, `Your verification code is: ${code}, do not share it with anyone.`)
             .catch((error) => {
-              console.error('Failed to send OTP', error);
+              logger.error('Failed to send OTP', error);
               throw new APIError('INTERNAL_SERVER_ERROR', {
                 message: `Failed to send OTP, ${error.message}`,
               });
@@ -191,21 +213,12 @@ export const createAuth = () => {
           if (!request) throw new APIError('BAD_REQUEST', { message: 'Request object is missing' });
           const db = await getZeroDB(user.id);
           const connections = await db.findManyConnections();
-          const context = getContext<HonoContext>();
-          const customer = await context.var.autumn.customers.get(user.id);
-          if (customer.data) {
-            try {
-              await Promise.all(
-                customer.data.products.map(async (product) =>
-                  context.var.autumn.cancel({
-                    customer_id: user.id,
-                    product_id: product.id,
-                  }),
-                ),
-              );
-            } catch (error) {
-              console.error('Failed to delete Autumn customer:', error);
-            }
+          const autumn = new Autumn({ secretKey: env.AUTUMN_SECRET_KEY });
+          try {
+            await autumn.customers.delete(user.id);
+          } catch (error) {
+            logger.error('Failed to delete Autumn customer:', error);
+            // Continue with deletion process despite Autumn failure
           }
 
           const revokedAccounts = (
@@ -236,7 +249,7 @@ export const createAuth = () => {
           });
 
           if (revokedAccounts.every((value) => !!value)) {
-            console.log('Failed to revoke some accounts');
+            logger.info('Failed to revoke some accounts');
           }
 
           await db.deleteUser();
@@ -322,23 +335,29 @@ export const createAuth = () => {
 };
 
 const createAuthConfig = () => {
-  const cache = redis();
+  // Devlab self-host: Redis optionnel — sans REDIS_URL/TOKEN, better-auth
+  // retombe sur Postgres seul (pas de secondaryStorage).
+  const cache = env.REDIS_URL && env.REDIS_TOKEN ? redis() : null;
   const { db } = createDb(env.HYPERDRIVE.connectionString);
   return {
     database: drizzleAdapter(db, { provider: 'pg' }),
-    secondaryStorage: {
-      get: async (key: string) => {
-        const value = await cache.get(key);
-        return typeof value === 'string' ? value : value ? JSON.stringify(value) : null;
-      },
-      set: async (key: string, value: string, ttl?: number) => {
-        if (ttl) await cache.set(key, value, { ex: ttl });
-        else await cache.set(key, value);
-      },
-      delete: async (key: string) => {
-        await cache.del(key);
-      },
-    },
+    ...(cache
+      ? {
+          secondaryStorage: {
+            get: async (key: string) => {
+              const value = await cache.get(key);
+              return typeof value === 'string' ? value : value ? JSON.stringify(value) : null;
+            },
+            set: async (key: string, value: string, ttl?: number) => {
+              if (ttl) await cache.set(key, value, { ex: ttl });
+              else await cache.set(key, value);
+            },
+            delete: async (key: string) => {
+              await cache.del(key);
+            },
+          },
+        }
+      : {}),
     advanced: {
       ipAddress: {
         disableIpTracking: true,
@@ -356,14 +375,18 @@ const createAuthConfig = () => {
       'https://staging.0.email',
       'https://0.email',
       'http://localhost:3000',
+      // Devlab: front served on 3001 locally + trust the configured app URL
+      'http://localhost:3001',
+      env.VITE_PUBLIC_APP_URL,
     ],
     session: {
       cookieCache: {
         enabled: true,
-        maxAge: 60 * 60 * 24 * 30, // 30 days
+        // Bound the revocation window: cached sessions are revalidated every five minutes.
+        maxAge: 60 * 5,
       },
-      expiresIn: 60 * 60 * 24 * 30, // 30 days
-      updateAge: 60 * 60 * 24 * 3, // 1 day (every 1 day the session expiration is updated)
+      expiresIn: 60 * 60 * 24 * 7,
+      updateAge: 60 * 60 * 12,
     },
     socialProviders: getSocialProviders(env as unknown as Record<string, string>),
     account: {
@@ -375,7 +398,7 @@ const createAuthConfig = () => {
     },
     onAPIError: {
       onError: (error) => {
-        console.error('API Error', error);
+        logger.error('API Error', error);
       },
       errorURL: `${env.VITE_PUBLIC_APP_URL}/login`,
       throw: true,

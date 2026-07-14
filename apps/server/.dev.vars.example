@@ -1,0 +1,99 @@
+# apps/server/.dev.vars — Cloudflare Worker secrets/config for `wrangler dev`.
+# Copy to `apps/server/.dev.vars` and fill in. Bindings (Durable Objects, KV, Queues, R2,
+# AI, Vectorize, Hyperdrive) come from wrangler.jsonc, NOT this file.
+#
+# The server validates the REQUIRED block at boot (src/env-schema.ts). A missing/empty
+# required key fails immediately with a message naming the key. OPTIONAL keys are
+# feature-gated: absent = that feature is disabled, the server still boots.
+
+# ============================== REQUIRED (boot-validated) ==============================
+DATABASE_URL="postgresql://postgres:postgres@localhost:5432/zerodotemail"
+BETTER_AUTH_SECRET="change-me-openssl-rand-hex-32"
+BETTER_AUTH_URL="http://localhost:3000"
+JWT_SECRET="change-me"
+COOKIE_DOMAIN="localhost"
+VITE_PUBLIC_APP_URL="http://localhost:3000"
+VITE_PUBLIC_BACKEND_URL="http://localhost:8787"
+GOOGLE_CLIENT_ID=""
+GOOGLE_CLIENT_SECRET=""
+
+# ============================== OPTIONAL ==============================
+# --- Runtime / feature flags ---
+NODE_ENV="local"
+USE_OPENAI="true"
+EARLY_ACCESS_ENABLED=""
+DISABLE_CALLS=""
+DISABLE_WORKFLOWS="true"
+DROP_AGENT_TABLES="false"
+THREAD_SYNC_MAX_COUNT="5"
+THREAD_SYNC_LOOP="false"
+HISTORY_OFFSET=""
+REACT_SCAN=""
+DEV_PROXY=""
+BASE_URL="http://localhost:3000"
+
+# --- Auth / OAuth (extra providers) ---
+BETTER_AUTH_TRUSTED_ORIGINS=""
+GOOGLE_REDIRECT_URI=""
+GOOGLE_APPLICATION_CREDENTIALS=""
+GOOGLE_S_ACCOUNT=""
+GITHUB_CLIENT_ID=""
+GITHUB_CLIENT_SECRET=""
+MICROSOFT_CLIENT_ID=""
+MICROSOFT_CLIENT_SECRET=""
+ZERO_CLIENT_ID=""
+ZERO_CLIENT_SECRET=""
+
+# --- AI providers ---
+OPENAI_API_KEY=""
+OPENAI_MODEL=""
+OPENAI_MINI_MODEL=""
+ANTHROPIC_API_KEY="" # gitleaks:allow — placeholder vide ; guillemets vides adjacents = faux positif bridging generic-api-key
+GROQ_API_KEY=""
+PERPLEXITY_API_KEY=""
+GOOGLE_GENERATIVE_AI_API_KEY=""
+AI_SYSTEM_PROMPT=""
+AUTORAG_ID=""
+ARCADE_API_KEY=""
+COMPOSIO_API_KEY=""
+BRAIN_URL=""
+
+# --- Email / cache ---
+RESEND_API_KEY=""
+REDIS_URL="http://localhost:8079"
+REDIS_TOKEN="upstash-local-token"
+
+# --- Cloudflare API (vectorize/autorag tooling) ---
+CLOUDFLARE_ACCOUNT_ID=""
+CLOUDFLARE_API_TOKEN=""
+
+# --- Billing / analytics ---
+AUTUMN_SECRET_KEY=""
+DUB_API_KEY=""
+VITE_PUBLIC_POSTHOG_KEY=""
+VITE_PUBLIC_POSTHOG_HOST=""
+
+# --- Voice / Twilio / ElevenLabs ---
+ELEVENLABS_API_KEY=""
+VITE_PUBLIC_ELEVENLABS_AGENT_ID=""
+VOICE_SECRET=""
+TWILIO_ACCOUNT_SID=""
+TWILIO_AUTH_TOKEN=""
+TWILIO_PHONE_NUMBER=""
+
+# --- Meet ---
+ENABLE_MEET="false"
+MEET_AUTH_HEADER=""
+MEET_API_URL=""
+
+# --- Observability (all opt-in; absent = disabled, clean no-op) ---
+SENTRY_DSN=""
+SENTRY_RELEASE=""
+DD_API_KEY=""
+DD_APP_KEY=""
+DD_SITE=""
+AXIOM_API_TOKEN=""
+AXIOM_DATASET=""
+OTEL_EXPORTER_OTLP_ENDPOINT=""
+OTEL_EXPORTER_OTLP_HEADERS=""
+OTEL_SERVICE_NAME=""

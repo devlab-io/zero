@@ -1,3 +1,5 @@
+import { log } from '@/lib/log';
+import { m } from '@/paraglide/messages';
 import { createContext, useContext, useState } from 'react';
 import { useConversation } from '@elevenlabs/react';
 // import { callServerTool } from '@/lib/server-tool';
@@ -62,7 +64,6 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     // clientTools: toolNames.reduce(
     //   (acc, name) => {
     //     acc[name] = async (params: any) => {
-    //       console.log(`[Voice Tool] ${name} called with params:`, params);
     //       setLastToolCall(`Executing: ${name}`);
 
     //       try {
@@ -72,7 +73,6 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     //           session?.user.phoneNumber ?? session?.user.email ?? '',
     //         );
 
-    //         console.log(`[Voice Tool] ${name} result:`, result);
     //         setLastToolCall(null);
     //         return result;
     //       } catch (err) {
@@ -96,7 +96,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       setHasPermission(true);
       return true;
     } catch {
-      toast.error('Microphone access denied. Please enable microphone permissions.');
+      toast.error(m['common.voice.micDenied']());
       setHasPermission(false);
       return false;
     }
@@ -120,9 +120,10 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
 
       await conversation.startSession({
         agentId: agentId,
+        connectionType: 'websocket',
         onMessage: (message) => {
           // TODO: Handle message, ideally send it to ai chat agent or show it somewhere on the screen?
-          console.log('message', message);
+          log.debug('message', message);
         },
         dynamicVariables: {
           user_name: session?.user.name.split(' ')[0] || 'User',
@@ -139,7 +140,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
 
       setOpen(true);
     } catch {
-      toast.error('Failed to start conversation. Please try again.');
+      toast.error(m['common.voice.startFailed']());
     }
   };
 
@@ -148,7 +149,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       await conversation.endSession();
       setCurrentContext(null);
     } catch {
-      toast.error('Failed to end conversation');
+      toast.error(m['common.voice.endFailed']());
     }
   };
 

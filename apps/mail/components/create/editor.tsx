@@ -1,3 +1,4 @@
+import { log } from '@/lib/log';
 import {
   EditorCommand,
   EditorCommandEmpty,
@@ -155,7 +156,7 @@ export default function Editor({
           }
         }, 0);
       } catch (error) {
-        console.error('Error setting editor content:', error);
+        log.error('Error setting editor content:', error);
       }
     }
   }, [initialValue, editor, onChange]);
@@ -316,7 +317,7 @@ export default function Editor({
         >
           {/* Make sure the command palette doesn't cause a refresh */}
           <EditorCommand
-            className="border-muted bg-background z-50 h-auto max-h-[330px] overflow-y-auto rounded-md border px-1 py-2 shadow-md transition-all"
+            className="border-muted bg-background z-50 h-auto max-h-[330px] overflow-y-auto rounded-md border px-1 py-2 shadow-md"
             onKeyDown={(e) => {
               // Prevent form submission on any key that might trigger it
               if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') {

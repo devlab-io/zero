@@ -49,7 +49,7 @@ export async function processToolCalls<
       args: z.infer<ExecutableTools[K]['parameters']>,
       context: ToolExecutionOptions,
       // biome-ignore lint/suspicious/noExplicitAny: vibes
-    ) => Promise<any>;
+    ) => Promise<unknown>;
   },
 ): Promise<Message[]> {
   const lastMessage = messages[messages.length - 1];
@@ -68,8 +68,7 @@ export async function processToolCalls<
       // Only continue if we have an execute function for the tool (meaning it requires confirmation) and it's in a 'result' state
       if (!(toolName in executeFunctions) || toolInvocation.state !== 'result') return part;
 
-      // biome-ignore lint/suspicious/noExplicitAny: vibes
-      let result: any;
+      let result: unknown;
 
       if (toolInvocation.result === APPROVAL.YES) {
         // Get the tool and check if the tool has an execute function.

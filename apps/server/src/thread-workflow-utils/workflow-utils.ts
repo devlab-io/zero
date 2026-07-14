@@ -1,3 +1,4 @@
+import { logger } from '../lib/logger';
 import type { ParsedMessage } from '../types';
 import * as cheerio from 'cheerio';
 
@@ -15,7 +16,7 @@ export async function htmlToText(decodedBody: string): Promise<string> {
       .replace(/\s+/g, ' ')
       .trim();
   } catch (error) {
-    console.error('Error extracting text from HTML:', error);
+    logger.error('Error extracting text from HTML:', error);
     return '';
   }
 }
@@ -43,10 +44,10 @@ export const messageToXML = async (message: ParsedMessage) => {
     const safeDate = escapeXml(message.receivedOn || '');
 
     const toElements = (message.to || [])
-      .map((r: any) => `<to>${escapeXml(r?.email || '')}</to>`)
+      .map((r: { email?: string }) => `<to>${escapeXml(r?.email || '')}</to>`)
       .join('');
     const ccElements = (message.cc || [])
-      .map((r: any) => `<cc>${escapeXml(r?.email || '')}</cc>`)
+      .map((r: { email?: string }) => `<cc>${escapeXml(r?.email || '')}</cc>`)
       .join('');
 
     return `
@@ -60,7 +61,7 @@ export const messageToXML = async (message: ParsedMessage) => {
         </message>
         `;
   } catch (error) {
-    console.log('[MESSAGE_TO_XML] Failed to convert message to XML:', {
+    logger.info('[MESSAGE_TO_XML] Failed to convert message to XML:', {
       messageId: message.id,
       error: error instanceof Error ? error.message : String(error),
     });
@@ -71,7 +72,7 @@ export const messageToXML = async (message: ParsedMessage) => {
 export const getParticipants = (messages: ParsedMessage[]) => {
   const participants = new Map<string, { name?: string; email: string }>();
 
-  const setIfUnset = (sender: any) => {
+  const setIfUnset = (sender: { email?: string; name?: string } | null | undefined) => {
     if (!sender?.email) return;
     if (!participants.has(sender.email)) {
       participants.set(sender.email, {

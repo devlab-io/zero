@@ -1,3 +1,4 @@
+import { log } from '@/lib/log';
 import {
   Dialog,
   DialogContent,
@@ -15,7 +16,7 @@ import {
 import { Form, FormField, FormItem, FormControl, FormMessage, FormDescription } from './ui/form';
 import { InputOTP, InputOTPGroup, InputOTPSlot, InputOTPSeparator } from './ui/input-otp';
 import { useSession, authClient } from '@/lib/auth-client';
-import { zodResolver } from '@hookform/resolvers/zod';
+import { zodResolver } from '@/lib/zod-resolver';
 import { useForm } from 'react-hook-form';
 import { OldPhone } from './icons/icons';
 import { Button } from './ui/button';
@@ -24,6 +25,7 @@ import { Copy } from 'lucide-react';
 import { Input } from './ui/input';
 import { useState } from 'react';
 import { toast } from 'sonner';
+import { m } from '@/paraglide/messages';
 import z from 'zod';
 
 const verificationSchema = z.object({
@@ -46,7 +48,7 @@ export const SetupInboxDialog = () => {
       const maskedPart = '*'.repeat(Math.max(0, phone.length - 4));
       return `${maskedPart}${lastFour}`;
     } catch (error) {
-      console.error('Error masking phone number:', error);
+      log.error('Error masking phone number:', error);
       return phone;
     }
   };
@@ -71,27 +73,29 @@ export const SetupInboxDialog = () => {
           phoneNumber: data.phoneNumber,
         });
         setShowOtpInput(true);
-        toast.success('Verification code sent to your phone');
+        toast.success(m['common.setupPhone.codeSent']());
       } else if (data.otp) {
         const isVerified = await authClient.phoneNumber.verify({
           phoneNumber: data.phoneNumber,
           code: data.otp,
         });
-        console.log('isVerified', isVerified);
+        log.debug('isVerified', isVerified);
 
         if (isVerified.error) {
-          toast.error('Invalid verification code');
+          toast.error(m['common.setupPhone.invalidCode']());
         } else {
           refetch();
-          toast.success('Phone number verified successfully');
+          toast.success(m['common.setupPhone.verified']());
         }
       } else {
-        toast.error('Please enter a valid OTP');
+        toast.error(m['common.setupPhone.enterValidOtp']());
       }
     } catch (error) {
-      console.error(error);
+      log.error(error);
       toast.error(
-        showOtpInput ? 'Failed to verify phone number' : 'Failed to send verification code',
+        showOtpInput
+          ? m['common.setupPhone.verifyFailed']()
+          : m['common.setupPhone.sendFailed'](),
       );
     } finally {
       setIsVerifying(false);
@@ -188,7 +192,7 @@ export const SetupInboxDialog = () => {
 export const CallInboxDialog = () => {
   const copyNumber = () => {
     navigator.clipboard.writeText(import.meta.env.VITE_PUBLIC_PHONE_NUMBER);
-    toast.success('Number copied to clipboard');
+    toast.success(m['common.setupPhone.numberCopied']());
   };
   return (
     <DropdownMenu>

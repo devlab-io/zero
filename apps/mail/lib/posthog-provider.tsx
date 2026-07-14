@@ -1,5 +1,6 @@
 // app/providers.tsx
 
+import { log } from '@/lib/log';
 import { PostHogProvider as PHProvider } from 'posthog-js/react';
 import { useSession } from '@/lib/auth-client';
 import { useEffect } from 'react';
@@ -16,7 +17,7 @@ export function PostHogProvider({ children }: { children: React.ReactNode }) {
         capture_pageview: true,
       });
     } catch (error) {
-      console.error('Error initializing PostHog:', error);
+      log.error('Error initializing PostHog:', error);
     }
   }, []);
 

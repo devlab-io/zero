@@ -1,0 +1,79 @@
+# A8 — Performance structurelle — évidence brute (partie non-build)
+# commit: 1c82b196cbc87d629b18024cca3f4ac6b7372af2
+
+## GIFs >1 MB dans apps/mail/public/ (palier 7):
+$ find apps/mail/public -iname "*.gif" -size +1M -exec ls -la {} +
+[si vide → 0 GIF >1MB = PASS]
+
+## Tous les GIFs présents (taille):
+
+## Poids total apps/mail/public/:
+4,9M	apps/mail/public/
+
+## Top 15 plus gros fichiers public/:
+    994908  apps/mail/public/onboarding/step1.mp4
+    823264  apps/mail/public/onboarding/step2.mp4
+    503924  apps/mail/public/onboarding/step3.mp4
+    377410  apps/mail/public/small-pixel.png
+    334941  apps/mail/public/compose.png
+    322139  apps/mail/public/ai-chat.png
+    269876  apps/mail/public/pricing-gradient.webp
+    234765  apps/mail/public/email-preview.png
+    102419  apps/mail/public/og.png
+     98284  apps/mail/public/onboarding/ready.webp
+     90552  apps/mail/public/favicon.ico
+     82835  apps/mail/public/openai.png
+     82730  apps/mail/public/mail-list.png
+     78356  apps/mail/public/search.png
+     70603  apps/mail/public/pixel.svg
+
+==============================================================
+## Build mail : SUCCÈS (exit 0). Client 5511 modules / 27,35s ; server SSR 956 modules / 15,92s.
+## Warnings non bloquants : CSS 'Unexpected )' + sourcemap recipient-autosuggest.tsx (2 oxlint warnings).
+
+## JS critique inbox — commande gelée measure-critical.py (union modulepreload /mail/inbox):
+$ python3 scripts/checks/measure-critical.py .
+NO RR7 manifest found
+
+## NOTE écart de chemin : la sortie RR7 est sous 'apps/mail/build/client' (pas './build/client').
+## La commande gelée littérale 'measure-critical.py .' depuis la racine renvoie 'NO RR7 manifest found'.
+## Chiffre réel obtenu avec la base correcte :
+$ python3 scripts/checks/measure-critical.py apps/mail
+=== CRITICAL INBOX JS (URL /mail/inbox) — 110 chunks ===
+     84050 gz     272372 raw  react-BH-yBEgs.js 
+     40935 gz     121880 raw  chunk-KS7C4IRE-DAla6bF3.js 
+     40032 gz     116756 raw  page-BkbrVSUM.js 
+     19656 gz      66233 raw  query-provider-DhM0WiUR.js 
+     19651 gz      63449 raw  utils-Cvo-ZYKo.js 
+     18574 gz      57590 raw  app-sidebar-CCto9heC.js 
+     12167 gz      53321 raw  types-BSfIYl1c.js 
+     11863 gz      31954 raw  email-utils-BskbJXHl.js 
+     10249 gz      26754 raw  index-DHgGv0xz.js 
+      9520 gz      26718 raw  proxy-DW4xm_nv.js 
+      9432 gz      33714 raw  index-C-yogrYb.js 
+      9301 gz      24597 raw  index.esm-JvvkO9EN.js 
+      7060 gz      24266 raw  dropdown-menu-BM32Pkm1.js 
+      6992 gz      17012 raw  onboarding-D4Gg30t_.js 
+      6438 gz      16932 raw  index-BOWNHgur.js 
+      6030 gz      16005 raw  root-BmxjSI5b.js 
+      5135 gz      14590 raw  IsRestoringProvider-Bjbf5gje.js 
+      4921 gz      12360 raw  layout-DL09_kJr.js 
+      4856 gz      19439 raw  sidebar-C7NMvdr7.js 
+      4397 gz      13588 raw  scroll-area-Bzd3nH-b.js 
+      4206 gz      14120 raw  context-menu-hvaf63ma.js 
+      3662 gz       9668 raw  tooltip-Bp_8n-ZA.js 
+      3626 gz      10249 raw  useQuery-CFmYWLwA.js 
+      3620 gz      11530 raw  action-icons-kPyr-p9U.js 
+      3553 gz       8292 raw  react-DnVXXpl-.js 
+... (110 chunks total, showing top 25 by gz)
+TOTAL CRITICAL INBOX JS: 1324895 raw  |  446350 gz  =  435.9 KiB gz
+GATE: <= 420 KiB gz  ->  FAIL (margin -15.9 KiB)
+CHUNKS >900 KiB raw (whole build): NONE (PASS)
+
+## (équivalent depuis apps/mail, base '.', comme au transfert #44):
+$ (cd apps/mail && python3 ../../scripts/checks/measure-critical.py .)
+      3553 gz       8292 raw  react-DnVXXpl-.js 
+... (110 chunks total, showing top 25 by gz)
+TOTAL CRITICAL INBOX JS: 1324895 raw  |  446350 gz  =  435.9 KiB gz
+GATE: <= 420 KiB gz  ->  FAIL (margin -15.9 KiB)
+CHUNKS >900 KiB raw (whole build): NONE (PASS)

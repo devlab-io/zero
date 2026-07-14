@@ -1,0 +1,537 @@
+// Durable Object database layer, extracted from main.ts during the V2.3
+// routing-consolidation (issue devlab-io/zero#24). Pure move: the DbRpcDO
+// (RpcTarget façade) and ZeroDB (SQLite-backed DurableObject) classes below
+// are unchanged; main.ts re-exports them so the wrangler `ZERO_DB` binding and
+// exported-class surface are identical. No routing logic lives here.
+import {
+  createUpdatedMatrixFromNewEmail,
+  initializeStyleMatrixFromEmail,
+  type EmailMatrix,
+  type WritingStyleMatrix,
+} from '../services/writing-style-service';
+import {
+  account,
+  connection,
+  note,
+  session,
+  user,
+  userHotkeys,
+  userSettings,
+  writingStyleMatrix,
+  emailTemplate,
+} from './schema';
+import { DurableObject, RpcTarget } from 'cloudflare:workers';
+import { eq, and, desc, asc, inArray } from 'drizzle-orm';
+import { defaultUserSettings } from '../lib/schemas';
+import { EProviders } from '../types';
+import { createDb, type DB } from './index';
+import type { ZeroEnv } from '../env';
+
+export class DbRpcDO extends RpcTarget {
+  constructor(
+    private mainDo: ZeroDB,
+    private userId: string,
+  ) {
+    super();
+  }
+
+  async findUser(): Promise<typeof user.$inferSelect | undefined> {
+    return await this.mainDo.findUser(this.userId);
+  }
+
+  async findUserConnection(
+    connectionId: string,
+  ): Promise<typeof connection.$inferSelect | undefined> {
+    return await this.mainDo.findUserConnection(this.userId, connectionId);
+  }
+
+  async updateUser(data: Partial<typeof user.$inferInsert>) {
+    return await this.mainDo.updateUser(this.userId, data);
+  }
+
+  async deleteConnection(connectionId: string) {
+    return await this.mainDo.deleteConnection(connectionId, this.userId);
+  }
+
+  async findFirstConnection(): Promise<typeof connection.$inferSelect | undefined> {
+    return await this.mainDo.findFirstConnection(this.userId);
+  }
+
+  async findManyConnections(): Promise<(typeof connection.$inferSelect)[]> {
+    return await this.mainDo.findManyConnections(this.userId);
+  }
+
+  async findManyNotesByThreadId(threadId: string): Promise<(typeof note.$inferSelect)[]> {
+    return await this.mainDo.findManyNotesByThreadId(this.userId, threadId);
+  }
+
+  async createNote(payload: Omit<typeof note.$inferInsert, 'userId'>) {
+    return await this.mainDo.createNote(this.userId, payload as typeof note.$inferInsert);
+  }
+
+  async updateNote(noteId: string, payload: Partial<typeof note.$inferInsert>) {
+    return await this.mainDo.updateNote(this.userId, noteId, payload);
+  }
+
+  async updateManyNotes(
+    notes: { id: string; order: number; isPinned?: boolean | null }[],
+  ): Promise<boolean> {
+    return await this.mainDo.updateManyNotes(this.userId, notes);
+  }
+
+  async findManyNotesByIds(noteIds: string[]): Promise<(typeof note.$inferSelect)[]> {
+    return await this.mainDo.findManyNotesByIds(this.userId, noteIds);
+  }
+
+  async deleteNote(noteId: string) {
+    return await this.mainDo.deleteNote(this.userId, noteId);
+  }
+
+  async findNoteById(noteId: string): Promise<typeof note.$inferSelect | undefined> {
+    return await this.mainDo.findNoteById(this.userId, noteId);
+  }
+
+  async findHighestNoteOrder(): Promise<{ order: number } | undefined> {
+    return await this.mainDo.findHighestNoteOrder(this.userId);
+  }
+
+  async deleteUser() {
+    return await this.mainDo.deleteUser(this.userId);
+  }
+
+  async findUserSettings(): Promise<typeof userSettings.$inferSelect | undefined> {
+    return await this.mainDo.findUserSettings(this.userId);
+  }
+
+  async findUserHotkeys(): Promise<(typeof userHotkeys.$inferSelect)[]> {
+    return await this.mainDo.findUserHotkeys(this.userId);
+  }
+
+  async insertUserHotkeys(shortcuts: (typeof userHotkeys.$inferInsert)[]) {
+    return await this.mainDo.insertUserHotkeys(this.userId, shortcuts);
+  }
+
+  async insertUserSettings(settings: typeof defaultUserSettings) {
+    return await this.mainDo.insertUserSettings(this.userId, settings);
+  }
+
+  async updateUserSettings(settings: typeof defaultUserSettings) {
+    return await this.mainDo.updateUserSettings(this.userId, settings);
+  }
+
+  async createConnection(
+    providerId: EProviders,
+    email: string,
+    updatingInfo: {
+      expiresAt: Date;
+      scope: string;
+    },
+  ): Promise<{ id: string }[]> {
+    return await this.mainDo.createConnection(providerId, email, this.userId, updatingInfo);
+  }
+
+  async findConnectionById(
+    connectionId: string,
+  ): Promise<typeof connection.$inferSelect | undefined> {
+    return await this.mainDo.findConnectionById(connectionId);
+  }
+
+  async syncUserMatrix(connectionId: string, emailStyleMatrix: EmailMatrix) {
+    return await this.mainDo.syncUserMatrix(connectionId, emailStyleMatrix);
+  }
+
+  async findWritingStyleMatrix(
+    connectionId: string,
+  ): Promise<typeof writingStyleMatrix.$inferSelect | undefined> {
+    return await this.mainDo.findWritingStyleMatrix(connectionId);
+  }
+
+  async deleteActiveConnection(connectionId: string) {
+    return await this.mainDo.deleteActiveConnection(this.userId, connectionId);
+  }
+
+  async updateConnection(
+    connectionId: string,
+    updatingInfo: Partial<typeof connection.$inferInsert>,
+  ) {
+    return await this.mainDo.updateConnection(connectionId, updatingInfo);
+  }
+
+  async listEmailTemplates(): Promise<(typeof emailTemplate.$inferSelect)[]> {
+    return await this.mainDo.findManyEmailTemplates(this.userId);
+  }
+
+  async createEmailTemplate(payload: Omit<typeof emailTemplate.$inferInsert, 'userId'>) {
+    return await this.mainDo.createEmailTemplate(this.userId, payload);
+  }
+
+  async deleteEmailTemplate(templateId: string) {
+    return await this.mainDo.deleteEmailTemplate(this.userId, templateId);
+  }
+
+  async updateEmailTemplate(templateId: string, data: Partial<typeof emailTemplate.$inferInsert>) {
+    return await this.mainDo.updateEmailTemplate(this.userId, templateId, data);
+  }
+}
+
+export class ZeroDB extends DurableObject<ZeroEnv> {
+  db: DB = createDb(this.env.HYPERDRIVE.connectionString).db;
+
+  async setMetaData(userId: string) {
+    return new DbRpcDO(this, userId);
+  }
+
+  async findUser(userId: string): Promise<typeof user.$inferSelect | undefined> {
+    return await this.db.query.user.findFirst({
+      where: eq(user.id, userId),
+    });
+  }
+
+  async findUserConnection(
+    userId: string,
+    connectionId: string,
+  ): Promise<typeof connection.$inferSelect | undefined> {
+    return await this.db.query.connection.findFirst({
+      where: and(eq(connection.userId, userId), eq(connection.id, connectionId)),
+    });
+  }
+
+  async updateUser(userId: string, data: Partial<typeof user.$inferInsert>) {
+    return await this.db.update(user).set(data).where(eq(user.id, userId));
+  }
+
+  async deleteConnection(connectionId: string, userId: string) {
+    const connections = await this.findManyConnections(userId);
+    if (connections.length <= 1) {
+      throw new Error('Cannot delete the last connection. At least one connection is required.');
+    }
+    return await this.db
+      .delete(connection)
+      .where(and(eq(connection.id, connectionId), eq(connection.userId, userId)));
+  }
+
+  async findFirstConnection(userId: string): Promise<typeof connection.$inferSelect | undefined> {
+    return await this.db.query.connection.findFirst({
+      where: eq(connection.userId, userId),
+    });
+  }
+
+  async findManyConnections(userId: string): Promise<(typeof connection.$inferSelect)[]> {
+    return await this.db.query.connection.findMany({
+      where: eq(connection.userId, userId),
+    });
+  }
+
+  async findManyNotesByThreadId(
+    userId: string,
+    threadId: string,
+  ): Promise<(typeof note.$inferSelect)[]> {
+    return await this.db.query.note.findMany({
+      where: and(eq(note.userId, userId), eq(note.threadId, threadId)),
+      orderBy: [desc(note.isPinned), asc(note.order), desc(note.createdAt)],
+    });
+  }
+
+  async createNote(userId: string, payload: typeof note.$inferInsert) {
+    return await this.db
+      .insert(note)
+      .values({
+        ...payload,
+        userId,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .returning();
+  }
+
+  async updateNote(
+    userId: string,
+    noteId: string,
+    payload: Partial<typeof note.$inferInsert>,
+  ): Promise<typeof note.$inferSelect | undefined> {
+    const [updated] = await this.db
+      .update(note)
+      .set({
+        ...payload,
+        updatedAt: new Date(),
+      })
+      .where(and(eq(note.id, noteId), eq(note.userId, userId)))
+      .returning();
+    return updated;
+  }
+
+  async updateManyNotes(
+    userId: string,
+    notes: { id: string; order: number; isPinned?: boolean | null }[],
+  ): Promise<boolean> {
+    return await this.db.transaction(async (tx) => {
+      for (const n of notes) {
+        const updateData: Record<string, unknown> = {
+          order: n.order,
+          updatedAt: new Date(),
+        };
+
+        if (n.isPinned !== undefined) {
+          updateData.isPinned = n.isPinned;
+        }
+        await tx
+          .update(note)
+          .set(updateData)
+          .where(and(eq(note.id, n.id), eq(note.userId, userId)));
+      }
+      return true;
+    });
+  }
+
+  async findManyNotesByIds(
+    userId: string,
+    noteIds: string[],
+  ): Promise<(typeof note.$inferSelect)[]> {
+    return await this.db.query.note.findMany({
+      where: and(eq(note.userId, userId), inArray(note.id, noteIds)),
+    });
+  }
+
+  async deleteNote(userId: string, noteId: string) {
+    return await this.db.delete(note).where(and(eq(note.id, noteId), eq(note.userId, userId)));
+  }
+
+  async findNoteById(
+    userId: string,
+    noteId: string,
+  ): Promise<typeof note.$inferSelect | undefined> {
+    return await this.db.query.note.findFirst({
+      where: and(eq(note.id, noteId), eq(note.userId, userId)),
+    });
+  }
+
+  async findHighestNoteOrder(userId: string): Promise<{ order: number } | undefined> {
+    return await this.db.query.note.findFirst({
+      where: eq(note.userId, userId),
+      orderBy: desc(note.order),
+      columns: { order: true },
+    });
+  }
+
+  async deleteUser(userId: string) {
+    return await this.db.transaction(async (tx) => {
+      await tx.delete(connection).where(eq(connection.userId, userId));
+      await tx.delete(account).where(eq(account.userId, userId));
+      await tx.delete(session).where(eq(session.userId, userId));
+      await tx.delete(userSettings).where(eq(userSettings.userId, userId));
+      await tx.delete(user).where(eq(user.id, userId));
+      await tx.delete(userHotkeys).where(eq(userHotkeys.userId, userId));
+    });
+  }
+
+  async findUserSettings(userId: string): Promise<typeof userSettings.$inferSelect | undefined> {
+    return await this.db.query.userSettings.findFirst({
+      where: eq(userSettings.userId, userId),
+    });
+  }
+
+  async findUserHotkeys(userId: string): Promise<(typeof userHotkeys.$inferSelect)[]> {
+    return await this.db.query.userHotkeys.findMany({
+      where: eq(userHotkeys.userId, userId),
+    });
+  }
+
+  async insertUserHotkeys(userId: string, shortcuts: (typeof userHotkeys.$inferInsert)[]) {
+    return await this.db
+      .insert(userHotkeys)
+      .values({
+        userId,
+        shortcuts,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .onConflictDoUpdate({
+        target: userHotkeys.userId,
+        set: {
+          shortcuts,
+          updatedAt: new Date(),
+        },
+      });
+  }
+
+  async insertUserSettings(userId: string, settings: typeof defaultUserSettings) {
+    return await this.db.insert(userSettings).values({
+      id: crypto.randomUUID(),
+      userId,
+      settings,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+  }
+
+  async updateUserSettings(userId: string, settings: typeof defaultUserSettings) {
+    return await this.db
+      .insert(userSettings)
+      .values({
+        id: crypto.randomUUID(),
+        userId,
+        settings,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .onConflictDoUpdate({
+        target: userSettings.userId,
+        set: {
+          settings,
+          updatedAt: new Date(),
+        },
+      });
+  }
+
+  async createConnection(
+    providerId: EProviders,
+    email: string,
+    userId: string,
+    updatingInfo: {
+      expiresAt: Date;
+      scope: string;
+    },
+  ): Promise<{ id: string }[]> {
+    return await this.db
+      .insert(connection)
+      .values({
+        ...updatingInfo,
+        providerId,
+        id: crypto.randomUUID(),
+        email,
+        userId,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .onConflictDoUpdate({
+        target: [connection.email, connection.userId],
+        set: {
+          ...updatingInfo,
+          updatedAt: new Date(),
+        },
+      })
+      .returning({ id: connection.id });
+  }
+
+  /**
+   * @param connectionId Dangerous, use findUserConnection instead
+   * @returns
+   */
+  async findConnectionById(
+    connectionId: string,
+  ): Promise<typeof connection.$inferSelect | undefined> {
+    return await this.db.query.connection.findFirst({
+      where: eq(connection.id, connectionId),
+    });
+  }
+
+  async syncUserMatrix(connectionId: string, emailStyleMatrix: EmailMatrix) {
+    await this.db.transaction(async (tx) => {
+      const [existingMatrix] = await tx
+        .select({
+          numMessages: writingStyleMatrix.numMessages,
+          style: writingStyleMatrix.style,
+        })
+        .from(writingStyleMatrix)
+        .where(eq(writingStyleMatrix.connectionId, connectionId));
+
+      if (existingMatrix) {
+        const newStyle = createUpdatedMatrixFromNewEmail(
+          existingMatrix.numMessages,
+          existingMatrix.style as WritingStyleMatrix,
+          emailStyleMatrix,
+        );
+
+        await tx
+          .update(writingStyleMatrix)
+          .set({
+            numMessages: existingMatrix.numMessages + 1,
+            style: newStyle,
+          })
+          .where(eq(writingStyleMatrix.connectionId, connectionId));
+      } else {
+        const newStyle = initializeStyleMatrixFromEmail(emailStyleMatrix);
+
+        await tx
+          .insert(writingStyleMatrix)
+          .values({
+            connectionId,
+            numMessages: 1,
+            style: newStyle,
+          })
+          .onConflictDoNothing();
+      }
+    });
+  }
+
+  async findWritingStyleMatrix(
+    connectionId: string,
+  ): Promise<typeof writingStyleMatrix.$inferSelect | undefined> {
+    return await this.db.query.writingStyleMatrix.findFirst({
+      where: eq(writingStyleMatrix.connectionId, connectionId),
+      columns: {
+        numMessages: true,
+        style: true,
+        updatedAt: true,
+        connectionId: true,
+      },
+    });
+  }
+
+  async deleteActiveConnection(userId: string, connectionId: string) {
+    return await this.db
+      .delete(connection)
+      .where(and(eq(connection.userId, userId), eq(connection.id, connectionId)));
+  }
+
+  async updateConnection(
+    connectionId: string,
+    updatingInfo: Partial<typeof connection.$inferInsert>,
+  ) {
+    return await this.db
+      .update(connection)
+      .set(updatingInfo)
+      .where(eq(connection.id, connectionId));
+  }
+
+  async findManyEmailTemplates(userId: string): Promise<(typeof emailTemplate.$inferSelect)[]> {
+    return await this.db.query.emailTemplate.findMany({
+      where: eq(emailTemplate.userId, userId),
+      orderBy: desc(emailTemplate.updatedAt),
+    });
+  }
+
+  async createEmailTemplate(
+    userId: string,
+    payload: Omit<typeof emailTemplate.$inferInsert, 'userId'>,
+  ) {
+    return await this.db
+      .insert(emailTemplate)
+      .values({
+        ...payload,
+        userId,
+        id: crypto.randomUUID(),
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .returning();
+  }
+
+  async deleteEmailTemplate(userId: string, templateId: string) {
+    return await this.db
+      .delete(emailTemplate)
+      .where(and(eq(emailTemplate.id, templateId), eq(emailTemplate.userId, userId)));
+  }
+
+  async updateEmailTemplate(
+    userId: string,
+    templateId: string,
+    data: Partial<typeof emailTemplate.$inferInsert>,
+  ) {
+    return await this.db
+      .update(emailTemplate)
+      .set({ ...data, updatedAt: new Date() })
+      .where(and(eq(emailTemplate.id, templateId), eq(emailTemplate.userId, userId)))
+      .returning();
+  }
+}

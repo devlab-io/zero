@@ -6,7 +6,7 @@ import * as React from 'react';
 
 export const RenderLabels = ({ count = 1, labels }: { count?: number; labels: Label[] }) => {
   const [searchValue, setSearchValue] = useSearchValue();
-  const handleFilterByLabel = (label: Label) => (event: any) => {
+  const handleFilterByLabel = (label: Label) => (event: React.MouseEvent) => {
     event.stopPropagation();
     const existingValue = searchValue.value;
     if (existingValue.includes(`label:${label.name}`)) {
@@ -51,7 +51,7 @@ export const RenderLabels = ({ count = 1, labels }: { count?: number; labels: La
       {hiddenLabels.length > 0 && (
         <Tooltip>
           <TooltipTrigger asChild>
-            <button className="text-foreground dark:bg-subtleBlack bg-subtleWhite inline-block overflow-hidden truncate rounded px-1.5 py-0.5 text-xs font-medium">
+            <button type="button" className="text-foreground dark:bg-subtleBlack bg-subtleWhite inline-block overflow-hidden truncate rounded px-1.5 py-0.5 text-xs font-medium cursor-pointer">
               +{hiddenLabels.length}
             </button>
           </TooltipTrigger>

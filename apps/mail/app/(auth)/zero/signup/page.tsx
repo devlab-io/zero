@@ -1,9 +1,10 @@
 import { Form, FormControl, FormField, FormItem, FormLabel } from '@/components/ui/form';
-import { zodResolver } from '@hookform/resolvers/zod';
+import { zodResolver } from '@/lib/zod-resolver';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useForm } from 'react-hook-form';
 import { toast } from 'sonner';
+import { m } from '@/paraglide/messages';
 import { z } from 'zod';
 
 const formSchema = z.object({
@@ -26,8 +27,8 @@ export default function SignupZero() {
     const fullEmail = `${values.email}@0.email`;
 
     // Use the correct sonner toast API
-    toast.success(`Trying to signup with ${fullEmail}`, {
-      description: 'Signup attempt',
+    toast.success(m['common.auth.tryingSignup']({ email: fullEmail }), {
+      description: m['common.auth.signupAttempt'](),
     });
 
     // Here you would typically handle authentication with the full email

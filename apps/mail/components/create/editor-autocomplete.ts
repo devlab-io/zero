@@ -1,3 +1,4 @@
+import { log } from '@/lib/log';
 import { Plugin, PluginKey, TextSelection } from '@tiptap/pm/state';
 import { Decoration, DecorationSet } from '@tiptap/pm/view';
 import { emailPhrases } from './email-phrases';
@@ -204,7 +205,7 @@ export const AutoComplete = Extension.create<AutoCompleteOptions>({
 
               return true;
             } catch (error) {
-              console.error('Error applying suggestion:', error);
+              log.error('Error applying suggestion:', error);
               return false;
             }
 

@@ -1,3 +1,4 @@
+import { logger } from './logger';
 import { env } from 'cloudflare:workers';
 import Cloudflare from 'cloudflare';
 
@@ -37,7 +38,7 @@ export const bulkDeleteKeys = async (
   const accountId = env.CLOUDFLARE_ACCOUNT_ID;
 
   if (!accountId) {
-    console.error('[BULK_DELETE] CLOUDFLARE_ACCOUNT_ID environment variable not set');
+    logger.error('[BULK_DELETE] CLOUDFLARE_ACCOUNT_ID environment variable not set');
     return { successful: 0, failed: keys.length };
   }
 
@@ -53,14 +54,14 @@ export const bulkDeleteKeys = async (
     const successful = response?.successful_key_count || 0;
     const failed = keys.length - successful;
 
-    console.log(`[BULK_DELETE] Successfully deleted ${successful}/${keys.length} keys`);
+    logger.info(`[BULK_DELETE] Successfully deleted ${successful}/${keys.length} keys`);
     if (failed > 0) {
-      console.warn(`[BULK_DELETE] Failed to delete ${failed} keys`);
+      logger.warn(`[BULK_DELETE] Failed to delete ${failed} keys`);
     }
 
     return { successful, failed };
   } catch (error) {
-    console.error('[BULK_DELETE] Failed to bulk delete keys:', error);
+    logger.error('[BULK_DELETE] Failed to bulk delete keys:', error);
     return { successful: 0, failed: keys.length };
   }
 };

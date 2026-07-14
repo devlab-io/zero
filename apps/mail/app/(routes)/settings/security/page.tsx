@@ -7,7 +7,7 @@ import {
   FormLabel,
 } from '@/components/ui/form';
 import { SettingsCard } from '@/components/settings/settings-card';
-import { zodResolver } from '@hookform/resolvers/zod';
+import { zodResolver } from '@/lib/zod-resolver';
 import { Switch } from '@/components/ui/switch';
 import { Button } from '@/components/ui/button';
 import { m } from '@/paraglide/messages';
@@ -37,7 +37,6 @@ export default function SecurityPage() {
 
     // TODO: Save settings in user's account
     setTimeout(() => {
-      console.log(values);
       setIsSaving(false);
     }, 1000);
   }

@@ -1,3 +1,4 @@
+import { log } from '@/lib/log';
 import {
   ContextMenu,
   ContextMenuContent,
@@ -21,15 +22,17 @@ import {
   Star,
   StarOff,
   Tag,
+  Plus,
   Trash,
 } from 'lucide-react';
 import { useOptimisticThreadState } from '@/components/mail/optimistic-thread-state';
+import { LabelDialog } from '@/components/labels/label-dialog';
 import { useOptimisticActions } from '@/hooks/use-optimistic-actions';
 import { ExclamationCircle, Mail, Clock } from '../icons/icons';
 import { SnoozeDialog } from '@/components/mail/snooze-dialog';
 import { type ThreadDestination } from '@/lib/thread-actions';
 import { useThread, useThreads } from '@/hooks/use-threads';
-import { useMemo, type ReactNode, useState } from 'react';
+import { useMemo, type ReactNode, useState, useCallback } from 'react';
 import { useTRPC } from '@/providers/query-provider';
 import { useMutation } from '@tanstack/react-query';
 import { useLabels } from '@/hooks/use-labels';
@@ -40,6 +43,7 @@ import { m } from '@/paraglide/messages';
 import { useParams } from 'react-router';
 import { useQueryState } from 'nuqs';
 import { toast } from 'sonner';
+import type { Label as LabelType } from '@/types';
 
 interface EmailAction {
   id: string;
@@ -61,7 +65,7 @@ interface EmailContextMenuProps {
   refreshCallback?: () => void;
 }
 
-const LabelsList = ({ threadId, bulkSelected }: { threadId: string; bulkSelected: string[] }) => {
+const LabelsList = ({ threadId, bulkSelected, onCreateLabel }: { threadId: string; bulkSelected: string[]; onCreateLabel: () => void }) => {
   const { userLabels: labels } = useLabels();
   const { optimisticToggleLabel } = useOptimisticActions();
   const targetThreadIds = bulkSelected.length > 0 ? bulkSelected : [threadId];
@@ -70,12 +74,15 @@ const LabelsList = ({ threadId, bulkSelected }: { threadId: string; bulkSelected
   const rightClickedThreadOptimisticState = useOptimisticThreadState(threadId);
 
   if (!labels || !thread) return null;
+  // `thread` is narrowed above, but that narrowing does not flow into the nested
+  // closures below; capture it so they use a non-null value without asserting.
+  const currentThread = thread;
 
   const handleToggleLabel = (labelId: string) => {
     if (!labelId) return;
 
     // Determine current label state considering optimistic updates
-    let hasLabel = thread!.labels?.some((l) => l.id === labelId) ?? false;
+    let hasLabel = currentThread.labels?.some((l) => l.id === labelId) ?? false;
 
     if (rightClickedThreadOptimisticState.optimisticLabels) {
       if (rightClickedThreadOptimisticState.optimisticLabels.addedLabelIds.includes(labelId)) {
@@ -90,13 +97,26 @@ const LabelsList = ({ threadId, bulkSelected }: { threadId: string; bulkSelected
     optimisticToggleLabel(targetThreadIds, labelId, !hasLabel);
   };
 
+  // If no labels exist, show create label button
+  if (!labels || labels.length === 0) {
+    return (
+      <ContextMenuItem 
+        onClick={onCreateLabel}
+        className="font-normal"
+      >
+        <Plus className="mr-2 h-4 w-4 opacity-60" />
+        {m['common.mail.createNewLabel']()}
+      </ContextMenuItem>
+    );
+  }
+
   return (
     <>
       {labels
         .filter((label) => label.id)
         .map((label) => {
           let isChecked = label.id
-            ? (thread!.labels?.some((l) => l.id === label.id) ?? false)
+            ? (currentThread.labels?.some((l) => l.id === label.id) ?? false)
             : false;
 
           if (rightClickedThreadOptimisticState.optimisticLabels) {
@@ -148,6 +168,7 @@ export function ThreadContextMenu({
   const [, setActiveReplyId] = useQueryState('activeReplyId');
   const optimisticState = useOptimisticThreadState(threadId);
   const trpc = useTRPC();
+  const { refetch: refetchLabels } = useLabels();
   const {
     optimisticMoveThreadsTo,
     optimisticToggleStar,
@@ -159,6 +180,7 @@ export function ThreadContextMenu({
     optimisticUnsnooze,
   } = useOptimisticActions();
   const { mutateAsync: deleteThread } = useMutation(trpc.mail.delete.mutationOptions());
+  const { mutateAsync: createLabel } = useMutation(trpc.labels.create.mutationOptions());
 
   const { isUnread, isStarred, isImportant } = useMemo(() => {
     const unread = threadData?.hasUnread ?? false;
@@ -205,7 +227,7 @@ export function ThreadContextMenu({
         setMail({ ...mail, bulkSelected: [] });
       }
     } catch (error) {
-      console.error(`Error moving ${threadId ? 'email' : 'thread'}:`, error);
+      log.error(`Error moving ${threadId ? 'email' : 'thread'}:`, error);
       toast.error(m['common.actions.failedToMove']());
     }
   };
@@ -307,7 +329,9 @@ export function ThreadContextMenu({
         disabled: false,
       },
     ],
-    [m, handleThreadReply, handleThreadReplyAll, handleThreadForward],
+    // `m` is a module-level constant namespace; using it as a runtime value here retained
+    // the whole paraglide catalog in the bundle (kills tree-shaking of unused messages).
+    [handleThreadReply, handleThreadReplyAll, handleThreadForward],
   );
 
   const handleDelete = () => () => {
@@ -454,11 +478,45 @@ export function ThreadContextMenu({
   }, [isSpam, isBin, isArchiveFolder, isInbox, isSent, handleMove, handleDelete]);
 
   const [snoozeOpen, setSnoozeOpen] = useState(false);
+  const [createLabelOpen, setCreateLabelOpen] = useState(false);
+
+  const handleOpenCreateLabel = useCallback(() => {
+    setCreateLabelOpen(true);
+  }, []);
 
   const handleSnoozeConfirm = (wakeAt: Date) => {
     const targets = mail.bulkSelected.length ? mail.bulkSelected : [threadId];
     optimisticSnooze(targets, currentFolder, wakeAt);
     setSnoozeOpen(false);
+  };
+
+  const handleCreateLabel = async (data: LabelType) => {
+    const labelData = {
+      name: data.name,
+      color: {
+        backgroundColor: data.color?.backgroundColor || '#202020',
+        textColor: data.color?.textColor || '#FFFFFF'
+      }
+    };
+    
+    try {
+      const promise = createLabel(labelData).then(async (result) => {
+        await refetchLabels();
+        return result;
+      });
+      
+      toast.promise(promise, {
+        loading: m['common.labels.savingLabel'](),
+        success: m['common.labels.saveLabelSuccess'](),
+        error: m['common.labels.failedToSavingLabel'](),
+      });
+      
+      await promise;
+    } catch (error) {
+      log.error('Failed to create label:', error);
+    } finally {
+      setCreateLabelOpen(false);
+    }
   };
 
   const otherActions: EmailAction[] = useMemo(
@@ -500,7 +558,9 @@ export function ThreadContextMenu({
         disabled: false,
       },
     ],
-    [isUnread, isImportant, isStarred, m, handleReadUnread, handleToggleImportant, handleFavorites],
+    // `m` is a module-level constant namespace; using it as a runtime value here retained
+    // the whole paraglide catalog in the bundle (kills tree-shaking of unused messages).
+    [isUnread, isImportant, isStarred, handleReadUnread, handleToggleImportant, handleFavorites],
   );
 
   const renderAction = (action: EmailAction) => {
@@ -520,6 +580,11 @@ export function ThreadContextMenu({
 
   return (
     <>
+      <LabelDialog
+        open={createLabelOpen}
+        onOpenChange={setCreateLabelOpen}
+        onSubmit={handleCreateLabel}
+      />
       <ContextMenu>
         <ContextMenuTrigger disabled={isLoading || isFetching} className="w-full">
           {children}
@@ -538,7 +603,7 @@ export function ThreadContextMenu({
               {m['common.mail.labels']()}
             </ContextMenuSubTrigger>
             <ContextMenuSubContent className="dark:bg-panelDark max-h-[520px] w-48 overflow-y-auto bg-white">
-              <LabelsList threadId={threadId} bulkSelected={mail.bulkSelected} />
+              <LabelsList threadId={threadId} bulkSelected={mail.bulkSelected} onCreateLabel={handleOpenCreateLabel} />
             </ContextMenuSubContent>
           </ContextMenuSub>
 

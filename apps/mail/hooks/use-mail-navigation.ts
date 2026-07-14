@@ -1,4 +1,5 @@
 
+import { isTypingOrModalTarget } from '@/lib/hotkeys/use-hotkey-utils';
 import { useCallback, useEffect, useRef } from 'react';
 import { useOptimisticActions } from './use-optimistic-actions';
 import { useMail } from '@/components/mail/use-mail';
@@ -8,6 +9,14 @@ import { useQueryState } from 'nuqs';
 
 export const focusedIndexAtom = atom<number | null>(null);
 export const mailNavigationCommandAtom = atom<null | 'next' | 'previous'>(null);
+
+// The imperative `list` scope (registry rows flagged `ignore`) is bound below via
+// react-hotkeys-hook — not through the generic registry binder — because these keys need
+// the live list container + repeat handling. Their action names live in
+// lib/hotkeys/handler-manifest.ts (LIST_IMPERATIVE_ACTIONS), which the coverage test checks.
+
+/** How many rows Space / shift+Space jump the focus (focus-based paging). */
+const PAGE_STEP = 10;
 
 export interface UseMailNavigationProps {
   items: { id: string }[];
@@ -133,12 +142,30 @@ export function useMailNavigation({ items, containerRef, onNavigate }: UseMailNa
     });
   }, [onNavigateRef, scrollIntoView, setFocusedIndex]);
 
+  const navigatePrevious = useCallback(() => {
+    setFocusedIndex((prevIndex) => {
+      const { length } = itemsRef.current;
+      if (length === 0) {
+        onNavigateRef.current(null);
+        return null;
+      }
+      const newIndex = prevIndex === null ? 0 : Math.max(0, prevIndex - 1);
+      const target = itemsRef.current[newIndex];
+      if (target) onNavigateRef.current(target.id);
+      scrollIntoView(newIndex, 'auto');
+      return newIndex;
+    });
+  }, [onNavigateRef, scrollIntoView, setFocusedIndex]);
+
   useEffect(() => {
     if (command === 'next') {
       navigateNext();
       setCommand(null);
+    } else if (command === 'previous') {
+      navigatePrevious();
+      setCommand(null);
     }
-  }, [command, navigateNext, setCommand]);
+  }, [command, navigateNext, navigatePrevious, setCommand]);
 
   const getHoveredIndex = useCallback(() => {
     if (!hoveredMailRef.current) return -1;
@@ -196,6 +223,53 @@ export function useMailNavigation({ items, containerRef, onNavigate }: UseMailNa
     keyboardActiveRef.current = false;
   }, [setFocusedIndex, onNavigateRef]);
 
+  // Space / shift+Space — page the focus by a screenful (focus-based paging; the real
+  // virtua scroller lives in mail-list.tsx which is out of scope for #32).
+  const pageFocus = useCallback(
+    (direction: 'up' | 'down') => {
+      keyboardActiveRef.current = true;
+      setFocusedIndex((prevIndex) => {
+        const { length } = itemsRef.current;
+        if (length === 0) return prevIndex;
+        const base = prevIndex ?? (direction === 'down' ? -1 : length);
+        const newIndex =
+          direction === 'down'
+            ? Math.min(length - 1, base + PAGE_STEP)
+            : Math.max(0, base - PAGE_STEP);
+        if (newIndex === prevIndex) return prevIndex;
+        scrollIntoView(newIndex, 'auto');
+        navigateToThread(newIndex);
+        return newIndex;
+      });
+    },
+    [scrollIntoView, navigateToThread, setFocusedIndex],
+  );
+
+  // Single-key list commands must stay inert while typing or inside a dialog (frozen
+  // check #4). react-hotkeys-hook already excludes form/contenteditable targets; the
+  // explicit guard also covers open dialogs.
+  const handleCloseLeft = useCallback(
+    (event: KeyboardEvent) => {
+      if (isTypingOrModalTarget(event.target)) return;
+      handleEscape();
+    },
+    [handleEscape],
+  );
+  const handlePageDown = useCallback(
+    (event: KeyboardEvent) => {
+      if (isTypingOrModalTarget(event.target)) return;
+      pageFocus('down');
+    },
+    [pageFocus],
+  );
+  const handlePageUp = useCallback(
+    (event: KeyboardEvent) => {
+      if (isTypingOrModalTarget(event.target)) return;
+      pageFocus('up');
+    },
+    [pageFocus],
+  );
+
   useHotkeys('ArrowUp', handleArrowUp, { preventDefault: true, enabled: !isCommandPaletteOpen });
   useHotkeys('ArrowDown', handleArrowDown, {
     preventDefault: true,
@@ -205,6 +279,9 @@ export function useMailNavigation({ items, containerRef, onNavigate }: UseMailNa
   useHotkeys('k', handleArrowUp, { enabled: !isCommandPaletteOpen });
   useHotkeys('Enter', handleEnter, { preventDefault: true, enabled: !isCommandPaletteOpen });
   useHotkeys('Escape', handleEscape, { preventDefault: true, enabled: !isCommandPaletteOpen });
+  useHotkeys('ArrowLeft', handleCloseLeft, { preventDefault: true, enabled: !isCommandPaletteOpen });
+  useHotkeys('space', handlePageDown, { preventDefault: true, enabled: !isCommandPaletteOpen });
+  useHotkeys('shift+space', handlePageUp, { preventDefault: true, enabled: !isCommandPaletteOpen });
 
   const handleMouseEnter = useCallback(
     (threadId: string) => {

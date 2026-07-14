@@ -1,3 +1,4 @@
+import { log } from '@/lib/log';
 import {
   Dialog,
   DialogContent,
@@ -9,7 +10,7 @@ import {
 import { Form, FormControl, FormDescription, FormField, FormItem } from '@/components/ui/form';
 import { SettingsCard } from '@/components/settings/settings-card';
 import { useSession, signOut } from '@/lib/auth-client';
-import { zodResolver } from '@hookform/resolvers/zod';
+import { zodResolver } from '@/lib/zod-resolver';
 import { useTRPC } from '@/providers/query-provider';
 import { useMutation } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
@@ -57,14 +58,14 @@ function DeleteAccountDialog() {
           refetch();
           await clear();
         } catch (error) {
-          console.error('Failed to delete account:', error);
+          log.error('Failed to delete account:', error);
           toast.error(m['pages.settings.dangerZone.error']());
         }
         toast.success(m['pages.settings.dangerZone.deleted']());
         window.location.href = '/';
       },
       onError: (error) => {
-        console.error('Failed to delete account:', error);
+        log.error('Failed to delete account:', error);
         toast.error(m['pages.settings.dangerZone.error']());
       },
       onSettled: () => form.reset(),

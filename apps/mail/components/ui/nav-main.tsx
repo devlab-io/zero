@@ -1,3 +1,4 @@
+import { log } from '@/lib/log';
 import { SidebarGroup, SidebarMenu, SidebarMenuButton, SidebarMenuItem } from './sidebar';
 import { Collapsible, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { useCommandPalette } from '../context/command-palette-context.jsx';
@@ -19,7 +20,6 @@ import { useStats } from '@/hooks/use-stats';
 import SidebarLabels from './sidebar-labels';
 import { useCallback, useRef } from 'react';
 import { BASE_URL } from '@/lib/constants';
-import { useQueryState } from 'nuqs';
 import { Plus } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
@@ -55,15 +55,17 @@ export function NavMain({ items }: NavMainProps) {
   const location = useLocation();
   const pathname = location.pathname;
   const searchParams = new URLSearchParams();
-  const [category] = useQueryState('category');
 
   const trpc = useTRPC();
   const { data: intercomToken } = useQuery(trpc.user.getIntercomToken.queryOptions());
 
   React.useEffect(() => {
-    if (intercomToken) {
+    // Devlab: Intercom was hardcoded to the editor's workspace ('aavenrba'),
+    // identifying every self-host user against THEIR support console. Opt-in now.
+    const intercomAppId = import.meta.env.VITE_PUBLIC_INTERCOM_APP_ID as string | undefined;
+    if (intercomToken && intercomAppId) {
       Intercom({
-        app_id: 'aavenrba',
+        app_id: intercomAppId,
         intercom_user_jwt: intercomToken,
       });
     }
@@ -108,9 +110,7 @@ export function NavMain({ items }: NavMainProps) {
       // Handle settings navigation
       if (item.isSettingsButton) {
         // Include current path with category query parameter if present
-        const currentPath = category
-          ? `${pathname}?category=${encodeURIComponent(category)}`
-          : pathname;
+        const currentPath = pathname;
         return `${item.url}?from=${encodeURIComponent(currentPath)}`;
       }
 
@@ -137,14 +137,9 @@ export function NavMain({ items }: NavMainProps) {
         return `${item.url}?from=/mail`;
       }
 
-      // Handle category links
-      if (item.id === 'inbox' && category) {
-        return `${item.url}?category=${encodeURIComponent(category)}`;
-      }
-
       return item.url;
     },
-    [pathname, category, searchParams, isValidInternalUrl],
+    [pathname, searchParams, isValidInternalUrl],
   );
 
   const { data: activeAccount } = useActiveConnection();
@@ -172,12 +167,22 @@ export function NavMain({ items }: NavMainProps) {
   );
 
   const onSubmit = async (data: LabelType) => {
-    toast.promise(createLabel(data), {
-      loading: 'Creating label...',
-      success: 'Label created successfully',
-      error: 'Failed to create label',
-      finally: () => {refetch()},
-    });
+    try {
+      const promise = createLabel(data).then(async (result) => {
+        await refetch();
+        return result;
+      });
+      
+      toast.promise(promise, {
+        loading: 'Creating label...',
+        success: 'Label created successfully',
+        error: 'Failed to create label',
+      });
+      
+      await promise;
+    } catch (error) {
+      log.error('Failed to create label:', error);
+    }
   };
 
   return (

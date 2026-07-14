@@ -1,5 +1,5 @@
 import { Tooltip, TooltipTrigger, TooltipContent } from './ui/tooltip';
-import { useAISidebar } from './ui/ai-sidebar';
+import { useAISidebar } from './ui/use-ai-sidebar';
 import { Button } from './ui/button';
 
 // AI Toggle Button Component

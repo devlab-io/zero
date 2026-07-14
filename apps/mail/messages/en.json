@@ -57,7 +57,9 @@
       "errorDeletingSpam": "Failed to delete spam emails",
       "confirmDeleteSpam": "Delete All Spam",
       "confirmDeleteSpamDescription": "Are you sure you want to delete all spam emails? This action cannot be undone.",
-      "confirmDelete": "Delete"
+      "confirmDelete": "Delete",
+      "linkCopied": "Link copied to clipboard!",
+      "errorTryAgainLater": "Error, please try again later"
     },
     "themes": {
       "dark": "Dark",
@@ -142,7 +144,9 @@
       "otherAccounts": "Other Accounts",
       "switchingAccounts": "Switching accounts...",
       "accountSwitched": "Account switched successfully",
-      "failedToSwitchAccount": "Failed to switch accounts. Please try again."
+      "failedToSwitchAccount": "Failed to switch accounts. Please try again.",
+      "cacheCleared": "Cache cleared successfully",
+      "connectionIdCopied": "Connection ID copied to clipboard"
     },
     "mailCategories": {
       "primary": "Primary",
@@ -165,8 +169,13 @@
       "attachments": "Attachments",
       "attachmentCount": [
         {
-          "declarations": ["input count", "local countPlural = count: plural"],
-          "selectors": ["countPlural"],
+          "declarations": [
+            "input count",
+            "local countPlural = count: plural"
+          ],
+          "selectors": [
+            "countPlural"
+          ],
           "match": {
             "countPlural=0": "attachments",
             "countPlural=one": "attachment",
@@ -176,8 +185,13 @@
       ],
       "fileCount": [
         {
-          "declarations": ["input count", "local countPlural = count: plural"],
-          "selectors": ["countPlural"],
+          "declarations": [
+            "input count",
+            "local countPlural = count: plural"
+          ],
+          "selectors": [
+            "countPlural"
+          ],
           "match": {
             "countPlural=0": "files",
             "countPlural=one": "file",
@@ -209,7 +223,11 @@
       "cancel": "Cancel",
       "goToWebsite": "Go to website",
       "failedToUnsubscribe": "Failed to unsubscribe from mailing list",
-      "print": "Print"
+      "print": "Print",
+      "failedToDownloadAttachment": "Failed to download attachment",
+      "failedToOpenAttachment": "Failed to open attachment",
+      "emailCopied": "Email copied to clipboard",
+      "failedToPrint": "Failed to print email. Please try again."
     },
     "threadDisplay": {
       "exitFullscreen": "Exit fullscreen",
@@ -249,8 +267,13 @@
       "search": "Search notes...",
       "noteCount": [
         {
-          "declarations": ["input count", "local countPlural = count: plural"],
-          "selectors": ["countPlural"],
+          "declarations": [
+            "input count",
+            "local countPlural = count: plural"
+          ],
+          "selectors": [
+            "countPlural"
+          ],
           "match": {
             "countPlural=0": "Add notes",
             "countPlural=one": "# note",
@@ -307,13 +330,20 @@
       "failedToSave": "Failed to save settings",
       "languageChanged": "Language changed to {locale}",
       "defaultEmailUpdated": "Default email alias updated in Gmail",
-      "failedToUpdateGmailAlias": "Failed to update default alias in Gmail settings"
+      "failedToUpdateGmailAlias": "Failed to update default alias in Gmail settings",
+      "promptUpdated": "Prompt updated",
+      "failedToUpdatePrompt": "Failed to update prompt"
     },
     "mail": {
       "replies": [
         {
-          "declarations": ["input count", "local countPlural = count: plural"],
-          "selectors": ["countPlural"],
+          "declarations": [
+            "input count",
+            "local countPlural = count: plural"
+          ],
+          "selectors": [
+            "countPlural"
+          ],
           "match": {
             "countPlural=0": "replies",
             "countPlural=one": "# reply",
@@ -371,7 +401,27 @@
       "failedToUnmute": "Failed to unmute",
       "archived": "Archived",
       "failedToArchive": "Failed to archive",
-      "openInNewTab": "Open in new tab"
+      "openInNewTab": "Open in new tab",
+      "failedToTrustSender": "Failed to trust sender",
+      "snoozeFutureDate": "Please choose a future date and time.",
+      "failedToSelectAll": "Failed to select all emails",
+      "failedToSelectAllConversations": "Failed to select all conversations",
+      "selectAllConversations": "Select all conversations",
+      "conversationsSelected": [
+        {
+          "declarations": [
+            "input count",
+            "local countPlural = count: plural"
+          ],
+          "selectors": [
+            "countPlural"
+          ],
+          "match": {
+            "countPlural=one": "# conversation on this page selected.",
+            "countPlural=other": "# conversations on this page selected."
+          }
+        }
+      ]
     },
     "units": {
       "mb": "{amount} MB"
@@ -392,12 +442,135 @@
       "savingLabel": "Saving label...",
       "failedToSavingLabel": "Failed to save label",
       "saveLabelSuccess": "Label saved successfully"
+    },
+    "onboarding": {
+      "welcomeTitle": "Welcome to Zero Email!",
+      "welcomeDescription": "Your new intelligent email experience starts here.",
+      "chatTitle": "Chat with your inbox",
+      "chatDescription": "Zero allows you to chat with your inbox, and take actions on your behalf.",
+      "composeTitle": "AI Compose & Reply",
+      "composeDescription": "Our AI assistant allows you to write emails that sound like you.",
+      "labelTitle": "Label your emails",
+      "labelDescription": "Zero helps you label your emails to focus on what matters.",
+      "comingSoonTitle": "Coming Soon",
+      "comingSoonDescription": "We're excited to bring these powerful features to all users very soon!",
+      "readyTitle": "Ready to start?",
+      "readyDescription": "Click below to begin your intelligent email experience!",
+      "goBack": "Go back",
+      "getStarted": "Get Started",
+      "next": "Next"
+    },
+    "voice": {
+      "micDenied": "Microphone access denied. Please enable microphone permissions.",
+      "startFailed": "Failed to start conversation. Please try again.",
+      "endFailed": "Failed to end conversation"
+    },
+    "auth": {
+      "tryingSignup": "Trying to sign up with {email}",
+      "tryingLogin": "Trying to log in with {email}",
+      "signupAttempt": "Signup attempt",
+      "loginAttempt": "Login attempt"
+    },
+    "undoSend": {
+      "emailScheduled": "Email scheduled",
+      "scheduleCancelled": "Schedule cancelled",
+      "emailSent": "Email sent",
+      "sendCancelled": "Send cancelled",
+      "failedToCancel": "Failed to cancel",
+      "undo": "Undo"
+    },
+    "setupPhone": {
+      "codeSent": "Verification code sent to your phone",
+      "invalidCode": "Invalid verification code",
+      "verified": "Phone number verified successfully",
+      "enterValidOtp": "Please enter a valid OTP",
+      "numberCopied": "Number copied to clipboard",
+      "verifyFailed": "Failed to verify phone number",
+      "sendFailed": "Failed to send verification code"
+    },
+    "templates": {
+      "provideName": "Please provide a name",
+      "saved": "Template saved",
+      "failedToSave": "Failed to save template",
+      "deleted": "Template deleted",
+      "failedToDelete": "Failed to delete template",
+      "deleteConfirm": "Delete template \"{name}\"?",
+      "delete": "Delete"
+    }
+  },
+  "queue": {
+    "title": "Draft queue",
+    "subtitle": "Review generated drafts by status before any send is armed.",
+    "filterAll": "All statuses",
+    "pendingForReview": "{count} pending review",
+    "loading": "Loading queue...",
+    "emptyTitle": "No draft jobs in this status",
+    "emptyDescription": "New agent draft jobs will appear here when they enter the outbox.",
+    "errorTitle": "Queue could not load",
+    "refresh": "Refresh",
+    "selected": "Selected",
+    "noSelection": "Select a queue item first",
+    "keyboardTitle": "Queue keys",
+    "keyboardApprove": "Approve",
+    "keyboardReject": "Reject",
+    "keyboardOpen": "Open draft",
+    "keyboardUndo": "Undo approval",
+    "actions": {
+      "approve": "Approve",
+      "reject": "Reject",
+      "open": "Open",
+      "retry": "Retry",
+      "undo": "Undo",
+      "approving": "Approving...",
+      "rejecting": "Rejecting...",
+      "undoing": "Undoing...",
+      "retrying": "Retrying...",
+      "approved": "Approved. Sending starts after the undo window.",
+      "rejected": "Rejected and cancelled.",
+      "undone": "Approval undone.",
+      "retried": "Job queued again.",
+      "failed": "Queue action failed",
+      "cannotApprove": "Only ready drafts can be approved",
+      "cannotReject": "This item can no longer be rejected",
+      "cannotOpen": "This item has no draft or thread to open"
+    },
+    "status": {
+      "queued": "Queued",
+      "generating": "Generating",
+      "draftReady": "Draft ready",
+      "approved": "Approved",
+      "sending": "Sending",
+      "sent": "Sent",
+      "cancelled": "Cancelled",
+      "failed": "Failed"
+    },
+    "statusDescription": {
+      "queued": "Waiting for the agent.",
+      "generating": "The agent is preparing the draft.",
+      "draftReady": "Ready for human approval.",
+      "approved": "Send is armed and can still be undone.",
+      "sending": "Sending is in progress.",
+      "sent": "Sent by the approved path.",
+      "cancelled": "Cancelled before sending.",
+      "failed": "Needs a retry or manual follow-up."
+    },
+    "item": {
+      "untitled": "Untitled draft",
+      "thread": "Thread",
+      "mission": "Mission",
+      "created": "Created",
+      "updated": "Updated",
+      "scheduled": "Scheduled",
+      "draftId": "Draft",
+      "error": "Error",
+      "undoCountdown": "Undo for {seconds}s"
     }
   },
   "navigation": {
     "sidebar": {
       "inbox": "Inbox",
       "drafts": "Drafts",
+      "queue": "Queue",
       "sent": "Sent",
       "spam": "Spam",
       "archive": "Archive",
@@ -416,7 +589,7 @@
       "signatures": "Signatures",
       "shortcuts": "Shortcuts",
       "labels": "Labels",
-      "categories": "Categories",
+      "categories": "Views",
       "dangerZone": "Danger Zone",
       "deleteAccount": "Delete Account",
       "privacy": "Privacy"
@@ -429,7 +602,14 @@
         "description": "Oops! The page you're looking for doesn't exist or has been moved.",
         "goBack": "Go Back"
       },
-      "settingsNotFound": "404 - Settings page not found"
+      "settingsNotFound": "404 - Settings page not found",
+      "boundary": {
+        "oops": "Oops!",
+        "error": "Error",
+        "notFoundDetails": "The requested page could not be found.",
+        "somethingWentWrong": "Something went wrong!",
+        "seeConsole": "See the console for more information."
+      }
     },
     "settings": {
       "general": {
@@ -448,6 +628,8 @@
         "noResultsFound": "No results found",
         "zeroSignature": "Zero Signature",
         "zeroSignatureDescription": "Add a Zero signature to your emails.",
+        "undoSendEnabled": "Undo Send",
+        "undoSendEnabledDescription": "Allow canceling emails within 30 seconds of sending.",
         "defaultEmailAlias": "Default Email Alias",
         "selectDefaultEmail": "Select default email",
         "defaultEmailDescription": "This email will be used as the default 'From' address when composing new emails",
@@ -562,7 +744,13 @@
           "bulkDelete": "Bulk delete",
           "bulkSelect": "Bulk select",
           "bulkArchive": "Bulk archive",
-          "bulkStar": "Bulk star"
+          "bulkStar": "Bulk star",
+          "replyToThread": "Reply to focused email",
+          "replyAllToThread": "Reply all to focused email",
+          "forwardThread": "Forward focused email",
+          "remindThread": "Remind me tomorrow (snooze)",
+          "archive": "Done — archive",
+          "remind": "Remind me tomorrow (snooze)"
         }
       },
       "labels": {
@@ -586,6 +774,15 @@
         "externalImagesDescription": "Allow emails to display images from external sources.",
         "trustedSenders": "Trusted Senders",
         "trustedSendersDescription": "Always display images for these senders."
+      },
+      "categories": {
+        "exactlyOneDefault": "Exactly one category must be set as default",
+        "saved": "Categories saved",
+        "failedToSave": "Failed to save",
+        "cannotDeleteLast": "Cannot delete the last remaining category",
+        "defaultReassigned": "Default category reassigned to the first remaining category",
+        "resetToDefaults": "Reset to defaults",
+        "failedToReset": "Failed to reset"
       }
     },
     "createEmail": {
@@ -640,12 +837,35 @@
           "label": "Original",
           "description": "No compression, original quality"
         }
-      }
+      },
+      "scheduledTimeInPast": "Scheduled time cannot be in the past",
+      "failedToLoadDraft": "Failed to load draft",
+      "failedToRemoveAttachment": "Failed to remove attachment"
     }
   },
   "errorMessages": {
     "required_scopes_missing": "We're missing the permissions needed to craft your full experience. Please sign in again and allow the requested access.",
     "early_access_required": "Early access is required to log in",
     "unauthorized": "Zero could not load your data from the 3rd party provider. Please try again."
+  },
+  "states": {
+    "sending": "Sending…",
+    "retry": "Retry",
+    "actionFailed": "Action failed",
+    "mailList": {
+      "errorTitle": "Couldn't load your inbox",
+      "errorDescription": "We couldn't reach the server. Check your connection and try again.",
+      "offlineNotice": "You're offline — showing your saved emails.",
+      "staleNotice": "Couldn't refresh — showing your saved emails.",
+      "emptyTitle": "It's empty here",
+      "emptyDescription": "Search for another email or",
+      "clearFilters": "clear filters"
+    },
+    "thread": {
+      "errorTitle": "Couldn't open this conversation",
+      "errorDescription": "We couldn't reach the server. Check your connection and try again.",
+      "retry": "Try again",
+      "back": "Back to inbox"
+    }
   }
 }

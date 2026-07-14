@@ -1,21 +1,34 @@
+import { log } from '@/lib/log';
+import { useUndoSend } from '@/hooks/use-undo-send';
 import { constructReplyBody, constructForwardBody } from '@/lib/utils';
 import { useActiveConnection } from '@/hooks/use-connections';
 import { useEmailAliases } from '@/hooks/use-email-aliases';
-import { EmailComposer } from '../create/email-composer';
 import { useHotkeysContext } from 'react-hotkeys-hook';
+import { loadGitHubEmojis } from '@/lib/emoji-data';
 import { useTRPC } from '@/providers/query-provider';
 import { useMutation } from '@tanstack/react-query';
 import { useSettings } from '@/hooks/use-settings';
 import { useThread } from '@/hooks/use-threads';
 import { useSession } from '@/lib/auth-client';
 import { serializeFiles } from '@/lib/schemas';
+import { deriveReplyRecipients, deriveReplySubject } from './reply-recipients';
 import { useDraft } from '@/hooks/use-drafts';
 import { m } from '@/paraglide/messages';
 import type { Sender } from '@/types';
 import { useQueryState } from 'nuqs';
-import { useEffect } from 'react';
+import { lazy, Suspense, useEffect, useMemo } from 'react';
 import posthog from 'posthog-js';
 import { toast } from 'sonner';
+
+// Loaded lazily: the editor (tiptap/prosemirror) only downloads when the user actually
+// opens a reply/forward composer, keeping it out of the initial mail chunk. The emoji
+// dataset (static JSON asset) is awaited too so the Emoji extension always initializes
+// with the full list (its emoticon input rules are built at editor creation).
+const EmailComposer = lazy(() =>
+  Promise.all([import('../create/email-composer'), loadGitHubEmojis()]).then(([mod]) => ({
+    default: mod.EmailComposer,
+  })),
+);
 
 interface ReplyComposeProps {
   messageId?: string;
@@ -36,65 +49,29 @@ export default function ReplyCompose({ messageId }: ReplyComposeProps) {
   const { data: activeConnection } = useActiveConnection();
   const { data: settings, isLoading: settingsLoading } = useSettings();
   const { data: session } = useSession();
+  const { handleUndoSend } = useUndoSend();
 
   // Find the specific message to reply to
   const replyToMessage =
     (messageId && emailData?.messages.find((msg) => msg.id === messageId)) || emailData?.latest;
 
-  // Initialize recipients and subject when mode changes
-  useEffect(() => {
-    if (!replyToMessage || !mode || !activeConnection?.email) return;
-
-    const userEmail = activeConnection.email.toLowerCase();
-    const senderEmail = replyToMessage.sender.email.toLowerCase();
-
-    // Set subject based on mode
-
-    if (mode === 'reply') {
-      // Reply to sender
-      const to: string[] = [];
-
-      // If the sender is not the current user, add them to the recipients
-      if (senderEmail !== userEmail) {
-        to.push(replyToMessage.sender.email);
-      } else if (replyToMessage.to && replyToMessage.to.length > 0 && replyToMessage.to[0]?.email) {
-        // If we're replying to our own email, reply to the first recipient
-        to.push(replyToMessage.to[0].email);
-      }
-
-      // Initialize email composer with these recipients
-      // Note: The actual initialization happens in the EmailComposer component
-    } else if (mode === 'replyAll') {
-      const to: string[] = [];
-      const cc: string[] = [];
-
-      // Add original sender if not current user
-      if (senderEmail !== userEmail) {
-        to.push(replyToMessage.sender.email);
-      }
-
-      // Add original recipients from To field
-      replyToMessage.to?.forEach((recipient) => {
-        const recipientEmail = recipient.email.toLowerCase();
-        if (recipientEmail !== userEmail && recipientEmail !== senderEmail) {
-          to.push(recipient.email);
-        }
-      });
-
-      // Add CC recipients
-      replyToMessage.cc?.forEach((recipient) => {
-        const recipientEmail = recipient.email.toLowerCase();
-        if (recipientEmail !== userEmail && !to.includes(recipient.email)) {
-          cc.push(recipient.email);
-        }
-      });
-
-      // Initialize email composer with these recipients
-    } else if (mode === 'forward') {
-      // For forward, we start with empty recipients
-      // Just set the subject and include the original message
+  // Issue #32 (keyboard-parity): the reply / reply-all recipient + subject
+  // defaults are derived from the pure, tested seam (./reply-recipients) and
+  // wired into initialTo/initialCc/initialSubject below. This is the fix for the
+  // empty «To» field: reply and reply-all now open pre-populated. A concrete
+  // draft (a resumed compose) still wins so we never clobber a saved draft.
+  const replyDefaults = useMemo(() => {
+    if (!replyToMessage || !mode || !activeConnection?.email) {
+      return { to: [] as string[], cc: [] as string[], subject: '' };
     }
-  }, [mode, replyToMessage, activeConnection?.email]);
+    const { to, cc } = deriveReplyRecipients({
+      mode,
+      message: replyToMessage,
+      userEmail: activeConnection.email,
+    });
+    const subject = deriveReplySubject({ mode, subject: replyToMessage.subject });
+    return { to, cc, subject };
+  }, [activeConnection?.email, mode, replyToMessage]);
 
   const handleSendEmail = async (data: {
     to: string[];
@@ -103,8 +80,13 @@ export default function ReplyCompose({ messageId }: ReplyComposeProps) {
     subject: string;
     message: string;
     attachments: File[];
+    scheduleAt?: string;
   }) => {
     if (!replyToMessage || !activeConnection?.email) return;
+
+    // Optimistic send (W2-H): show an immediate "Sending…" state and close the
+    // composer as soon as the send resolves — no blocking refetch in the close path.
+    const sendingToast = toast.loading(m['states.sending']());
 
     try {
       const userEmail = activeConnection.email.toLowerCase();
@@ -177,7 +159,7 @@ export default function ReplyCompose({ messageId }: ReplyComposeProps) {
               //   replyToMessage.decodedBody,
             );
 
-      await sendEmail({
+      const result = await sendEmail({
         to: toRecipients,
         cc: ccRecipients,
         bcc: bccRecipients,
@@ -199,16 +181,31 @@ export default function ReplyCompose({ messageId }: ReplyComposeProps) {
         threadId: replyToMessage?.threadId,
         isForward: mode === 'forward',
         originalMessage: replyToMessage.decodedBody,
+        scheduleAt: data.scheduleAt,
       });
 
       posthog.capture('Reply Email Sent');
+      toast.dismiss(sendingToast);
 
-      // Reset states
+      // Close the composer immediately; reconcile the thread in the BACKGROUND.
+      // The blocking `await refetch()` was the measured cold-path stall (W2-H) —
+      // it is now fire-and-forget so the send feels instant.
       setMode(null);
-      await refetch();
-      toast.success(m['pages.createEmail.emailSent']());
+      setActiveReplyId(null);
+      void refetch();
+
+      handleUndoSend(result, settings, {
+        to: data.to,
+        cc: data.cc,
+        bcc: data.bcc,
+        subject: data.subject,
+        message: data.message,
+        attachments: data.attachments,
+        scheduleAt: data.scheduleAt,
+      });
     } catch (error) {
-      console.error('Error sending email:', error);
+      toast.dismiss(sendingToast);
+      log.error('Error sending email:', error);
       toast.error(m['pages.createEmail.failedToSendEmail']());
     }
   };
@@ -243,6 +240,13 @@ export default function ReplyCompose({ messageId }: ReplyComposeProps) {
 
   return (
     <div className="w-full rounded-2xl overflow-visible border">
+      <Suspense
+        fallback={
+          <div className="flex h-[120px] w-full items-center justify-center">
+            <div className="h-5 w-5 animate-spin rounded-full border-2 border-gray-300 border-t-blue-600" />
+          </div>
+        }
+      >
       <EmailComposer
         editorClassName="min-h-[50px]"
         className="w-full max-w-none! pb-1 overflow-visible"
@@ -253,14 +257,15 @@ export default function ReplyCompose({ messageId }: ReplyComposeProps) {
           setActiveReplyId(null);
         }}
         initialMessage={draft?.content ?? latestDraft?.decodedBody}
-        initialTo={ensureEmailArray(draft?.to)}
-        initialCc={ensureEmailArray(draft?.cc)}
+        initialTo={draft ? ensureEmailArray(draft.to) : replyDefaults.to}
+        initialCc={draft ? ensureEmailArray(draft.cc) : replyDefaults.cc}
         initialBcc={ensureEmailArray(draft?.bcc)}
-        initialSubject={draft?.subject}
+        initialSubject={draft?.subject ?? replyDefaults.subject}
         autofocus={true}
         settingsLoading={settingsLoading}
         replyingTo={replyToMessage?.sender.email}
       />
+      </Suspense>
     </div>
   );
 }

@@ -1,24 +1,36 @@
+import { log } from '@/lib/log';
+import { useUndoSend, type EmailData, deserializeFiles } from '@/hooks/use-undo-send';
+import { m } from '@/paraglide/messages';
 import { useActiveConnection } from '@/hooks/use-connections';
 import { Dialog, DialogClose } from '@/components/ui/dialog';
 import { useEmailAliases } from '@/hooks/use-email-aliases';
 import { cleanEmailAddresses } from '@/lib/email-utils';
+import { loadGitHubEmojis } from '@/lib/emoji-data';
 
 import { useTRPC } from '@/providers/query-provider';
 import { useMutation } from '@tanstack/react-query';
 import { useSettings } from '@/hooks/use-settings';
-import { EmailComposer } from './email-composer';
 import { useSession } from '@/lib/auth-client';
 import { serializeFiles } from '@/lib/schemas';
 import { useDraft } from '@/hooks/use-drafts';
-import { useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 
 import type { Attachment } from '@/types';
-import { m } from '@/paraglide/messages';
 import { useQueryState } from 'nuqs';
 import { X } from '../icons/icons';
 import posthog from 'posthog-js';
 import { toast } from 'sonner';
 import './prosemirror.css';
+
+// Loaded lazily: the editor (tiptap/prosemirror) only downloads when the compose
+// dialog/page actually renders it, keeping it out of the initial mail chunk. The emoji
+// dataset (static JSON asset) is awaited too so the Emoji extension always initializes
+// with the full list (its emoticon input rules are built at editor creation).
+const EmailComposer = lazy(() =>
+  Promise.all([import('./email-composer'), loadGitHubEmojis()]).then(([mod]) => ({
+    default: mod.EmailComposer,
+  })),
+);
 
 // Define the draft type to include CC and BCC fields
 type DraftType = {
@@ -64,12 +76,13 @@ export function CreateEmail({
   const [, setActiveReplyId] = useQueryState('activeReplyId');
   const { data: activeConnection } = useActiveConnection();
   const { data: settings, isLoading: settingsLoading } = useSettings();
+  const { handleUndoSend } = useUndoSend();
   // If there was an error loading the draft, set the failed state
   useEffect(() => {
     if (draftError) {
-      console.error('Error loading draft:', draftError);
+      log.error('Error loading draft:', draftError);
       setIsDraftFailed(true);
-      toast.error('Failed to load draft');
+      toast.error(m['pages.createEmail.failedToLoadDraft']());
     }
   }, [draftError]);
 
@@ -86,6 +99,7 @@ export function CreateEmail({
     message: string;
     attachments: File[];
     fromEmail?: string;
+    scheduleAt?: string;
   }) => {
     const fromEmail = data.fromEmail || aliases?.[0]?.email || userEmail;
 
@@ -93,19 +107,20 @@ export function CreateEmail({
       ? '<p style="color: #666; font-size: 12px;">Sent via <a href="https://0.email/" style="color: #0066cc; text-decoration: none;">Zero</a></p>'
       : '';
 
-    await sendEmail({
-      to: data.to.map((email) => ({ email, name: email?.split('@')[0] || email })),
-      cc: data.cc?.map((email) => ({ email, name: email?.split('@')[0] || email })),
-      bcc: data.bcc?.map((email) => ({ email, name: email?.split('@')[0] || email })),
+    const result = await sendEmail({
+      to: data.to.map((email) => ({ email, name: email.split('@')[0] || email })),
+      cc: data.cc?.map((email) => ({ email, name: email.split('@')[0] || email })),
+      bcc: data.bcc?.map((email) => ({ email, name: email.split('@')[0] || email })),
       subject: data.subject,
       message: data.message + zeroSignature,
       attachments: await serializeFiles(data.attachments),
       fromEmail: userName.trim() ? `${userName.replace(/[<>]/g, '')} <${fromEmail}>` : fromEmail,
       draftId: draftId ?? undefined,
+      scheduleAt: data.scheduleAt,
     });
 
-    // Clear draft ID from URL
     setDraftId(null);
+    clearUndoData();
 
     // Track different email sending scenarios
     if (data.cc && data.cc.length > 0 && data.bcc && data.bcc.length > 0) {
@@ -118,7 +133,16 @@ export function CreateEmail({
       posthog.capture('Create Email Sent');
     }
 
-    toast.success(m['pages.createEmail.emailSentSuccessfully']());
+    handleUndoSend(result, settings, {
+      to: data.to,
+      cc: data.cc,
+      bcc: data.bcc,
+      subject: data.subject,
+      message: data.message,
+      attachments: data.attachments,
+      fromEmail: data.fromEmail,
+      scheduleAt: data.scheduleAt,
+    });
   };
 
   useEffect(() => {
@@ -134,6 +158,33 @@ export function CreateEmail({
     return cleanedAddresses || [];
   };
 
+  const clearUndoData = () => {
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('undoEmailData');
+    }
+  };
+
+  const undoEmailData = useMemo((): EmailData | null => {
+    if (isComposeOpen !== 'true') return null;
+    if (typeof window === 'undefined') return null;
+    
+    const storedData = localStorage.getItem('undoEmailData');
+    if (!storedData) return null;
+    
+    try {
+      const parsedData = JSON.parse(storedData);
+      
+      if (parsedData.attachments && Array.isArray(parsedData.attachments)) {
+        parsedData.attachments = deserializeFiles(parsedData.attachments);
+      }
+      
+      return parsedData;
+    } catch (error) {
+      log.error('Failed to parse undo email data:', error);
+      return null;
+    }
+  }, [isComposeOpen]);
+
   // Cast draft to our extended type that includes CC and BCC
   const typedDraft = draft as unknown as DraftType;
 
@@ -141,6 +192,7 @@ export function CreateEmail({
     setIsComposeOpen(open ? 'true' : null);
     if (!open) {
       setDraftId(null);
+      clearUndoData();
     }
   };
 
@@ -153,7 +205,7 @@ export function CreateEmail({
       }
       return new File([byteArray], filename, { type: mimeType });
     } catch (error) {
-      console.error('Failed to convert base64 to file', error);
+      log.error('Failed to convert base64 to file', error);
       return null;
     }
   };
@@ -169,7 +221,7 @@ export function CreateEmail({
         <div className="flex min-h-screen flex-col items-center justify-center gap-1">
           <div className="flex w-[750px] justify-start">
             <DialogClose asChild className="flex">
-              <button className="dark:bg-panelDark flex items-center gap-1 rounded-lg bg-[#F0F0F0] px-2 py-1.5">
+              <button className="dark:bg-panelDark flex items-center gap-1 rounded-lg bg-[#F0F0F0] px-2 py-1 hover:bg-gray-100 dark:hover:bg-[#404040] transition-colors cursor-pointer">
                 <X className="fill-muted-foreground mt-0.5 h-3.5 w-3.5 dark:fill-[#929292]" />
                 <span className="text-muted-foreground text-sm font-medium dark:text-white">
                   esc
@@ -185,20 +237,34 @@ export function CreateEmail({
               </div>
             </div>
           ) : (
+            <Suspense
+              fallback={
+                <div className="flex h-[600px] w-[750px] items-center justify-center rounded-2xl border">
+                  <div className="mx-auto h-6 w-6 animate-spin rounded-full border-2 border-gray-300 border-t-blue-600"></div>
+                </div>
+              }
+            >
             <EmailComposer
-              key={typedDraft?.id || 'composer'}
+              key={typedDraft?.id || undoEmailData?.to?.join(',') || 'composer'}
               className="mb-12 rounded-2xl border"
               onSendEmail={handleSendEmail}
-              initialMessage={typedDraft?.content || initialBody}
+              initialMessage={
+                undoEmailData?.message || 
+                typedDraft?.content || 
+                initialBody
+              }
               initialTo={
+                undoEmailData?.to ||
                 typedDraft?.to?.map((e: string) => e.replace(/[<>]/g, '')) ||
                 processInitialEmails(initialTo)
               }
               initialCc={
+                undoEmailData?.cc ||
                 typedDraft?.cc?.map((e: string) => e.replace(/[<>]/g, '')) ||
                 processInitialEmails(initialCc)
               }
               initialBcc={
+                undoEmailData?.bcc ||
                 typedDraft?.bcc?.map((e: string) => e.replace(/[<>]/g, '')) ||
                 processInitialEmails(initialBcc)
               }
@@ -207,12 +273,18 @@ export function CreateEmail({
                 setActiveReplyId(null);
                 setIsComposeOpen(null);
                 setDraftId(null);
+                clearUndoData();
               }}
-              initialAttachments={files}
-              initialSubject={typedDraft?.subject || initialSubject}
+              initialAttachments={undoEmailData?.attachments || files}
+              initialSubject={
+                undoEmailData?.subject || 
+                typedDraft?.subject || 
+                initialSubject
+              }
               autofocus={false}
               settingsLoading={settingsLoading}
             />
+            </Suspense>
           )}
         </div>
       </Dialog>

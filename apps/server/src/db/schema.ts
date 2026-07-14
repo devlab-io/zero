@@ -194,7 +194,10 @@ export const userSettings = createTable(
       .notNull()
       .references(() => user.id, { onDelete: 'cascade' })
       .unique(),
-    settings: jsonb('settings').notNull().default(defaultUserSettings),
+    settings: jsonb('settings')
+      .$type<typeof defaultUserSettings>()
+      .notNull()
+      .default(defaultUserSettings),
     createdAt: timestamp('created_at').notNull(),
     updatedAt: timestamp('updated_at').notNull(),
   },
@@ -317,5 +320,43 @@ export const emailTemplate = createTable(
   (t) => [
     index('idx_mail0_email_template_user_id').on(t.userId),
     unique('mail0_email_template_user_id_name_unique').on(t.userId, t.name),
+  ],
+);
+
+export const draftOutbox = createTable(
+  'draft_outbox',
+  {
+    id: text('id').primaryKey(),
+    connectionId: text('connection_id')
+      .notNull()
+      .references(() => connection.id, { onDelete: 'cascade' }),
+    threadId: text('thread_id'),
+    mission: text('mission'),
+    status: text('status')
+      .$type<
+        | 'queued'
+        | 'generating'
+        | 'draft_ready'
+        | 'approved'
+        | 'sending'
+        | 'sent'
+        | 'cancelled'
+        | 'failed'
+      >()
+      .notNull()
+      .default('queued'),
+    gmailDraftId: text('gmail_draft_id'),
+    subject: text('subject').notNull(),
+    body: text('body').notNull(),
+    idempotencyKey: text('idempotency_key').notNull(),
+    scheduledSendAt: timestamp('scheduled_send_at'),
+    error: text('error'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (t) => [
+    unique('mail0_draft_outbox_idempotency_key_unique').on(t.idempotencyKey),
+    index('draft_outbox_connection_status_idx').on(t.connectionId, t.status),
+    index('draft_outbox_scheduled_send_at_idx').on(t.scheduledSendAt),
   ],
 );

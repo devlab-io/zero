@@ -1,3 +1,4 @@
+import { logger } from './logger';
 import { ReSummarizeThread, SummarizeMessage, SummarizeThread } from './brain.fallback.prompts';
 import { getSubscriptionFactory } from './factories/subscription-factory.registry';
 import { AiChatPrompt, StyledEmailAssistantSystemPrompt } from './prompts';
@@ -11,7 +12,7 @@ export const enableBrainFunction = async (connection: { id: string; providerId: 
     const subscriptionFactory = getSubscriptionFactory(connection.providerId);
     await subscriptionFactory.subscribe({ body: { connectionId: connection.id } });
   } catch (error) {
-    console.error(`Failed to enable brain function: ${error}`);
+    logger.error(`Failed to enable brain function: ${error}`);
     await resetConnection(connection.id);
   }
 };
@@ -23,7 +24,7 @@ export const disableBrainFunction = async (connection: { id: string; providerId:
       body: { connectionId: connection.id, providerId: connection.providerId },
     });
   } catch (error) {
-    console.error(`Failed to disable brain function: ${error}`);
+    logger.error(`Failed to disable brain function: ${error}`);
   }
 };
 

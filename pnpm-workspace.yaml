@@ -2,27 +2,43 @@ packages:
   - apps/*
   - packages/*
   - scripts/*
+
 catalog:
-  zod: ^3.25.42
-  better-auth: ^1.2.9
-  autumn-js: ^0.0.48
-  superjson: ^2.2.2
-  '@trpc/server': ^11.1.4
+  '@react-email/components': ^0.0.41
   '@trpc/client': ^11.1.4
+  '@trpc/server': ^11.1.4
   '@trpc/tanstack-react-query': ^11.1.4
-  wrangler: ^4.18.0
-  typescript: ^5.8.3
-  drizzle-orm: ^0.43.1
-  drizzle-kit: ^0.31.1
   '@types/node': ^22.15.21
-  'react': ^19.1.0
-  'react-dom': ^19.1.0
+  '@types/react': 19.1.6
+  agents: 0.0.106
+  ai: ^4.3.13
+  autumn-js: ^0.0.48
+  better-auth: 1.6.23
+  date-fns: ^4.1.0
+  dedent: ^1.6.0
+  drizzle-kit: 0.31.4
+  drizzle-orm: 0.45.2
+  email-addresses: ^5.0.0
+  eslint: ^9.27.0
+  react: ^19.1.0
+  react-dom: ^19.1.0
+  resend: ^4.5.1
+  superjson: ^2.2.2
+  typescript: ^5.8.3
+  wrangler: ^4.32.0
+  zod: ^3.25.42
+
 onlyBuiltDependencies:
+  - '@sentry/cli'
+  - '@tailwindcss/oxide'
+  - better-sqlite3
   - core-js
   - core-js-pure
   - esbuild
+  - msw
   - sharp
   - unrs-resolver
   - workerd
+
 patchedDependencies:
   novel: patches/novel.patch

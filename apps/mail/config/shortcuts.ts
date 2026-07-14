@@ -1,18 +1,36 @@
-import { z } from 'zod';
 import { keyboardLayoutMapper } from '../utils/keyboard-layout-map';
 import { getKeyCodeFromKey } from '../utils/keyboard-utils';
+import { isMac } from '@/lib/platform';
 
-export const shortcutSchema = z.object({
-  keys: z.array(z.string()),
-  action: z.string(),
-  type: z.enum(['single', 'combination']),
-  description: z.string(),
-  scope: z.string(),
-  preventDefault: z.boolean().optional(),
-  ignore: z.boolean().optional(),
-});
+// Machine-readable Shortwave keyboard-parity registry (issue #32).
+//
+// This module is the SINGLE source of truth for the keyboard contract: the hotkey
+// handlers (apps/mail/lib/hotkeys/**) bind from it, and the settings/help UI
+// (app/(routes)/settings/shortcuts/page.tsx) renders from it via useShortcutCache —
+// so a shortcut can never be advertised without a registration, nor handled without
+// being listed. Every in-scope row of docs/spec/niveau8-mailos.md §Shortwave keyboard
+// contract appears here with its exact key aliases and contextual scope.
+//
+// `mod` = Command on macOS, Control elsewhere. Types:
+//   - single       one bare key (suppressed while typing — see use-hotkey-utils)
+//   - combination   a modifier chord (safe while typing)
+//   - sequence      two keys pressed in order within a bounded timeout (the `g …` set)
 
-export type Shortcut = z.infer<typeof shortcutSchema>;
+// #a8-weight-hunt LEAD F: the shortcut shape is a plain interface, not a zod schema. It was only
+// ever consumed as a type (z.infer) and never runtime-validated (no .parse/.safeParse anywhere),
+// so importing zod here pulled ~12 KiB gz of dead runtime weight into the cold /mail/inbox closure
+// (this module is loaded eagerly by lib/hotkeys/**). Shape is identical; runtime behaviour unchanged.
+export interface Shortcut {
+  keys: string[];
+  action: string;
+  type: 'single' | 'combination' | 'sequence';
+  description: string;
+  scope: string;
+  preventDefault?: boolean;
+  /** Documentation-only row: rendered in help, bound outside the registry (e.g. list focus keys). */
+  ignore?: boolean;
+}
+
 export type ShortcutType = Shortcut['type'];
 
 /**
@@ -28,30 +46,32 @@ export interface EnhancedShortcut extends Shortcut {
  */
 export function getDisplayKeysForShortcut(shortcut: Shortcut): string[] {
   const detectedLayout = keyboardLayoutMapper.getDetectedLayout();
-  
-  return shortcut.keys.map(key => {
+
+  return shortcut.keys.map((key) => {
     // Handle special modifiers first
     switch (key.toLowerCase()) {
       case 'mod':
-        return navigator.platform.includes('Mac') ? '⌘' : 'Ctrl';
+        return isMac ? '⌘' : 'Ctrl';
       case 'meta':
         return '⌘';
       case 'ctrl':
       case 'control':
         return 'Ctrl';
       case 'alt':
-        return navigator.platform.includes('Mac') ? '⌥' : 'Alt';
+        return isMac ? '⌥' : 'Alt';
       case 'shift':
         return '⇧';
       case 'escape':
         return 'Esc';
       case 'backspace':
         return '⌫';
+      case 'delete':
+        return '⌦';
       case 'enter':
         return '↵';
       case 'space':
         return 'Space';
-      default:
+      default: {
         // Use enhanced keyboard layout mapping
         if (detectedLayout?.layout && detectedLayout.layout !== 'qwerty') {
           const keyCode = getKeyCodeFromKey(key);
@@ -59,378 +79,220 @@ export function getDisplayKeysForShortcut(shortcut: Shortcut): string[] {
           return mappedKey.length === 1 ? mappedKey.toUpperCase() : mappedKey;
         }
         return key.length === 1 ? key.toUpperCase() : key;
+      }
     }
   });
 }
 
 /**
- * Convert a key string to its corresponding KeyCode
- */
-
-
-/**
  * Enhance shortcuts with keyboard layout mapping
  */
 export function enhanceShortcutsWithMapping(shortcuts: Shortcut[]): EnhancedShortcut[] {
-  return shortcuts.map(shortcut => ({
+  return shortcuts.map((shortcut) => ({
     ...shortcut,
     displayKeys: getDisplayKeysForShortcut(shortcut),
     mappedKeys: keyboardLayoutMapper.mapKeys(shortcut.keys.map(getKeyCodeFromKey)),
   }));
 }
 
-const threadDisplayShortcuts: Shortcut[] = [
-  // {
-  //   keys: ['i'],
-  //   action: 'viewEmailDetails',
-  //   type: 'single',
-  //   description: 'View email details',
-  //   scope: 'thread-display',
-  // },
-  // {
-  //   keys: ['mod', 'p'],
-  //   action: 'printEmail',
-  //   type: 'combination',
-  //   description: 'Print email',
-  //   scope: 'thread-display',
-  // },
-  {
-    keys: ['r'],
-    action: 'reply',
-    type: 'single',
-    description: 'Reply to email',
-    scope: 'thread-display',
-  },
-  {
-    keys: ['a'],
-    action: 'replyAll',
-    type: 'single',
-    description: 'Reply all',
-    scope: 'thread-display',
-  },
-  {
-    keys: ['f'],
-    action: 'forward',
-    type: 'single',
-    description: 'Forward email',
-    scope: 'thread-display',
-  },
-  {
-    keys: ['meta', 'backspace'],
-    action: 'delete',
-    type: 'single',
-    description: 'Move to Bin',
-    scope: 'thread-display',
-  },
-];
+/** Terse constructor so the tables below read like the spec grid. */
+const shortcut = (
+  keys: string[],
+  action: string,
+  description: string,
+  scope: string,
+  options: Pick<Shortcut, 'type' | 'preventDefault' | 'ignore'> = { type: 'single' },
+): Shortcut => ({ keys, action, description, scope, ...options });
 
+// Navigate: real timed two-key sequences (`g` then a letter), never a chord.
+//
+// `g s` (Shortwave "starred") navigates to the EXISTING `is:starred` search (Zero has
+// no starred folder route, but the search filter is a live, functional view — see
+// navigation-hotkeys.tsx), so parity is met without inventing a route.
 const navigation: Shortcut[] = [
-  {
-    keys: ['g', 'd'],
-    action: 'goToDrafts',
-    type: 'combination',
-    description: 'Go to drafts',
-    scope: 'navigation',
-  },
-  {
-    keys: ['g', 'i'],
-    action: 'inbox',
-    type: 'combination',
-    description: 'Go to inbox',
-    scope: 'navigation',
-  },
-  {
-    keys: ['g', 't'],
-    action: 'sentMail',
-    type: 'combination',
-    description: 'Go to sent mail',
-    scope: 'navigation',
-  },
-  {
-    keys: ['g', 's'],
-    action: 'goToSettings',
-    type: 'combination',
-    description: 'Go to general settings',
-    scope: 'navigation',
-  },
-  {
-    keys: ['g', 'a'],
-    action: 'goToArchive',
-    type: 'combination',
-    description: 'Go to archive',
-    scope: 'navigation',
-  },
-  {
-    keys: ['g', 'b'],
-    action: 'goToBin',
-    type: 'combination',
-    description: 'Go to bin',
-    scope: 'navigation',
-  },
-  {
-    keys: ['?', 'shift'],
-    action: 'helpWithShortcuts',
-    type: 'combination',
-    description: 'Show keyboard shortcuts',
-    scope: 'navigation',
-  },
+  shortcut(['g', 'i'], 'inbox', 'Go to inbox', 'navigation', { type: 'sequence' }),
+  shortcut(['g', 's'], 'goToStarred', 'Go to starred', 'navigation', { type: 'sequence' }),
+  shortcut(['g', 'b'], 'goToSnoozed', 'Go to snoozed', 'navigation', { type: 'sequence' }),
+  shortcut(['g', 'h'], 'goToSnoozed', 'Go to snoozed', 'navigation', { type: 'sequence' }),
+  shortcut(['g', 'e'], 'goToArchive', 'Go to done', 'navigation', { type: 'sequence' }),
+  shortcut(['g', 'a'], 'goToArchive', 'Go to archive', 'navigation', { type: 'sequence' }),
+  shortcut(['g', 't'], 'sentMail', 'Go to sent mail', 'navigation', { type: 'sequence' }),
+  shortcut(['g', 'd'], 'goToDrafts', 'Go to drafts', 'navigation', { type: 'sequence' }),
+  shortcut(['g', '!'], 'goToSpam', 'Go to spam', 'navigation', { type: 'sequence' }),
+  shortcut(['g', '#'], 'goToBin', 'Go to bin', 'navigation', { type: 'sequence' }),
 ];
 
 const globalShortcuts: Shortcut[] = [
-  // {
-  //   keys: ['?'],
-  //   action: 'helpWithShortcuts',
-  //   type: 'single',
-  //   description: 'Show keyboard shortcuts',
-  //   scope: 'global',
-  // },
-  {
-    keys: ['mod', 'z'],
-    action: 'undoLastAction',
+  shortcut(['c'], 'newEmail', 'Compose new email', 'global', {
     type: 'single',
-    description: 'Undo last action',
-    scope: 'global',
     preventDefault: true,
-  },
-  {
-    keys: ['v'],
-    action: 'openVoice',
-    type: 'single',
-    description: 'Open voice',
-    scope: 'global',
-  },
-  {
-    keys: ['c'],
-    action: 'newEmail',
-    type: 'single',
-    description: 'Compose new email',
-    scope: 'global',
-    preventDefault: true,
-  },
-  {
-    keys: ['mod', 'k'],
-    action: 'commandPalette',
+  }),
+  shortcut(['/'], 'search', 'Search email', 'global', { type: 'single', preventDefault: true }),
+  shortcut(['mod', 'k'], 'commandPalette', 'Open command palette', 'global', {
     type: 'combination',
-    description: 'Open command palette',
-    scope: 'global',
-  },
-  {
-    keys: ['mod', 'shift', 'f'],
-    action: 'clearAllFilters',
-    type: 'combination',
-    description: 'Clear all filters',
-    scope: 'global',
     preventDefault: true,
-  },
+  }),
+  shortcut(['mod', 'shift', 'k'], 'commandPalette', 'Open command palette', 'global', {
+    type: 'combination',
+    preventDefault: true,
+  }),
+  shortcut(['mod', 'shift', 'p'], 'commandPalette', 'Open command palette', 'global', {
+    type: 'combination',
+    preventDefault: true,
+  }),
+  shortcut(['shift', '?'], 'helpWithShortcuts', 'Show keyboard shortcuts', 'global', {
+    type: 'combination',
+    preventDefault: true,
+  }),
+  shortcut(['mod', '/'], 'helpWithShortcuts', 'Show keyboard shortcuts', 'global', {
+    type: 'combination',
+    preventDefault: true,
+  }),
+  shortcut(['mod', ','], 'goToSettings', 'Go to settings', 'global', {
+    type: 'combination',
+    preventDefault: true,
+  }),
+  shortcut(['mod', 'shift', 'l'], 'toggleTheme', 'Toggle theme', 'global', {
+    type: 'combination',
+    preventDefault: true,
+  }),
+  shortcut(['mod', '\\'], 'toggleSidebar', 'Toggle sidebar', 'global', {
+    type: 'combination',
+    preventDefault: true,
+  }),
+  shortcut(['mod', 'z'], 'undoLastAction', 'Undo last reversible action', 'global', {
+    type: 'combination',
+    preventDefault: true,
+  }),
+  shortcut(['mod', 'shift', 'f'], 'clearAllFilters', 'Clear all filters', 'global', {
+    type: 'combination',
+    preventDefault: true,
+  }),
 ];
 
 const mailListShortcuts: Shortcut[] = [
-  {
-    keys: ['r'],
-    action: 'markAsRead',
+  shortcut(['r'], 'replyToThread', 'Reply to focused email', 'mail-list'),
+  shortcut(['a'], 'replyAllToThread', 'Reply all to focused email', 'mail-list'),
+  shortcut(['f'], 'forwardThread', 'Forward focused email', 'mail-list'),
+  shortcut(['d'], 'archiveEmail', 'Done — archive', 'mail-list'),
+  shortcut(['e'], 'archiveEmail', 'Done — archive', 'mail-list'),
+  shortcut(['b'], 'remindThread', 'Snooze focused email', 'mail-list'),
+  shortcut(['h'], 'remindThread', 'Snooze focused email', 'mail-list'),
+  shortcut(['s'], 'bulkStar', 'Toggle star', 'mail-list'),
+  shortcut(['u'], 'markAsUnread', 'Mark as unread', 'mail-list'),
+  shortcut(['shift', 'u'], 'markAsUnread', 'Mark as unread', 'mail-list', { type: 'combination' }),
+  shortcut(['shift', 'i'], 'markAsRead', 'Mark as read', 'mail-list', { type: 'combination' }),
+  shortcut(['+'], 'markAsImportant', 'Mark as important', 'mail-list'),
+  shortcut(['-'], 'markAsNotImportant', 'Mark as not important', 'mail-list'),
+  shortcut(['x'], 'toggleFocusedSelection', 'Select focused email', 'mail-list'),
+  shortcut(['#'], 'bulkDelete', 'Move to bin', 'mail-list', { type: 'single', preventDefault: true }),
+  shortcut(['delete'], 'bulkDelete', 'Move to bin', 'mail-list', {
     type: 'single',
-    description: 'Mark as read',
-    scope: 'mail-list',
-  },
-  {
-    keys: ['u'],
-    action: 'markAsUnread',
-    type: 'single',
-    description: 'Mark as unread',
-    scope: 'mail-list',
-  },
-  {
-    keys: ['i'],
-    action: 'markAsImportant',
-    type: 'single',
-    description: 'Mark as important',
-    scope: 'mail-list',
-  },
-  {
-    keys: ['a'],
-    action: 'bulkArchive',
-    type: 'single',
-    description: 'Bulk archive',
-    scope: 'mail-list',
-  },
-  {
-    keys: ['d'],
-    action: 'bulkDelete',
-    type: 'single',
-    description: 'Bulk delete',
-    scope: 'mail-list',
-  },
-  {
-    keys: ['s'],
-    action: 'bulkStar',
-    type: 'single',
-    description: 'Bulk star',
-    scope: 'mail-list',
-  },
-  // {
-  //   keys: ['u'],
-  //   action: 'bulkUnstar',
-  //   type: 'single',
-  //   description: 'Bulk unstar',
-  //   scope: 'mail-list',
-  // },
-  // {
-  //   keys: [''],
-  //   action: 'exitSelectionMode',
-  //   type: 'single',
-  //   description: 'Exit selection mode',
-  //   scope: 'mail-list',
-  // },
-  // {
-  //   keys: ['m'],
-  //   action: 'muteThread',
-  //   type: 'single',
-  //   description: 'Mute thread',
-  //   scope: 'mail-list',
-  // },
-  {
-    keys: ['e'],
-    action: 'archiveEmail',
-    type: 'single',
-    description: 'Archive email',
-    scope: 'mail-list',
-  },
-  {
-    keys: ['escape'],
-    action: 'exitSelectionMode',
-    type: 'single',
-    description: 'Exit selection mode',
-    scope: 'mail-list',
-  },
-  // {
-  //   keys: ['!'],
-  //   action: 'markAsSpam',
-  //   type: 'single',
-  //   description: 'Mark as spam',
-  //   scope: 'mail-list',
-  // },
-  // {
-  //   keys: ['v'],
-  //   action: 'moveToFolder',
-  //   type: 'single',
-  //   description: 'Move to folder',
-  //   scope: 'mail-list',
-  // },
-
-  // {
-  //   keys: ['o'],
-  //   action: 'expandEmailView',
-  //   type: 'single',
-  //   description: 'Expand email view',
-  //   scope: 'mail-list',
-  // },
-  // {
-  //   keys: ['#'],
-  //   action: 'delete',
-  //   type: 'single',
-  //   description: 'Delete email',
-  //   scope: 'mail-list',
-  // },
-  {
-    keys: ['mod', 'a'],
-    action: 'selectAll',
-    type: 'combination',
-    description: 'Select all emails',
-    scope: 'mail-list',
     preventDefault: true,
-  },
-  // {
-  //   keys: ['j'],
-  //   action: 'scrollDown',
-  //   type: 'single',
-  //   description: 'Scroll down',
-  //   scope: 'mail-list',
-  // },
-  // {
-  //   keys: ['k'],
-  //   action: 'scrollUp',
-  //   type: 'single',
-  //   description: 'Scroll up',
-  //   scope: 'mail-list',
-  // },
-  {
-    keys: ['1'],
-    action: 'showImportant',
-    type: 'single',
-    description: 'Show important',
-    scope: 'mail-list',
-  },
-  {
-    keys: ['2'],
-    action: 'showAllMail',
-    type: 'single',
-    description: 'Show all mail',
-    scope: 'mail-list',
-  },
-  {
-    keys: ['3'],
-    action: 'showPersonal',
-    type: 'single',
-    description: 'Show personal',
-    scope: 'mail-list',
-  },
-  {
-    keys: ['4'],
-    action: 'showUpdates',
-    type: 'single',
-    description: 'Show updates',
-    scope: 'mail-list',
-  },
-  {
-    keys: ['5'],
-    action: 'showPromotions',
-    type: 'single',
-    description: 'Show promotions',
-    scope: 'mail-list',
-  },
-  {
-    keys: ['6'],
-    action: 'showUnread',
-    type: 'single',
-    description: 'Show unread',
-    scope: 'mail-list',
-  },
-  {
-    keys: ['alt', 'shift', 'click'],
-    action: 'selectUnderCursor',
+  }),
+  shortcut(['mod', 'backspace'], 'bulkDelete', 'Move to bin', 'mail-list', {
     type: 'combination',
-    description: 'Select under cursor',
-    scope: 'mail-list',
-    ignore: true,
-  },
+    preventDefault: true,
+  }),
+  shortcut(['mod', 'a'], 'selectAll', 'Select all emails', 'mail-list', {
+    type: 'combination',
+    preventDefault: true,
+  }),
+  // Space / shift+Space paging lives in the imperative `list` group below: the real
+  // scroller is the virtua VList inside mail-list.tsx (must-not-touch) and paging is
+  // driven from use-mail-navigation.ts, which holds the list container ref.
+  shortcut(['escape'], 'exitSelectionMode', 'Clear selection', 'mail-list', {
+    type: 'single',
+    preventDefault: true,
+  }),
+];
+
+const threadDisplayShortcuts: Shortcut[] = [
+  shortcut(['r'], 'reply', 'Reply to email', 'thread-display'),
+  shortcut(['a'], 'replyAll', 'Reply all', 'thread-display'),
+  shortcut(['f'], 'forward', 'Forward email', 'thread-display'),
+  shortcut(['d'], 'archive', 'Done — archive and go next', 'thread-display'),
+  shortcut(['e'], 'archive', 'Done — archive and go next', 'thread-display'),
+  shortcut(['['], 'archiveNext', 'Done and open next', 'thread-display'),
+  shortcut([']'], 'archivePrevious', 'Done and open previous', 'thread-display'),
+  shortcut(['b'], 'remind', 'Snooze email', 'thread-display'),
+  shortcut(['h'], 'remind', 'Snooze email', 'thread-display'),
+  shortcut(['s'], 'toggleStar', 'Toggle star', 'thread-display'),
+  // `l`/`v` open the label / move picker (components/mail/label-move-picker.tsx), driven
+  // by the `picker` query-state the handler sets — see thread-display-hotkeys.tsx.
+  shortcut(['l'], 'openLabels', 'Open label picker', 'thread-display'),
+  shortcut(['v'], 'openMove', 'Open move picker', 'thread-display'),
+  shortcut(['u'], 'markAsUnread', 'Mark as unread', 'thread-display'),
+  shortcut(['shift', 'u'], 'markAsUnread', 'Mark as unread', 'thread-display', {
+    type: 'combination',
+  }),
+  shortcut(['shift', 'i'], 'markAsRead', 'Mark as read', 'thread-display', { type: 'combination' }),
+  shortcut(['+'], 'markAsImportant', 'Mark as important', 'thread-display'),
+  shortcut(['-'], 'markAsNotImportant', 'Mark as not important', 'thread-display'),
+  shortcut(['#'], 'delete', 'Move to bin', 'thread-display', { type: 'single', preventDefault: true }),
+  shortcut(['delete'], 'delete', 'Move to bin', 'thread-display', {
+    type: 'single',
+    preventDefault: true,
+  }),
+  shortcut(['mod', 'backspace'], 'delete', 'Move to bin', 'thread-display', {
+    type: 'combination',
+    preventDefault: true,
+  }),
+  shortcut(['escape'], 'closeView', 'Close thread', 'thread-display', {
+    type: 'single',
+    preventDefault: true,
+  }),
 ];
 
 const composeShortcuts: Shortcut[] = [
-  {
-    keys: ['mod', 'Enter'],
-    action: 'sendEmail',
+  // `mod+Enter` (send) and `mod+shift+Enter` (send + archive/done) are bound INSIDE the
+  // composer (email-composer.tsx) — the send path needs the composer's live form/editor
+  // state — not through the generic hotkey binder. Registered `ignore`d so the help UI
+  // documents them and the coverage test accounts for their external binding without the
+  // binder double-firing them.
+  shortcut(['mod', 'enter'], 'sendEmail', 'Send email', 'compose', {
     type: 'combination',
-    description: 'Send email',
-    scope: 'compose',
-  },
-  {
-    keys: ['escape'],
-    action: 'closeCompose',
+    preventDefault: true,
+    ignore: true,
+  }),
+  shortcut(['mod', 'shift', 'enter'], 'sendAndArchive', 'Send and archive (done)', 'compose', {
+    type: 'combination',
+    preventDefault: true,
+    ignore: true,
+  }),
+  shortcut(['escape'], 'closeCompose', 'Close composer', 'compose'),
+];
+
+// List focus/paging keys handled imperatively in hooks/use-mail-navigation.ts (they need
+// the live list container + repeat handling react-hotkeys-hook does not model). Registered
+// here `ignore`d so the help UI documents them and the coverage test can assert their live
+// bindings, without the generic hotkey binder double-registering them.
+const listShortcuts: Shortcut[] = [
+  shortcut(['j'], 'focusNext', 'Focus next', 'list', { type: 'single', ignore: true }),
+  shortcut(['ArrowDown'], 'focusNext', 'Focus next', 'list', { type: 'single', ignore: true }),
+  shortcut(['k'], 'focusPrevious', 'Focus previous', 'list', { type: 'single', ignore: true }),
+  shortcut(['ArrowUp'], 'focusPrevious', 'Focus previous', 'list', { type: 'single', ignore: true }),
+  shortcut(['Enter'], 'openFocused', 'Open focused', 'list', { type: 'single', ignore: true }),
+  shortcut(['ArrowRight'], 'openFocused', 'Open focused', 'list', { type: 'single', ignore: true }),
+  shortcut(['ArrowLeft'], 'closeList', 'Close thread / clear selection', 'list', {
     type: 'single',
-    description: 'Close compose',
-    scope: 'compose',
-  },
+    ignore: true,
+  }),
+  shortcut(['space'], 'pageDown', 'Page down', 'list', { type: 'single', ignore: true }),
+  shortcut(['shift', 'space'], 'pageUp', 'Page up', 'list', { type: 'combination', ignore: true }),
 ];
 
 export const keyboardShortcuts: Shortcut[] = [
   ...navigation,
-  ...threadDisplayShortcuts,
   ...globalShortcuts,
   ...mailListShortcuts,
+  ...threadDisplayShortcuts,
   ...composeShortcuts,
+  ...listShortcuts,
 ];
 
 /**
  * Enhanced keyboard shortcuts with layout mapping
  */
-export const enhancedKeyboardShortcuts: EnhancedShortcut[] = enhanceShortcutsWithMapping(keyboardShortcuts);
+export const enhancedKeyboardShortcuts: EnhancedShortcut[] =
+  enhanceShortcutsWithMapping(keyboardShortcuts);

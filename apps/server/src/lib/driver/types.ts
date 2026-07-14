@@ -1,36 +1,13 @@
-import type { IOutgoingMessage, ParsedMessage, Label, DeleteAllSpamResponse } from '../../types';
-import { ParsedMessageSchema } from '../../types';
+import type { IOutgoingMessage, Label, DeleteAllSpamResponse } from '../../types';
 import type { CreateDraftData } from '../schemas';
 import { z } from 'zod';
+// V2.4 shared-types-package (issue #25): IGetThreadResponse(+Schema) et ParsedDraft
+// vivent dans @zero/types ; ré-export arrière pour MailManager (ci-dessous) et pour
+// trpc/routes/mail.ts (.output(IGetThreadResponseSchema)). Voir ADR 0004.
+import { IGetThreadResponseSchema, type IGetThreadResponse, type ParsedDraft } from '@zero/types';
 
-export interface IGetThreadResponse {
-  messages: ParsedMessage[];
-  latest?: ParsedMessage;
-  hasUnread: boolean;
-  totalReplies: number;
-  labels: { id: string; name: string }[];
-  isLatestDraft?: boolean;
-}
-
-export const IGetThreadResponseSchema = z.object({
-  messages: z.array(ParsedMessageSchema),
-  latest: ParsedMessageSchema.optional(),
-  hasUnread: z.boolean(),
-  totalReplies: z.number(),
-  labels: z.array(z.object({ id: z.string(), name: z.string() })),
-});
-
-export interface ParsedDraft {
-  id: string;
-  to?: string[];
-  subject?: string;
-  content?: string;
-  rawMessage?: {
-    internalDate?: string | null;
-  };
-  cc?: string[];
-  bcc?: string[];
-}
+export { IGetThreadResponseSchema };
+export type { IGetThreadResponse, ParsedDraft };
 
 export interface IConfig {
   auth?: {
@@ -74,6 +51,7 @@ export interface MailManager {
     nextPageToken: string | null;
   }>;
   delete(id: string): Promise<void>;
+  deleteDraft(id: string): Promise<void>;
   list(params: {
     folder: string;
     query?: string;
@@ -115,6 +93,7 @@ export interface MailManager {
   getEmailAliases(): Promise<{ email: string; name?: string; primary?: boolean }[]>;
   revokeToken(token: string): Promise<boolean>;
   deleteAllSpam(): Promise<DeleteAllSpamResponse>;
+  getRawEmail(id: string): Promise<string>;
 }
 
 export interface IGetThreadsResponse {

@@ -1,5 +1,6 @@
 import { parseFrom as _parseFrom, parseAddressList as _parseAddressList } from 'email-addresses';
 import type { Sender } from '../types';
+import { logger } from './logger';
 
 type ListUnsubscribeAction =
   | { type: 'get'; url: string; host: string }
@@ -40,6 +41,7 @@ export const getListUnsubscribeAction = ({
       }
       return null;
     } catch {
+      logger.debug('List-Unsubscribe URL parse failed');
       return null;
     }
   }

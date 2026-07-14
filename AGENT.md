@@ -1,15 +1,15 @@
 # Agent Configuration for Zero Email
 
-Zero is an open-source AI email solution built with a modern TypeScript/Next.js stack in a monorepo setup.
+Zero is an open-source AI email solution built with a modern TypeScript stack (React Router 7 + Cloudflare Workers) in a monorepo setup.
 
 ## Project Structure
 
 This is a pnpm workspace monorepo with the following structure:
-- `apps/mail/` - Next.js frontend email client
-- `apps/server/` - Backend server
-- `apps/ios-app/` - iOS mobile app
+- `apps/mail/` - React Router 7 frontend email client (deployed as a Cloudflare Worker)
+- `apps/server/` - Backend (Cloudflare Worker: Hono + tRPC + Durable Objects + Workflows)
 - `packages/cli/` - CLI tools (`nizzy` command)
-- `packages/db/` - Database schemas and utilities
+- `packages/types/` - Shared front↔server type contracts (`@zero/types`)
+- `packages/testing/` - Playwright e2e suite (`@zero/testing`)
 - `packages/eslint-config/` - Shared ESLint configuration
 - `packages/tsconfig/` - Shared TypeScript configuration
 
@@ -41,10 +41,10 @@ This is a pnpm workspace monorepo with the following structure:
 - `pnpm db:studio` - Open Drizzle Studio
 
 ### Testing & Evaluation
-- `pnpm test:ai` - Run AI tests
+- `pnpm test` - Run unit tests (turbo → server + mail vitest)
+- `pnpm test:e2e` - Run the Playwright e2e suite (`@zero/testing`)
 - `pnpm eval` - Run evaluation suite
-- `pnpm eval:dev` - Run evaluation in dev mode
-- `pnpm eval:ci` - Run evaluation in CI mode
+- `pnpm eval:dev` - Run evaluation in watch mode
 
 ### Utilities
 - `pnpm nizzy env` - Setup environment variables
@@ -53,9 +53,9 @@ This is a pnpm workspace monorepo with the following structure:
 
 ## Tech Stack
 
-- **Frontend**: Next.js, React 19, TypeScript, TailwindCSS, Shadcn UI
-- **Backend**: Node.js, tRPC, Drizzle ORM
-- **Database**: PostgreSQL
+- **Frontend**: React Router 7 (SPA), React 19, TypeScript, TailwindCSS, Shadcn UI
+- **Backend**: Cloudflare Workers, Hono, tRPC, Drizzle ORM, Durable Objects
+- **Storage**: PostgreSQL (via Hyperdrive) + Durable Object SQLite + R2
 - **Authentication**: Better Auth, Google OAuth
 - **Package Manager**: pnpm (v10+)
 - **Build Tool**: Turbo
@@ -103,5 +103,12 @@ This is a pnpm workspace monorepo with the following structure:
 - Uses Husky for git hooks
 - Integrates with Sentry for error tracking
 - Uses Cloudflare Workers for backend deployment
-- iOS app is part of the monorepo
 - CLI tool `nizzy` helps manage environment and sync operations
+- See `ARCHITECTURE.md` for the full architecture and `docs/adr/` for the decision records
+
+## IMPORTANT RESTRICTIONS
+
+- **NEVER run project-wide lint/format commands** (`pnpm check`, `pnpm lint`, `pnpm format`, `pnpm check:format`)
+- These commands format/lint the entire codebase and cause unnecessary changes
+- Only use targeted linting/formatting on specific files when absolutely necessary
+- Focus on the specific task at hand without touching unrelated files

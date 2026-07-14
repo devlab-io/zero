@@ -1,0 +1,10 @@
+{
+  "extends": "@zero/tsconfig/base",
+  "compilerOptions": {
+    // Shared-contract package: stricter than the apps on purpose — every indexed
+    // access must be guarded (RULING #25). `noEmit`/`strict` inherited from base.
+    "noUncheckedIndexedAccess": true
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules"]
+}

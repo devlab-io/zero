@@ -1,3 +1,4 @@
+import { log } from '@/lib/log';
 import {
   isRouteErrorResponse,
   Links,
@@ -8,7 +9,6 @@ import {
   useNavigate,
   type MetaFunction,
 } from 'react-router';
-import { Analytics as DubAnalytics } from '@dub/analytics/react';
 import { ServerProviders } from '@/providers/server-providers';
 import { ClientProviders } from '@/providers/client-providers';
 import { createTRPCClient, httpBatchLink } from '@trpc/client';
@@ -22,9 +22,20 @@ import type { Route } from './+types/root';
 import { AlertCircle } from 'lucide-react';
 import { m } from '@/paraglide/messages';
 import { ArrowLeft } from 'lucide-react';
-import * as Sentry from '@sentry/react';
+import { Loader2 } from 'lucide-react';
 import superjson from 'superjson';
 import './globals.css';
+
+// w2cd (client weight): @sentry/react is loaded via dynamic import() so it stays out
+// of the critical inbox bundle. Error reporting only fires when telemetry is enabled
+// (VITE_PUBLIC_SENTRY_DSN set) and the Sentry client has been initialized.
+function captureToSentry(error: unknown, context: Record<string, unknown>) {
+  if (!import.meta.env.VITE_PUBLIC_SENTRY_DSN) return;
+  void import('@sentry/react').then((Sentry) => {
+    if (!Sentry.getClient()) return;
+    Sentry.captureException(error instanceof Error ? error : new Error(String(error)), context);
+  });
+}
 
 const getUrl = () => import.meta.env.VITE_PUBLIC_BACKEND_URL + '/api/trpc';
 
@@ -71,11 +82,8 @@ export function Layout({ children }: PropsWithChildren) {
       <body className="antialiased">
         <ServerProviders connectionId={null}>
           <ClientProviders>{children}</ClientProviders>
-          <DubAnalytics
-            domainsConfig={{
-              refer: 'mail0.com',
-            }}
-          />
+          {/* Devlab: DubAnalytics removed — click/referral tracking phoning dub.co
+              for the editor's mail0.com domain. Nothing to gain in self-host. */}
         </ServerProviders>
         <ScrollRestoration />
         <Scripts />
@@ -84,27 +92,34 @@ export function Layout({ children }: PropsWithChildren) {
   );
 }
 
-// export function HydrateFallback() {
-//   return (
-//     <div className="flex h-screen w-full items-center justify-center">
-//       <Loader2 className="h-10 w-10 animate-spin" />
-//     </div>
-//   );
-// }
+// w2cd (client weight): reactivated as the neutral prerendered shell. With ssr:false +
+// prerender:['/'], this is the HTML painted before hydration for the landing AND — via
+// the Cloudflare SPA not_found_handling — for deep-links (e.g. /mail/inbox). It carries
+// no route-specific (landing) markup, so a deep-link is never shown landing content.
+export function HydrateFallback() {
+  return (
+    <div className="flex h-screen w-full items-center justify-center">
+      <Loader2 className="h-10 w-10 animate-spin" />
+    </div>
+  );
+}
 
 export default function App() {
   return <Outlet />;
 }
 
 export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {
-  let message = 'Oops!';
+  // #44 (post-#38): consume the ErrorBoundary i18n keys delivered by #38 (pages.error.boundary.*).
+  let message = m['pages.error.boundary.oops']();
   let details = 'An unexpected error occurred.';
   let stack: string | undefined;
 
   if (isRouteErrorResponse(error)) {
-    message = error.status === 404 ? '404' : 'Error';
+    message = error.status === 404 ? '404' : m['pages.error.boundary.error']();
     details =
-      error.status === 404 ? 'The requested page could not be found.' : error.statusText || details;
+      error.status === 404
+        ? m['pages.error.boundary.notFoundDetails']()
+        : error.statusText || details;
     if (error.status === 404) {
       return <NotFound />;
     }
@@ -114,12 +129,12 @@ export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {
   }
 
   useEffect(() => {
-    console.error(error);
-    console.error({ message, details, stack });
+    log.error(error);
+    log.error({ message, details, stack });
 
-    // Report error to Sentry
+    // Report error to Sentry (lazy — see captureToSentry above)
     if (isRouteErrorResponse(error)) {
-      Sentry.captureException(new Error(`Route Error ${error.status}: ${error.statusText}`), {
+      captureToSentry(new Error(`Route Error ${error.status}: ${error.statusText}`), {
         tags: {
           type: 'route_error',
           status: error.status,
@@ -130,13 +145,13 @@ export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {
         },
       });
     } else if (error instanceof Error) {
-      Sentry.captureException(error, {
+      captureToSentry(error, {
         tags: {
           type: 'app_error',
         },
       });
     } else {
-      Sentry.captureException(new Error('Unknown error occurred'), {
+      captureToSentry(new Error('Unknown error occurred'), {
         tags: {
           type: 'unknown_error',
         },
@@ -152,8 +167,10 @@ export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {
       <div className="flex-col items-center justify-center md:flex dark:text-gray-100">
         {/* Message */}
         <div className="space-y-2">
-          <h2 className="text-2xl font-semibold tracking-tight">Something went wrong!</h2>
-          <p className="text-muted-foreground">See the console for more information.</p>
+          <h2 className="text-2xl font-semibold tracking-tight">
+            {m['pages.error.boundary.somethingWentWrong']()}
+          </h2>
+          <p className="text-muted-foreground">{m['pages.error.boundary.seeConsole']()}</p>
           <pre className="text-muted-foreground">{JSON.stringify(error, null, 2)}</pre>
         </div>
 

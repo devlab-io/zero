@@ -64,6 +64,12 @@ export const navigationConfig: Record<string, NavConfig> = {
             shortcut: 'g + d',
           },
           {
+            id: 'queue',
+            title: m['navigation.sidebar.queue'](),
+            url: '/queue',
+            icon: Clock,
+          },
+          {
             id: 'sent',
             title: m['navigation.sidebar.sent'](),
             url: '/mail/sent',
@@ -173,11 +179,11 @@ export const navigationConfig: Record<string, NavConfig> = {
             url: '/settings/labels',
             icon: Sheet,
           },
-          //   {
-          //     title: m['navigation.settings.categories'](),
-          //     url: '/settings/categories',
-          //     icon: Tabs,
-          //   },
+          {
+            title: m['navigation.settings.categories'](),
+            url: '/settings/categories',
+            icon: Tabs,
+          },
           {
             title: m['navigation.settings.signatures'](),
             url: '/settings/signatures',

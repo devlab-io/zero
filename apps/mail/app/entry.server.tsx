@@ -1,3 +1,4 @@
+import { log } from '@/lib/log';
 // @ts-expect-error react-dom provides ESM browser build without TS typings yet
 import { renderToReadableStream } from 'react-dom/server.browser';
 import type { AppLoadContext, EntryContext } from 'react-router';
@@ -23,7 +24,7 @@ export default async function handleRequest(
         // errors encountered during initial shell rendering since they'll
         // reject and get logged in handleDocumentRequest.
         if (shellRendered) {
-          console.error(error);
+          log.error(error);
         }
       },
     },

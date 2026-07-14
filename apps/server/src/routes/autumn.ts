@@ -1,8 +1,11 @@
-import { fetchPricingTable } from 'autumn-js';
+import { Autumn, fetchPricingTable } from 'autumn-js';
 import type { HonoContext } from '../ctx';
+import { invariant } from '../lib/invariant';
 import { env } from '../env';
 import { Hono } from 'hono';
 
+// Passthrough sanitizer for the autumn customer body; the shape is the provider's
+// AttachParams/CancelParams, so keep it loose and let the caller's types apply.
 const sanitizeCustomerBody = (body: any) => {
   let bodyCopy = { ...body };
   delete bodyCopy.id;
@@ -23,6 +26,32 @@ type AutumnContext = {
   };
 } & HonoContext;
 
+// Devlab self-host: when no AUTUMN_SECRET_KEY is configured, billing is disabled
+// and every /api/autumn/* route answers with a permissive stub. Without this,
+// the frontend's useBilling() hook receives an error and force-signs the user out.
+const selfHostFeature = {
+  unlimited: true,
+  balance: 999999,
+  usage: 0,
+  included_usage: 999999,
+  next_reset_at: null,
+  interval: 'month',
+  enabled: true,
+};
+
+const selfHostCustomer = (id: string, name: string, email: string) => ({
+  id,
+  name,
+  email,
+  // 'pro-example' matches the frontend's PRO_PLANS list → unlocks all Pro gates in self-host
+  products: [{ id: 'pro-example', name: 'Pro (Self-hosted)', status: 'active' }],
+  features: {
+    'chat-messages': { id: 'chat-messages', ...selfHostFeature },
+    connections: { id: 'connections', ...selfHostFeature },
+    'brain-activity': { id: 'brain-activity', ...selfHostFeature },
+  },
+});
+
 export const autumnApi = new Hono<AutumnContext>()
   .use('*', async (c, next) => {
     const { sessionUser } = c.var;
@@ -38,10 +67,34 @@ export const autumnApi = new Hono<AutumnContext>()
             },
           },
     );
+    if (!env.AUTUMN_SECRET_KEY) {
+      const { customerData } = c.var;
+      if (!customerData) return c.json({ error: 'No customer ID found' }, 401);
+      const path = c.req.path;
+      if (path.endsWith('/customers'))
+        return c.json(
+          selfHostCustomer(
+            customerData.customerId,
+            customerData.customerData.name,
+            customerData.customerData.email,
+          ),
+        );
+      if (path.endsWith('/check')) return c.json({ allowed: true, balance: 999999 });
+      if (path.endsWith('/track')) return c.json({ success: true });
+      if (path.endsWith('/pricing_table')) return c.json({ list: [] });
+      if (path.includes('/entities')) return c.json({ list: [] });
+      // attach / cancel / billing portals: billing is not available in self-host
+      return c.json({ error: 'Billing disabled in self-hosted mode' }, 200);
+    }
+    c.set('autumn', new Autumn({ secretKey: env.AUTUMN_SECRET_KEY }));
     await next();
   })
+  // Every handler below is only reachable when AUTUMN_SECRET_KEY is set: the
+  // middleware returns a stub (or 200) for all paths otherwise, so `autumn` has
+  // already been c.set(). invariant() makes that guarantee explicit instead of `!`.
   .post('/customers', async (c) => {
     const { autumn, customerData } = c.var;
+    invariant(autumn, 'Autumn client is not initialized');
     const body = await c.req.json();
     if (!customerData) return c.json({ error: 'No customer ID found' }, 401);
 
@@ -57,6 +110,7 @@ export const autumnApi = new Hono<AutumnContext>()
   })
   .post('/attach', async (c) => {
     const { autumn, customerData } = c.var;
+    invariant(autumn, 'Autumn client is not initialized');
     const body = await c.req.json();
     const sanitizedBody = sanitizeCustomerBody(body);
     if (!customerData) return c.json({ error: 'No customer ID found' }, 401);
@@ -73,6 +127,7 @@ export const autumnApi = new Hono<AutumnContext>()
   })
   .post('/cancel', async (c) => {
     const { autumn, customerData } = c.var;
+    invariant(autumn, 'Autumn client is not initialized');
     const body = await c.req.json();
     const sanitizedBody = sanitizeCustomerBody(body);
     if (!customerData) return c.json({ error: 'No customer ID found' }, 401);
@@ -88,6 +143,7 @@ export const autumnApi = new Hono<AutumnContext>()
   })
   .post('/check', async (c) => {
     const { autumn, customerData } = c.var;
+    invariant(autumn, 'Autumn client is not initialized');
     const body = await c.req.json();
     const sanitizedBody = sanitizeCustomerBody(body);
     if (!customerData) return c.json({ error: 'No customer ID found' }, 401);
@@ -104,6 +160,7 @@ export const autumnApi = new Hono<AutumnContext>()
   })
   .post('/track', async (c) => {
     const { autumn, customerData } = c.var;
+    invariant(autumn, 'Autumn client is not initialized');
     const body = await c.req.json();
     const sanitizedBody = sanitizeCustomerBody(body);
     if (!customerData) return c.json({ error: 'No customer ID found' }, 401);
@@ -120,15 +177,19 @@ export const autumnApi = new Hono<AutumnContext>()
   })
   .post('/billing_portal', async (c) => {
     const { autumn, customerData } = c.var;
+    invariant(autumn, 'Autumn client is not initialized');
     const body = await c.req.json();
     if (!customerData) return c.json({ error: 'No customer ID found' }, 401);
 
     return c.json(
-      await autumn.customers.billingPortal(customerData.customerId, body).then((data) => data.data),
+      await autumn.customers
+        .billingPortal(customerData.customerId, body)
+        .then((data) => data.data),
     );
   })
   .post('/openBillingPortal', async (c) => {
     const { autumn, customerData } = c.var;
+    invariant(autumn, 'Autumn client is not initialized');
     const body = await c.req.json();
     if (!customerData) return c.json({ error: 'No customer ID found' }, 401);
 
@@ -143,6 +204,7 @@ export const autumnApi = new Hono<AutumnContext>()
   })
   .post('/entities', async (c) => {
     const { autumn, customerData } = c.var;
+    invariant(autumn, 'Autumn client is not initialized');
     const body = await c.req.json();
     if (!customerData) return c.json({ error: 'No customer ID found' }, 401);
 
@@ -152,6 +214,7 @@ export const autumnApi = new Hono<AutumnContext>()
   })
   .get('/entities/:entityId', async (c) => {
     const { autumn, customerData } = c.var;
+    invariant(autumn, 'Autumn client is not initialized');
     if (!customerData) return c.json({ error: 'No customer ID found' }, 401);
 
     const entityId = c.req.param('entityId');
@@ -175,6 +238,7 @@ export const autumnApi = new Hono<AutumnContext>()
   })
   .delete('/entities/:entityId', async (c) => {
     const { autumn, customerData } = c.var;
+    invariant(autumn, 'Autumn client is not initialized');
     if (!customerData) return c.json({ error: 'No customer ID found' }, 401);
 
     const entityId = c.req.param('entityId');
@@ -195,6 +259,7 @@ export const autumnApi = new Hono<AutumnContext>()
   })
   .get('/components/pricing_table', async (c) => {
     const { autumn, customerData } = c.var;
+    invariant(autumn, 'Autumn client is not initialized');
 
     return c.json(
       await fetchPricingTable({

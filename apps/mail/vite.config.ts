@@ -6,7 +6,22 @@ import oxlintPlugin from 'vite-plugin-oxlint';
 import babel from 'vite-plugin-babel';
 import tailwindcss from "@tailwindcss/vite";
 import { defineConfig } from 'vite';
+import { createRequire } from 'node:module';
+import path from 'node:path';
 import dedent from 'dedent';
+
+const require = createRequire(import.meta.url);
+// Client code only uses renderToString/renderToStaticMarkup (lib/email-utils.client.tsx,
+// lib/sanitize-tip-tap-html.tsx). The 'react-dom/server' entry is CJS and statically
+// requires BOTH the legacy renderer (renderToString) and the full streaming renderer
+// (renderToReadableStream, ~85 kB min) that nothing on the client uses and that CJS
+// interop cannot tree-shake. Point the bare 'react-dom/server' specifier at the legacy
+// renderer file that entry itself loads. NOTE: 'react-dom/server.browser' (used by
+// app/entry.server.tsx for prerendering) does NOT match this alias and keeps streaming.
+const reactDomServerLegacy = path.join(
+  path.dirname(require.resolve('react-dom/package.json')),
+  'cjs/react-dom-server-legacy.browser.production.js',
+);
 
 const ReactCompilerConfig = {
   /* ... */
@@ -19,6 +34,11 @@ export default defineConfig({
     cloudflare(),
     babel({
       filter: /\.[jt]sx?$/,
+      // The react-compiler pass is only meant for app source. Without this exclude the
+      // babel transform re-printed every node_modules/paraglide module, which destroyed
+      // rollup tree-shaking annotations (retaining e.g. the full paraglide catalog) and
+      // slowed the build for no benefit.
+      exclude: [/node_modules/, /\/paraglide\//],
       babelConfig: {
         presets: ['@babel/preset-typescript'], // if you use TypeScript
         plugins: [['babel-plugin-react-compiler', ReactCompilerConfig]],
@@ -26,6 +46,21 @@ export default defineConfig({
     }),
     tsconfigPaths(),
     tailwindcss(),
+    {
+      // @tiptap/extension-emoji inlines its full emoji dataset (~480 kB) and references
+      // it from the extension's DEFAULT options, so it can never be tree-shaken even
+      // though every editor in this app passes `emojis` explicitly (loaded from the
+      // static JSON asset in lib/emoji-data.ts before any editor chunk mounts — see the
+      // React.lazy factories in reply-composer/create-email/mail). Emptying the default
+      // lets rollup drop the duplicate inline dataset. Same approach as the existing
+      // pnpm patch on novel (patches/novel.patch), applied at build time instead.
+      name: 'strip-emoji-default-dataset',
+      transform(code, id) {
+        if (id.includes('@tiptap/extension-emoji') && code.includes('emojis: emojis,')) {
+          return code.replace('emojis: emojis,', 'emojis: [],');
+        }
+      },
+    },
     {
       name: 'add-headers',
       applyToEnvironment: (env) => env.name === 'client',
@@ -50,7 +85,7 @@ export default defineConfig({
     }),
   ],
   server: {
-    port: 3000,
+    port: 3001,
     warmup: {
       clientFiles: ['./app/**/*', './components/**/*'],
     },
@@ -65,10 +100,52 @@ export default defineConfig({
   },
   build: {
     sourcemap: false,
+    // #a8-weight-hunt LEAD C: modern output target. The app ships only to evergreen browsers
+    // (SPA, no legacy support matrix); es2022 drops rollup/esbuild down-leveling helpers across
+    // app + non-prebundled deps. Behaviour identical on target browsers; measured gz delta logged.
+    target: 'es2022',
+    rollupOptions: {
+      output: {
+        // w2cd (client weight): reasoned vendor split into dedicated, long-term-cacheable,
+        // attributable chunks for the two libraries that dominate this job's surface.
+        // Both REMAIN critical — anchored by importers outside this job's scope:
+        //   • posthog-js  — hooks/use-optimistic-actions.ts, components/mail/reply-composer
+        //   • motion      — components/mail/** (thread-display, rows page) + mail/layout
+        // Isolating them costs no net critical bytes (measured: total critical is within
+        // ~2 KiB of the un-split build, i.e. rollup reshuffle noise) but gives each a
+        // deterministic, named boundary so its weight is attributable build-over-build.
+        //
+        // @sentry/react is deliberately NOT given a manual chunk: with no
+        // VITE_PUBLIC_SENTRY_DSN at build time it is fully dead-code-eliminated (opt-in
+        // telemetry), so a rule would only emit an empty stub.
+        manualChunks(id) {
+          if (!id.includes('/node_modules/')) return;
+          if (id.includes('/node_modules/posthog-js/')) return 'posthog';
+          if (
+            id.includes('/node_modules/motion/') ||
+            id.includes('/node_modules/motion-dom/') ||
+            id.includes('/node_modules/motion-utils/') ||
+            id.includes('/node_modules/framer-motion/')
+          )
+            return 'motion';
+          // #44 (gate A8): keep React in its own chunk, separate from `motion`, so that once the
+          // last critical importer of motion is de-anchored the motion chunk can leave the inbox
+          // closure without dragging (or being pinned by) the always-critical React runtime.
+          if (
+            id.includes('/node_modules/react/') ||
+            id.includes('/node_modules/react-dom/') ||
+            id.includes('/node_modules/react-is/') ||
+            id.includes('/node_modules/scheduler/')
+          )
+            return 'react';
+        },
+      },
+    },
   },
   resolve: {
     alias: {
       tslib: 'tslib/tslib.es6.js',
+      'react-dom/server': reactDomServerLegacy,
     },
   },
 });

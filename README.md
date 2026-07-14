@@ -30,11 +30,21 @@ Most email services today are either **closed-source**, **data-hungry**, or **to
 
 Zero is built with modern and reliable technologies:
 
-- **Frontend**: Next.js, React, TypeScript, TailwindCSS, Shadcn UI
-- **Backend**: Node.js, Drizzle ORM
-- **Database**: PostgreSQL
-- **Authentication**: Better Auth, Google OAuth
-<!-- - **Testing**: Jest, React Testing Library -->
+- **Frontend**: React Router 7 (SPA), React, TypeScript, TailwindCSS, Shadcn UI — deployed as a Cloudflare Worker.
+- **Backend**: Cloudflare Workers (Hono + tRPC), Durable Objects, Workflows, Drizzle ORM.
+- **Storage**: PostgreSQL (via Hyperdrive) + Durable Object SQLite + R2 (email sync) + Vectorize.
+- **Authentication**: Better Auth, Google OAuth.
+
+> For the full picture — layers, data flow (Gmail → DO SQLite → projection → client), boundaries and
+> environments — see [`ARCHITECTURE.md`](./ARCHITECTURE.md). For tests and CI, see
+> [`docs/testing.md`](./docs/testing.md). This repo is a fork of `Mail-0/Zero`; see
+> [`FORK.md`](./FORK.md) and [`LICENSE-NOTES.md`](./LICENSE-NOTES.md) for divergences and the
+> licensing posture. Note: **20 restricted files** carry an Apache-2.0 header **plus an additional
+> restrictive clause** — `Reuse or distribution of this file requires a license from Zero Email Inc.`
+> (The 22 `Zero Email Inc` matches = 20 restricted files + 1 telemetry comment in `instrument.ts` +
+> 1 UI branding line in `footer.tsx`.) The clause's scope relative to the MIT root is **not
+> adjudicated here**. Operational posture for the 20 restricted files: do **not** redistribute,
+> relicense, or strip the header without written upstream permission or a legal review.
 
 ## Getting Started
 
