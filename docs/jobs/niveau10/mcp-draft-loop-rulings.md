@@ -15,3 +15,11 @@
 - The current focused smoke hides the defect because its fake stores the raw input unchanged. Judge evidence is `docs/jobs/niveau10/mcp-draft-loop-judge-1.md`.
 - The corrective builder must replace raw byte equality with a provider-aware canonical or semantic persistence check that still proves the same draft ID and a fresh revision. It must add at least one behavioral test whose fake applies the real sanitizer before refetch, and prove success for both create/get/update while stale revisions still produce zero mutation.
 - No relaxation of ownership, idempotency, draft-only, or human-send boundaries is authorised. Merge remains blocked until a fresh builder, fresh deterministic checkrun, and fresh independent judge all pass.
+
+## 2026-07-14 — Judge 2 FAIL: Gmail reply MIME lacks threading headers
+
+- Independent judge 2 verified the provider-normalized update correction and passed all six frozen RUNs, but found that Gmail reply drafts only carry the API `threadId`, matching subject, recipients, and body.
+- Gmail's threading contract also requires RFC-compliant `In-Reply-To` and `References` headers. The current MIME builder emits neither, so `createReplyDraft` cannot guarantee that Gmail places the draft in the intended thread. Outlook already uses Graph `createReply` and is not affected.
+- The existing Gmail regression asserts only the JSON `threadId`, which cannot detect this defect. Judge evidence is `docs/jobs/niveau10/mcp-draft-loop-judge-2.md`.
+- The corrective builder must derive the owned source message's RFC Message-ID server-side, add injection-safe `In-Reply-To` and `References` headers to Gmail reply MIME, and test by decoding the produced raw MIME as well as asserting the API `threadId`. Missing or malformed source Message-ID must fail safely before a provider draft mutation rather than silently create an unthreaded draft.
+- No client-supplied threading header is authorised. Merge remains blocked until a fresh builder, fresh deterministic checkrun, and fresh independent judge all pass.
