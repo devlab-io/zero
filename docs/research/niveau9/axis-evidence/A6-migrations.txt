@@ -1,0 +1,30 @@
+# A6 — Données, migrations & config — évidence brute
+# commit: 1c82b196cbc87d629b18024cca3f4ac6b7372af2
+
+## Check migrations-consistency (journal == disque, préfixes):
+$ node scripts/checks/migrations-consistency.mjs
+migrations-consistency [apps/server/src/db/migrations]: 42 sql, 39 journalled, 3 orphan(s), 0 missing, 4 duplicate-prefix group(s)
+migrations-consistency [apps/server/src/routes/agent/db/drizzle]: 1 sql, 1 journalled, 0 orphan(s), 0 missing, 0 duplicate-prefix group(s)
+migrations-consistency PASSED (drift within documented allowlist).
+[exit: 0]
+
+## .dev.vars.example présent ?
+"apps/mail/.dev.vars.example": No such file or directory (os error 2)
+.rw-r--r--@ 2,7k thomasverdenne 13 juil. 16:10 -- apps/server/.dev.vars.example
+
+## env zod validation au boot (grep zod dans env.ts):
+123:// The zod schema + `assertServerEnv` live in ./env-schema (a dependency-free module that can
+---mail env---
+apps/mail/app/(routes)/settings/privacy/page.tsx
+apps/mail/app/(routes)/settings/security/page.tsx
+apps/mail/app/(routes)/settings/danger-zone/page.tsx
+apps/mail/app/(routes)/settings/appearance/page.tsx
+apps/mail/app/(routes)/settings/general/page.tsx
+apps/mail/app/(routes)/settings/notifications/page.tsx
+apps/mail/app/(auth)/zero/login/page.tsx
+apps/mail/app/(auth)/zero/signup/page.tsx
+apps/mail/lib/email-utils.ts
+apps/mail/lib/schemas.ts
+
+## db:push guard:
+.rw-r--r--@ 1,5k thomasverdenne 13 juil. 16:10 -- apps/server/scripts/db-push-guard.mjs
