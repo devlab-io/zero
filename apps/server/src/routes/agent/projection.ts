@@ -26,6 +26,7 @@
  */
 
 import { logger } from '../../lib/logger';
+import { invariant } from '../../lib/invariant';
 import { threadLabels as threadLabelsTable, labels as labelsTable } from './db/schema';
 import { GmailSearchAssistantSystemPrompt } from '../../lib/prompts';
 import type { IGetThreadResponse } from '../../lib/driver/types';
@@ -194,9 +195,10 @@ export async function searchThreads(
 
   const genQueryResult = await Effect.runPromise(genQueryEffect);
 
+  const driver = self.driver;
+  invariant(driver, 'driver is not available');
   const rawEffect = Effect.tryPromise(() =>
-    self
-      .driver!.list({
+    driver.list({
         folder,
         query: genQueryResult,
         labelIds,

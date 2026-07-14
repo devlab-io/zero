@@ -41,7 +41,7 @@ aiRouter.post('/do/:action', async (c) => {
 
   const connection = await db.query.connection.findFirst({
     where: (connection, { eq, or }) =>
-      or(eq(connection.id, user.defaultConnectionId!), eq(connection.userId, user.id)),
+      or(eq(connection.id, user.defaultConnectionId ?? ''), eq(connection.userId, user.id)),
   });
   await conn.end();
   if (!connection) return c.json({ success: false, error: 'Unauthorized' }, 401);
@@ -86,7 +86,8 @@ aiRouter.post('/call', async (c) => {
     return c.json({ success: false, error: 'Unauthorized' }, 401);
   }
 
-  if (!c.req.header('X-Caller')) {
+  const caller = c.req.header('X-Caller');
+  if (!caller) {
     logger.info('[DEBUG] Missing caller header');
     return c.json({ success: false, error: 'Unauthorized' }, 401);
   }
@@ -109,7 +110,7 @@ aiRouter.post('/call', async (c) => {
   logger.info('[DEBUG] Finding user by phone number:', c.req.header('X-Caller'));
   const user = await db.query.user.findFirst({
     where: (user, { eq, and }) =>
-      and(eq(user.phoneNumber, c.req.header('X-Caller')!), eq(user.phoneNumberVerified, true)),
+      and(eq(user.phoneNumber, caller), eq(user.phoneNumberVerified, true)),
   });
 
   if (!user) {
@@ -120,7 +121,7 @@ aiRouter.post('/call', async (c) => {
   logger.info('[DEBUG] Finding connection for user:', user.id);
   const connection = await db.query.connection.findFirst({
     where: (connection, { eq, or }) =>
-      or(eq(connection.id, user.defaultConnectionId!), eq(connection.userId, user.id)),
+      or(eq(connection.id, user.defaultConnectionId ?? ''), eq(connection.userId, user.id)),
   });
 
   await conn.end();

@@ -76,7 +76,7 @@ export const useThread = (threadId: string | null, options?: { enabled?: boolean
   const threadQuery = useQuery(
     trpc.mail.get.queryOptions(
       {
-        id: id!,
+        id: id ?? '',
       },
       {
         enabled: (options?.enabled ?? true) && !!id && !!session?.user?.id,

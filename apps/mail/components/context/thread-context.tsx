@@ -74,12 +74,15 @@ const LabelsList = ({ threadId, bulkSelected, onCreateLabel }: { threadId: strin
   const rightClickedThreadOptimisticState = useOptimisticThreadState(threadId);
 
   if (!labels || !thread) return null;
+  // `thread` is narrowed above, but that narrowing does not flow into the nested
+  // closures below; capture it so they use a non-null value without asserting.
+  const currentThread = thread;
 
   const handleToggleLabel = (labelId: string) => {
     if (!labelId) return;
 
     // Determine current label state considering optimistic updates
-    let hasLabel = thread!.labels?.some((l) => l.id === labelId) ?? false;
+    let hasLabel = currentThread.labels?.some((l) => l.id === labelId) ?? false;
 
     if (rightClickedThreadOptimisticState.optimisticLabels) {
       if (rightClickedThreadOptimisticState.optimisticLabels.addedLabelIds.includes(labelId)) {
@@ -113,7 +116,7 @@ const LabelsList = ({ threadId, bulkSelected, onCreateLabel }: { threadId: strin
         .filter((label) => label.id)
         .map((label) => {
           let isChecked = label.id
-            ? (thread!.labels?.some((l) => l.id === label.id) ?? false)
+            ? (currentThread.labels?.some((l) => l.id === label.id) ?? false)
             : false;
 
           if (rightClickedThreadOptimisticState.optimisticLabels) {

@@ -37,6 +37,7 @@ import {
   retryDraftOutboxJob,
 } from '../../lib/draft-outbox';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { invariant } from '../../lib/invariant';
 import { getThread, getZeroAgent } from '../../lib/server-utils';
 import { sanitizeMailContent } from '../../lib/mail-sanitize';
 import { composeEmail } from '../../trpc/routes/ai/compose';
@@ -198,7 +199,9 @@ export class ZeroMCP extends McpAgent<typeof env, Record<string, unknown>, { use
       'getThread',
       { description: descriptions.getThread, inputSchema: schemas.getThread },
       async (s) => {
-        const { result: thread } = await getThread(this.activeConnectionId!, s.threadId);
+        const connectionId = this.activeConnectionId;
+        invariant(connectionId, 'no active connection');
+        const { result: thread } = await getThread(connectionId, s.threadId);
         return {
           content: [
             { type: 'text' as const, text: `Subject: ${thread.latest?.subject ?? '(no subject)'}` },

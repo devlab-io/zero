@@ -94,10 +94,9 @@ export class GmailThreads {
 
         return {
           threads: threads
-            .filter((thread) => typeof thread.id === 'string')
-            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+            .filter((thread): thread is typeof thread & { id: string } => typeof thread.id === 'string')
             .map((thread) => ({
-              id: thread.id!,
+              id: thread.id,
               historyId: thread.historyId ?? null,
               $raw: thread,
             })),
@@ -193,11 +192,10 @@ export class GmailThreads {
                 const contentId = part.headers?.find(
                   (h) => h.name?.toLowerCase() === 'content-id',
                 )?.value;
-                if (contentId && part.body?.attachmentId) {
+                if (contentId && part.body?.attachmentId && message.id) {
                   try {
-                    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
                     const imageData = await this.messages.getAttachment(
-                      message.id!,
+                      message.id,
                       part.body.attachmentId,
                     );
                     if (imageData) {

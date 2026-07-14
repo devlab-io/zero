@@ -153,7 +153,8 @@ export function QueueReview() {
     mutationFn: (input: { id: string }) => trpcClient.outbox.approve.mutate(input),
     onSuccess: async (item) => {
       if (item?.scheduledSendAt) {
-        setUndoDeadlines((current) => ({ ...current, [item.id]: item.scheduledSendAt! }));
+        const scheduledSendAt = item.scheduledSendAt;
+        setUndoDeadlines((current) => ({ ...current, [item.id]: scheduledSendAt }));
       }
       toast.success(m['queue.actions.approved']());
       await invalidateOutbox();

@@ -14,6 +14,7 @@
  * Reuse or distribution of this file requires a license from Zero Email Inc.
  */
 import { logger } from '../lib/logger';
+import { invariant } from '../lib/invariant';
 import {
   SummarizeMessage,
   ReSummarizeThread,
@@ -106,7 +107,8 @@ export const workflowFunctions: Record<string, WorkflowFunction> = {
     if (!context.thread.messages || context.thread.messages.length === 0) {
       throw new Error('Cannot analyze email intent: No messages in thread');
     }
-    const latestMessage = context.thread.latest!;
+    const latestMessage = context.thread.latest;
+    invariant(latestMessage, 'thread has no latest message');
 
     if (latestMessage.tags.some((tag) => tag.name.toLowerCase() === 'spam')) {
       logger.info('[WORKFLOW_FUNCTIONS] Skipping analysis for spam message');

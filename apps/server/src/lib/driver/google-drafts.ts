@@ -295,16 +295,19 @@ export class GmailDrafts {
 
       attachments = await Promise.all(
         attachmentParts.map(async (part) => {
+          // attachmentParts is already filtered on part.body?.attachmentId, but TS
+          // does not narrow across .filter(); re-derive and skip (like the catch below
+          // returns null) if the ids are somehow absent instead of asserting non-null.
+          const messageId = draft.message?.id;
+          const attachmentId = part.body?.attachmentId;
+          if (!messageId || !attachmentId) return null;
           try {
-            const attachmentData = await this.messages.getAttachment(
-              draft.message!.id!,
-              part.body!.attachmentId!,
-            );
+            const attachmentData = await this.messages.getAttachment(messageId, attachmentId);
             return {
               filename: part.filename || '',
               mimeType: part.mimeType || '',
               size: Number(part.body?.size || 0),
-              attachmentId: part.body!.attachmentId!,
+              attachmentId,
               headers:
                 part.headers?.map((h) => ({
                   name: h.name ?? '',

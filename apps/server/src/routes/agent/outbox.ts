@@ -27,6 +27,7 @@ import {
   type DraftOutboxItem,
 } from '../../lib/draft-outbox';
 import { generateAutomaticDraft } from '../../thread-workflow-utils';
+import { invariant } from '../../lib/invariant';
 import type { ParsedDraft } from '../../lib/driver/types';
 import type { ZeroDriverInternal } from './internal';
 import { reSyncThread } from '../../lib/server-utils';
@@ -142,8 +143,9 @@ async function sendDraftOutboxItem(self: ZeroDriverInternal, db: OutboxDb, item:
   let current = item;
   try {
     current = await beginSendingDraftOutboxJob(db, item);
-    const draft = await self.getDraft(current.gmailDraftId!);
-    await self.sendDraft(current.gmailDraftId!, toOutgoingMessage(self, current, draft));
+    invariant(current.gmailDraftId, 'outbox item has no gmailDraftId');
+    const draft = await self.getDraft(current.gmailDraftId);
+    await self.sendDraft(current.gmailDraftId, toOutgoingMessage(self, current, draft));
     await markDraftOutboxJobSent(db, current);
 
     if (current.threadId) {
