@@ -235,7 +235,7 @@ describe('keyboard runtime', () => {
     act(() => {
       root?.render(
         <MemoryRouter initialEntries={['/mail/inbox']}>
-          <HotkeysProvider initiallyActiveScopes={['global']}>
+          <HotkeysProvider initiallyActiveScopes={['global', 'navigation']}>
             <GlobalHotkeys />
             <Location />
           </HotkeysProvider>
@@ -248,6 +248,12 @@ describe('keyboard runtime', () => {
 
     expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Keyboard Shortcuts');
     expect(document.querySelector('[role="dialog"]')?.textContent).toContain('New Email');
+    for (const action of new Set(keyboardShortcuts.filter((shortcut) => ['global', 'navigation'].includes(shortcut.scope)).map((shortcut) => shortcut.action))) {
+      expect(document.querySelector(`[data-shortcut-action="${action}"]`)?.textContent).not.toBe(action);
+    }
+    for (const action of ['goToStarred', 'goToSnoozed', 'toggleTheme', 'toggleSidebar']) {
+      expect(document.querySelector('[role="dialog"]')?.textContent).not.toContain(action);
+    }
     expect(container.querySelector('[data-testid="location"]')?.textContent).toBe('/mail/inbox');
   });
 });

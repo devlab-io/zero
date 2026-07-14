@@ -1,36 +1,27 @@
 MIRROR: ORCHESTRATOR
 
-RAW EVIDENCE
+COMMAND: pnpm --filter @zero/mail exec react-router typegen && pnpm --filter @zero/mail build
+EXIT: 0
+OUTPUT: Paraglide compilation complete; build completed. Initial execution before the final catalog correction emitted `pages.settings.shortcuts.actions.markAsNotImportant is not exported`; the catalog key was added and this command was rerun after the final change.
 
-`pnpm --filter @zero/mail exec vitest run lib/hotkeys/keyboard-runtime.test.tsx lib/hotkeys/keyboard-parity.test.ts components/mail/reply-recipients.test.ts`
-exit: 0
-Test Files  3 passed (3)
-Tests  37 passed (37)
-components/mail/reply-recipients.test.ts (18 tests)
-lib/hotkeys/keyboard-parity.test.ts (11 tests)
-lib/hotkeys/keyboard-runtime.test.tsx (8 tests)
-stderr: KeyboardLayoutMap API is not supported in this browser
+COMMAND: pnpm --filter @zero/mail exec react-router typegen && pnpm --filter @zero/mail build
+EXIT: 0
+OUTPUT: Paraglide compilation complete; 5,535 client modules and 980 SSR modules transformed; build completed. Existing warnings: 3 unrelated oxlint warnings, recipient-autosuggest sourcemap resolution, CSS syntax warning, dynamic-import chunk notices.
 
-`pnpm --filter @zero/mail exec eslint config/shortcuts.ts lib/hotkeys components/mail/reply-recipients.ts components/mail/reply-composer.tsx components/create/email-composer.tsx app/'(routes)'/settings/shortcuts`
-exit: 0
-Warning: React version not specified in eslint-plugin-react settings.
-5 problems (0 errors, 5 warnings)
-apps/mail/components/create/email-composer.tsx: react-hooks/exhaustive-deps (3)
-apps/mail/lib/hotkeys/mail-list-hotkeys.tsx: react-hooks/exhaustive-deps (2)
+COMMAND: pnpm --filter @zero/mail exec vitest run lib/hotkeys/keyboard-runtime.test.tsx lib/hotkeys/keyboard-parity.test.ts components/mail/reply-recipients.test.ts
+EXIT: 0
+OUTPUT: 3 test files passed; 37 tests passed. keyboard-runtime contextual Shift+? test passed. Existing KeyboardLayoutMap unsupported-browser stderr noted.
 
-`pnpm --filter @zero/mail exec react-router typegen && pnpm --filter @zero/mail build`
-exit: 0
-typegen: [paraglide-js] Compilation complete (message-modules)
-build: react-router build
-build: Found 3 warnings and 0 errors; Oxlint successfully finished.
-build: ✓ built in 6.82s
+COMMAND: pnpm --filter @zero/mail exec eslint config/shortcuts.ts lib/hotkeys components/mail/reply-recipients.ts components/mail/reply-composer.tsx components/create/email-composer.tsx app/'(routes)'/settings/shortcuts
+EXIT: 0
+OUTPUT: 0 errors, 5 existing react-hooks/exhaustive-deps warnings in email-composer.tsx and mail-list-hotkeys.tsx; React version configuration warning.
 
-`git status --porcelain --untracked-files=all | sed 's/^...//' | awk '!/^(apps\/mail\/(config\/shortcuts\.ts|lib\/hotkeys\/.*|components\/mail\/(reply-recipients(\.test)?\.ts|reply-composer\.tsx)|components\/create\/email-composer\.tsx|components\/queue\/queue-review\.tsx|app\/\(routes\)\/settings\/shortcuts\/.*)|docs\/jobs\/niveau10\/keyboard-runtime-01\.md)$/ {print; bad=1} END {exit bad}'`
-exit: 0
-output:
+COMMAND: git status --porcelain --untracked-files=all | sed 's/^...//' | awk '!/^(apps\/mail\/(config\/shortcuts\.ts|lib\/hotkeys\/.*|components\/mail\/(reply-recipients(\.test)?\.ts|reply-composer\.tsx)|components\/create\/email-composer\.tsx|components\/queue\/queue-review\.tsx|app\/\(routes\)\/settings\/shortcuts\/.*|messages\/(en|fr)\.json)|docs\/jobs\/niveau10\/keyboard-runtime-01\.md)$/ {print; bad=1} END {exit bad}'
+EXIT: 0
+OUTPUT: no output; touch-set respected.
 
-`git diff --check`
-exit: 0
-output:
+COMMAND: git diff --check
+EXIT: 0
+OUTPUT: no output.
 
-STATUS: COMPLETE
+STATUS: COMPLETE_WITH_CONCERNS (the typegen/build frozen command was executed once before final catalog correction and once after it because its first output exposed a missing Paraglide export despite exit 0)
