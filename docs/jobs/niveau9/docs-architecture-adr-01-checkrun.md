@@ -1,9 +1,9 @@
 # Checkrun: docs-architecture-adr-01-checkrun
-generated: 2026-07-14T02:44:46Z  runner: sh  config: /Users/thomasverdenne/cc/zero/.architect/checkrun-docs-adr-01.json
+generated: 2026-07-14T02:47:11Z  runner: sh  config: /Users/thomasverdenne/cc/zero/.architect/checkrun-docs-adr-01.json
 check_file: docs/checks/niveau9/docs-governance.md  freeze_sha: 8c643c12c98be2223d427622550d5f58b84cd24e
 Executor: bash
 executor_config: bash
-integrity: check_file_matches_freeze=true head=d85bd0fc99771fd88a2663be5f0b4cff7a97ce7c
+integrity: check_file_matches_freeze=true head=d8ba1dc692bea4b4123a13970ef94a67c8d14343
 changed_files: 21 listed below; docs_checks_touched=false
 AGENT.md
 ARCHITECTURE.md
@@ -34,10 +34,10 @@ exit: 0  ms: 145  bytes: 9
 
 ## RUN (mécanique — check-runner) line 7
 $ grep -n "Next.js" README.md | wc -l
-exit: 0  ms: 12  bytes: 9
+exit: 0  ms: 11  bytes: 9
        0
 
 ## RUN (mécanique — check-runner) line 8
 $ ls docs/adr/ | wc -l
-exit: 0  ms: 13  bytes: 9
+exit: 0  ms: 11  bytes: 9
       15
