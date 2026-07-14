@@ -84,3 +84,16 @@
   présentation de queue n'est dégelée.
 - La preuve FAIL est conservée dans `docs/jobs/niveau10/keyboard-queue-nav-judge-6.md`. Un nouveau
   builder, un checkrun frais et un nouveau juge sont obligatoires avant intégration.
+
+## 2026-07-14 — Le gate global UX révèle un appel DOM incompatible avec les types Workers
+
+- Le gate global UX, exécuté après génération complète des types `server` et `mail`, expose
+  `TS2554` dans `lib/hotkeys/keyboard-runtime.test.tsx` sur l'appel de test
+  `document.body.append(input, editor, dialog)`.
+- Le gate propriétaire précédent ne préparait pas les deux jeux de types Workers avant le
+  `typegen` React Router et n'a donc pas reproduit l'environnement TypeScript réel du pipeline.
+- Une correction propriétaire peut remplacer uniquement cet appel DOM de test par des ajouts
+  unitaires compatibles. Le RUN TypeScript clavier prépare désormais les types `server` et `mail`
+  avant le gate propriétaire ; aucun fichier produit ni critère d'acceptation n'est élargi.
+- L'UX reste bloquée jusqu'à une nouvelle preuve builder, un checkrun déterministe et un jugement
+  indépendant sur cette correction clavier.
