@@ -33,13 +33,31 @@ nécessaire. Un test de régression vérifie simultanément le contrat Better Au
 - ESLint ciblé : `0` erreur.
 - Prettier ciblé : vert.
 - Typecheck bloquant : serveur `0`, mail `0`.
-- Enregistrement dynamique réel Codex : PASS (`applications:1`, `access_tokens:1`).
+- Enregistrement dynamique réel Codex puis Claude : PASS (`applications:2`, `access_tokens:2`,
+  `consents:0`). Les deux clients ont terminé OAuth automatiquement depuis la session Zero déjà
+  authentifiée ; aucun écran de consentement n'a été rendu dans Chrome.
 - `codex mcp list` : `zero`, Streamable HTTP, `enabled`, `OAuth`.
+- `claude mcp list` : `zero`, Streamable HTTP, `Connected`.
 - Configuration Codex : allowlist de onze outils draft-only et
   `default_tools_approval_mode = "writes"` ; `updateDraft` exclu tant que le provider ne prouve
   pas un CAS atomique.
 - Configuration Claude : serveur `zero` ajouté au scope utilisateur ; policy locale Zero avec
   lectures autorisées, `setActiveConnection`/`createReplyDraft` en `ask`, autres outils en `deny`.
+- Smoke Codex en lecture : `getServerCapabilities`, `getActiveConnection` et `listDrafts` PASS ;
+  `draftOnly=true`, `canSendMail=false`.
+- Smoke Claude en lecture : `getServerCapabilities` et `getActiveConnection` PASS ;
+  `draftOnly=true`, compte Google actif confirmé.
+- Smoke d'écriture Claude strictement borné : un seul `createReplyDraft` sur le fil QA, clé
+  d'idempotence `qa-niveau10-claude-20260714-v1`, brouillon non envoyé
+  `r-3874298184339802701`.
+- Preuve croisée Codex : `getDraft(r-3874298184339802701)` retrouve le bon fil, le bon sujet et le
+  marqueur `[TEST QA ZERO MCP — NE PAS ENVOYER]`.
+- Computer Use : après `Refresh`, le brouillon apparaît en tête de `/mail/draft` à `10:03 AM` ;
+  `J`, `J`, `K`, `Enter`, puis `Escape` déplacent la sélection, ouvrent exactement
+  `draftId=r-3874298184339802701` et referment le composeur sans quitter Drafts.
+- Computer Use final : `/queue` affiche `0 pending review` et
+  `No draft jobs in this status` ; `Sent 0` reste inchangé. Les logs live ne contiennent aucun
+  appel de route d'envoi et la table locale `mail0_draft_outbox` reste vide.
 
 ## Frontières
 
@@ -48,7 +66,9 @@ nécessaire. Un test de régression vérifie simultanément le contrat Better Au
 - Aucun déploiement ni écriture de base distante.
 - Codex a terminé OAuth automatiquement depuis la session Chrome existante, sans écran de
   consentement ni clic Computer Use.
-- Le login Claude et le smoke live draft-only restent en attente d'une confirmation au point
-  d'action, car le même auto-achèvement est possible.
+- Claude a suivi le même auto-achèvement après l'accord explicite au point d'action.
+- Le front Vite historique présent sur `:3001` avait perdu ses WebSockets HMR et renvoyait `500`
+  sur les imports dynamiques. Il a été redémarré depuis ce worktree avant la QA visuelle finale ;
+  Inbox, ouverture du fil, Drafts, composeur et Queue sont alors tous passés.
 
-STATUS: CODEX PASS — CLAUDE CONSENT PENDING
+STATUS: COMPLETE — CODEX + CLAUDE + COMPUTER USE PASS
