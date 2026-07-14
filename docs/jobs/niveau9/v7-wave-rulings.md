@@ -119,3 +119,42 @@ mail-list-thread.tsx (1 import) ; email-utils.ts possiblement INTOUCHÉ. Toutes 
 conditions du ruling initial (f143abf9, DOMPurify statique, preuves, gates)
 inchangées. Anti-collision a2 : le nouveau fichier est réputé appartenir au
 périmètre a8 jusqu'au fan-in.
+
+## RULING a2-nonnull-01 PHASE 0 — E1/E2/E3 + helper (2026-07-13)
+
+### E1 — type-ratchet any ROUGE au gel : CONFIRMÉ orchestrateur, correctif a3 ordonné
+Reproduit sur HEAD factory : any(server)=17/15, any(total)=40/38 FAILED. Cause exacte
+confirmée : merge a3 (3a809685) a introduit __fixtures__/google-http-fake.ts avec 3
+`any` (l.24 root, l.53 auth, l.77 auth?) — la commande gelée ne connaît pas
+__fixtures__ et elle NE CHANGE PAS. Défaut de process orchestrateur assumé : le merge
+a3 a été vérifié tests+coverage mais PAS ratchets ; désormais les 4 ratchets
+(type/console/loc/migrations) font partie de MA checklist de merge, chaque merge.
+Correctif : micro-tranche a3-corrective par builder-a3-driver-01 (son fichier) —
+typer honnêtement les 3 any, zéro changement de comportement, suite verte,
+type-ratchet vert (server attendu 14/15, total 37/38). Ni a2 (hors fence) ni
+l'orchestrateur (Hard Rule 4) ne touchent le fichier. Option (iii) REJETÉE :
+le factory ne reste pas rouge.
+
+### E2 — compteur nonNull AST : APPROUVÉ
+Le critère barème « non-null assertions ≤10 » n'a PAS de commande gelée (seul le
+comptage `any` en a une — vérifié rubric l.17). Le comptage grep porte 55 faux
+positifs irréductibles (Tailwind `!` important-suffix ~50, strings de prose, lignes
+commentées) : gater dessus forcerait à masquer du texte, pas des types. Compteur
+nonNull = AST (nœuds NonNullExpression, typescript@5.8.3 DU repo, zéro dépendance),
+même périmètre de dossiers, exclusions *.test.*, *.test-d.ts, *.d.ts. Le header du
+ratchet documente la réconciliation grep⇄AST (105 = 50 réelles + FP énumérés par
+catégorie) et le rapport porte LES DEUX chiffres pour le juge : le « 84 » du
+jugement = grep conservateur ère c80d4bf4 ; réel AST au gel V7b = 50 ; cible ≤10
+INCHANGÉE. @ts-expect-error (4) et @ts-ignore (1) restent en grep verbatim.
+
+### E3 — exclusion .test-d.ts : APPROUVÉE (cohérence exclusion tests des ratchets ;
+le `!` y est l'objet testé).
+
+### Helper invariant : APPROUVÉ aux deux emplacements proposés
+apps/server/src/lib/invariant.ts + apps/mail/lib/invariant.ts (duplication assumée :
+builds disjoints, frontière front→serveur non percée — règle a1). Signature
+`invariant(cond, msg): asserts cond`, throw explicite.
+
+### Libellé gate a2 : tant que le correctif a3 n'est pas mergé, a2 rapporte le
+type-ratchet avec « rouge any pré-existant attribué (fixture a3, correctif en
+cours) » — jamais « PASSED » global. Vert intégral exigé au fan-in post-rebase.
