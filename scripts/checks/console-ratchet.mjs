@@ -19,10 +19,12 @@ import { execSync } from 'node:child_process';
 // server-console-sweep (#42): lib/driver 45 → 0, then 87 → 8 by the #42 -02 pass
 // (routes/agent 78 sites → logger after #36 unblocked the zone). The 8 residual is
 // lib/logger.ts only (4 intentional sinks + 2 header comments) + 2 fully-commented
-// dead lines in routes/agent/sync.ts. A5 ≤20 palier REACHED. Re-snapshots ordered by
-// the right-critic at each #42 merge so gains are non-regainable. `front` left at its
-// niveau9 baseline (owned by apps/mail jobs). NON-GROWING — never widen.
-const BUDGET = { server: 8, front: 143 };
+// dead lines in routes/agent/sync.ts. A5 ≤20 palier REACHED. `front` lowered
+// 121 → 6 by V7 a5-front-console (lib/log.ts mirror of the server logger: debug/info
+// no-op in prod, warn/error always visible; residual = log.ts's 4 sinks +
+// entry.client bespoke handler + 1 prose comment). Re-snapshots ordered at each merge
+// (right-critic / #42 precedent) so gains are non-regainable. NON-GROWING — never widen.
+const BUDGET = { server: 8, front: 6 };
 
 const SERVER_CMD =
   "grep -rE \"console\\.\" apps/server/src --include='*.ts' --exclude='*.test.*' --exclude='*.d.ts' | wc -l";
