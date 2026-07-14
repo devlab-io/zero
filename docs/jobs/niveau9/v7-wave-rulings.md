@@ -177,3 +177,21 @@ si zod reste ancré ailleurs, libellé honnête et STOP (pas de coupe supplémen
 sans ruling) ; (4) gates tsc mail 0 / vitest mail / build, RC natifs.
 Extension de périmètre : + apps/mail/config/shortcuts.ts. LEAD B toujours NON
 autorisé.
+
+### INCIDENT + RULING a3-corrective (2026-07-13) — rebase hors-worktree sur factory/perf
+Fait : le postflight a3 avait auto-nettoyé worktree ET branche ; mon premier mandat
+correctif ordonnait « git rebase e106b9ba » dans un worktree disparu. Le builder,
+cwd retombé sur le dépôt PRINCIPAL (/Users/thomasverdenne/cc/zero, factory/perf), a
+exécuté le rebase LÀ : factory/perf réécrit (d199c253/1f9a1462 ré-parentés,
+historique niveau9 greffé). Transparence builder totale (§0 de son STATUS) —
+signalé, aucune dissimulation. AUCUN push.
+Décisions : (a) réécriture NON acceptable — factory/perf RESTAURÉ par reflog à
+1f9a1462 (= origin/factory/perf, identique au snapshot de session, vérifié) ;
+(b) fix fixture sauvé par patch (112 lignes) AVANT reset, transplanté dans
+a3-corrective-01, gates re-passés par l'orchestrateur (tsc 0, 298/298, ratchet
+14/15 · 37/38 PASSED), mergé f5a77dc6. E1 CLOS.
+Règles durcies : (1) tout mandat builder nomme le worktree ET exige STOP+signal si
+le chemin n'existe pas — JAMAIS d'opération git en fallback de cwd (Hard Rule 9) ;
+(2) l'orchestrateur vérifie l'existence du worktree AVANT tout mandat post-merge
+(le postflight auto-nettoie worktree+branche) ; (3) aucune instruction de rebase
+sans garde explicite « depuis <chemin> uniquement ».
