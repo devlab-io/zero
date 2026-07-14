@@ -97,7 +97,7 @@ Mesuré au commit gelé (≠ note : je fournis l'évidence, je ne note pas les a
 | A7 | `A7-security.txt` | `pnpm audit --prod --audit-level critical` **exit 0** (0 critical ; 48H/64M/14L) ; `check-agent-surface` PASS ; `mail.google.com` absent des scopes ; audit-triage.md (75 réfs GHSA, #37) ; gitleaks CI (working-tree) + historique 3376 commits en-job. |
 | A8 | `A8-perf-structural.txt` | **JS critique inbox = 435,9 KiB gz → gate ≤420 FAIL (−15,9), plancher structurel** ; **0 chunk >900 KiB (PASS)** ; **0 GIF >1 MB** (GIFs→MP4) ; public/ **4,9 MB** (−70 MB vs baseline). |
 | A9 | `A9-robustness.txt` | `mail-list.tsx` destructure `isError` (l.41), viewState `'error'` DISTINCT de `'empty'` (l.206/228) → défaut baseline corrigé ; états 404/erreur runtime capturés lisibles. |
-| A10 | `A10-docs.txt` | **ARCHITECTURE.md, LICENSE-NOTES.md, FORK.md ABSENTS** ; README toujours « Next.js/Node/PostgreSQL » (inexact vs RR7/CF Workers/Hono-tRPC/Drizzle/DO) ; **7 ADRs** présents (0001-0006 + collision numérotation `0004` ×2). |
+| A10 ⚠️ **pre-#39** | `A10-docs-pre39.txt` | **PHOTO D'ÉTAT, PAS UN VERDICT** — ce gel précède la création d'ARCHITECTURE.md/FORK.md/LICENSE-NOTES.md par #39 (parallèle). État au gel : ces 3 fichiers **absents** (attendu), README inexact « Next.js/Node/PostgreSQL », **7 ADRs** (0001-0006 + collision n° `0004` ×2). **Le juge froid RE-EXÉCUTERA A10 sur le HEAD fusionné post-#39+#40** (rerun obligatoire consigné). |
 
 **Réconciliation JS critique** : 622,4 KiB (état au transfert #44, amendement A8) → **435,9 KiB (commit gelé, mesuré ici)** — confirme exactement la référence brief « 435,9 KiB, FAIL −15,9 ». Libellé honnête : jamais « poids OK » tant que >420. Écart de chemin noté : la commande gelée `measure-critical.py .` depuis la racine échoue (sortie sous `apps/mail/build/client`) ; chiffre obtenu avec base `apps/mail`.
 
@@ -121,7 +121,12 @@ Plancher arithmétique profil Tahiti (calcul sur artefact, PAS une latence mesur
 ### WS4 — QA visuelle desktop/mobile — `docs/research/niveau9/visual/`
 6 captures (1440×900 + 390×844), **0 overflow horizontal partout**. Landing prérendue **réelle** (hero/nav/mockup) ; reduced-motion émulé ; deep-link `/mail/inbox` sans session → **404 propre** ; `/login` sans backend → **ErrorBoundary lisible** (Refresh / Log Out and Refresh) = état d'erreur honnête. Surfaces mail authentifiées réelles = **BLOCKED**.
 
-**Constat prerender (résout #44/d199c253)** : au commit gelé, `/` sert le **vrai HomeContent** (101 KB), les deep-links servent la **coquille neutre 6 KB** (`__spa-fallback.html` via worker `spa-fallback.ts`, 6 cas). Le constat antérieur « prerender émet une coquille vide » (commit d199c253) est **périmé** — corrigé par #44 (d5de5c3a). **Résiduel doc** : le commentaire de `react-router.config.ts` est périmé (annonce HydrateFallback-only + `not_found_handling: single-page-application`, alors que `/` = HomeContent réel et config = `none` + worker dédié).
+**Constat prerender (résout #44/d199c253)** : au commit gelé, `/` sert le **vrai HomeContent** (101 KB), les deep-links servent la **coquille neutre 6 KB** (`__spa-fallback.html` via worker `spa-fallback.ts`, 6 cas). Le constat antérieur « prerender émet une coquille vide » (commit d199c253) est **périmé** — corrigé par #44 (d5de5c3a). **Résiduel doc (known-issue propriétaire, NON fixé — code intouchable)** : le commentaire de `react-router.config.ts` est périmé (annonce HydrateFallback-only + `not_found_handling: single-page-application`, alors que `/` = HomeContent réel et config = `none` + worker dédié).
+
+**Sonde deep-link / garde anti-masquage (dual-labellisée — `perf/deeplink-fallback-probe.txt`)** : correction d'un faux négatif de mon probe initial (curl par défaut envoie `Accept: */*`). Les DEUX moitiés sont conservées et libellées :
+- **navigation** (`Accept: text/html` [+ `Sec-Fetch-Mode: navigate`]) : `/pricing`, `/login`, `/mail/inbox`, `/settings/general`, `/nonexistent` → **200 + coquille neutre 6 KB** (`animate-spin` présent, **0 marqueur HomeContent**) ; `/` → 200 landing réelle 101 KB.
+- **non-navigation** (`Accept: */*`, y compris un asset réellement manquant `/assets/does-not-exist.js`) : **404 anti-masquage CONFORME** (garde stricte : un chunk/asset manquant surfacé comme 404, jamais masqué en HTML-200).
+→ Le 404 initial observé au curl par défaut **N'EST PAS un deep-link cassé** : c'est la garde voulue. Deep-link réel navigateur (envoie `Accept: text/html`) = shell neutre 200, hydratation client de la route demandée.
 
 ### WS5 — Dettes de preuve AUTHENTIFIÉES → DEMANDES SUPERVISEUR précises (surface Computer Use)
 Aucune estimée, aucune contournée. Chaque demande est exécutable sur le Chrome staging authentifié :
@@ -165,11 +170,10 @@ aucun envoi réel, aucune mutation de données réelles, aucun credential.
   porteur nominal #44. 0 chunk >900 KiB.
 - **7 demandes superviseur** formulées, exécutables sur le Chrome staging authentifié ; tout le reste
   authentifié = BLOCKED explicite, jamais estimé (cookie/proxy/override non utilisés — hard stop respecté).
-- **2 constats actionnables propriétaire** (RAPPORT, pas fix) : (a) snapshot gen-trpc stale ordre-seul,
-  non gaté ; (b) A10 manquant — ARCHITECTURE.md/LICENSE-NOTES.md/FORK.md absents, README inexact ;
-  + 3 résiduels code (voice-provider guard, closeView no-op, commentaire hotkeys périmé) + commentaire
-  `react-router.config.ts` périmé.
+- **A10 = photo d'état pre-#39, PAS un verdict** : le gel précède la création des artefacts de gouvernance par #39 (parallèle). Évidence étiquetée `A10-docs-pre39.txt` ; **rerun A10 obligatoire par le juge froid sur le HEAD fusionné post-#39+#40** (consigné). Ne pas noter A10 sur cette photo.
+- **Constats actionnables propriétaire** (RAPPORT, pas fix) : (a) snapshot gen-trpc stale ordre-seul, non gaté ; (b) 3 résiduels code (voice-provider guard, closeView no-op, commentaire hotkeys périmé) + commentaire `react-router.config.ts` périmé (known-issue).
+- **Deep-link : garde anti-masquage CONFORME** (dual-labellisée) — navigation→shell 200 neutre, non-navigation→404 voulu. Aucun deep-link cassé.
 - **Écart de commande gelée** : `measure-critical.py .` (racine) échoue sur le chemin de build.
 
 ## STATUS
-STATUS: DONE — évidences par axe A1..A10 + bench R10 + QA visuelle produites (`docs/research/niveau9/`) ; JS critique 435,9 KiB gz FAIL −15,9 (0 chunk >900 KiB) ; tsc 0/0, 327 tests, console serveur 8 confirmés ; boundary gen-trpc divergent ordre-seul non gaté (rapport, fichier restauré) ; 3 résiduels code + gaps A10 documentés ; 7 demandes superviseur formulées, reste authentifié BLOCKED explicite ; 0 drift périmètre. Pas de commit.
+STATUS: DONE — évidences par axe A1..A10 + bench R10 + QA visuelle produites (`docs/research/niveau9/`) ; JS critique 435,9 KiB gz FAIL −15,9 (0 chunk >900 KiB) ; tsc 0/0, 327 tests, console serveur 8 confirmés ; A10 = photo d'état **pre-#39** (`A10-docs-pre39.txt`, rerun juge obligatoire sur HEAD fusionné, PAS un verdict) ; deep-link garde anti-masquage CONFORME (sonde dual-labellisée, aucun deep-link cassé) ; boundary gen-trpc divergent ordre-seul non gaté (rapport, fichier restauré) ; 3 résiduels code + commentaire react-router.config périmé (known-issue) ; 7 demandes superviseur formulées, reste authentifié BLOCKED explicite ; 0 drift périmètre. Pas de commit.
