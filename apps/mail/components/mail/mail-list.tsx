@@ -18,6 +18,7 @@ import { Draft } from './mail-list-draft';
 import { useParams } from 'react-router';
 import { useQueryState } from 'nuqs';
 import { useAtom } from 'jotai';
+import { useCommandPalette } from '@/components/context/command-palette-context';
 
 // The list presentation consumes the thread list exclusively through the
 // `useMailListData()` contract and the `useMailSelection()` layer; the row
@@ -31,6 +32,7 @@ export const MailList = memo(
     const [, setThreadId] = useQueryState('threadId');
     const [, setDraftId] = useQueryState('draftId');
     const [searchValue, setSearchValue] = useSearchValue();
+    const { clearAllFilters } = useCommandPalette();
 
     const {
       items,
@@ -133,11 +135,7 @@ export const MailList = memo(
     }, [isLoading, isFiltering, setSearchValue]);
 
     const clearFilters = () => {
-      setSearchValue({
-        value: '',
-        highlight: '',
-        folder: '',
-      });
+      clearAllFilters();
     };
 
     const filteredItems = useMemo(() => items.filter((item) => item.id), [items]);
@@ -230,9 +228,11 @@ export const MailList = memo(
                 <div className="flex flex-col items-center justify-center gap-2 text-center">
                   <EmptyStateIcon width={200} height={200} />
                   <div className="mt-5">
-                    <p className="text-lg">{m['states.mailList.emptyTitle']()}</p>
+                    <p className="text-lg">
+                      {isFiltering ? 'No messages match these filters' : m['states.mailList.emptyTitle']()}
+                    </p>
                     <p className="text-md text-muted-foreground dark:text-white/50">
-                      {m['states.mailList.emptyDescription']()}{' '}
+                      {isFiltering ? 'Try another search or ' : m['states.mailList.emptyDescription']()}{' '}
                       <button type="button" className="underline cursor-pointer" onClick={clearFilters}>
                         {m['states.mailList.clearFilters']()}
                       </button>

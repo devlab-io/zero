@@ -67,7 +67,7 @@ export interface CommandGroupData {
 export interface QuickSearchThread {
   id?: string;
   subject?: string;
-  from?: { name?: string; email?: string } | null;
+  sender?: { name?: string; email?: string } | null;
   snippet?: string;
 }
 

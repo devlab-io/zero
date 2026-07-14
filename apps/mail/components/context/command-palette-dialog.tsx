@@ -66,7 +66,10 @@ export function CommandPaletteDialog({
   clearAllFilters,
 }: CommandPaletteDialogProps) {
   const [, setIsComposeOpen] = useQueryState('isComposeOpen');
-  const [currentView, setCurrentView] = useState<CommandView>('main');
+  const [isLexicalSearchOpen, setIsLexicalSearchOpen] = useQueryState('isLexicalSearchOpen');
+  const [currentView, setCurrentView] = useState<CommandView>(
+    isLexicalSearchOpen ? 'search' : 'main',
+  );
   const [selectedDateFilter, setSelectedDateFilter] = useState<string | null>(null);
   const [selectedDate, setSelectedDate] = useState<Date | undefined>(undefined);
   const [dateRangeStart, setDateRangeStart] = useState<Date | undefined>(undefined);
@@ -348,14 +351,14 @@ export function CommandPaletteDialog({
 
             const snippet = thread.snippet?.toString() || '';
             const subject = thread.subject?.toString() || '';
-            const fromName = thread.from?.name?.toString() || '';
-            const fromEmail = thread.from?.email?.toString() || '';
+            const senderName = thread.sender?.name?.toString() || '';
+            const senderEmail = thread.sender?.email?.toString() || '';
 
             return (
               snippet.toLowerCase().includes(query) ||
               subject.toLowerCase().includes(query) ||
-              fromName.toLowerCase().includes(query) ||
-              fromEmail.toLowerCase().includes(query)
+              senderName.toLowerCase().includes(query) ||
+              senderEmail.toLowerCase().includes(query)
             );
           } catch (err) {
             log.error('Error filtering thread:', err);
@@ -368,6 +371,13 @@ export function CommandPaletteDialog({
       return [];
     }
   }, [searchQuery, threads]);
+
+  useEffect(() => {
+    if (isLexicalSearchOpen) {
+      setCurrentView('search');
+      setIsLexicalSearchOpen(null);
+    }
+  }, [isLexicalSearchOpen, setIsLexicalSearchOpen]);
 
   const allCommands = useMemo<CommandGroupData[]>(() => {
     const searchCommands: CommandItem[] = [];

@@ -47,6 +47,7 @@ import { Inbox, RefreshCcw } from 'lucide-react';
 import { useQueryState } from 'nuqs';
 import { useAtom } from 'jotai';
 import { toast } from 'sonner';
+import { log } from '@/lib/log';
 
 import { printThread } from './thread-display.print';
 import { ThreadActionButton } from './thread-display.action-button';
@@ -68,6 +69,12 @@ const AnimatedMessageList = lazy(() => import('./thread-display.animated-message
 const ReplyCompose = lazy(() => import('./reply-composer'));
 
 const isFullscreen = false;
+
+export function successorAfterThread<T extends { id: string }>(items: T[], currentId: string): T | null {
+  const currentIndex = items.findIndex((item) => item.id === currentId);
+  return currentIndex >= 0 && currentIndex + 1 < items.length ? items[currentIndex + 1] : null;
+}
+
 export function ThreadDisplay() {
   const isMobile = useIsMobile();
   const { toggleOpen: toggleAISidebar } = useAISidebar();
@@ -118,26 +125,34 @@ export function ThreadDisplay() {
   const optimisticState = useOptimisticThreadState(id ?? '');
 
   const handleNext = useCallback(() => {
-    if (!id || !items.length || focusedIndex === null) return setThreadId(null);
-    if (focusedIndex < items.length - 1) {
-      const nextIndex = Math.max(1, focusedIndex + 1);
+    if (!id) {
+      setThreadId(null);
+      setMode(null);
+      setActiveReplyId(null);
+      setDraftId(null);
+      return;
+    }
+    const nextThread = successorAfterThread(items, id);
+    if (!nextThread) {
+      setThreadId(null);
+      setMode(null);
+      setActiveReplyId(null);
+      setDraftId(null);
+      return;
+    }
 
-      const nextThread = items[nextIndex];
-      if (nextThread) {
-        setMode(null);
-        setActiveReplyId(null);
-        setDraftId(null);
-        setThreadId(nextThread.id);
-        setFocusedIndex(focusedIndex + 1);
-        if (animationsEnabled) {
-          setNavigationDirection('next');
-        }
-      }
+    const nextIndex = items.findIndex((item) => item.id === nextThread.id);
+    setMode(null);
+    setActiveReplyId(null);
+    setDraftId(null);
+    setThreadId(nextThread.id);
+    setFocusedIndex(nextIndex);
+    if (animationsEnabled) {
+      setNavigationDirection('next');
     }
   }, [
     items,
     id,
-    focusedIndex,
     setThreadId,
     setFocusedIndex,
     setMode,
@@ -174,8 +189,8 @@ export function ThreadDisplay() {
       setActiveReplyId(null);
       setDraftId(null);
 
-      optimisticMoveThreadsTo([id], folder, destination);
       handleNext();
+      optimisticMoveThreadsTo([id], folder, destination);
     },
     [id, folder, optimisticMoveThreadsTo, handleNext, setMode, setActiveReplyId, setDraftId],
   );
@@ -193,14 +208,16 @@ export function ThreadDisplay() {
 
   const handleToggleImportant = useCallback(async () => {
     if (!emailData || !id) return;
-    await toggleImportant({ ids: [id] });
-    await refetchThread();
-    if (isImportant) {
+    try {
+      await toggleImportant({ ids: [id] });
+      await refetchThread();
+      setIsImportant(!isImportant);
       toast.success(m['common.mail.markedAsImportant']());
-    } else {
+    } catch (error) {
+      log.error('Failed to toggle important status:', error);
       toast.error('Failed to mark as important');
     }
-  }, [emailData, id]);
+  }, [emailData, id, isImportant, refetchThread, toggleImportant]);
 
   // Set initial star state based on email data
   useEffect(() => {
@@ -361,8 +378,9 @@ export function ThreadDisplay() {
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <button
+                        aria-label={m['common.actions.close']()}
                         onClick={handleClose}
-                        className="inline-flex h-7 w-7 items-center justify-center gap-1 overflow-hidden rounded-md hover:bg-white md:hidden dark:hover:bg-[#313131]"
+                        className="inline-flex h-11 w-11 items-center justify-center gap-1 overflow-hidden rounded-md hover:bg-white md:hidden dark:hover:bg-[#313131]"
                       >
                         <X className="fill-iconLight dark:fill-iconDark h-3.5 w-3.5" />
                       </button>
@@ -381,12 +399,13 @@ export function ThreadDisplay() {
               </div>
               <div className="flex items-center gap-2">
                 <button
+                  aria-label={m['common.threadDisplay.replyAll']()}
                   onClick={(e) => {
                     e.stopPropagation();
                     setMode('replyAll');
                     setActiveReplyId(emailData?.latest?.id ?? '');
                   }}
-                  className="inline-flex h-7 items-center justify-center gap-1 overflow-hidden rounded-lg border bg-white px-1.5 dark:border-none dark:bg-[#313131] hover:bg-gray-100 dark:hover:bg-[#404040] transition-colors cursor-pointer"
+                  className="inline-flex min-h-11 items-center justify-center gap-1 overflow-hidden rounded-lg border bg-white px-1.5 dark:border-none dark:bg-[#313131] hover:bg-gray-100 dark:hover:bg-[#404040] transition-colors cursor-pointer md:min-h-10"
                 >
                   <Reply className="fill-muted-foreground dark:fill-[#9B9B9B]" />
                   <div className="flex items-center justify-center gap-2.5 pl-0.5 pr-1">
@@ -400,8 +419,9 @@ export function ThreadDisplay() {
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <button
+                        aria-label={isStarred ? m['common.threadDisplay.unstar']() : m['common.threadDisplay.star']()}
                         onClick={handleToggleStar}
-                        className="inline-flex h-7 w-7 items-center justify-center gap-1 overflow-hidden rounded-lg bg-white dark:bg-[#313131] hover:bg-gray-100 dark:hover:bg-[#404040] transition-colors cursor-pointer"
+                        className="inline-flex h-11 w-11 items-center justify-center gap-1 overflow-hidden rounded-lg bg-white dark:bg-[#313131] hover:bg-gray-100 dark:hover:bg-[#404040] transition-colors cursor-pointer md:h-10 md:w-10"
                       >
                         <Star
                           className={cn(
@@ -425,8 +445,9 @@ export function ThreadDisplay() {
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <button
+                        aria-label={m['common.threadDisplay.archive']()}
                         onClick={() => moveThreadTo('archive')}
-                        className="inline-flex h-7 w-7 items-center justify-center gap-1 overflow-hidden rounded-lg bg-white dark:bg-[#313131] hover:bg-gray-100 dark:hover:bg-[#404040] transition-colors cursor-pointer"
+                        className="inline-flex h-11 w-11 items-center justify-center gap-1 overflow-hidden rounded-lg bg-white dark:bg-[#313131] hover:bg-gray-100 dark:hover:bg-[#404040] transition-colors cursor-pointer md:h-10 md:w-10"
                       >
                         <Archive className="fill-iconLight dark:fill-iconDark" />
                       </button>
@@ -442,8 +463,9 @@ export function ThreadDisplay() {
                     <Tooltip>
                       <TooltipTrigger asChild>
                         <button
+                          aria-label={m['common.mail.moveToBin']()}
                           onClick={() => moveThreadTo('bin')}
-                          className="inline-flex h-7 w-7 items-center justify-center gap-1 overflow-hidden rounded-lg border border-[#FCCDD5] bg-[#FDE4E9] hover:bg-[#fccdd5]/70 dark:border-[#6E2532] dark:bg-[#411D23] dark:hover:bg-[#6E2532]/70 cursor-pointer transition-colors"
+                          className="inline-flex h-11 w-11 items-center justify-center gap-1 overflow-hidden rounded-lg border border-[#FCCDD5] bg-[#FDE4E9] hover:bg-[#fccdd5]/70 dark:border-[#6E2532] dark:bg-[#411D23] dark:hover:bg-[#6E2532]/70 cursor-pointer transition-colors md:h-10 md:w-10"
                         >
                           <Trash className="fill-[#F43F5E]" />
                         </button>
@@ -457,7 +479,7 @@ export function ThreadDisplay() {
 
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
-                    <button type="button" aria-label="Thread actions" aria-haspopup="menu" className="inline-flex h-7 w-7 items-center justify-center gap-1 overflow-hidden rounded-lg bg-white cursor-pointer focus:outline-hidden focus:ring-0 dark:bg-[#313131] transition-colors">
+                    <button type="button" aria-label="Thread actions" aria-haspopup="menu" className="inline-flex h-11 w-11 items-center justify-center gap-1 overflow-hidden rounded-lg bg-white cursor-pointer focus:outline-hidden focus:ring-0 dark:bg-[#313131] transition-colors md:h-10 md:w-10">
                       <ThreeDots className="fill-iconLight dark:fill-iconDark" />
                     </button>
                   </DropdownMenuTrigger>

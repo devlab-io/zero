@@ -129,7 +129,7 @@ export function MainView({
         onKeyDown={(e) => {
           if (e.key === 'Enter' && commandInputValue.trim() && !hasMatchingCommands) {
             e.preventDefault();
-            handleSearch(commandInputValue, true);
+            handleSearch(commandInputValue, false);
           }
         }}
       />
@@ -140,8 +140,7 @@ export function MainView({
             <Loader2 className="m-auto h-4 w-4 animate-spin" />
           ) : (
             <>
-              No results found, press <span className="font-bold">ENTER</span> to search for emails
-              in this folder
+              No results found, press <span className="font-bold">ENTER</span> for an exact local search
             </>
           )}
         </CommandEmpty>
@@ -243,7 +242,7 @@ export function SearchView({
           onKeyDown={(e) => {
             if (e.key === 'Enter' && searchQuery.trim()) {
               e.preventDefault();
-              handleSearch(searchQuery, true);
+              handleSearch(searchQuery, false);
             }
           }}
         />
@@ -261,7 +260,7 @@ export function SearchView({
             {recentSearches.map((search, index) => (
               <CommandItem
                 key={`recent-${index}`}
-                onSelect={() => handleSearch(search, true)}
+                onSelect={() => handleSearch(search, false)}
                 disabled={isProcessing}
               >
                 <Clock className="h-4 w-4 opacity-60" />
@@ -280,7 +279,7 @@ export function SearchView({
                   runCommand(() => {
                     try {
                       if (thread && thread.id) {
-                        navigate(`/inbox?threadId=${thread.id}`);
+                        navigate(`/mail/inbox?threadId=${thread.id}`);
                       }
                     } catch (error) {
                       log.error('Error navigating to thread:', error);
@@ -294,7 +293,7 @@ export function SearchView({
                 <div className="ml-2 flex flex-1 flex-col overflow-hidden">
                   <span className="truncate font-medium">{thread.subject || 'No Subject'}</span>
                   <span className="text-muted-foreground truncate text-xs">
-                    {thread.from?.name || thread.from?.email || 'Unknown sender'} -{' '}
+                    {thread.sender?.name || thread.sender?.email || 'Unknown sender'} -{' '}
                     {thread.snippet || ''}
                   </span>
                 </div>

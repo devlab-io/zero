@@ -28,10 +28,11 @@ export function ThreadActionButton({
       <Tooltip>
         <TooltipTrigger asChild>
           <Button
+            aria-label={label}
             disabled={disabled}
             onClick={onClick}
             variant="ghost"
-            className={cn('md:h-fit md:px-2', className)}
+            className={cn('min-h-10 min-w-10 md:h-10 md:w-10 md:px-2', className)}
             onMouseEnter={() => iconRef.current?.startAnimation?.()}
             onMouseLeave={() => iconRef.current?.stopAnimation?.()}
           >

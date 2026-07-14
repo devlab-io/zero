@@ -228,6 +228,7 @@ export const Thread = memo(function Thread({
           window.dispatchEvent(new CustomEvent('emailHover', { detail: { id: idToUse } }));
           if (hoverPrefetchTimer.current) clearTimeout(hoverPrefetchTimer.current);
           hoverPrefetchTimer.current = setTimeout(() => {
+            if (!idToUse) return;
             void queryClient.prefetchQuery(
               trpc.mail.get.queryOptions({ id: idToUse }, { staleTime: 1000 * 60 * 60 }),
             );
