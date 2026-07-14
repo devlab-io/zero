@@ -241,3 +241,70 @@ Toutes les commandes (audit, tsc, tests, coverage, ratchets, measure-critical, g
 | **Moyenne** | **8,45** | **8,50** |
 
 **Verdict re-statué : NON PASS.** Moyenne = **8,50** < 9 (barre haute non atteinte) ; **aucun axe <7** (plancher 8,0). Le correctif gitleaks lève proprement le défaut A7 (+0,5) et solidifie la posture « CI verte » d'A4, mais ne suffit pas à porter la moyenne à ≥9 : les résidus qui plafonnent le PASS sont désormais **hors gitleaks** (JS critique 435,9>420 sur A8, cold-start non prouvé, non-null assertions A2, couverture `lib/driver` A3, front console A5, latences p75 / soak BLOCKED-AS). Le run reste une remontée 3,3 → 8,50 sans axe faible.
+
+---
+
+## Contre-jugement post-V7 (gel 30a07e9c) — append-only
+
+- **Ancrage** : arbre re-noté = **`30a07e9c3735ddf9a3d25b18a1dc4e4a5541a966`** (HEAD factory local post-fan-in V7). `git merge-base --is-ancestor 93d2c7c8 30a07e9c` = vrai (le gel jugé par le juge de vague est ancêtre ; diff = docs seuls). Checkout détaché, porcelain propre.
+- **Séquence env reproduite (RC natifs)** : `pnpm install --frozen-lockfile --ignore-scripts --offline` RC=0 · `@zero/server run types` RC=0 · `@zero/mail run types` RC=0 · `react-router typegen` RC=0. **`tsc` server 0/0 · mail 0/0 (RC=0)**. **`pnpm test` : server 23 fichiers/298 · mail 23 fichiers/144, RC=0.** 4 ratchets PASSED (type any 37 [mail 23/server 14] · nonNull 0/0 · @ts-expect-error 4/4 · @ts-ignore 1/1 ; console server 8 / **front 6** ; loc frontier 0/0 ; migrations drift documentée).
+- **Périmètre** : re-note des axes dont l'évidence V7 a changé (A1, A2, A3, A5, A6, A8). A7 canary re-attesté (1 ligne). A4 reste BLOCKED/provisoire. A9/A10 inchangés (aucune évidence V7). Barème GELÉ, paliers binaires. Toutes preuves reproduites par le juge sur 30a07e9c ; le rapport de vague `judge-v7-wave-01.md` a servi d'index, pas de verdict.
+
+### A1 — 8,0 → **8,5** (1 manquant sur 2 levé)
+- **MANQUANT 1 (ESLint no-restricted-imports en CI) — LEVÉ.** `ci.yml:77-81` step « Enforce front→server import boundary (A1) » = `oxlint@1.9.0 --config packages/eslint-config/oxlint-frontier.json apps/mail` (1 règle `no-restricted-imports` sur `**/server/src/**`). Reproduit : **arbre sain → RC=0** (« Found 0 warnings and 0 errors », 356 fichiers) ; **sonde d'import interdit `../../server/src/lib/secret` → RC=1** avec message frontière exact (« importez les contrats partagés depuis @zero/types … issue #25 »). Sonde supprimée, porcelain propre. Le gate est réel et efficace.
+- **MANQUANT 2 (components/ « avec index ») — MAINTENU (−0,5).** `find apps/mail/components -maxdepth 2 -name index.ts*` = **0**. Le builder/ruling A1 classe l'absence « cosmétique documenté (pas de barrels inutilisés) » ; **désaccord de pesée avec le juge de vague** : au barème **gelé**, palier-9 exige littéralement « organisé par domaine **avec index** » — un ruling ne re-négocie pas la mesure gelée. Je maintiens le −0,5 (organisé par domaine ✓, index ✗), en notant l'argument architectural.
+- → 9 − 0,5 (index) = **8,5**.
+
+### A2 — 8,0 → **9,0** (mes 2 déductions levées)
+- **non-null ≤10 — ACQUIS.** **Mon décompte AST indépendant** (typescript@5.8.3 du repo, nœuds `NonNullExpression`, mon propre walk) = **2 produit-wide** (`apps/mail/utils/keyboard-layout-map.ts:273,325`), **0 dans la fence** (confirme `nonNull=0/0` du ratchet). Cible ≤10 **ATTEINTE**. Ma déduction initiale « ≫10 » venait d'un **regex bruité** (comptait `!` logiques/`!=`) — **corrigée par l'AST**.
+- **@ts-expect-error budgété par ratchet — ACQUIS.** Le `type-ratchet` compte désormais **@ts-expect-error=4/4, @ts-ignore=1/1, nonNull=0/0** (à c80d4bf4 il ne comptait que `any`). Les 4 sont les sites nominatifs du RULING (entry.server react-dom, page-header ×2, editor-autocomplete tiptap). Ma déduction initiale (« non comptés par le ratchet ») est **levée**.
+- any 37 (mail 23 ≤25 / server 14 ≤15) ✓ ; @ts-nocheck=0 ✓ ; ratchet en CI ✓.
+- **Anomalie honnête (accord avec le juge de vague)** : les 2 non-null de `utils/keyboard-layout-map.ts` sont **hors fence ET hors périmètre du ratchet** → une régression `x!` future dans `utils/` ne serait pas gatée. Pré-existantes, cible barème tenue produit-wide (2≤10), **sans impact sur la note**. Le libellé builder « 0 en code produit » est exact-dans-la-fence mais littéralement large.
+- → palier 9 plein = **9,0**.
+
+### A3 — 8,0 → **8,5** (miss couverture levé)
+- **lib/driver ≥50 % — ACQUIS.** `cd apps/server && vitest run src/lib/driver --coverage` reproduit : **driver (hors fixtures) = 58,69 % lignes**, **All files (fixtures incluses) = 60,12 %** — **>50 % des deux façons** ; `microsoft.ts` = **0 %** (gelé, may-not-touch, libellé honnête + plafond documenté) ; **168 tests**. Mon miss initial (folder 13,4 %) est **clos** (V7 a couvert google-drafts/labels/messages/parse/threads).
+- Autres cibles inchangées (trpc/mail 94,9 %, optimiste, auth, env, raccourcis) ✓. ≥120 tests (442) ✓.
+- → cible 8,5 intégralement satisfaite = **8,5**.
+
+### A5 — 8,0 → **8,5** (miss front console levé)
+- **front ≤40 — ACQUIS.** Comptage gelé front = **6** (vs 121) ; `console-ratchet` front **6/6 PASSED**. Les 6 = 4 sinks `lib/log.ts` + 1 `entry.client.tsx` (reportRenderError câblé Sentry) + 1 faux positif prose. `warn`/`error` **non gatés** (prod préservé) ; `debug`/`info` DEV-gated. Mon miss initial (front 121>40) est **clos**.
+- serveur 8 ≤20 ✓ ; 0 catch-swallow ✓ ; taxonomie erreurs (ADR 0008) ✓ ; tracing statué (ADR 0003) ✓.
+- → cible 8,5 intégralement satisfaite = **8,5**.
+
+### A6 — 9,0 → **9,5** (boot zod 2ᵉ worker levé)
+- **env validé par zod au boot des 2 workers — ACQUIS.** Le worker mail a désormais une vraie garde : `workers/spa-fallback.ts:53` `bootEnv(env)` en **1ère ligne** du `fetch`, appelant `assertMailEnv` (1×/isolate). Schéma **honnête** (`env-schema.ts`) : `fetcherBinding = z.custom<{fetch}>` validant la **forme fetcher** d'`ASSETS` (`.fetch` callable), **pas** un `z.object({})` vide (commentaire explicite). **11 tests** `spa-fallback.test.ts` (RC=0) exercent la validation réelle (throw `/ASSETS/` si absent/non-fetcher, message pointant `wrangler.jsonc`). Ma déduction initiale (« boot zod du 2ᵉ worker non démontré ») est **levée**.
+- Palier 9,5 déjà acquis par ailleurs (migrations CI, divergences documentées, immutabilité SQL, ADR 0001, .dev.vars.example, db:push guard).
+- → cible 9,5 intégralement satisfaite = **9,5**.
+
+### A8 — 8,0 → **8,5** (JS ≤420 acquis ; cold-start toujours non acquis)
+- **JS critique ≤420 — PASS.** `python3 scripts/checks/measure-critical.py apps/mail` (post-build RC=0) reproduit : **TOTAL 424 948 gz = 415,0 KiB gz → GATE ≤420 PASS (marge 5,0 KiB)** ; **aucun chunk >900 KiB (PASS)**. Mon FAIL initial (435,9>420) est **levé** (V7 a8-weight-hunt : code-motion pur highlightText, suppression zod runtime mort de shortcuts.ts, es2022 — vérifiés non-gaming par le juge de vague, measure-critical intouché).
+- **cold-start −1 s — NON ACQUIS (−0,5 maintenu).** Médianes recalculées **par moi** depuis les walls bruts : AFTER (HEAD) médiane **780,8 ms** (6 walls 730-849), BEFORE (0e55cc09) **807,3 ms** (6 walls 724-1203, 2 outliers) → **Δ = +26,5 ms, entièrement dans le bruit**. Seule borne : transfert client **−1,06 s** arithmétique (Δ bundle −193,6 KiB gz @1,5 Mbps), **PAS une mesure runtime** (FCP/LCP Tahiti BLOCKED). Libellé honnête ; jamais présenté comme −1 s serveur prouvé.
+- public/ 4,9 MB (0 GIF>1MB, −70 MB) ✓ ; backoff/concurrence unit ✓ ; batch ≤100 ✓ ; p75/Shortwave BLOCKED-AS.
+- → 9 − 0,5 (cold-start −1s non acquis) = **8,5**.
+
+### A7 — 9,0 (inchangé, canary re-attesté)
+Commande CI gitleaks exacte (docker v8.30.1, working-tree) → **RC=0, « no leaks found »** sur 30a07e9c. Gate secrets vert. Note maintenue 9,0.
+
+### A4 — 9,0 (inchangé, BLOCKED/provisoire)
+Aucune évidence V7. La déduction reste « durée <15 min **non prouvée** » — je ne peux **jamais** la revendiquer prouvée (mesure GitHub Actions non exécutable localement). Note maintenue 9,0, provisoire.
+
+### Nouveau tableau & verdict re-statué
+
+| Axe | Post-gitleaks | Post-V7 |
+|---|---|---|
+| A1 | 8,0 | **8,5** |
+| A2 | 8,0 | **9,0** |
+| A3 | 8,0 | **8,5** |
+| A4 | 9,0 | 9,0 |
+| A5 | 8,0 | **8,5** |
+| A6 | 9,0 | **9,5** |
+| A7 | 9,0 | 9,0 |
+| A8 | 8,0 | **8,5** |
+| A9 | 8,5 | 8,5 |
+| A10 | 9,5 | 9,5 |
+| **Moyenne** | **8,50** | **8,85** |
+
+**Verdict re-statué : NON PASS.** Moyenne = **8,85** < 9 ; **aucun axe <7** (plancher 8,5). Progrès 8,50 → 8,85 : les 6 axes visés par V7 sont re-notés à la hausse (A1/A3/A5/A8 +0,5, A2 +1,0, A6 +0,5), chaque manquant fermé par preuve reproduite.
+
+**Plafond structurel du PASS.** Trois axes ont leur **palier-cible à 8,5** par barème (A3, A5, A9) — leur maximum hors palier-9 BLOCKED (e2e CI, soak). Le maximum théorique du run, A3/A5/A9 à 8,5 et les 7 autres à leur plafond, est **exactement 9,0**. Atteindre ≥9 exigerait donc les 7 autres axes **tous à leur maximum absolu** ET la levée des 3 résidus restants : A1 index-de-domaines (tension barème-littéral vs ruling « pas de barrels »), A4 durée <15 min (BLOCKED, non mesurable localement), A8 cold-start −1 s (non acquis serveur, +26,5 ms dans le bruit ; runtime FCP/LCP BLOCKED Tahiti). Le run est à **1,5 point** du plafond, ces 1,5 points étant portés par des items **BLOCKED ou en tension de barème gelé**, pas par des défauts ouverts.
