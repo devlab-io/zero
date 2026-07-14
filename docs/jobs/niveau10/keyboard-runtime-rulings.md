@@ -25,3 +25,11 @@
 - `shortcutMatchesEvent` rejects a common AZERTY AltGr representation because browsers may expose AltGr as `Ctrl+Alt`; sequence dispatch also rejects any `ctrlKey`. The corrective test must include a produced punctuation event with `ctrlKey: true` and `altKey: true`, without allowing command/control chords to bypass scope rules.
 - `Shift+?` currently navigates to `/settings/shortcuts`. The accepted spec requires an in-place contextual shortcut sheet without leaving the inbox; the fresh builder must implement that within the authorised hotkey/settings surface and add an observable test.
 - Judge evidence is `docs/jobs/niveau10/keyboard-runtime-judge-1.md`. The orchestrator cannot merge until a fresh builder, fresh checkrun, and fresh independent judge all pass.
+
+## 2026-07-14 — Judge 2 FAIL: contextual labels only partially localized
+
+- Independent judge 2 verified both previous corrections: Ctrl+Alt AltGr punctuation is scope-safe, and `Shift+?` opens the contextual sheet in place while preserving the inbox route.
+- The slice still failed because active `global` and `navigation` actions `goToStarred`, `goToSnoozed`, `toggleTheme`, and `toggleSidebar` fall back to raw internal identifiers in the contextual sheet.
+- The corrective builder must provide explicit English and French catalog labels for every active contextual action and add a regression proving no active action falls back to its identifier.
+- The MAY TOUCH boundary and frozen touch audit now include only `apps/mail/messages/en.json` and `apps/mail/messages/fr.json` in addition to the prior keyboard/settings surface. No other message catalog or product area is authorised.
+- Merge remains blocked until a fresh builder, fresh checkrun under the new freeze, and fresh independent judge all pass.
