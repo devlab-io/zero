@@ -12,3 +12,9 @@
 
 - Plain `git status --porcelain` collapses a newly created untracked report directory to `docs/jobs/niveau10/`, causing the touch-set check to reject the authorised report before it is committed.
 - The touch-set command now requests `--untracked-files=all`; the allowed product and report paths are unchanged.
+
+## 2026-07-14 — Sandboxed Paraglide fetch versus deterministic runner
+
+- The fresh builder passed 35/35 focused tests, focused lint, the corrected touch-set audit, and diff hygiene, but its sandbox could not fetch the two jsDelivr Paraglide plugins; type generation then produced incomplete message exports and React Router prerender failed.
+- The orchestrator's deterministic check-runner reran the exact frozen `react-router typegen && build` command outside the network-restricted builder sandbox. Plugin compilation and the full production build exited 0, while every other frozen command also exited 0.
+- The authoritative independent evidence is `docs/jobs/niveau10/keyboard-runtime-checkrun.md`; no product fallback or check weakening is authorised.
