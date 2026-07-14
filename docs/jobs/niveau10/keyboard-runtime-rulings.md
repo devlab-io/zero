@@ -49,3 +49,10 @@
 - The keyboard production build and focused Vitest suite did not typecheck test globals, so the earlier frozen keyboard command could not detect it.
 - The keyboard frozen build command now runs `tsc --noEmit` after type generation and before the production build. A fresh correction builder may change only the test-global assignment required to satisfy that gate.
 - Search/triage remains blocked until this owner-slice correction is independently checked and integrated into a new freeze.
+
+## 2026-07-14 — Owner-scoped TypeScript gate breaks a cross-slice cycle
+
+- Correction builder 2 removed the keyboard-owned `TS7017`; 37/37 tests, focused ESLint, touch audit and diff hygiene passed.
+- A complete generated mail `tsc` then failed only on `mail-list-thread.tsx:232`, a search/triage-owned prefetch guard already corrected on that job branch. The two additional errors seen before Wrangler generation disappeared after the full `server types` + `mail types` setup, confirming setup drift rather than product defects.
+- Requiring global mail=0 inside the keyboard slice creates a dependency cycle: search consumes the corrected keyboard freeze while the keyboard check waits for a search-owned file. The keyboard gate is therefore narrowed to reject TypeScript errors in its authorised touch-set and still runs the full production build; the search slice retains the global blocking mail=0 gate.
+- A fresh builder must rerun the corrected owner-scoped command. The cast from builder 2 is not integrated from a BLOCKED report alone.
