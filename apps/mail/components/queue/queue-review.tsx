@@ -115,6 +115,7 @@ export function QueueReview() {
   const { enableScope, disableScope } = useHotkeysContext();
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
+  const selectedItemIdRef = useRef<string | null>(null);
   const [undoDeadlines, setUndoDeadlines] = useState<Record<string, Date | string>>({});
   const [pendingItems, setPendingItems] = useState<Record<string, QueuePendingAction>>({});
   const pendingItemIdsRef = useRef(new Set<string>());
@@ -145,16 +146,21 @@ export function QueueReview() {
   );
   const selectedItem = visibleItems.find((item) => item.id === selectedItemId) ?? null;
 
+  const selectQueueItem = useCallback((itemId: string | null) => {
+    selectedItemIdRef.current = itemId;
+    setSelectedItemId(itemId);
+  }, []);
+
   useEffect(() => {
     if (!visibleItems.length) {
-      setSelectedItemId(null);
+      selectQueueItem(null);
       return;
     }
 
     if (!visibleItems.some((item) => item.id === selectedItemId)) {
-      setSelectedItemId(visibleItems[0]?.id ?? null);
+      selectQueueItem(visibleItems[0]?.id ?? null);
     }
-  }, [selectedItemId, visibleItems]);
+  }, [selectQueueItem, selectedItemId, visibleItems]);
 
   const invalidateOutbox = async () => {
     await queryClient.invalidateQueries({ queryKey: trpc.outbox.list.queryKey() });
@@ -280,11 +286,11 @@ export function QueueReview() {
 
   const moveSelection = useCallback(
     (direction: 'next' | 'previous') => {
-      const nextId = resolveQueueSelectionId(visibleItems, selectedItemId, direction);
-      setSelectedItemId(nextId);
+      const nextId = resolveQueueSelectionId(visibleItems, selectedItemIdRef.current, direction);
+      selectQueueItem(nextId);
       focusQueueItem(nextId);
     },
-    [focusQueueItem, selectedItemId, visibleItems],
+    [focusQueueItem, selectQueueItem, visibleItems],
   );
 
   const shortcutHandlers: Record<(typeof QUEUE_HANDLED_ACTIONS)[number], () => void> =
@@ -416,7 +422,7 @@ export function QueueReview() {
                       onCancel={() => cancelItem(item)}
                       onOpen={() => openItem(item)}
                       onRetry={() => retryItem(item)}
-                      onSelect={() => setSelectedItemId(item.id)}
+                      onSelect={() => selectQueueItem(item.id)}
                       statusLabel={labels[undoDeadlines[item.id] ? 'approved' : item.status]}
                     />
                   ))}
