@@ -249,7 +249,9 @@ export const oauthApplication = createTable(
     metadata: text('metadata'),
     clientId: text('client_id').unique(),
     clientSecret: text('client_secret'),
-    redirectURLs: text('redirect_u_r_ls'),
+    // Better Auth resolves adapter fields by their model property name. Keep
+    // the legacy physical column name while exposing the current field name.
+    redirectUrls: text('redirect_u_r_ls'),
     type: text('type'),
     disabled: boolean('disabled'),
     userId: text('user_id'),
