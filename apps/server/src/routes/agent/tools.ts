@@ -2,6 +2,7 @@ import { logger } from '../../lib/logger';
 import { getCurrentDateContext, GmailSearchAssistantSystemPrompt } from '../../lib/prompts';
 import { getThread, getZeroAgent } from '../../lib/server-utils';
 import type { IGetThreadResponse } from '../../lib/driver/types';
+import { sanitizeMailContent } from '../../lib/mail-sanitize';
 import { composeEmail } from '../../trpc/routes/ai/compose';
 import { perplexity } from '@ai-sdk/perplexity';
 import { colors } from '../../lib/prompts';
@@ -151,7 +152,7 @@ const getThreadSummary = (connectionId: string) =>
           input_text: result.summary,
         });
         return {
-          short: shortResponse.summary,
+          short: sanitizeMailContent(shortResponse.summary).text,
           subject: thread.latest?.subject,
           sender: thread.latest?.sender,
           date: thread.latest?.receivedOn,

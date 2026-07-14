@@ -2,6 +2,11 @@ import { logger } from '../../lib/logger';
 import { streamText, tool, type DataStreamWriter, type ToolSet } from 'ai';
 import { perplexity } from '@ai-sdk/perplexity';
 
+import {
+  executeAuthorizedAgentTool,
+  isProtectedAgentTool,
+  type AgentPolicyMessage,
+} from '../../lib/agent-security/policy';
 import { getZeroAgent } from '../../lib/server-utils';
 import { Tools } from '../../types';
 import { z } from 'zod';
@@ -97,8 +102,21 @@ export class ToolOrchestrator {
     const processedTools = { ...tools };
 
     for (const [toolName, toolInstance] of Object.entries(tools)) {
-      if (this.isStreamingTool(toolName)) {
-        processedTools[toolName as keyof T] = this.createStreamingAgent(toolName, toolInstance);
+      const processedTool = this.isStreamingTool(toolName)
+        ? this.createStreamingAgent(toolName, toolInstance)
+        : toolInstance;
+
+      if (isProtectedAgentTool(toolName) && typeof processedTool?.execute === 'function') {
+        const execute = processedTool.execute.bind(processedTool);
+        processedTools[toolName as keyof T] = {
+          ...processedTool,
+          execute: async (args: unknown, options: { messages?: AgentPolicyMessage[] }) =>
+            executeAuthorizedAgentTool({ toolName, args, messages: options?.messages }, () =>
+              execute(args, options),
+            ),
+        } as T[keyof T];
+      } else {
+        processedTools[toolName as keyof T] = processedTool;
       }
     }
 

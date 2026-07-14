@@ -241,7 +241,10 @@ export class ZeroMCP extends McpAgent<typeof env, Record<string, unknown>, { use
           });
           return {
             content: [
-              { type: 'text' as const, text: shortResponse.summary as string },
+              {
+                type: 'text' as const,
+                text: sanitizeMailContent(shortResponse.summary as string).text,
+              },
               { type: 'text' as const, text: `Subject: ${thread.latest?.subject}` },
               { type: 'text' as const, text: `Sender: ${formatSender(thread.latest?.sender)}` },
               { type: 'text' as const, text: `Date: ${thread.latest?.receivedOn}` },

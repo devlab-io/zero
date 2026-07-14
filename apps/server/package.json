@@ -13,6 +13,7 @@
     "db:push": "node scripts/db-push-guard.mjs && drizzle-kit push",
     "db:studio": "drizzle-kit studio",
     "eval": "evalite",
+    "eval:prompt-injection": "evalite evals/indirect-prompt-injection.eval.ts",
     "eval:dev": "evalite watch",
     "test": "vitest run",
     "test:cron": "curl 'http://localhost:8787/cdn-cgi/handler/scheduled'"

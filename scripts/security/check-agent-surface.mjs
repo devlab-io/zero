@@ -2,13 +2,26 @@ import { readFile } from 'node:fs/promises';
 
 const read = (path) => readFile(new URL(`../../${path}`, import.meta.url), 'utf8');
 
-const [toolRegistry, mcp, scopes, auth, prompt, legacyPrompt] = await Promise.all([
+const [
+  toolRegistry,
+  mcp,
+  scopes,
+  auth,
+  prompt,
+  legacyPrompt,
+  orchestrator,
+  agentPolicy,
+  mailSanitizer,
+] = await Promise.all([
   read('apps/server/src/routes/agent/tools.ts'),
   read('apps/server/src/routes/agent/mcp.ts'),
   read('apps/server/src/lib/google-scopes.ts'),
   read('apps/server/src/lib/auth.ts'),
   read('apps/server/src/lib/prompts.ts'),
   read('apps/server/src/services/call-service/system-prompt.ts'),
+  read('apps/server/src/routes/agent/orchestrator.ts'),
+  read('apps/server/src/lib/agent-security/policy.ts'),
+  read('apps/server/src/lib/mail-sanitize/index.ts'),
 ]);
 
 const failures = [];
@@ -137,10 +150,39 @@ assert(
   'session cookie cache revocation window is not five minutes',
 );
 
+// Indirect prompt injection: untrusted content cannot grant tool authority.
+assert(
+  prompt.includes('<untrusted_data_protocol>'),
+  'primary prompt is missing the untrusted-data protocol',
+);
+assert(
+  orchestrator.includes('executeAuthorizedAgentTool') &&
+    orchestrator.includes('isProtectedAgentTool'),
+  'agent orchestrator is not wired to the trusted-user intent gate',
+);
+for (const protectedTool of [
+  'searchThreads',
+  'webSearch',
+  'createDraft',
+  'enqueueDraftJob',
+  'bulkArchive',
+]) {
+  assert(
+    agentPolicy.includes(`${protectedTool}:`),
+    `indirect prompt injection policy is missing ${protectedTool}`,
+  );
+}
+assert(
+  mailSanitizer.includes('neutralizeUnicodeControls'),
+  'mail sanitizer is missing Unicode-control neutralization',
+);
+
 if (failures.length) {
   console.error(`Security surface check failed (${failures.length}):`);
   for (const failure of failures) console.error(`- ${failure}`);
   process.exit(1);
 }
 
-console.log('Security surface check passed: least scopes, bounded session cache, draft-only MCP.');
+console.log(
+  'Security surface check passed: least scopes, bounded session cache, draft-only MCP, prompt-injection intent gate.',
+);

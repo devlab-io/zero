@@ -31,6 +31,7 @@
     "test": "turbo run test",
     "test:e2e": "pnpm --filter=@zero/testing test:e2e",
     "eval": "dotenv -- pnpm --filter=@zero/server run eval",
+    "eval:prompt-injection": "dotenv -- pnpm --filter=@zero/server run eval:prompt-injection",
     "eval:dev": "dotenv -- pnpm --filter=@zero/server run eval:dev"
   },
   "lint-staged": {
