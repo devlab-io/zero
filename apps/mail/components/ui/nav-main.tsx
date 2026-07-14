@@ -1,4 +1,3 @@
-import { log } from '@/lib/log';
 import { SidebarGroup, SidebarMenu, SidebarMenuButton, SidebarMenuItem } from './sidebar';
 import { Collapsible, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { useCommandPalette } from '../context/command-palette-context.jsx';
@@ -22,6 +21,7 @@ import { useCallback, useRef } from 'react';
 import { BASE_URL } from '@/lib/constants';
 import { Plus } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { log } from '@/lib/log';
 import { toast } from 'sonner';
 import * as React from 'react';
 
@@ -172,13 +172,13 @@ export function NavMain({ items }: NavMainProps) {
         await refetch();
         return result;
       });
-      
+
       toast.promise(promise, {
         loading: 'Creating label...',
         success: 'Label created successfully',
         error: 'Failed to create label',
       });
-      
+
       await promise;
     } catch (error) {
       log.error('Failed to create label:', error);
@@ -253,6 +253,7 @@ export function NavMain({ items }: NavMainProps) {
                       <Button
                         variant="ghost"
                         size="icon"
+                        aria-label={m['common.threadDisplay.addLabel']()}
                         className="mr-1 h-4 w-4 p-0 hover:bg-transparent"
                       >
                         <Plus className="text-muted-foreground h-3 w-3 dark:text-[#898989]" />

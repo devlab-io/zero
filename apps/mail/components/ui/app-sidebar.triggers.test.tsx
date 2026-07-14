@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, useReducer, useEffect } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { act, useReducer, useEffect } from 'react';
 
 // #44 supervisor ruling d2f3e884 (dégel 0e55cc09) — OPTION A STRUCTURELLE, sans @testing-library/user-event.
 // La dep directe user-event a été revertée : pnpm-lock.yaml est MUST-NOT-TOUCH de la fence #44, et le ruling
@@ -42,7 +42,10 @@ vi.mock('nuqs', () => ({
       };
     }, []);
     const setter = (v: unknown) => {
-      queryStore[key] = typeof v === 'function' ? (v as (o: unknown) => string | null)(queryStore[key] ?? null) : (v as string | null);
+      queryStore[key] =
+        typeof v === 'function'
+          ? (v as (o: unknown) => string | null)(queryStore[key] ?? null)
+          : (v as string | null);
       notify();
     };
     return [queryStore[key] ?? null, setter];
@@ -76,9 +79,9 @@ vi.mock('@/components/ui/sidebar', async (orig) => ({
 }));
 vi.mock('@/hooks/use-mobile', () => ({ useIsMobile: () => false }));
 
+import { PricingDialogSurface } from '../mail/mail-lazy-surfaces';
 import { ComposeButton, PricingTrialButton } from './app-sidebar';
 import { useQueryState } from 'nuqs';
-import { PricingDialogSurface } from '../mail/mail-lazy-surfaces';
 
 // A real, bubbling mouse click — the exact native event a pointer activation produces. No user-event.
 function realClick(el: Element) {
@@ -133,6 +136,7 @@ describe('Compose (real ComposeButton, real mouse click)', () => {
     const btn = container.querySelector('button')!;
     // STRUCTURAL: the trigger is a real native <button> (Enter/Space-activatable in a real browser).
     expect(btn.tagName).toBe('BUTTON');
+    expect(btn.getAttribute('aria-label')).toBe('New email');
     // COLD: the compose chunk import has NOT been invoked (the dialog is closed, ComposeSurface
     // unmounted, so React.lazy never triggered import('./create-email')).
     expect(h.composeFactory).toBe(0);
@@ -143,6 +147,10 @@ describe('Compose (real ComposeButton, real mouse click)', () => {
     });
     expect(queryStore['isComposeOpen']).toBe('true'); // real query flipped by the real click
     expect(h.composeFactory).toBeGreaterThan(0); // the click invoked the lazy import
+    expect(document.body.textContent).toContain('Email composer');
+    expect(document.body.textContent).toContain(
+      'Write recipients, subject and message, then review the actions before sending.',
+    );
     expect(document.querySelector('[role="status"]')?.textContent).toContain('Loading composer');
     expect(document.querySelector('[data-testid="compose"]')).toBeNull();
 

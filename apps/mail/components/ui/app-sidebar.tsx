@@ -7,10 +7,11 @@ import {
 } from '@/components/ui/dialog';
 import { Sidebar, SidebarContent, SidebarFooter, SidebarHeader } from '@/components/ui/sidebar';
 import { navigationConfig, bottomNavItems } from '@/config/navigation';
-import { useTRPC } from '@/providers/query-provider';
-import { useSidebar } from '@/components/ui/sidebar';
 // import { useMutation } from '@tanstack/react-query';
 import { ComposeSurface } from '../create/compose-surface';
+import { useTRPC } from '@/providers/query-provider';
+import { useSidebar } from '@/components/ui/sidebar';
+import { useAIFullScreen } from './use-ai-sidebar';
 import { PencilCompose, X } from '../icons/icons';
 import { useQuery } from '@tanstack/react-query';
 import { useBilling } from '@/hooks/use-billing';
@@ -18,7 +19,6 @@ import { useIsMobile } from '@/hooks/use-mobile';
 import React, { useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { useSession } from '@/lib/auth-client';
-import { useAIFullScreen } from './use-ai-sidebar';
 import { useStats } from '@/hooks/use-stats';
 import { useLocation } from 'react-router';
 import { cn, FOLDERS } from '@/lib/utils';
@@ -87,14 +87,19 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         if (queueItem) {
           const BaseIcon = queueItem.icon;
           queueItem.icon = React.forwardRef<SVGSVGElement, React.SVGProps<SVGSVGElement>>(
-            ({ className, ...iconProps }, ref) => (
-              <span className={cn('relative inline-flex shrink-0', className)}>
-                <BaseIcon {...iconProps} ref={ref} className="h-4 w-4" />
-                <span className="absolute -right-2 -top-2 flex h-4 min-w-4 items-center justify-center rounded-full bg-emerald-600 px-1 text-[10px] font-semibold leading-none text-white">
-                  {pendingQueueCount > 99 ? '99+' : pendingQueueCount}
+            // The props are statically enforced by React.SVGProps; this dynamic icon wrapper has
+            // no runtime PropTypes surface for eslint-plugin-react to inspect.
+            // eslint-disable-next-line react/prop-types
+            function QueueNavIconWithBadge({ className, ...iconProps }, ref) {
+              return (
+                <span className={cn('relative inline-flex shrink-0', className)}>
+                  <BaseIcon {...iconProps} ref={ref} className="h-4 w-4" />
+                  <span className="absolute -right-2 -top-2 flex h-4 min-w-4 items-center justify-center rounded-full bg-emerald-600 px-1 text-[10px] font-semibold leading-none text-white">
+                    {pendingQueueCount > 99 ? '99+' : pendingQueueCount}
+                  </span>
                 </span>
-              </span>
-            ),
+              );
+            },
           );
           queueItem.icon.displayName = 'QueueNavIconWithBadge';
         }
@@ -166,6 +171,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
               <Button
                 variant="ghost"
                 size="icon"
+                aria-label={m['common.actions.close']()}
                 className="absolute right-2 top-2 h-6 w-6 rounded-full hover:bg-white/10 [&>svg]:h-2.5 [&>svg]:w-2.5"
                 onClick={() => {
                   setShowUpgrade(false);
@@ -240,17 +246,20 @@ export function ComposeButton() {
   };
   return (
     <Dialog open={!!dialogOpen} onOpenChange={handleOpenChange}>
-      <DialogTitle></DialogTitle>
-      <DialogDescription></DialogDescription>
+      <DialogTitle className="sr-only">{m['states.composer.title']()}</DialogTitle>
+      <DialogDescription className="sr-only">
+        {m['states.composer.description']()}
+      </DialogDescription>
 
       <DialogTrigger asChild>
         {/* #44 (gate A8): warm the lazy compose chunk on explicit user intent (hover/focus),
             never on mount. */}
         <button
           type="button"
+          aria-label={m['common.commandPalette.commands.newEmail']()}
           onPointerEnter={preloadCompose}
           onFocus={preloadCompose}
-          className="relative mb-1.5 inline-flex h-8 w-full items-center justify-center gap-1 self-stretch overflow-hidden rounded-lg border border-gray-200 bg-[#006FFE] text-black dark:border-none dark:text-white cursor-pointer hover:bg-[#0056CC] dark:hover:bg-[#0056CC] transition-colors"
+          className="relative mb-1.5 inline-flex h-8 w-full cursor-pointer items-center justify-center gap-1 self-stretch overflow-hidden rounded-lg border border-gray-200 bg-[#006FFE] text-black transition-colors hover:bg-[#0056CC] dark:border-none dark:text-white dark:hover:bg-[#0056CC]"
         >
           {state === 'collapsed' && !isMobile ? (
             <PencilCompose className="mt-0.5 fill-white text-black" />
