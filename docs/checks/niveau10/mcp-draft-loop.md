@@ -18,8 +18,10 @@ Spec: `docs/spec/niveau10-mailos.md` sections 3, 4 et critères MCP live.
 1. `getThreadContext`, `createReplyDraft`, `listDrafts`, `getDraft`, `updateDraft` sont
    présents dans la source unique, le snapshot et les capabilities.
 2. Le contexte passe par `sanitizeMailContent`, ≤20 messages et ≤64 Kio ; reply dérive destinataires/thread/sujet côté serveur ;
-   lecture restitue le draft détenu ; update conserve son Gmail draft ID.
-3. Une révision obsolète est refusée sans écrasement ; comptes et draft IDs tiers ne
+   lecture restitue le draft détenu ; un update conditionnel conserve le même provider draft ID.
+3. Une révision obsolète ou une édition concurrente est refusée sans écrasement. Le driver
+   doit lier la révision à un vrai CAS provider ; si le provider n'en expose pas, update
+   échoue avant toute mutation avec une capacité explicite. Comptes et draft IDs tiers ne
    révèlent aucune existence.
 4. Instructions serveur : 512 premiers caractères autonomes, draft-only et workflow
    clair. Annotations read/write/destructive/idempotent reflètent le comportement réel.
@@ -30,6 +32,7 @@ Spec: `docs/spec/niveau10-mailos.md` sections 3, 4 et critères MCP live.
 7. `createReplyDraft` et `updateDraft` exigent la clé 1..128 et partagent les tests de
    réservation atomique : 20 appels concurrents, conflit de payload, zéro double effet.
 8. Un smoke HTTP local prouve initialize → tools/list → lecture → create reply draft →
-   get → update sur fakes réalistes, et vérifie que les outils interdits sont absents.
+   get → update sur un fake CAS réaliste, plus le fail-closed d'un provider sans CAS, et
+   vérifie que les outils interdits sont absents.
 9. Le builder adapte explicitement la whitelist de `check-agent-surface.mjs` aux deux
    nouvelles writes draft-only et ne touche ni la spec ni les checks ; aucun commit/push.
