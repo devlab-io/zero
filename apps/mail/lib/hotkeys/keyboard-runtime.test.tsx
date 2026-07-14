@@ -1,37 +1,48 @@
 import { HotkeysProvider, useHotkeysContext } from 'react-hotkeys-hook';
-import { act, useEffect } from 'react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createRoot, type Root } from 'react-dom/client';
 import { MemoryRouter, useLocation } from 'react-router';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { act, useEffect } from 'react';
 
+import {
+  dispatchShortcutEvent,
+  dispatchShortcutSequenceEvent,
+  useShortcuts,
+} from './use-hotkey-utils';
 import { keyboardShortcuts, type Shortcut } from '@/config/shortcuts';
-import enMessages from '@/messages/en.json';
 import frMessages from '@/messages/fr.json';
-import { dispatchShortcutEvent, dispatchShortcutSequenceEvent, useShortcuts } from './use-hotkey-utils';
+import enMessages from '@/messages/en.json';
 
-vi.mock('@/components/context/command-palette-context', () => ({ useCommandPalette: () => ({ clearAllFilters: vi.fn() }) }));
-vi.mock('@/components/context/sidebar-context', () => ({ useSidebar: () => ({ toggleSidebar: vi.fn() }) }));
-vi.mock('@/hooks/use-optimistic-actions', () => ({ useOptimisticActions: () => ({ undoLastAction: vi.fn() }) }));
+vi.mock('@/components/context/command-palette-context', () => ({
+  useCommandPalette: () => ({ clearAllFilters: vi.fn() }),
+}));
+vi.mock('@/components/context/sidebar-context', () => ({
+  useSidebar: () => ({ toggleSidebar: vi.fn() }),
+}));
+vi.mock('@/hooks/use-optimistic-actions', () => ({
+  useOptimisticActions: () => ({ undoLastAction: vi.fn() }),
+}));
 vi.mock('next-themes', () => ({ useTheme: () => ({ theme: 'light', setTheme: vi.fn() }) }));
 vi.mock('nuqs', async () => {
   const React = await import('react');
   return { useQueryState: () => React.useState<string | null>(null) };
 });
 
-const shortcutsFor = (scope: string) => keyboardShortcuts.filter((shortcut) => shortcut.scope === scope);
+const shortcutsFor = (scope: string) =>
+  keyboardShortcuts.filter((shortcut) => shortcut.scope === scope);
 const contextualSheetScopes = [...new Set(keyboardShortcuts.map((shortcut) => shortcut.scope))];
-const contextualSheetActions = [...new Set(
-  keyboardShortcuts
-    .filter((shortcut) => !shortcut.ignore)
-    .map((shortcut) => shortcut.action),
-)];
+const contextualSheetActions = [
+  ...new Set(
+    keyboardShortcuts.filter((shortcut) => !shortcut.ignore).map((shortcut) => shortcut.action),
+  ),
+];
 const contextualActionCatalogs = [
   enMessages.pages.settings.shortcuts.actions,
   frMessages.pages.settings.shortcuts.actions,
 ] as Array<Record<string, string>>;
 
-(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean })
-  .IS_REACT_ACT_ENVIRONMENT = true;
+(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT =
+  true;
 
 let root: Root | undefined;
 let container: HTMLDivElement | undefined;
@@ -71,6 +82,24 @@ function mountRuntime(enabled: boolean, onArchive: () => void) {
   });
 }
 
+function QueueRuntimeProbe({ handlers }: { handlers: Record<string, () => void> }) {
+  useShortcuts(shortcutsFor('queue'), handlers, { scope: 'queue', preventDefault: true });
+  return null;
+}
+
+function mountQueueRuntime(handlers: Record<string, () => void>) {
+  container = document.createElement('div');
+  document.body.appendChild(container);
+  root = createRoot(container);
+  act(() => {
+    root?.render(
+      <HotkeysProvider initiallyActiveScopes={['queue']}>
+        <QueueRuntimeProbe handlers={handlers} />
+      </HotkeysProvider>,
+    );
+  });
+}
+
 describe('keyboard runtime', () => {
   it('keeps every alias for a mail-list action when real keyboard events arrive', () => {
     const calls: string[] = [];
@@ -95,7 +124,17 @@ describe('keyboard runtime', () => {
       dispatchShortcutEvent(event, shortcutsFor('mail-list'), handlers);
     }
 
-    expect(calls).toEqual(['archive', 'archive', 'remind', 'remind', 'unread', 'unread', 'delete', 'delete', 'delete']);
+    expect(calls).toEqual([
+      'archive',
+      'archive',
+      'remind',
+      'remind',
+      'unread',
+      'unread',
+      'delete',
+      'delete',
+      'delete',
+    ]);
   });
 
   it('matches canonical punctuation and modifiers from QWERTY and AZERTY events', () => {
@@ -106,11 +145,31 @@ describe('keyboard runtime', () => {
       helpWithShortcuts: () => calls.push('help'),
     };
 
-    dispatchShortcutEvent(new KeyboardEvent('keydown', { key: '+', code: 'Equal', shiftKey: true }), shortcutsFor('mail-list'), handlers);
-    dispatchShortcutEvent(new KeyboardEvent('keydown', { key: '+', code: 'Equal', shiftKey: true }), shortcutsFor('thread-display'), handlers);
-    dispatchShortcutEvent(new KeyboardEvent('keydown', { key: ',', code: 'Comma', ctrlKey: true }), shortcutsFor('global'), handlers);
-    dispatchShortcutEvent(new KeyboardEvent('keydown', { key: '?', code: 'Slash', shiftKey: true }), shortcutsFor('global'), handlers);
-    dispatchShortcutEvent(new KeyboardEvent('keydown', { key: '?', code: 'Comma', shiftKey: true }), shortcutsFor('global'), handlers);
+    dispatchShortcutEvent(
+      new KeyboardEvent('keydown', { key: '+', code: 'Equal', shiftKey: true }),
+      shortcutsFor('mail-list'),
+      handlers,
+    );
+    dispatchShortcutEvent(
+      new KeyboardEvent('keydown', { key: '+', code: 'Equal', shiftKey: true }),
+      shortcutsFor('thread-display'),
+      handlers,
+    );
+    dispatchShortcutEvent(
+      new KeyboardEvent('keydown', { key: ',', code: 'Comma', ctrlKey: true }),
+      shortcutsFor('global'),
+      handlers,
+    );
+    dispatchShortcutEvent(
+      new KeyboardEvent('keydown', { key: '?', code: 'Slash', shiftKey: true }),
+      shortcutsFor('global'),
+      handlers,
+    );
+    dispatchShortcutEvent(
+      new KeyboardEvent('keydown', { key: '?', code: 'Comma', shiftKey: true }),
+      shortcutsFor('global'),
+      handlers,
+    );
 
     expect(calls).toEqual(['important', 'important', 'settings', 'help', 'help']);
   });
@@ -119,7 +178,13 @@ describe('keyboard runtime', () => {
     const calls: string[] = [];
     const shortcuts: Shortcut[] = [
       { keys: ['u'], action: 'bare', type: 'single', description: 'Bare U', scope: 'test' },
-      { keys: ['shift', 'u'], action: 'shifted', type: 'combination', description: 'Shift U', scope: 'test' },
+      {
+        keys: ['shift', 'u'],
+        action: 'shifted',
+        type: 'combination',
+        description: 'Shift U',
+        scope: 'test',
+      },
     ];
 
     dispatchShortcutEvent(
@@ -140,12 +205,35 @@ describe('keyboard runtime', () => {
     const dialogButton = document.createElement('button');
     dialog.appendChild(dialogButton);
     const calls: string[] = [];
-    const handlers = { archiveEmail: () => calls.push('archive'), exitSelectionMode: () => calls.push('escape') };
+    const handlers = {
+      archiveEmail: () => calls.push('archive'),
+      exitSelectionMode: () => calls.push('escape'),
+    };
 
-    dispatchShortcutEvent(new KeyboardEvent('keydown', { key: 'd', code: 'KeyD' }), shortcutsFor('mail-list'), handlers, input);
-    dispatchShortcutEvent(new KeyboardEvent('keydown', { key: 'd', code: 'KeyD' }), shortcutsFor('mail-list'), handlers, editor);
-    dispatchShortcutEvent(new KeyboardEvent('keydown', { key: 'd', code: 'KeyD' }), shortcutsFor('mail-list'), handlers, dialogButton);
-    dispatchShortcutEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape' }), shortcutsFor('mail-list'), handlers, input);
+    dispatchShortcutEvent(
+      new KeyboardEvent('keydown', { key: 'd', code: 'KeyD' }),
+      shortcutsFor('mail-list'),
+      handlers,
+      input,
+    );
+    dispatchShortcutEvent(
+      new KeyboardEvent('keydown', { key: 'd', code: 'KeyD' }),
+      shortcutsFor('mail-list'),
+      handlers,
+      editor,
+    );
+    dispatchShortcutEvent(
+      new KeyboardEvent('keydown', { key: 'd', code: 'KeyD' }),
+      shortcutsFor('mail-list'),
+      handlers,
+      dialogButton,
+    );
+    dispatchShortcutEvent(
+      new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape' }),
+      shortcutsFor('mail-list'),
+      handlers,
+      input,
+    );
 
     expect(calls).toEqual(['escape']);
   });
@@ -155,15 +243,78 @@ describe('keyboard runtime', () => {
     mountRuntime(false, () => calls.push('archive'));
 
     act(() => {
-      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'd', code: 'KeyD', bubbles: true }));
+      document.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'd', code: 'KeyD', bubbles: true }),
+      );
     });
     expect(calls).toEqual([]);
 
     mountRuntime(true, () => calls.push('archive'));
     act(() => {
-      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'd', code: 'KeyD', bubbles: true }));
+      document.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'd', code: 'KeyD', bubbles: true }),
+      );
     });
     expect(calls).toEqual(['archive']);
+  });
+
+  it('dispatches every queue navigation variant exactly once without typing/modal leaks or a parallel listener', () => {
+    const calls: string[] = [];
+    const handlers = {
+      focusNext: () => calls.push('next'),
+      focusPrevious: () => calls.push('previous'),
+      openSelected: () => calls.push('open'),
+      approveSelected: () => calls.push('approve'),
+      rejectSelected: () => calls.push('reject'),
+    };
+    const addEventListener = vi.spyOn(document, 'addEventListener');
+
+    try {
+      mountQueueRuntime(handlers);
+      expect(
+        addEventListener.mock.calls.filter(([eventName]) => eventName === 'keydown'),
+      ).toHaveLength(1);
+
+      for (const event of [
+        new KeyboardEvent('keydown', { key: 'j', code: 'KeyJ', bubbles: true }),
+        new KeyboardEvent('keydown', { key: 'ArrowDown', code: 'ArrowDown', bubbles: true }),
+        new KeyboardEvent('keydown', { key: 'k', code: 'KeyK', bubbles: true }),
+        new KeyboardEvent('keydown', { key: 'ArrowUp', code: 'ArrowUp', bubbles: true }),
+        new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true }),
+        new KeyboardEvent('keydown', { key: ' ', code: 'Space', bubbles: true }),
+      ]) {
+        act(() => document.dispatchEvent(event));
+      }
+      expect(calls).toEqual(['next', 'next', 'previous', 'previous', 'open', 'open']);
+
+      const input = document.createElement('input');
+      const editor = document.createElement('div');
+      editor.setAttribute('contenteditable', 'true');
+      const dialog = document.createElement('div');
+      dialog.setAttribute('role', 'dialog');
+      const dialogButton = document.createElement('button');
+      dialog.appendChild(dialogButton);
+      document.body.append(input, editor, dialog);
+
+      for (const target of [input, editor, dialogButton]) {
+        for (const init of [
+          { key: 'j', code: 'KeyJ' },
+          { key: 'ArrowDown', code: 'ArrowDown' },
+          { key: 'k', code: 'KeyK' },
+          { key: 'ArrowUp', code: 'ArrowUp' },
+          { key: 'Enter', code: 'Enter' },
+          { key: ' ', code: 'Space' },
+        ]) {
+          act(() => target.dispatchEvent(new KeyboardEvent('keydown', { ...init, bubbles: true })));
+        }
+      }
+      expect(calls).toEqual(['next', 'next', 'previous', 'previous', 'open', 'open']);
+      input.remove();
+      editor.remove();
+      dialog.remove();
+    } finally {
+      addEventListener.mockRestore();
+    }
   });
 
   it('routes g ! and g # sequences from real QWERTY and AZERTY punctuation events', () => {
@@ -207,7 +358,10 @@ describe('keyboard runtime', () => {
 
   it('accepts Ctrl+Alt layout punctuation only for punctuation shortcuts', () => {
     const calls: string[] = [];
-    const handlers = { bulkDelete: () => calls.push('delete'), archiveEmail: () => calls.push('archive') };
+    const handlers = {
+      bulkDelete: () => calls.push('delete'),
+      archiveEmail: () => calls.push('archive'),
+    };
     const input = document.createElement('input');
     const dialog = document.createElement('div');
     dialog.setAttribute('role', 'dialog');
@@ -256,13 +410,17 @@ describe('keyboard runtime', () => {
       );
     });
     act(() => {
-      document.dispatchEvent(new KeyboardEvent('keydown', { key: '?', code: 'Slash', shiftKey: true, bubbles: true }));
+      document.dispatchEvent(
+        new KeyboardEvent('keydown', { key: '?', code: 'Slash', shiftKey: true, bubbles: true }),
+      );
     });
 
     expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Keyboard Shortcuts');
     expect(document.querySelector('[role="dialog"]')?.textContent).toContain('New Email');
     for (const action of contextualSheetActions) {
-      expect(document.querySelector(`[data-shortcut-action="${action}"]`)?.textContent).not.toBe(action);
+      expect(document.querySelector(`[data-shortcut-action="${action}"]`)?.textContent).not.toBe(
+        action,
+      );
     }
     for (const catalog of contextualActionCatalogs) {
       for (const action of contextualSheetActions) {
