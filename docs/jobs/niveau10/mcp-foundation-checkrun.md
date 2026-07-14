@@ -1,10 +1,10 @@
 # Checkrun: mcp-foundation-checkrun
-generated: 2026-07-14T12:04:25Z  runner: sh  config: .architect/checkrun-mcp-foundation-v5.json
+generated: 2026-07-14T12:19:57Z  runner: sh  config: .architect/checkrun-mcp-foundation-v5.json
 check_file: docs/checks/niveau10/mcp-foundation.md  freeze_sha: e08ef425cfd50b1491ef5771ff86c595b7f2f63c
 Executor: bash
 executor_config: bash
-integrity: check_file_matches_freeze=true head=d64d8314875dd097ddd561af06d01e60491727ff
-changed_files: 12 listed below; docs_checks_touched=false
+integrity: check_file_matches_freeze=true head=01195efb9d5ab67fb91325795015662eecae7087
+changed_files: 15 listed below; docs_checks_touched=false
 apps/server/src/lib/logger.ts
 apps/server/src/routes/agent/mcp-account.test.ts
 apps/server/src/routes/agent/mcp-account.ts
@@ -15,24 +15,27 @@ apps/server/src/routes/agent/mcp-tools.test.ts
 apps/server/src/routes/agent/mcp-tools.ts
 apps/server/src/routes/agent/mcp.ts
 apps/server/src/routes/index.ts
+docs/jobs/niveau10/keyboard-runtime-rulings.md
 docs/jobs/niveau10/mcp-foundation-01.md
+docs/jobs/niveau10/mcp-foundation-checkrun.md
+docs/jobs/niveau10/mcp-foundation-rulings.md
 scripts/security/check-agent-surface.mjs
 
 ## RUN line 9
 $ pnpm --filter @zero/server exec vitest run src/routes/agent/mcp-auth.test.ts src/routes/agent/mcp-account.test.ts src/routes/agent/mcp-idempotency.test.ts src/routes/agent/mcp-tools.test.ts
-exit: 0  ms: 813  bytes: 518
+exit: 0  ms: 866  bytes: 519
 
  RUN  v3.2.7 /Users/thomasverdenne/cc/zero-niveau10/.architect/wt/niveau10/mcp-foundation-01/apps/server
 
  ✓ src/routes/agent/mcp-account.test.ts (2 tests) 3ms
- ✓ src/routes/agent/mcp-idempotency.test.ts (3 tests) 11ms
- ✓ src/routes/agent/mcp-tools.test.ts (19 tests) 10ms
- ✓ src/routes/agent/mcp-auth.test.ts (4 tests) 8ms
+ ✓ src/routes/agent/mcp-idempotency.test.ts (3 tests) 13ms
+ ✓ src/routes/agent/mcp-tools.test.ts (20 tests) 12ms
+ ✓ src/routes/agent/mcp-auth.test.ts (4 tests) 10ms
 
  Test Files  4 passed (4)
-      Tests  28 passed (28)
-   Start at  02:04:26
-   Duration  267ms (transform 111ms, setup 0ms, collect 234ms, tests 31ms, environment 0ms, prepare 189ms)
+      Tests  29 passed (29)
+   Start at  02:19:57
+   Duration  280ms (transform 130ms, setup 0ms, collect 274ms, tests 38ms, environment 0ms, prepare 180ms)
 
 
 ## RUN line 10
@@ -42,12 +45,12 @@ Security surface check passed: least scopes, bounded session cache, draft-only M
 
 ## RUN line 11
 $ pnpm --filter @zero/server exec eslint src/routes/index.ts src/lib/logger.ts src/routes/agent/mcp.ts src/routes/agent/mcp-tools.ts
-exit: 0  ms: 1781  bytes: 140
+exit: 0  ms: 1497  bytes: 140
 Warning: React version not specified in eslint-plugin-react settings. See https://github.com/jsx-eslint/eslint-plugin-react#configuration .
 
 ## RUN line 12
 $ pnpm --filter @zero/server types && pnpm --filter @zero/server exec tsc --noEmit
-exit: 0  ms: 4764  bytes: 3915 truncated
+exit: 0  ms: 4832  bytes: 3915 truncated
 
 > @zero/server@ types /Users/thomasverdenne/cc/zero-niveau10/.architect/wt/niveau10/mcp-foundation-01/apps/server
 > wrangler types --env local
@@ -131,7 +134,7 @@ Runtime types generated.
 
 ## RUN line 13
 $ git status --porcelain --untracked-files=all | sed 's/^...//' | awk '!/^(apps\/server\/(src\/routes\/index\.ts|src\/lib\/logger\.ts|src\/routes\/agent\/mcp[^\/]*\.ts)|scripts\/security\/check-agent-surface\.mjs|docs\/jobs\/niveau10\/mcp-foundation-01\.md)$/ {print; bad=1} END {exit bad}'
-exit: 0  ms: 18  bytes: 0
+exit: 0  ms: 25  bytes: 0
 
 ## RUN line 14
 $ git diff --check
