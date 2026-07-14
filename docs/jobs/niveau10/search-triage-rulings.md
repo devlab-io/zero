@@ -8,3 +8,8 @@
 - `QuickSearchThread.from` is an obsolete projection type while live rows expose `sender`. A narrow exception permits only that interface field change in `command-registry.ts`; command definitions and keyboard bindings remain owned by `keyboard-runtime`.
 - `/` must flow through the already certified `GlobalHotkeys` `search` action. A parallel native `keydown` listener is explicitly rejected.
 - A fresh builder must start from the corrected freeze, rerun every corrected command, and produce a new report; the blocked implementation is not accepted by itself.
+
+## 2026-07-14 — Search owns the remaining global mail type error
+
+- After full Wrangler and Paraglide generation, the keyboard correction branch has no keyboard-owned TypeScript error; the only remaining mail error is the missing `idToUse` guard in `mail-list-thread.tsx:232`.
+- Builder 1 already added the required early return in the search checkpoint. The fresh search builder must retain and test it, then prove the existing global blocking mail=0 command after consuming the corrected keyboard freeze.
