@@ -42,3 +42,10 @@
 - The corrective builder must add an explicit `archivePrevious` mapping and EN/FR labels, then replace the partial `global` + `navigation` regression with an exhaustive assertion over every canonical action that the inbox can activate, including `thread-display`.
 - The v6 MAY TOUCH boundary and frozen commands already authorize the required component, catalogs, and test changes; no check-contract amendment or scope expansion is needed.
 - Merge remains blocked until a fresh builder, fresh deterministic checkrun, and fresh independent judge all pass.
+
+## 2026-07-14 — Generated-type gate exposed a test-global error
+
+- The downstream search slice ran the blocking mail typecheck after `react-router typegen` and exposed `TS7017` on `globalThis.IS_REACT_ACT_ENVIRONMENT` in `keyboard-runtime.test.tsx`.
+- The keyboard production build and focused Vitest suite did not typecheck test globals, so the earlier frozen keyboard command could not detect it.
+- The keyboard frozen build command now runs `tsc --noEmit` after type generation and before the production build. A fresh correction builder may change only the test-global assignment required to satisfy that gate.
+- Search/triage remains blocked until this owner-slice correction is independently checked and integrated into a new freeze.
