@@ -185,7 +185,10 @@ const mailListShortcuts: Shortcut[] = [
   shortcut(['+'], 'markAsImportant', 'Mark as important', 'mail-list'),
   shortcut(['-'], 'markAsNotImportant', 'Mark as not important', 'mail-list'),
   shortcut(['x'], 'toggleFocusedSelection', 'Select focused email', 'mail-list'),
-  shortcut(['#'], 'bulkDelete', 'Move to bin', 'mail-list', { type: 'single', preventDefault: true }),
+  shortcut(['#'], 'bulkDelete', 'Move to bin', 'mail-list', {
+    type: 'single',
+    preventDefault: true,
+  }),
   shortcut(['delete'], 'bulkDelete', 'Move to bin', 'mail-list', {
     type: 'single',
     preventDefault: true,
@@ -229,7 +232,10 @@ const threadDisplayShortcuts: Shortcut[] = [
   shortcut(['shift', 'i'], 'markAsRead', 'Mark as read', 'thread-display', { type: 'combination' }),
   shortcut(['+'], 'markAsImportant', 'Mark as important', 'thread-display'),
   shortcut(['-'], 'markAsNotImportant', 'Mark as not important', 'thread-display'),
-  shortcut(['#'], 'delete', 'Move to bin', 'thread-display', { type: 'single', preventDefault: true }),
+  shortcut(['#'], 'delete', 'Move to bin', 'thread-display', {
+    type: 'single',
+    preventDefault: true,
+  }),
   shortcut(['delete'], 'delete', 'Move to bin', 'thread-display', {
     type: 'single',
     preventDefault: true,
@@ -260,10 +266,19 @@ const composeShortcuts: Shortcut[] = [
     preventDefault: true,
     ignore: true,
   }),
-  shortcut(['escape'], 'closeCompose', 'Close composer', 'compose', { type: 'single', ignore: true }),
+  shortcut(['escape'], 'closeCompose', 'Close composer', 'compose', {
+    type: 'single',
+    ignore: true,
+  }),
 ];
 
 const queueShortcuts: Shortcut[] = [
+  shortcut(['j'], 'focusNext', 'Focus next queue item', 'queue'),
+  shortcut(['ArrowDown'], 'focusNext', 'Focus next queue item', 'queue'),
+  shortcut(['k'], 'focusPrevious', 'Focus previous queue item', 'queue'),
+  shortcut(['ArrowUp'], 'focusPrevious', 'Focus previous queue item', 'queue'),
+  shortcut(['Enter'], 'openSelected', 'Open selected queue item', 'queue'),
+  shortcut(['Space'], 'openSelected', 'Open selected queue item', 'queue'),
   shortcut(['d'], 'approveSelected', 'Approve selected queue item', 'queue'),
   shortcut(['a'], 'approveSelected', 'Approve selected queue item', 'queue'),
   shortcut(['r'], 'rejectSelected', 'Reject selected queue item', 'queue'),
@@ -279,7 +294,10 @@ const listShortcuts: Shortcut[] = [
   shortcut(['j'], 'focusNext', 'Focus next', 'list', { type: 'single', ignore: true }),
   shortcut(['ArrowDown'], 'focusNext', 'Focus next', 'list', { type: 'single', ignore: true }),
   shortcut(['k'], 'focusPrevious', 'Focus previous', 'list', { type: 'single', ignore: true }),
-  shortcut(['ArrowUp'], 'focusPrevious', 'Focus previous', 'list', { type: 'single', ignore: true }),
+  shortcut(['ArrowUp'], 'focusPrevious', 'Focus previous', 'list', {
+    type: 'single',
+    ignore: true,
+  }),
   shortcut(['Enter'], 'openFocused', 'Open focused', 'list', { type: 'single', ignore: true }),
   shortcut(['ArrowRight'], 'openFocused', 'Open focused', 'list', { type: 'single', ignore: true }),
   shortcut(['ArrowLeft'], 'closeList', 'Close thread / clear selection', 'list', {

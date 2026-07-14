@@ -76,7 +76,13 @@ export const MAILLIST_HANDLED_ACTIONS = [
 export const COMPOSE_HANDLED_ACTIONS = ['closeCompose'] as const;
 
 /** `queue` scope — bound by QueueReview from the canonical registry. */
-export const QUEUE_HANDLED_ACTIONS = ['approveSelected', 'rejectSelected', 'openSelected'] as const;
+export const QUEUE_HANDLED_ACTIONS = [
+  'focusNext',
+  'focusPrevious',
+  'openSelected',
+  'approveSelected',
+  'rejectSelected',
+] as const;
 
 /**
  * `list` scope — imperative rows (registry `ignore`), bound in hooks/use-mail-navigation.ts

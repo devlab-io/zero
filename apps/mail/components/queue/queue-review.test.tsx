@@ -1,16 +1,15 @@
 import {
   buildQueueItemAccessibleName,
-  buildQueueNavigationShortcuts,
   clearQueueItemPending,
-  moveQueueSelection,
   setQueueItemPending,
 } from './queue-review.logic';
+import { resolveQueueSelectionId } from '@/lib/hotkeys/queue-navigation';
 import { enhancedKeyboardShortcuts } from '@/config/shortcuts';
 import { describe, expect, it } from 'vitest';
 
 describe('queue review interactions', () => {
   it('derives j/k, arrows, Enter and Space from the canonical registry', () => {
-    const shortcuts = buildQueueNavigationShortcuts(enhancedKeyboardShortcuts);
+    const shortcuts = enhancedKeyboardShortcuts.filter((shortcut) => shortcut.scope === 'queue');
     const bindings = shortcuts.map((shortcut) => `${shortcut.keys.join('+')}:${shortcut.action}`);
 
     expect(bindings).toEqual(
@@ -19,8 +18,8 @@ describe('queue review interactions', () => {
         'ArrowDown:focusNext',
         'k:focusPrevious',
         'ArrowUp:focusPrevious',
-        'Enter:openFocused',
-        'space:pageDown',
+        'Enter:openSelected',
+        'Space:openSelected',
       ]),
     );
     expect(shortcuts.every((shortcut) => shortcut.scope === 'queue' && !shortcut.ignore)).toBe(
@@ -28,13 +27,13 @@ describe('queue review interactions', () => {
     );
   });
 
-  it('moves a roving selection without overflowing either end', () => {
+  it('moves and wraps the roving selection through the production resolver', () => {
     const items = [{ id: 'a' }, { id: 'b' }, { id: 'c' }];
-    expect(moveQueueSelection(items, null, 'next')).toBe('a');
-    expect(moveQueueSelection(items, 'a', 'next')).toBe('b');
-    expect(moveQueueSelection(items, 'c', 'next')).toBe('c');
-    expect(moveQueueSelection(items, null, 'previous')).toBe('c');
-    expect(moveQueueSelection(items, 'a', 'previous')).toBe('a');
+    expect(resolveQueueSelectionId(items, null, 'next')).toBe('a');
+    expect(resolveQueueSelectionId(items, 'a', 'next')).toBe('b');
+    expect(resolveQueueSelectionId(items, 'c', 'next')).toBe('a');
+    expect(resolveQueueSelectionId(items, null, 'previous')).toBe('c');
+    expect(resolveQueueSelectionId(items, 'a', 'previous')).toBe('c');
   });
 
   it('tracks pending state per item so another item remains actionable', () => {

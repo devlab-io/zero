@@ -56,3 +56,31 @@
 - A complete generated mail `tsc` then failed only on `mail-list-thread.tsx:232`, a search/triage-owned prefetch guard already corrected on that job branch. The two additional errors seen before Wrangler generation disappeared after the full `server types` + `mail types` setup, confirming setup drift rather than product defects.
 - Requiring global mail=0 inside the keyboard slice creates a dependency cycle: search consumes the corrected keyboard freeze while the keyboard check waits for a search-owned file. The keyboard gate is therefore narrowed to reject TypeScript errors in its authorised touch-set and still runs the full production build; the search slice retains the global blocking mail=0 gate.
 - A fresh builder must rerun the corrected owner-scoped command. The cast from builder 2 is not integrated from a BLOCKED report alone.
+
+## 2026-07-14 — La navigation queue manquait au registre canonique
+
+- Le builder UX a constaté que le registre `queue` ne contient que `d/a/r/f/h`, tandis que
+  l'acceptation UX exige aussi `j/k`, les flèches, `Enter` et `Space`.
+- Une première adaptation locale réutilisait les entrées `list` via un nouveau listener
+  `document.keydown`. Cela aurait contourné le binder canonique, ses scopes et ses gardes
+  input/editor/dialog ; cette approche est refusée.
+- La correction propriétaire doit ajouter les variantes de navigation au scope `queue`, étendre le
+  manifeste de handlers et prouver par événements réels que chaque variante appelle exactement une
+  fois le bon handler sans fuite de scope. `QueueReview` doit ensuite les consommer via
+  `useShortcuts` ; aucun listener clavier natif parallèle n'est accepté.
+- Aucun changement visuel de la queue n'est autorisé dans cette correction. L'UX reprend la
+  présentation et le pending par item après intégration du nouveau freeze clavier.
+
+## 2026-07-14 — Judge 6 FAIL : probe synthétique sans handlers de production
+
+- Le registre, le manifeste et 39 tests sont verts, mais le juge indépendant a constaté que le
+  vrai `QueueReview` fournit seulement `approveSelected`, `rejectSelected` et `openSelected` au
+  binder. Les nouvelles actions `focusNext` et `focusPrevious` restent donc inertes en production.
+- Le test runtime montait un probe synthétique auquel il injectait lui-même les deux handlers ; il
+  prouvait le binder générique, pas le consommateur réel.
+- La correction suivante doit câbler le déplacement déterministe dans `QueueReview`, fournir un
+  handler exhaustif typé contre `QUEUE_HANDLED_ACTIONS` et conserver `useShortcuts` comme unique
+  listener. Ce changement est comportemental et déjà autorisé par le touch-set ; aucune
+  présentation de queue n'est dégelée.
+- La preuve FAIL est conservée dans `docs/jobs/niveau10/keyboard-queue-nav-judge-6.md`. Un nouveau
+  builder, un checkrun frais et un nouveau juge sont obligatoires avant intégration.

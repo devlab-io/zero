@@ -9,14 +9,14 @@ import {
 } from '@/components/queue/queue-view-model';
 import {
   buildQueueItemAccessibleName,
-  buildQueueNavigationShortcuts,
   clearQueueItemPending,
-  moveQueueSelection,
   setQueueItemPending,
 } from './queue-review.logic';
 import { CheckCircle2, ExternalLink, RefreshCcw, RotateCcw, Undo2, XCircle } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { resolveQueueSelectionId } from '@/lib/hotkeys/queue-navigation';
+import { QUEUE_HANDLED_ACTIONS } from '@/lib/hotkeys/handler-manifest';
 import { useTRPC, useTRPCClient } from '@/providers/query-provider';
 import { enhancedKeyboardShortcuts } from '@/config/shortcuts';
 import { useShortcuts } from '@/lib/hotkeys/use-hotkey-utils';
@@ -267,26 +267,6 @@ export function QueueReview() {
 
   const queueShortcuts = enhancedKeyboardShortcuts.filter((shortcut) => shortcut.scope === 'queue');
 
-  const shortcutHandlers = useMemo(
-    () => ({
-      approveSelected: () => {
-        void approveItem(selectedItem);
-      },
-      rejectSelected: () => {
-        void cancelItem(selectedItem);
-      },
-      openSelected: () => openItem(selectedItem),
-    }),
-    [selectedItem, undoDeadlines],
-  );
-
-  useShortcuts(queueShortcuts, shortcutHandlers, { scope: 'queue', preventDefault: true });
-
-  const queueNavigationShortcuts = useMemo(
-    () => buildQueueNavigationShortcuts(enhancedKeyboardShortcuts),
-    [],
-  );
-
   const focusQueueItem = useCallback((itemId: string | null) => {
     if (!itemId) return;
     requestAnimationFrame(() => {
@@ -300,38 +280,39 @@ export function QueueReview() {
 
   const moveSelection = useCallback(
     (direction: 'next' | 'previous') => {
-      const nextId = moveQueueSelection(visibleItems, selectedItemId, direction);
+      const nextId = resolveQueueSelectionId(visibleItems, selectedItemId, direction);
       setSelectedItemId(nextId);
       focusQueueItem(nextId);
     },
     [focusQueueItem, selectedItemId, visibleItems],
   );
 
-  const queueNavigationHandlers = useMemo(() => {
-    const isOnRowAction = () =>
-      document.activeElement instanceof HTMLElement &&
-      !!document.activeElement.closest('button, a, summary, [role="button"]');
+  const shortcutHandlers: Record<(typeof QUEUE_HANDLED_ACTIONS)[number], () => void> =
+    useMemo(() => {
+      const isOnRowAction = () =>
+        document.activeElement instanceof HTMLElement &&
+        !!document.activeElement.closest('button, a, summary, [role="button"]');
 
-    return {
-      focusNext: () => {
-        if (!isOnRowAction()) moveSelection('next');
-      },
-      focusPrevious: () => {
-        if (!isOnRowAction()) moveSelection('previous');
-      },
-      openFocused: () => {
-        if (!isOnRowAction()) openItem(selectedItem);
-      },
-      pageDown: () => {
-        if (!isOnRowAction()) openItem(selectedItem);
-      },
-    };
-  }, [moveSelection, selectedItem]);
+      return {
+        focusNext: () => {
+          if (!isOnRowAction()) moveSelection('next');
+        },
+        focusPrevious: () => {
+          if (!isOnRowAction()) moveSelection('previous');
+        },
+        approveSelected: () => {
+          void approveItem(selectedItem);
+        },
+        rejectSelected: () => {
+          void cancelItem(selectedItem);
+        },
+        openSelected: () => {
+          if (!isOnRowAction()) openItem(selectedItem);
+        },
+      };
+    }, [moveSelection, selectedItem, undoDeadlines]);
 
-  useShortcuts(queueNavigationShortcuts, queueNavigationHandlers, {
-    scope: 'queue',
-    preventDefault: true,
-  });
+  useShortcuts(queueShortcuts, shortcutHandlers, { scope: 'queue', preventDefault: true });
 
   return (
     <section className="bg-background text-foreground flex h-[100dvh] min-w-0 flex-1 flex-col overflow-x-hidden">
