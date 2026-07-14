@@ -84,6 +84,20 @@ describe('deriveReplyRecipients', () => {
     });
   });
 
+  it('excludes every owned identity and deduplicates To and Cc case-insensitively', () => {
+    const result = deriveReplyRecipients({
+      mode: 'replyAll',
+      userEmail: USER,
+      ownedEmails: ['alias@example.com'],
+      message: {
+        sender: s('Alice@Example.com'),
+        to: [s('alice@example.com'), s('ALIAS@example.com'), s('Bob@Example.com')],
+        cc: [s('bob@example.com'), s('Carol@Example.com'), s('CAROL@example.com')],
+      },
+    });
+    expect(result).toEqual({ to: ['Alice@Example.com', 'Bob@Example.com'], cc: ['Carol@Example.com'] });
+  });
+
   describe('forward and edge cases', () => {
     it('returns empty recipients for forward', () => {
       const result = deriveReplyRecipients({

@@ -280,25 +280,6 @@ export function EmailComposer({
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, [editor]);
 
-  // Perhaps add `hasUnsavedChanges` to the condition
-  useEffect(() => {
-    if (!editor) return;
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        const hasContent = editor?.getText()?.trim().length > 0;
-        if (hasContent && !draftId) {
-          e.preventDefault();
-          e.stopPropagation();
-          setShowLeaveConfirmation(true);
-        }
-      }
-    };
-
-    document.addEventListener('keydown', handleKeyDown, true); // Use capture phase
-    return () => document.removeEventListener('keydown', handleKeyDown, true);
-  }, [editor, draftId]);
-
   const proceedWithSend = async () => {
     try {
       if (isLoading || isSavingDraft) return;
@@ -482,6 +463,20 @@ export function EmailComposer({
       onClose?.();
     }
   };
+
+  // Escape follows the same close policy as the visible close control for new mail,
+  // replies, and forwards: discard empty composers, otherwise ask before leaving.
+  useEffect(() => {
+    if (!editor || !onClose) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      event.stopPropagation();
+      handleClose();
+    };
+    document.addEventListener('keydown', handleKeyDown, true);
+    return () => document.removeEventListener('keydown', handleKeyDown, true);
+  }, [editor, onClose, handleClose]);
 
   const confirmLeave = () => {
     setShowLeaveConfirmation(false);

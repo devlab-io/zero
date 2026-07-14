@@ -153,57 +153,21 @@ export default function ShortcutsPage() {
 }
 
 function ShortcutItem({ children, keys }: { children: ReactNode; keys: string[] }) {
-  // const [isRecording, setIsRecording] = useState(false);
   const displayKeys = formatDisplayKeys(keys);
 
-  // const { updateShortcut } = useShortcutCache(session?.user?.id);
-
-  // const handleHotkeyRecorded = async (newKeys: string[]) => {
-  //   try {
-  //     // Find the original shortcut to preserve its type and description
-  //     const originalShortcut = keyboardShortcuts.find((s) => s.action === action);
-  //     if (!originalShortcut) {
-  //       throw new Error('Original shortcut not found');
-  //     }
-
-  //     const updatedShortcut: Shortcut = {
-  //       ...originalShortcut,
-  //       keys: newKeys,
-  //     };
-
-  //     await updateShortcut(updatedShortcut);
-  //     toast.success('Shortcut saved successfully');
-  //   } catch (error) {
-  //     toast.error('Failed to save shortcut');
-  //   }
-  // };
-
   return (
-    <>
-      <div
-        className="bg-popover text-muted-foreground hover:bg-accent/50 flex cursor-pointer items-center justify-between gap-2 rounded-lg border p-2 text-sm"
-        // onClick={() => setIsRecording(true)}
-        role="button"
-        tabIndex={0}
-      >
-        <span className="font-medium">{children}</span>
-        <div className="flex select-none gap-1">
-          {displayKeys.map((key) => (
-            <kbd
-              key={key}
-              className="border-muted-foreground/10 bg-accent h-6 rounded-[6px] border px-1.5 font-mono text-xs leading-6"
-            >
-              {key}
-            </kbd>
-          ))}
-        </div>
+    <div className="bg-popover text-muted-foreground flex items-center justify-between gap-2 rounded-lg border p-2 text-sm">
+      <span className="font-medium">{children}</span>
+      <div className="flex select-none gap-1">
+        {displayKeys.map((key) => (
+          <kbd
+            key={key}
+            className="border-muted-foreground/10 bg-accent h-6 rounded-[6px] border px-1.5 font-mono text-xs leading-6"
+          >
+            {key}
+          </kbd>
+        ))}
       </div>
-      {/* <HotkeyRecorder
-        isOpen={isRecording}
-        onClose={() => setIsRecording(false)}
-        onHotkeyRecorded={handleHotkeyRecorded}
-        currentKeys={keys}
-      /> */}
-    </>
+    </div>
   );
 }

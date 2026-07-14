@@ -68,10 +68,11 @@ export default function ReplyCompose({ messageId }: ReplyComposeProps) {
       mode,
       message: replyToMessage,
       userEmail: activeConnection.email,
+      ownedEmails: aliases?.map((alias) => alias.email) ?? [],
     });
     const subject = deriveReplySubject({ mode, subject: replyToMessage.subject });
     return { to, cc, subject };
-  }, [activeConnection?.email, mode, replyToMessage]);
+  }, [activeConnection?.email, aliases, mode, replyToMessage]);
 
   const handleSendEmail = async (data: {
     to: string[];

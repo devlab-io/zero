@@ -2,7 +2,7 @@
 import { type Shortcut, keyboardShortcuts, enhancedKeyboardShortcuts } from '@/config/shortcuts';
 import { keyboardLayoutMapper, type KeyboardLayout } from '@/utils/keyboard-layout-map';
 import { getKeyCodeFromKey } from '@/utils/keyboard-utils';
-import { useHotkeys } from 'react-hotkeys-hook';
+import { useHotkeys, useHotkeysContext } from 'react-hotkeys-hook';
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { isMac } from '@/lib/platform';
 
@@ -284,76 +284,112 @@ export function isTypingOrModalTarget(target: EventTarget | null): boolean {
   );
 }
 
+type ShortcutHandlers = Record<string, (() => void) | undefined>;
+export type PendingShortcutSequence = { key: string; startedAt: number } | null;
+
+const modifierKeys = new Set(['mod', 'meta', 'ctrl', 'control', 'alt', 'shift']);
+
+function shortcutMatchesEvent(event: KeyboardEvent, shortcut: Shortcut): boolean {
+  const keys = shortcut.keys.map((key) => key.toLowerCase());
+  const expected = new Set(keys.filter((key) => modifierKeys.has(key)));
+  const expectsMod = expected.has('mod');
+  const expectsMeta = expectsMod || expected.has('meta');
+  const expectsCtrl = expectsMod || expected.has('ctrl') || expected.has('control');
+  const hasMod = event.metaKey || event.ctrlKey;
+
+  if (expectsMod ? !hasMod : event.metaKey || event.ctrlKey) return false;
+  if (!expectsMod && (expectsMeta !== event.metaKey || expectsCtrl !== event.ctrlKey)) return false;
+  const key = keys.find((candidate) => !modifierKeys.has(candidate));
+  if (!key) return false;
+  const eventKey = event.key.toLowerCase();
+  // Shift and AltGr are part of producing punctuation on common layouts. A bare
+  // punctuation row therefore accepts them only when the browser already reports
+  // the canonical punctuation character; letter and digit rows remain exact.
+  const allowsLayoutModifier =
+    !expected.has('alt') &&
+    !expected.has('shift') &&
+    key.length === 1 &&
+    !/[a-z0-9]/i.test(key) &&
+    eventKey === key;
+  // A modified event must not fall through to a bare-key alias. For example,
+  // Shift+U must select the `shift+u` row, never the preceding `u` row.
+  if (!allowsLayoutModifier && expected.has('alt') !== event.altKey) return false;
+  if (!allowsLayoutModifier && expected.has('shift') !== event.shiftKey) return false;
+
+  if (key === 'space') return eventKey === ' ' || event.code === 'Space';
+  return eventKey === key || event.code.toLowerCase() === key;
+}
+
+/**
+ * Dispatch a browser KeyboardEvent against the canonical registry without parsing
+ * punctuation into a hotkey string. `key`, `code`, and modifiers remain separate
+ * event fields, so QWERTY and AZERTY punctuation reach the same advertised action.
+ */
+export function dispatchShortcutEvent(
+  event: KeyboardEvent,
+  shortcuts: Shortcut[],
+  handlers: ShortcutHandlers,
+  target: EventTarget | null = event.target,
+): boolean {
+  for (const shortcut of shortcuts) {
+    if (shortcut.ignore || shortcut.type === 'sequence' || !handlers[shortcut.action]) continue;
+    if (!shortcutMatchesEvent(event, shortcut)) continue;
+    if (shortcut.type === 'single' && shortcut.keys[0]?.toLowerCase() !== 'escape' && isTypingOrModalTarget(target)) {
+      return false;
+    }
+    if (shortcut.preventDefault) event.preventDefault();
+    handlers[shortcut.action]?.();
+    return true;
+  }
+  return false;
+}
+
+export function dispatchShortcutSequenceEvent(
+  event: KeyboardEvent,
+  shortcuts: Shortcut[],
+  handlers: ShortcutHandlers,
+  pending: PendingShortcutSequence,
+  now: number,
+  timeoutMs: number,
+): PendingShortcutSequence {
+  // AltGr is required to produce `#` on AZERTY, so only command/control chords
+  // cancel a navigation sequence.
+  if (event.defaultPrevented || event.metaKey || event.ctrlKey) return null;
+  if (isTypingOrModalTarget(event.target)) return null;
+
+  const key = event.key.toLowerCase();
+  if (pending && now - pending.startedAt <= timeoutMs) {
+    const match = shortcuts.find(
+      (shortcut) => shortcut.keys[0] === pending.key && shortcut.keys[1] === key,
+    );
+    if (match) {
+      event.preventDefault();
+      handlers[match.action]?.();
+    }
+    return null;
+  }
+
+  return shortcuts.some((shortcut) => shortcut.keys[0] === key) ? { key, startedAt: now } : null;
+}
+
 export function useShortcuts(
   shortcuts: Shortcut[],
   handlers: { [key: string]: () => void },
   options: Partial<HotkeyOptions> = {},
 ) {
-  // Sequences are driven separately (useShortcutSequences); the react-hotkeys-hook
-  // binder only owns single keys and modifier chords.
-  const shortcutMap = useMemo(() => {
-    return shortcuts.reduce<Record<string, Shortcut>>((acc, shortcut) => {
-      if (shortcut.type !== 'sequence' && handlers[shortcut.action]) {
-        acc[shortcut.action] = shortcut;
-      }
-      return acc;
-    }, {});
-  }, [shortcuts, handlers]);
+  const { activeScopes } = useHotkeysContext();
+  const scope = options.scope;
 
-  const shortcutString = useMemo(() => {
-    return [...new Set(Object.values(shortcutMap).map((shortcut) => formatKeys(shortcut.keys)))]
-      .filter(Boolean)
-      .join(',');
-  }, [shortcutMap]);
-
-  useHotkeys(
-    shortcutString,
-    (event: KeyboardEvent, hotkeysEvent) => {
-      if (hotkeysEvent.keys?.includes('click')) {
-        return;
-      }
-      const getModifierString = (e: typeof hotkeysEvent) => {
-        const modifiers = [];
-        if (e.meta) modifiers.push('meta');
-        if (e.ctrl) modifiers.push('control');
-        if (e.alt) modifiers.push('alt');
-        if (e.shift) modifiers.push('shift');
-        return modifiers.length > 0 ? modifiers.join('+') + '+' : '';
-      };
-
-      const pressedKeys = getModifierString(hotkeysEvent) + (hotkeysEvent.keys?.join('+') || '');
-
-      const matchingEntry = Object.entries(shortcutMap).find(
-        ([_, shortcut]) => formatKeys(shortcut.keys) === pressedKeys,
-      );
-
-      if (matchingEntry) {
-        const [action, shortcut] = matchingEntry;
-        // A bare key must never fire while typing or inside a dialog. Modifier chords
-        // (mod+…) are safe there and stay live (e.g. ⌘K to dismiss the palette).
-        if (shortcut.type === 'single' && isTypingOrModalTarget(event.target)) {
-          return;
-        }
-        const handlerFn = handlers[action];
-        if (handlerFn) {
-          if (shortcut.preventDefault || options.preventDefault) {
-            event.preventDefault();
-          }
-          handlerFn();
-        }
-      }
-    },
-    {
-      ...options,
-      scopes: options.scope ? [options.scope] : undefined,
-      preventDefault: false, // We'll handle preventDefault per-shortcut
-      enableOnContentEditable: false,
-      enableOnFormTags: false,
-      keyup: false,
-      keydown: true,
-    },
-    [shortcutMap, handlers, options],
-  );
+  useEffect(() => {
+    if (scope && !activeScopes.includes(scope)) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) return;
+      const handled = dispatchShortcutEvent(event, shortcuts, handlers);
+      if (handled && options.preventDefault) event.preventDefault();
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [activeScopes, handlers, options.preventDefault, scope, shortcuts]);
 }
 
 /**
@@ -374,26 +410,15 @@ export function useShortcutSequences(
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return;
-      if (isTypingOrModalTarget(event.target)) return;
-
-      const key = event.key.toLowerCase();
       const now = performance.now();
-      const current = pending.current;
-
-      if (current && now - current.startedAt <= timeoutMs) {
-        const match = sequenceShortcuts.find(
-          (shortcut) => shortcut.keys[0] === current.key && shortcut.keys[1] === key,
-        );
-        pending.current = null;
-        if (!match) return;
-        event.preventDefault();
-        handlers[match.action]?.();
-        return;
-      }
-
-      const startsSequence = sequenceShortcuts.some((shortcut) => shortcut.keys[0] === key);
-      pending.current = startsSequence ? { key, startedAt: now } : null;
+      pending.current = dispatchShortcutSequenceEvent(
+        event,
+        sequenceShortcuts,
+        handlers,
+        pending.current,
+        now,
+        timeoutMs,
+      );
     };
 
     window.addEventListener('keydown', handleKeyDown, { capture: true });
