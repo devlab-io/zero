@@ -5,6 +5,8 @@ import { MemoryRouter, useLocation } from 'react-router';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { keyboardShortcuts, type Shortcut } from '@/config/shortcuts';
+import enMessages from '@/messages/en.json';
+import frMessages from '@/messages/fr.json';
 import { dispatchShortcutEvent, dispatchShortcutSequenceEvent, useShortcuts } from './use-hotkey-utils';
 
 vi.mock('@/components/context/command-palette-context', () => ({ useCommandPalette: () => ({ clearAllFilters: vi.fn() }) }));
@@ -17,6 +19,16 @@ vi.mock('nuqs', async () => {
 });
 
 const shortcutsFor = (scope: string) => keyboardShortcuts.filter((shortcut) => shortcut.scope === scope);
+const contextualSheetScopes = [...new Set(keyboardShortcuts.map((shortcut) => shortcut.scope))];
+const contextualSheetActions = [...new Set(
+  keyboardShortcuts
+    .filter((shortcut) => !shortcut.ignore)
+    .map((shortcut) => shortcut.action),
+)];
+const contextualActionCatalogs = [
+  enMessages.pages.settings.shortcuts.actions,
+  frMessages.pages.settings.shortcuts.actions,
+] as Array<Record<string, string>>;
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -235,7 +247,7 @@ describe('keyboard runtime', () => {
     act(() => {
       root?.render(
         <MemoryRouter initialEntries={['/mail/inbox']}>
-          <HotkeysProvider initiallyActiveScopes={['global', 'navigation']}>
+          <HotkeysProvider initiallyActiveScopes={contextualSheetScopes}>
             <GlobalHotkeys />
             <Location />
           </HotkeysProvider>
@@ -248,11 +260,14 @@ describe('keyboard runtime', () => {
 
     expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Keyboard Shortcuts');
     expect(document.querySelector('[role="dialog"]')?.textContent).toContain('New Email');
-    for (const action of new Set(keyboardShortcuts.filter((shortcut) => ['global', 'navigation'].includes(shortcut.scope)).map((shortcut) => shortcut.action))) {
+    for (const action of contextualSheetActions) {
       expect(document.querySelector(`[data-shortcut-action="${action}"]`)?.textContent).not.toBe(action);
     }
-    for (const action of ['goToStarred', 'goToSnoozed', 'toggleTheme', 'toggleSidebar']) {
-      expect(document.querySelector('[role="dialog"]')?.textContent).not.toContain(action);
+    for (const catalog of contextualActionCatalogs) {
+      for (const action of contextualSheetActions) {
+        expect(catalog[action]).toEqual(expect.any(String));
+        expect(catalog[action]).not.toBe(action);
+      }
     }
     expect(container.querySelector('[data-testid="location"]')?.textContent).toBe('/mail/inbox');
   });

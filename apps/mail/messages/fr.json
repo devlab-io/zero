@@ -698,6 +698,7 @@
           "approveSelected": "Approuver la sélection",
           "archive": "Terminé — archiver",
           "archiveNext": "Archiver et ouvrir le suivant",
+          "archivePrevious": "Archiver et ouvrir le précédent",
           "closeList": "Fermer le fil ou effacer la sélection",
           "closeView": "Fermer le fil",
           "focusNext": "Sélectionner le suivant",

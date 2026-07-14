@@ -698,6 +698,7 @@
           "approveSelected": "Approve selected",
           "archive": "Done — archive",
           "archiveNext": "Archive and open next",
+          "archivePrevious": "Archive and open previous",
           "closeList": "Close thread or clear selection",
           "closeView": "Close thread",
           "focusNext": "Focus next",

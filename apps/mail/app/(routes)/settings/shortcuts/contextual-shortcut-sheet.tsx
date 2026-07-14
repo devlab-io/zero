@@ -8,6 +8,7 @@ const actionLabels: Record<string, () => string> = {
   archive: m['pages.settings.shortcuts.actions.archive'],
   archiveEmail: m['pages.settings.shortcuts.actions.archiveEmail'],
   archiveNext: m['pages.settings.shortcuts.actions.archiveNext'],
+  archivePrevious: m['pages.settings.shortcuts.actions.archivePrevious'],
   bulkDelete: m['pages.settings.shortcuts.actions.bulkDelete'],
   bulkStar: m['pages.settings.shortcuts.actions.bulkStar'],
   clearAllFilters: m['pages.settings.shortcuts.actions.clearAllFilters'],
