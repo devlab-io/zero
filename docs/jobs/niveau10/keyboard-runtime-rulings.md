@@ -70,3 +70,17 @@
   `useShortcuts` ; aucun listener clavier natif parallèle n'est accepté.
 - Aucun changement visuel de la queue n'est autorisé dans cette correction. L'UX reprend la
   présentation et le pending par item après intégration du nouveau freeze clavier.
+
+## 2026-07-14 — Judge 6 FAIL : probe synthétique sans handlers de production
+
+- Le registre, le manifeste et 39 tests sont verts, mais le juge indépendant a constaté que le
+  vrai `QueueReview` fournit seulement `approveSelected`, `rejectSelected` et `openSelected` au
+  binder. Les nouvelles actions `focusNext` et `focusPrevious` restent donc inertes en production.
+- Le test runtime montait un probe synthétique auquel il injectait lui-même les deux handlers ; il
+  prouvait le binder générique, pas le consommateur réel.
+- La correction suivante doit câbler le déplacement déterministe dans `QueueReview`, fournir un
+  handler exhaustif typé contre `QUEUE_HANDLED_ACTIONS` et conserver `useShortcuts` comme unique
+  listener. Ce changement est comportemental et déjà autorisé par le touch-set ; aucune
+  présentation de queue n'est dégelée.
+- La preuve FAIL est conservée dans `docs/jobs/niveau10/keyboard-queue-nav-judge-6.md`. Un nouveau
+  builder, un checkrun frais et un nouveau juge sont obligatoires avant intégration.
