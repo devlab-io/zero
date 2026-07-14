@@ -1,5 +1,5 @@
-import { Archive2, ExclamationCircle, Star2, Trash } from '../icons/icons';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { Archive2, ExclamationCircle, Star2, Trash } from '../icons/icons';
 import { type ThreadDestination } from '@/lib/thread-actions';
 import { m } from '@/paraglide/messages';
 import { Button } from '../ui/button';
@@ -32,8 +32,8 @@ export function ThreadHoverActions({
   return (
     <div
       className={cn(
-        'dark:bg-panelDark z-25 absolute right-2 flex -translate-y-1/2 items-center gap-1 rounded-xl border bg-white p-1 opacity-0 shadow-sm group-hover:opacity-100',
-        index === 0 ? 'top-4' : 'top-[-1px]',
+        'dark:bg-panelDark z-25 pointer-events-none absolute right-2 top-1/2 flex -translate-y-1/2 items-center gap-1 rounded-xl border bg-white p-1 opacity-0 shadow-sm transition-opacity',
+        'group-focus-within:pointer-events-auto group-focus-within:opacity-100 group-hover:pointer-events-auto group-hover:opacity-100',
       )}
     >
       <Tooltip>
@@ -41,7 +41,10 @@ export function ThreadHoverActions({
           <Button
             variant="ghost"
             size="icon"
-            className="h-6 w-6 overflow-visible [&_svg]:size-3.5"
+            aria-label={
+              displayStarred ? m['common.threadDisplay.unstar']() : m['common.threadDisplay.star']()
+            }
+            className="h-11 w-11 overflow-visible md:h-10 md:w-10 [&_svg]:size-4"
             onClick={onToggleStar}
           >
             <Star2
@@ -49,7 +52,7 @@ export function ThreadHoverActions({
                 'h-4 w-4',
                 displayStarred
                   ? 'fill-yellow-400 stroke-yellow-400'
-                  : 'fill-transparent stroke-[#9D9D9D] dark:stroke-[#9D9D9D]',
+                  : 'stroke-muted-foreground fill-transparent',
               )}
             />
           </Button>
@@ -58,9 +61,7 @@ export function ThreadHoverActions({
           side={index === 0 ? 'bottom' : 'top'}
           className="mb-1 bg-white dark:bg-[#1A1A1A]"
         >
-          {displayStarred
-            ? m['common.threadDisplay.unstar']()
-            : m['common.threadDisplay.star']()}
+          {displayStarred ? m['common.threadDisplay.unstar']() : m['common.threadDisplay.star']()}
         </TooltipContent>
       </Tooltip>
       <Tooltip>
@@ -68,14 +69,15 @@ export function ThreadHoverActions({
           <Button
             variant="ghost"
             size="icon"
+            aria-label={m['common.mail.toggleImportant']()}
             className={cn(
-              'h-6 w-6 [&_svg]:size-3.5',
+              'h-11 w-11 md:h-10 md:w-10 [&_svg]:size-4',
               displayImportant ? 'hover:bg-orange-200/70 dark:hover:bg-orange-800/40' : '',
             )}
             onClick={onToggleImportant}
           >
             <ExclamationCircle
-              className={cn(displayImportant ? 'fill-orange-400' : 'fill-[#9D9D9D]')}
+              className={cn(displayImportant ? 'fill-orange-400' : 'fill-muted-foreground')}
             />
           </Button>
         </TooltipTrigger>
@@ -91,13 +93,14 @@ export function ThreadHoverActions({
           <Button
             variant="ghost"
             size="icon"
-            className="h-6 w-6 [&_svg]:size-3.5"
+            aria-label={m['common.threadDisplay.archive']()}
+            className="h-11 w-11 md:h-10 md:w-10 [&_svg]:size-4"
             onClick={(e) => {
               e.stopPropagation();
               moveThreadTo('archive');
             }}
           >
-            <Archive2 className="fill-[#9D9D9D]" />
+            <Archive2 className="fill-muted-foreground" />
           </Button>
         </TooltipTrigger>
         <TooltipContent
@@ -113,7 +116,8 @@ export function ThreadHoverActions({
             <Button
               variant="ghost"
               size="icon"
-              className="h-6 w-6 hover:bg-[#FDE4E9] dark:hover:bg-[#411D23] [&_svg]:size-3.5"
+              aria-label={m['common.actions.Bin']()}
+              className="h-11 w-11 hover:bg-[#FDE4E9] md:h-10 md:w-10 dark:hover:bg-[#411D23] [&_svg]:size-4"
               onClick={(e: React.MouseEvent) => {
                 e.stopPropagation();
                 moveThreadTo('bin');

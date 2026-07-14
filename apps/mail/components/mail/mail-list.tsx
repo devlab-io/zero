@@ -10,6 +10,7 @@ import { useSearchValue } from '@/hooks/use-search-value';
 import { EmptyStateIcon } from '../icons/empty-state-svg';
 import { useIsOffline } from '@/hooks/use-online-status';
 import { useSettings } from '@/hooks/use-settings';
+import { MailListSkeleton } from './mail-skeleton';
 import { VList, type VListHandle } from 'virtua';
 import type { ParsedMessage } from '@/types';
 import { Thread } from './mail-list-thread';
@@ -18,6 +19,7 @@ import { RefreshCcw } from 'lucide-react';
 import { cn, FOLDERS } from '@/lib/utils';
 import { m } from '@/paraglide/messages';
 import { useParams } from 'react-router';
+import { Button } from '../ui/button';
 import { useQueryState } from 'nuqs';
 import { useAtom } from 'jotai';
 
@@ -174,7 +176,7 @@ export const MailList = memo(
             {index === filteredItems.length - 1 &&
             (isFetchingNextPage || isFetchingThreadBodies) ? (
               <div className="flex w-full justify-center py-4">
-                <div className="h-4 w-4 animate-spin rounded-full border-2 border-neutral-900 border-t-transparent dark:border-white dark:border-t-transparent" />
+                <div className="h-4 w-4 animate-spin rounded-full border-2 border-neutral-900 border-t-transparent motion-reduce:animate-none dark:border-white dark:border-t-transparent" />
               </div>
             ) : null}
           </>
@@ -207,11 +209,9 @@ export const MailList = memo(
         >
           <>
             {viewState === 'loading' ? (
-              <div className="flex h-32 w-full items-center justify-center">
-                <div className="h-4 w-4 animate-spin rounded-full border-2 border-neutral-900 border-t-transparent dark:border-white dark:border-t-transparent" />
-              </div>
+              <MailListSkeleton />
             ) : viewState === 'error' ? (
-              <div className="flex w-full items-center justify-center p-6">
+              <div role="alert" className="flex w-full items-center justify-center p-6">
                 <div className="flex max-w-md flex-col items-center justify-center gap-3 text-center">
                   <EmptyStateIcon width={160} height={160} />
                   <div>
@@ -222,14 +222,14 @@ export const MailList = memo(
                         : m['states.mailList.errorDescription']()}
                     </p>
                   </div>
-                  <button
-                    type="button"
+                  <Button
+                    variant="outline"
                     onClick={() => void refetch()}
-                    className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-md border px-3 text-sm transition-colors hover:bg-gray-100 dark:hover:bg-[#313131]"
+                    className="min-h-11 md:min-h-10"
                   >
                     <RefreshCcw className="h-4 w-4" />
                     {m['states.retry']()}
-                  </button>
+                  </Button>
                 </div>
               </div>
             ) : viewState === 'empty' ? (
@@ -239,20 +239,21 @@ export const MailList = memo(
                   <div className="mt-5">
                     <p className="text-lg">
                       {isFiltering
-                        ? 'No messages match these filters'
+                        ? m['states.mailList.filteredEmptyTitle']()
                         : m['states.mailList.emptyTitle']()}
                     </p>
                     <p className="text-md text-muted-foreground dark:text-white/50">
                       {isFiltering ? (
                         <>
-                          Try another search or{' '}
-                          <button
+                          {m['states.mailList.filteredEmptyDescription']()}{' '}
+                          <Button
                             type="button"
-                            className="cursor-pointer underline"
+                            variant="link"
+                            className="h-auto min-h-11 px-1 align-baseline md:min-h-10"
                             onClick={clearFilters}
                           >
                             {m['states.mailList.clearFilters']()}
-                          </button>
+                          </Button>
                         </>
                       ) : (
                         m['states.mailList.emptyDescription']()
@@ -264,20 +265,25 @@ export const MailList = memo(
             ) : (
               <div className="flex flex-1 flex-col" id="mail-list-scroll">
                 {viewState === 'stale' ? (
-                  <div className="flex items-center justify-between gap-2 border-b border-amber-200/60 bg-amber-50 px-3 py-1.5 text-xs text-amber-800 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-300">
+                  <div
+                    role="status"
+                    className="flex items-center justify-between gap-2 border-b border-amber-200/60 bg-amber-50 px-3 py-1.5 text-xs text-amber-800 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-300"
+                  >
                     <span>
                       {isOffline
                         ? m['states.mailList.offlineNotice']()
                         : m['states.mailList.staleNotice']()}
                     </span>
-                    <button
+                    <Button
                       type="button"
+                      variant="ghost"
+                      size="sm"
                       onClick={() => void refetch()}
-                      className="inline-flex cursor-pointer items-center gap-1 rounded px-1.5 py-0.5 font-medium transition-colors hover:bg-amber-100 dark:hover:bg-amber-500/20"
+                      className="min-h-11 shrink-0 px-2 font-medium hover:bg-amber-100 md:min-h-10 dark:hover:bg-amber-500/20"
                     >
                       <RefreshCcw className="h-3 w-3" />
                       {m['states.retry']()}
-                    </button>
+                    </Button>
                   </div>
                 ) : null}
                 <VList
@@ -307,14 +313,10 @@ export const MailList = memo(
             )}
           </>
         </div>
-        <div className="w-full pt-2 text-center">
+        <div className="flex h-8 w-full items-center justify-center text-center">
           {isFetching ? (
-            <div className="text-center">
-              <div className="mx-auto h-4 w-4 animate-spin rounded-full border-2 border-neutral-900 border-t-transparent dark:border-white dark:border-t-transparent" />
-            </div>
-          ) : (
-            <div className="h-2" />
-          )}
+            <div className="h-4 w-4 animate-spin rounded-full border-2 border-neutral-900 border-t-transparent motion-reduce:animate-none dark:border-white dark:border-t-transparent" />
+          ) : null}
         </div>
       </>
     );

@@ -1,4 +1,8 @@
-import { threadRowPropsAreEqual, type ThreadRowProps } from './mail-list-thread-projection';
+import {
+  buildThreadRowAccessibleName,
+  threadRowPropsAreEqual,
+  type ThreadRowProps,
+} from './mail-list-thread-projection';
 import { describe, it, expect } from 'vitest';
 
 /**
@@ -79,5 +83,19 @@ describe('threadRowPropsAreEqual (#30 memo comparator)', () => {
     const prev = props();
     expect(threadRowPropsAreEqual(prev, { ...prev, index: 1 })).toBe(false);
     expect(threadRowPropsAreEqual(prev, { ...prev, isKeyboardFocused: true })).toBe(false);
+  });
+});
+
+describe('inbox row accessible name', () => {
+  it('announces read state, sender, subject and received time', () => {
+    expect(buildThreadRowAccessibleName(props().message)).toBe(
+      'Unread: Alice Martin, Suivi dossier client, 2026-07-13T08:00:00.000Z',
+    );
+    expect(
+      buildThreadRowAccessibleName(
+        props({ sender: { name: '', email: 'alice@client.pf' }, subject: '', unread: false })
+          .message,
+      ),
+    ).toContain('Read: alice@client.pf, No subject');
   });
 });

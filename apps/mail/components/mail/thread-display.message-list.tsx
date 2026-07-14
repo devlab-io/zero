@@ -1,7 +1,8 @@
-import type { Attachment, ParsedMessage } from '@/types';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { lazy, Suspense } from 'react';
+import type { Attachment, ParsedMessage } from '@/types';
+import { ReplyComposerSkeleton } from './mail-skeleton';
 import MailDisplay from './mail-display';
+import { lazy, Suspense } from 'react';
 import { cn } from '@/lib/utils';
 
 // #44 (gate A8): the reply composer statically pulls posthog-js (+ its own shell) into the
@@ -41,7 +42,10 @@ export const MessageList = ({
         return (
           <div
             key={message.id}
-            className={cn('duration-200', index > 0 && 'border-border border-t')}
+            className={cn(
+              'duration-200 motion-reduce:transition-none',
+              index > 0 && 'border-border border-t',
+            )}
           >
             <MailDisplay
               emailData={message}
@@ -54,7 +58,7 @@ export const MessageList = ({
             />
             {isReplyingToThisMessage && !isLastMessage && (
               <div className="px-4 py-2" id={`reply-composer-${message.id}`}>
-                <Suspense fallback={null}>
+                <Suspense fallback={<ReplyComposerSkeleton />}>
                   <ReplyCompose messageId={message.id} />
                 </Suspense>
               </div>

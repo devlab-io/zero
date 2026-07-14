@@ -169,13 +169,8 @@
       "attachments": "Attachments",
       "attachmentCount": [
         {
-          "declarations": [
-            "input count",
-            "local countPlural = count: plural"
-          ],
-          "selectors": [
-            "countPlural"
-          ],
+          "declarations": ["input count", "local countPlural = count: plural"],
+          "selectors": ["countPlural"],
           "match": {
             "countPlural=0": "attachments",
             "countPlural=one": "attachment",
@@ -185,13 +180,8 @@
       ],
       "fileCount": [
         {
-          "declarations": [
-            "input count",
-            "local countPlural = count: plural"
-          ],
-          "selectors": [
-            "countPlural"
-          ],
+          "declarations": ["input count", "local countPlural = count: plural"],
+          "selectors": ["countPlural"],
           "match": {
             "countPlural=0": "files",
             "countPlural=one": "file",
@@ -267,13 +257,8 @@
       "search": "Search notes...",
       "noteCount": [
         {
-          "declarations": [
-            "input count",
-            "local countPlural = count: plural"
-          ],
-          "selectors": [
-            "countPlural"
-          ],
+          "declarations": ["input count", "local countPlural = count: plural"],
+          "selectors": ["countPlural"],
           "match": {
             "countPlural=0": "Add notes",
             "countPlural=one": "# note",
@@ -337,13 +322,8 @@
     "mail": {
       "replies": [
         {
-          "declarations": [
-            "input count",
-            "local countPlural = count: plural"
-          ],
-          "selectors": [
-            "countPlural"
-          ],
+          "declarations": ["input count", "local countPlural = count: plural"],
+          "selectors": ["countPlural"],
           "match": {
             "countPlural=0": "replies",
             "countPlural=one": "# reply",
@@ -409,13 +389,8 @@
       "selectAllConversations": "Select all conversations",
       "conversationsSelected": [
         {
-          "declarations": [
-            "input count",
-            "local countPlural = count: plural"
-          ],
-          "selectors": [
-            "countPlural"
-          ],
+          "declarations": ["input count", "local countPlural = count: plural"],
+          "selectors": ["countPlural"],
           "match": {
             "countPlural=one": "# conversation on this page selected.",
             "countPlural=other": "# conversations on this page selected."
@@ -514,6 +489,8 @@
     "keyboardApprove": "Approve",
     "keyboardReject": "Reject",
     "keyboardOpen": "Open draft",
+    "keyboardMove": "Move selection",
+    "keyboardActivate": "Open selected",
     "keyboardUndo": "Undo approval",
     "actions": {
       "approve": "Approve",
@@ -562,6 +539,7 @@
       "updated": "Updated",
       "scheduled": "Scheduled",
       "draftId": "Draft",
+      "details": "Technical details",
       "error": "Error",
       "undoCountdown": "Undo for {seconds}s"
     }
@@ -875,18 +853,39 @@
     "sending": "Sending…",
     "retry": "Retry",
     "actionFailed": "Action failed",
+    "composer": {
+      "title": "Email composer",
+      "description": "Write recipients, subject and message, then review the actions before sending.",
+      "loading": "Loading composer",
+      "bodyLabel": "Message body",
+      "attach": "Attach files",
+      "formatting": "Formatting options",
+      "generateSubject": "Generate subject",
+      "close": "Close composer",
+      "autosave": {
+        "idle": "Ready",
+        "local": "Saved on this device",
+        "saving": "Saving to server…",
+        "server": "Saved to server",
+        "error": "Save failed",
+        "retry": "Retry save"
+      }
+    },
     "mailList": {
       "errorTitle": "Couldn't load your inbox",
       "errorDescription": "We couldn't reach the server. Check your connection and try again.",
       "offlineNotice": "You're offline — showing your saved emails.",
       "staleNotice": "Couldn't refresh — showing your saved emails.",
       "emptyTitle": "It's empty here",
-      "emptyDescription": "Search for another email or",
+      "emptyDescription": "There are no messages in this mailbox yet.",
+      "filteredEmptyTitle": "No messages match these filters",
+      "filteredEmptyDescription": "Try another search or",
       "clearFilters": "clear filters"
     },
     "thread": {
       "errorTitle": "Couldn't open this conversation",
       "errorDescription": "We couldn't reach the server. Check your connection and try again.",
+      "bodyError": "The message body could not be loaded.",
       "retry": "Try again",
       "back": "Back to inbox"
     }

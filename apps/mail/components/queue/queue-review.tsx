@@ -7,11 +7,16 @@ import {
   groupOutboxItemsByStatus,
   type OutboxStatus,
 } from '@/components/queue/queue-view-model';
+import {
+  buildQueueItemAccessibleName,
+  clearQueueItemPending,
+  setQueueItemPending,
+} from './queue-review.logic';
 import { CheckCircle2, ExternalLink, RefreshCcw, RotateCcw, Undo2, XCircle } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { resolveQueueSelectionId } from '@/lib/hotkeys/queue-navigation';
 import { QUEUE_HANDLED_ACTIONS } from '@/lib/hotkeys/handler-manifest';
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useTRPC, useTRPCClient } from '@/providers/query-provider';
 import { enhancedKeyboardShortcuts } from '@/config/shortcuts';
 import { useShortcuts } from '@/lib/hotkeys/use-hotkey-utils';
@@ -40,6 +45,7 @@ type QueueItem = {
 };
 
 type StatusFilter = OutboxStatus | 'all';
+type QueuePendingAction = 'approve' | 'cancel' | 'retry';
 
 const statusTone: Record<OutboxStatus, string> = {
   queued:
@@ -109,7 +115,10 @@ export function QueueReview() {
   const { enableScope, disableScope } = useHotkeysContext();
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
+  const selectedItemIdRef = useRef<string | null>(null);
   const [undoDeadlines, setUndoDeadlines] = useState<Record<string, Date | string>>({});
+  const [pendingItems, setPendingItems] = useState<Record<string, QueuePendingAction>>({});
+  const pendingItemIdsRef = useRef(new Set<string>());
   const [now, setNow] = useState(() => new Date());
 
   useEffect(() => {
@@ -137,19 +146,42 @@ export function QueueReview() {
   );
   const selectedItem = visibleItems.find((item) => item.id === selectedItemId) ?? null;
 
+  const selectQueueItem = useCallback((itemId: string | null) => {
+    selectedItemIdRef.current = itemId;
+    setSelectedItemId(itemId);
+  }, []);
+
   useEffect(() => {
     if (!visibleItems.length) {
-      setSelectedItemId(null);
+      selectQueueItem(null);
       return;
     }
 
     if (!visibleItems.some((item) => item.id === selectedItemId)) {
-      setSelectedItemId(visibleItems[0]?.id ?? null);
+      selectQueueItem(visibleItems[0]?.id ?? null);
     }
-  }, [selectedItemId, visibleItems]);
+  }, [selectQueueItem, selectedItemId, visibleItems]);
 
   const invalidateOutbox = async () => {
     await queryClient.invalidateQueries({ queryKey: trpc.outbox.list.queryKey() });
+  };
+
+  const runItemAction = async (
+    itemId: string,
+    action: QueuePendingAction,
+    mutation: () => Promise<unknown>,
+  ) => {
+    if (pendingItemIdsRef.current.has(itemId)) return;
+    pendingItemIdsRef.current.add(itemId);
+    setPendingItems((current) => setQueueItemPending(current, itemId, action));
+    try {
+      await mutation();
+    } catch {
+      // The mutation's onError owns the user-facing message.
+    } finally {
+      pendingItemIdsRef.current.delete(itemId);
+      setPendingItems((current) => clearQueueItemPending(current, itemId));
+    }
   };
 
   const approveMutation = useMutation({
@@ -203,7 +235,7 @@ export function QueueReview() {
       toast.info(m['queue.actions.cannotApprove']());
       return;
     }
-    await approveMutation.mutateAsync({ id: item.id });
+    await runItemAction(item.id, 'approve', () => approveMutation.mutateAsync({ id: item.id }));
   };
 
   const cancelItem = async (item: QueueItem | null) => {
@@ -215,7 +247,7 @@ export function QueueReview() {
       toast.info(m['queue.actions.cannotReject']());
       return;
     }
-    await cancelMutation.mutateAsync({ id: item.id });
+    await runItemAction(item.id, 'cancel', () => cancelMutation.mutateAsync({ id: item.id }));
   };
 
   const openItem = (item: QueueItem | null) => {
@@ -236,37 +268,60 @@ export function QueueReview() {
   };
 
   const retryItem = async (item: QueueItem) => {
-    await retryMutation.mutateAsync({ id: item.id });
+    await runItemAction(item.id, 'retry', () => retryMutation.mutateAsync({ id: item.id }));
   };
 
   const queueShortcuts = enhancedKeyboardShortcuts.filter((shortcut) => shortcut.scope === 'queue');
 
-  const shortcutHandlers: Record<(typeof QUEUE_HANDLED_ACTIONS)[number], () => void> = useMemo(
-    () => ({
-      focusNext: () => {
-        setSelectedItemId((current) => resolveQueueSelectionId(visibleItems, current, 'next'));
-      },
-      focusPrevious: () => {
-        setSelectedItemId((current) => resolveQueueSelectionId(visibleItems, current, 'previous'));
-      },
-      approveSelected: () => {
-        void approveItem(selectedItem);
-      },
-      rejectSelected: () => {
-        void cancelItem(selectedItem);
-      },
-      openSelected: () => openItem(selectedItem),
-    }),
-    [selectedItem, undoDeadlines, visibleItems],
+  const focusQueueItem = useCallback((itemId: string | null) => {
+    if (!itemId) return;
+    requestAnimationFrame(() => {
+      const row = Array.from(document.querySelectorAll<HTMLElement>('[data-queue-item-id]')).find(
+        (element) => element.dataset.queueItemId === itemId,
+      );
+      row?.focus({ preventScroll: true });
+      row?.scrollIntoView({ block: 'nearest', behavior: 'auto' });
+    });
+  }, []);
+
+  const moveSelection = useCallback(
+    (direction: 'next' | 'previous') => {
+      const nextId = resolveQueueSelectionId(visibleItems, selectedItemIdRef.current, direction);
+      selectQueueItem(nextId);
+      focusQueueItem(nextId);
+    },
+    [focusQueueItem, selectQueueItem, visibleItems],
   );
+
+  const shortcutHandlers: Record<(typeof QUEUE_HANDLED_ACTIONS)[number], () => void> =
+    useMemo(() => {
+      const isOnRowAction = () =>
+        document.activeElement instanceof HTMLElement &&
+        !!document.activeElement.closest('button, a, summary, [role="button"]');
+
+      return {
+        focusNext: () => {
+          if (!isOnRowAction()) moveSelection('next');
+        },
+        focusPrevious: () => {
+          if (!isOnRowAction()) moveSelection('previous');
+        },
+        approveSelected: () => {
+          void approveItem(selectedItem);
+        },
+        rejectSelected: () => {
+          void cancelItem(selectedItem);
+        },
+        openSelected: () => {
+          if (!isOnRowAction()) openItem(selectedItem);
+        },
+      };
+    }, [moveSelection, selectedItem, undoDeadlines]);
 
   useShortcuts(queueShortcuts, shortcutHandlers, { scope: 'queue', preventDefault: true });
 
-  const isMutating =
-    approveMutation.isPending || cancelMutation.isPending || retryMutation.isPending;
-
   return (
-    <section className="flex h-screen min-w-0 flex-1 flex-col overflow-hidden bg-[#FAFAFA] text-zinc-950 dark:bg-[#141414] dark:text-zinc-50">
+    <section className="bg-background text-foreground flex h-[100dvh] min-w-0 flex-1 flex-col overflow-x-hidden">
       <header className="border-b border-zinc-200/80 px-4 py-4 sm:px-6 dark:border-zinc-800">
         <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
           <div className="min-w-0 space-y-2">
@@ -274,7 +329,7 @@ export function QueueReview() {
               <h1 className="text-2xl font-semibold tracking-normal">{m['queue.title']()}</h1>
               <Badge
                 variant="outline"
-                className="border-emerald-300 text-emerald-700 dark:border-emerald-500/40 dark:text-emerald-300"
+                className="border-emerald-300 tabular-nums text-emerald-700 dark:border-emerald-500/40 dark:text-emerald-300"
               >
                 {m['queue.pendingForReview']({ count: pendingReviewCount })}
               </Badge>
@@ -291,6 +346,8 @@ export function QueueReview() {
             <ShortcutHint keys="D/A" label={m['queue.keyboardApprove']()} />
             <ShortcutHint keys="R" label={m['queue.keyboardReject']()} />
             <ShortcutHint keys="F/H" label={m['queue.keyboardOpen']()} />
+            <ShortcutHint keys="J/K · ↑/↓" label={m['queue.keyboardMove']()} />
+            <ShortcutHint keys="↵/Space" label={m['queue.keyboardActivate']()} />
           </div>
         </div>
 
@@ -320,7 +377,12 @@ export function QueueReview() {
           <StateMessage
             title={m['queue.errorTitle']()}
             action={
-              <Button variant="outline" size="sm" onClick={() => outboxQuery.refetch()}>
+              <Button
+                variant="outline"
+                size="sm"
+                className="min-h-11 sm:min-h-10"
+                onClick={() => outboxQuery.refetch()}
+              >
                 <RefreshCcw className="h-4 w-4" />
                 {m['queue.refresh']()}
               </Button>
@@ -353,14 +415,14 @@ export function QueueReview() {
                       item={item}
                       displayStatus={undoDeadlines[item.id] ? 'approved' : item.status}
                       isSelected={item.id === selectedItemId}
-                      isMutating={isMutating}
+                      pendingAction={pendingItems[item.id]}
                       now={now}
                       undoDeadline={undoDeadlines[item.id]}
                       onApprove={() => approveItem(item)}
                       onCancel={() => cancelItem(item)}
                       onOpen={() => openItem(item)}
                       onRetry={() => retryItem(item)}
-                      onSelect={() => setSelectedItemId(item.id)}
+                      onSelect={() => selectQueueItem(item.id)}
                       statusLabel={labels[undoDeadlines[item.id] ? 'approved' : item.status]}
                     />
                   ))}
@@ -370,6 +432,17 @@ export function QueueReview() {
           })
         )}
       </div>
+      {selectedItem ? (
+        <QueueMobileActions
+          item={selectedItem}
+          pendingAction={pendingItems[selectedItem.id]}
+          undoAvailable={!!undoDeadlines[selectedItem.id]}
+          onApprove={() => void approveItem(selectedItem)}
+          onCancel={() => void cancelItem(selectedItem)}
+          onOpen={() => openItem(selectedItem)}
+          onRetry={() => void retryItem(selectedItem)}
+        />
+      ) : null}
     </section>
   );
 }
@@ -390,14 +463,14 @@ function StatusFilterButton({
       type="button"
       onClick={onClick}
       className={cn(
-        'inline-flex h-8 shrink-0 items-center gap-2 rounded-md border px-3 text-sm transition-colors',
+        'inline-flex h-11 shrink-0 items-center gap-2 rounded-md border px-3 text-sm transition-colors sm:h-10',
         active
           ? 'border-zinc-900 bg-zinc-900 text-white dark:border-zinc-100 dark:bg-zinc-100 dark:text-zinc-950'
           : 'border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300 dark:hover:bg-zinc-900',
       )}
     >
       <span>{label}</span>
-      <span className="bg-current/10 rounded-full px-1.5 text-xs">{count}</span>
+      <span className="bg-current/10 rounded-full px-1.5 text-xs tabular-nums">{count}</span>
     </button>
   );
 }
@@ -437,7 +510,7 @@ function QueueItemRow({
   item,
   displayStatus,
   isSelected,
-  isMutating,
+  pendingAction,
   now,
   undoDeadline,
   onApprove,
@@ -450,7 +523,7 @@ function QueueItemRow({
   item: QueueItem;
   displayStatus: OutboxStatus;
   isSelected: boolean;
-  isMutating: boolean;
+  pendingAction?: QueuePendingAction;
   now: Date;
   undoDeadline?: Date | string;
   onApprove: () => void;
@@ -476,15 +549,22 @@ function QueueItemRow({
 
   return (
     <article
+      data-queue-item-id={item.id}
+      aria-label={buildQueueItemAccessibleName({
+        subject: item.subject,
+        fallbackSubject: m['queue.item.untitled'](),
+        status: statusLabel,
+      })}
+      aria-current={isSelected ? 'true' : undefined}
       className={cn(
-        'rounded-md border bg-white p-4 shadow-sm transition-colors dark:bg-zinc-950',
+        'bg-background min-w-0 rounded-lg border p-4 shadow-sm transition-colors',
         isSelected
           ? 'border-zinc-900 ring-1 ring-zinc-900 dark:border-zinc-100 dark:ring-zinc-100'
           : 'border-zinc-200 hover:border-zinc-300 dark:border-zinc-800 dark:hover:border-zinc-700',
       )}
       onFocus={onSelect}
       onMouseDown={onSelect}
-      tabIndex={0}
+      tabIndex={isSelected ? 0 : -1}
     >
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
         <div className="min-w-0 flex-1 space-y-2">
@@ -503,7 +583,7 @@ function QueueItemRow({
             {undoSeconds > 0 ? (
               <Badge
                 variant="outline"
-                className="border-blue-300 text-blue-700 dark:border-blue-500/40 dark:text-blue-300"
+                className="border-blue-300 tabular-nums text-blue-700 dark:border-blue-500/40 dark:text-blue-300"
               >
                 {m['queue.item.undoCountdown']({ seconds: undoSeconds })}
               </Badge>
@@ -521,13 +601,7 @@ function QueueItemRow({
             ) : null}
           </div>
 
-          <dl className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-zinc-500 dark:text-zinc-400">
-            {item.threadId ? (
-              <MetaItem label={m['queue.item.thread']()} value={item.threadId} />
-            ) : null}
-            {item.gmailDraftId ? (
-              <MetaItem label={m['queue.item.draftId']()} value={item.gmailDraftId} />
-            ) : null}
+          <dl className="flex flex-wrap gap-x-4 gap-y-1 text-xs tabular-nums text-zinc-500 dark:text-zinc-400">
             {item.mission ? (
               <MetaItem label={m['queue.item.mission']()} value={item.mission} />
             ) : null}
@@ -538,6 +612,22 @@ function QueueItemRow({
             ) : null}
           </dl>
 
+          {item.threadId || item.gmailDraftId ? (
+            <details className="text-muted-foreground min-w-0 text-xs">
+              <summary className="text-foreground focus-visible:ring-ring inline-flex min-h-11 cursor-pointer items-center rounded-md pr-2 font-medium focus-visible:outline-none focus-visible:ring-2 sm:min-h-10">
+                {m['queue.item.details']()}
+              </summary>
+              <dl className="bg-muted/50 mt-1 grid min-w-0 gap-1 rounded-md p-2 font-mono">
+                {item.threadId ? (
+                  <MetaItem label={m['queue.item.thread']()} value={item.threadId} />
+                ) : null}
+                {item.gmailDraftId ? (
+                  <MetaItem label={m['queue.item.draftId']()} value={item.gmailDraftId} />
+                ) : null}
+              </dl>
+            </details>
+          ) : null}
+
           {item.error ? (
             <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-300">
               <span className="font-medium">{m['queue.item.error']()}:</span> {item.error}
@@ -545,8 +635,16 @@ function QueueItemRow({
           ) : null}
         </div>
 
-        <div className="flex shrink-0 flex-wrap gap-2 lg:justify-end">
-          <Button type="button" size="sm" onClick={onApprove} disabled={!canApprove || isMutating}>
+        <div className="hidden shrink-0 flex-wrap gap-2 sm:flex lg:justify-end">
+          <Button
+            type="button"
+            size="sm"
+            onClick={onApprove}
+            className="min-h-10"
+            isLoading={pendingAction === 'approve'}
+            loadingText={m['queue.actions.approving']()}
+            disabled={!canApprove || !!pendingAction}
+          >
             <CheckCircle2 className="h-4 w-4" />
             {m['queue.actions.approve']()}
           </Button>
@@ -555,7 +653,10 @@ function QueueItemRow({
             size="sm"
             variant="outline"
             onClick={onCancel}
-            disabled={!canCancel || isMutating}
+            className="min-h-10"
+            isLoading={pendingAction === 'cancel'}
+            loadingText={m['queue.actions.rejecting']()}
+            disabled={!canCancel || !!pendingAction}
           >
             <XCircle className="h-4 w-4" />
             {m['queue.actions.reject']()}
@@ -565,7 +666,8 @@ function QueueItemRow({
             size="sm"
             variant="outline"
             onClick={onOpen}
-            disabled={!canOpen || isMutating}
+            className="min-h-10"
+            disabled={!canOpen || !!pendingAction}
           >
             <ExternalLink className="h-4 w-4" />
             {m['queue.actions.open']()}
@@ -576,7 +678,10 @@ function QueueItemRow({
               size="sm"
               variant="outline"
               onClick={onRetry}
-              disabled={isMutating}
+              className="min-h-10"
+              isLoading={pendingAction === 'retry'}
+              loadingText={m['queue.actions.retrying']()}
+              disabled={!!pendingAction}
             >
               <RotateCcw className="h-4 w-4" />
               {m['queue.actions.retry']()}
@@ -588,7 +693,10 @@ function QueueItemRow({
               size="sm"
               variant="secondary"
               onClick={onCancel}
-              disabled={isMutating}
+              className="min-h-10"
+              isLoading={pendingAction === 'cancel'}
+              loadingText={m['queue.actions.undoing']()}
+              disabled={!!pendingAction}
             >
               <Undo2 className="h-4 w-4" />
               {m['queue.actions.undo']()}
@@ -597,6 +705,85 @@ function QueueItemRow({
         </div>
       </div>
     </article>
+  );
+}
+
+function QueueMobileActions({
+  item,
+  pendingAction,
+  undoAvailable,
+  onApprove,
+  onCancel,
+  onOpen,
+  onRetry,
+}: {
+  item: QueueItem;
+  pendingAction?: QueuePendingAction;
+  undoAvailable: boolean;
+  onApprove: () => void;
+  onCancel: () => void;
+  onOpen: () => void;
+  onRetry: () => void;
+}) {
+  const canApprove = APPROVABLE_STATUSES.has(item.status);
+  const canCancel = CANCELABLE_STATUSES.has(item.status) || undoAvailable;
+  const canOpen = !!item.gmailDraftId || !!item.threadId;
+
+  return (
+    <div className="bg-background/95 sticky bottom-0 z-30 min-w-0 border-t px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur sm:hidden">
+      <p className="text-muted-foreground mb-2 truncate text-xs font-medium">
+        {item.subject || m['queue.item.untitled']()}
+      </p>
+      <div className="flex min-w-0 flex-wrap gap-2">
+        <Button
+          type="button"
+          className="min-h-11 shrink-0"
+          onClick={onApprove}
+          isLoading={pendingAction === 'approve'}
+          loadingText={m['queue.actions.approving']()}
+          disabled={!canApprove || !!pendingAction}
+        >
+          <CheckCircle2 className="h-4 w-4" />
+          {m['queue.actions.approve']()}
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          className="min-h-11 shrink-0"
+          onClick={onCancel}
+          isLoading={pendingAction === 'cancel'}
+          loadingText={m['queue.actions.rejecting']()}
+          disabled={!canCancel || !!pendingAction}
+        >
+          {undoAvailable ? <Undo2 className="h-4 w-4" /> : <XCircle className="h-4 w-4" />}
+          {undoAvailable ? m['queue.actions.undo']() : m['queue.actions.reject']()}
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          className="min-h-11 shrink-0"
+          onClick={onOpen}
+          disabled={!canOpen || !!pendingAction}
+        >
+          <ExternalLink className="h-4 w-4" />
+          {m['queue.actions.open']()}
+        </Button>
+        {item.status === 'failed' ? (
+          <Button
+            type="button"
+            variant="outline"
+            className="min-h-11 shrink-0"
+            onClick={onRetry}
+            isLoading={pendingAction === 'retry'}
+            loadingText={m['queue.actions.retrying']()}
+            disabled={!!pendingAction}
+          >
+            <RotateCcw className="h-4 w-4" />
+            {m['queue.actions.retry']()}
+          </Button>
+        ) : null}
+      </div>
+    </div>
   );
 }
 
