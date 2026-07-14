@@ -70,3 +70,41 @@ apps/mail/lib/email-utils.client.tsx (nouveau), apps/mail/components/mail/
 mail-list-thread.tsx (1 import), apps/mail/vite.config.ts (build.target seul),
 docs/research/niveau9/perf/**, docs/jobs/niveau9/a8-weight-hunt-01.md. Rien d'autre.
 Builder ne committe pas ; STATUS final avec mesures + RC natifs.
+
+## RULING V7b — a2-nonnull-01 : budget @ts-expect-error + fence (2026-07-13)
+
+### Budget RULING @ts-expect-error = 4 (énumération opposable, vérifiée sur HEAD factory)
+Les 4 occurrences existantes correspondent à de VRAIS trous de typings de libs
+(pré-existants, 0 ajouté par le run) et sont budgétées ici nominativement :
+1. `apps/mail/app/entry.server.tsx:2` — react-dom fournit un build ESM navigateur
+   sans typings TS.
+2. `apps/mail/components/ui/page-header.tsx:48` — incompatibilité de types slot/asChild.
+3. `apps/mail/components/ui/page-header.tsx:50` — idem (même composant).
+4. `apps/mail/components/create/editor-autocomplete.ts:214` — types tiptap
+   incompatibles prosemirror.
+Tout @ts-expect-error au-delà de ces 4 = FAIL ratchet. Le builder étend
+`scripts/checks/type-ratchet.mjs` pour compter et gater : tsExpectError ≤ 4,
+tsIgnore ≤ 1 (`apps/server/src/lib/email-processor.ts:1`, pré-existant — fix
+optionnel, jamais requis), et nonNull ≤ valeur post-job (cible ≤10).
+
+### Fence a2-nonnull-01
+- Objectif : non-null assertions (postfixe `!`, hors `!=`, comptage juge : 84 à
+  l'époque du jugement sur c80d4bf4-era ; le builder RE-MESURE la baseline exacte en
+  PHASE 0 sur son gel avec commande explicitée — a5 a touché 59 fichiers mail depuis).
+  Réduction par GUARDS RÉELS (narrowing, invariant explicite qui throw avec message,
+  early-return honnête) — JAMAIS `as` de substitution, jamais eslint-disable, jamais
+  d'affaiblissement de type. Comportement chemin heureux inchangé.
+- MAY : sites `!` dans apps/mail/{app,components,lib,hooks,store,providers} et
+  apps/server/src ; un helper `invariant` léger sans dépendance si utile ;
+  scripts/checks/type-ratchet.mjs (extension) ; tests existants UNIQUEMENT pour
+  rester verts (documenté) ; docs/jobs/niveau9/a2-nonnull-01.md.
+- MUST-NOT (anti-collision a8 ACTIF) : apps/mail/lib/email-utils.ts,
+  apps/mail/lib/email-utils.client.tsx, apps/mail/components/mail/mail-list-thread.tsx,
+  apps/mail/vite.config.ts — sites `!` dans ces fichiers = DIFFÉRÉS et consignés.
+- MUST-NOT (standard) : docs/checks/** (gelé), scripts/checks/measure-critical.py,
+  package.json, pnpm-lock.yaml, migrations, .github/workflows/ci.yml (le ratchet y
+  est déjà branché), tout fichier de config build.
+- Gates : séquence env obligatoire (frozen install --ignore-scripts, server types,
+  mail types, react-router typegen) ; tsc 0/0 ; suites mail + server vertes ;
+  type-ratchet PASSED (any 23/15/38 INCHANGÉS + nouveaux compteurs) ; console-ratchet
+  8/6 PASSED ; loc-ratchet PASSED. RC natifs. Builder ne committe pas.
