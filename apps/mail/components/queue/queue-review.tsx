@@ -9,16 +9,18 @@ import {
 } from '@/components/queue/queue-view-model';
 import { CheckCircle2, ExternalLink, RefreshCcw, RotateCcw, Undo2, XCircle } from 'lucide-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { resolveQueueSelectionId } from '@/lib/hotkeys/queue-navigation';
+import { QUEUE_HANDLED_ACTIONS } from '@/lib/hotkeys/handler-manifest';
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { useShortcuts } from '@/lib/hotkeys/use-hotkey-utils';
-import { useHotkeysContext } from 'react-hotkeys-hook';
 import { useTRPC, useTRPCClient } from '@/providers/query-provider';
 import { enhancedKeyboardShortcuts } from '@/config/shortcuts';
+import { useShortcuts } from '@/lib/hotkeys/use-hotkey-utils';
+import { useHotkeysContext } from 'react-hotkeys-hook';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { useNavigate } from 'react-router';
-import { useQueryState } from 'nuqs';
 import { m } from '@/paraglide/messages';
+import { useQueryState } from 'nuqs';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 
@@ -40,7 +42,8 @@ type QueueItem = {
 type StatusFilter = OutboxStatus | 'all';
 
 const statusTone: Record<OutboxStatus, string> = {
-  queued: 'border-sky-200 bg-sky-50 text-sky-700 dark:border-sky-500/20 dark:bg-sky-500/10 dark:text-sky-300',
+  queued:
+    'border-sky-200 bg-sky-50 text-sky-700 dark:border-sky-500/20 dark:bg-sky-500/10 dark:text-sky-300',
   generating:
     'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-300',
   draft_ready:
@@ -238,8 +241,14 @@ export function QueueReview() {
 
   const queueShortcuts = enhancedKeyboardShortcuts.filter((shortcut) => shortcut.scope === 'queue');
 
-  const shortcutHandlers = useMemo(
+  const shortcutHandlers: Record<(typeof QUEUE_HANDLED_ACTIONS)[number], () => void> = useMemo(
     () => ({
+      focusNext: () => {
+        setSelectedItemId((current) => resolveQueueSelectionId(visibleItems, current, 'next'));
+      },
+      focusPrevious: () => {
+        setSelectedItemId((current) => resolveQueueSelectionId(visibleItems, current, 'previous'));
+      },
       approveSelected: () => {
         void approveItem(selectedItem);
       },
@@ -248,21 +257,25 @@ export function QueueReview() {
       },
       openSelected: () => openItem(selectedItem),
     }),
-    [selectedItem, undoDeadlines],
+    [selectedItem, undoDeadlines, visibleItems],
   );
 
   useShortcuts(queueShortcuts, shortcutHandlers, { scope: 'queue', preventDefault: true });
 
-  const isMutating = approveMutation.isPending || cancelMutation.isPending || retryMutation.isPending;
+  const isMutating =
+    approveMutation.isPending || cancelMutation.isPending || retryMutation.isPending;
 
   return (
     <section className="flex h-screen min-w-0 flex-1 flex-col overflow-hidden bg-[#FAFAFA] text-zinc-950 dark:bg-[#141414] dark:text-zinc-50">
-      <header className="border-b border-zinc-200/80 px-4 py-4 dark:border-zinc-800 sm:px-6">
+      <header className="border-b border-zinc-200/80 px-4 py-4 sm:px-6 dark:border-zinc-800">
         <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
           <div className="min-w-0 space-y-2">
             <div className="flex flex-wrap items-center gap-2">
               <h1 className="text-2xl font-semibold tracking-normal">{m['queue.title']()}</h1>
-              <Badge variant="outline" className="border-emerald-300 text-emerald-700 dark:border-emerald-500/40 dark:text-emerald-300">
+              <Badge
+                variant="outline"
+                className="border-emerald-300 text-emerald-700 dark:border-emerald-500/40 dark:text-emerald-300"
+              >
                 {m['queue.pendingForReview']({ count: pendingReviewCount })}
               </Badge>
             </div>
@@ -384,7 +397,7 @@ function StatusFilterButton({
       )}
     >
       <span>{label}</span>
-      <span className="rounded-full bg-current/10 px-1.5 text-xs">{count}</span>
+      <span className="bg-current/10 rounded-full px-1.5 text-xs">{count}</span>
     </button>
   );
 }
@@ -480,12 +493,18 @@ function QueueItemRow({
               {statusLabel}
             </Badge>
             {isSelected ? (
-              <Badge variant="outline" className="border-zinc-300 text-zinc-600 dark:border-zinc-700 dark:text-zinc-300">
+              <Badge
+                variant="outline"
+                className="border-zinc-300 text-zinc-600 dark:border-zinc-700 dark:text-zinc-300"
+              >
                 {m['queue.selected']()}
               </Badge>
             ) : null}
             {undoSeconds > 0 ? (
-              <Badge variant="outline" className="border-blue-300 text-blue-700 dark:border-blue-500/40 dark:text-blue-300">
+              <Badge
+                variant="outline"
+                className="border-blue-300 text-blue-700 dark:border-blue-500/40 dark:text-blue-300"
+              >
                 {m['queue.item.undoCountdown']({ seconds: undoSeconds })}
               </Badge>
             ) : null}
@@ -509,10 +528,14 @@ function QueueItemRow({
             {item.gmailDraftId ? (
               <MetaItem label={m['queue.item.draftId']()} value={item.gmailDraftId} />
             ) : null}
-            {item.mission ? <MetaItem label={m['queue.item.mission']()} value={item.mission} /> : null}
+            {item.mission ? (
+              <MetaItem label={m['queue.item.mission']()} value={item.mission} />
+            ) : null}
             {createdAt ? <MetaItem label={m['queue.item.created']()} value={createdAt} /> : null}
             {updatedAt ? <MetaItem label={m['queue.item.updated']()} value={updatedAt} /> : null}
-            {scheduledAt ? <MetaItem label={m['queue.item.scheduled']()} value={scheduledAt} /> : null}
+            {scheduledAt ? (
+              <MetaItem label={m['queue.item.scheduled']()} value={scheduledAt} />
+            ) : null}
           </dl>
 
           {item.error ? (
@@ -523,12 +546,7 @@ function QueueItemRow({
         </div>
 
         <div className="flex shrink-0 flex-wrap gap-2 lg:justify-end">
-          <Button
-            type="button"
-            size="sm"
-            onClick={onApprove}
-            disabled={!canApprove || isMutating}
-          >
+          <Button type="button" size="sm" onClick={onApprove} disabled={!canApprove || isMutating}>
             <CheckCircle2 className="h-4 w-4" />
             {m['queue.actions.approve']()}
           </Button>

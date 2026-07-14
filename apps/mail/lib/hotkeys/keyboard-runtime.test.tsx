@@ -10,6 +10,8 @@ import {
   useShortcuts,
 } from './use-hotkey-utils';
 import { keyboardShortcuts, type Shortcut } from '@/config/shortcuts';
+import { resolveQueueSelectionId } from './queue-navigation';
+import { QUEUE_HANDLED_ACTIONS } from './handler-manifest';
 import frMessages from '@/messages/fr.json';
 import enMessages from '@/messages/en.json';
 
@@ -82,12 +84,14 @@ function mountRuntime(enabled: boolean, onArchive: () => void) {
   });
 }
 
-function QueueRuntimeProbe({ handlers }: { handlers: Record<string, () => void> }) {
+type QueueShortcutHandlers = Record<(typeof QUEUE_HANDLED_ACTIONS)[number], () => void>;
+
+function QueueRuntimeProbe({ handlers }: { handlers: QueueShortcutHandlers }) {
   useShortcuts(shortcutsFor('queue'), handlers, { scope: 'queue', preventDefault: true });
   return null;
 }
 
-function mountQueueRuntime(handlers: Record<string, () => void>) {
+function mountQueueRuntime(handlers: QueueShortcutHandlers) {
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -315,6 +319,18 @@ describe('keyboard runtime', () => {
     } finally {
       addEventListener.mockRestore();
     }
+  });
+
+  it('uses the production queue selection algorithm with deterministic wrap and filtered-list recovery', () => {
+    const visibleItems = [{ id: 'first' }, { id: 'middle' }, { id: 'last' }];
+
+    expect(resolveQueueSelectionId(visibleItems, 'first', 'next')).toBe('middle');
+    expect(resolveQueueSelectionId(visibleItems, 'last', 'next')).toBe('first');
+    expect(resolveQueueSelectionId(visibleItems, 'last', 'previous')).toBe('middle');
+    expect(resolveQueueSelectionId(visibleItems, 'first', 'previous')).toBe('last');
+    expect(resolveQueueSelectionId(visibleItems, 'filtered-out', 'next')).toBe('first');
+    expect(resolveQueueSelectionId(visibleItems, 'filtered-out', 'previous')).toBe('last');
+    expect(resolveQueueSelectionId([], 'filtered-out', 'next')).toBeNull();
   });
 
   it('routes g ! and g # sequences from real QWERTY and AZERTY punctuation events', () => {

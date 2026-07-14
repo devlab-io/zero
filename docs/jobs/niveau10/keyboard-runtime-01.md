@@ -1,3 +1,112 @@
+MIRROR: CORRECTION 4 keyboard-queue-nav-03
+
+BASELINE HEAD: `968b0a5e44f36b07ef2fb91583e6bd6243a088f7`
+
+FREEZE: `f097e61f0940decbeed1684118c2bb32a02dd6f8`
+
+RULING: `docs/jobs/niveau10/keyboard-queue-nav-judge-6.md` — FAIL conservé ;
+`docs/jobs/niveau10/keyboard-runtime-rulings.md` — ruling fusionné
+
+SCOPE: correction du consommateur réel queue et preuve comportementale ; spec, checks, rulings,
+présentation, pending et mobile inchangés ; aucun commit/push/tracker
+
+## PHASE 0 — correction 4
+
+- `QueueReview` possédait bien un unique `useShortcuts` au scope `queue`, mais son objet de
+  handlers n'exposait pas `focusNext` et `focusPrevious`. Les raccourcis de navigation déclarés
+  ne pouvaient donc pas modifier la sélection visible.
+- Plan exécuté : extraire l'algorithme pur de sélection, le consommer dans les deux handlers
+  réels, rendre le handler map exhaustif par rapport à `QUEUE_HANDLED_ACTIONS`, puis tester le
+  comportement de cet algorithme de production avec les RUNs gelés.
+- Aucun désaccord avec le ruling Judge 6.
+
+## Correction queue navigation 4
+
+- `QueueReview` câble réellement `focusNext` et `focusPrevious` sur `visibleItems` et
+  `selectedItemId` via la mise à jour fonctionnelle de `setSelectedItemId`. La sélection existante
+  du composant rend le déplacement observable sans ajout de focus DOM ni changement visuel.
+- `resolveQueueSelectionId` documente et applique un wrap déterministe aux deux extrémités. Si la
+  sélection courante a disparu de la liste filtrée, `next` repart du premier élément visible et
+  `previous` du dernier ; une liste vide rend `null`.
+- Le handler map réel est typé
+  `Record<(typeof QUEUE_HANDLED_ACTIONS)[number], () => void>` : ajouter une action au manifeste
+  sans l'implémenter dans le consommateur fait échouer TypeScript.
+- Les handlers existants restent inchangés : `Enter/Space` ouvrent la sélection, `d/a`
+  l'approuvent, `r` la rejette et `f/h` l'ouvrent.
+- Le test runtime importe l'algorithme réellement consommé par `QueueReview` et couvre le
+  déplacement avant/arrière, le wrap, la récupération après filtrage et la liste vide. Le probe
+  d'événements queue est en plus typé par le même manifeste exhaustif.
+- Le composant conserve un seul `useShortcuts` queue et aucun listener `keydown` natif n'a été
+  ajouté.
+
+## RUNs gelés — correction 4
+
+COMMAND: pnpm --filter @zero/mail exec vitest run lib/hotkeys/keyboard-runtime.test.tsx lib/hotkeys/keyboard-parity.test.ts components/mail/reply-recipients.test.ts
+
+EXIT: 0
+
+OUTPUT:
+
+```text
+✓ components/mail/reply-recipients.test.ts (18 tests)
+✓ lib/hotkeys/keyboard-parity.test.ts (12 tests)
+✓ lib/hotkeys/keyboard-runtime.test.tsx (10 tests)
+Test Files  3 passed (3)
+Tests  40 passed (40)
+Duration  2.64s
+```
+
+COMMAND: pnpm --filter @zero/mail exec eslint config/shortcuts.ts lib/hotkeys components/mail/reply-recipients.ts components/mail/reply-composer.tsx components/create/email-composer.tsx components/queue/queue-review.tsx app/'(routes)'/settings/shortcuts
+
+EXIT: 0
+
+OUTPUT:
+
+```text
+Warning: React version not specified in eslint-plugin-react settings.
+components/create/email-composer.tsx: 3 inherited react-hooks/exhaustive-deps warnings
+components/queue/queue-review.tsx: 3 inherited react-hooks/exhaustive-deps warnings
+lib/hotkeys/mail-list-hotkeys.tsx: 2 inherited react-hooks/exhaustive-deps warnings
+✖ 8 problems (0 errors, 8 warnings)
+```
+
+COMMAND: pnpm --filter @zero/mail exec react-router typegen && (pnpm --filter @zero/mail exec tsc --noEmit --pretty false > /tmp/zero-niveau10-keyboard-tsc.log 2>&1 || true) && ! rg '^(lib/hotkeys/|app/\(routes\)/settings/shortcuts/|components/mail/reply-|components/create/email-composer\.tsx|components/queue/queue-review\.tsx|config/shortcuts\.ts).\*error TS' /tmp/zero-niveau10-keyboard-tsc.log && cat /tmp/zero-niveau10-keyboard-tsc.log && pnpm --filter @zero/mail build
+
+EXIT: 0
+
+OUTPUT:
+
+```text
+✔ [paraglide-js] Compilation complete (message-modules)
+lib/server-tool.ts(21,31): error TS2558: Expected 0 type arguments, but got 1.
+../server/src/types.ts(184,46): error TS2304: Cannot find name 'Env'.
+ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL Command failed with exit code 2: tsc --noEmit --pretty false
+Owner-scope TypeScript negative rg: no match
+Oxlint: 3 inherited warnings, 0 errors
+Client build: ✓ built in 11.23s
+SSR build: ✓ built in 7.31s
+```
+
+Les deux erreurs TypeScript imprimées sont hors du périmètre propriétaire filtré par le RUN gelé
+(`lib/server-tool.ts` et `../server/src/types.ts`). Elles restent une incohérence connue non
+bloquante pour ce job ; le build de production complet termine avec succès.
+
+COMMAND: git status --porcelain --untracked-files=all | sed 's/^...//' | awk '!/^(apps\/mail\/(config\/shortcuts\.ts|lib\/hotkeys\/._|components\/mail\/(reply-recipients(\.test)?\.ts|reply-composer\.tsx)|components\/create\/email-composer\.tsx|components\/queue\/queue-review\.tsx|app\/\(routes\)\/settings\/shortcuts\/._|messages\/(en|fr)\.json)|docs\/jobs\/niveau10\/keyboard-runtime-01\.md)$/ {print; bad=1} END {exit bad}'
+
+EXIT: 0
+
+OUTPUT: vide
+
+COMMAND: git diff --check
+
+EXIT: 0
+
+OUTPUT: vide
+
+STATUS: COMPLETE
+
+---
+
 MIRROR: BUILDER keyboard-queue-nav-03
 
 BASELINE: `bc41aa70c29865f92d595b7ed7390b1f9af5bdb8`
