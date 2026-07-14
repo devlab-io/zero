@@ -1,4 +1,12 @@
-import { log } from '@/lib/log';
+import {
+  IN_PALETTE_VIEW_COMMAND_TITLES,
+  PALETTE_TRIGGER_KEYS,
+  type ActiveFilter,
+  type CommandGroupData,
+  type CommandView,
+  type PaletteLabel,
+  type QuickSearchThread,
+} from './command-registry';
 import {
   ArrowLeft,
   ArrowRight,
@@ -18,23 +26,15 @@ import {
   CommandItem,
   CommandList,
 } from '@/components/ui/command';
-import type { Dispatch, SetStateAction } from 'react';
-import { Fragment } from 'react';
-import type { NavigateFunction } from 'react-router';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
+import type { Dispatch, SetStateAction } from 'react';
+import type { NavigateFunction } from 'react-router';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '../ui/button';
+import { Fragment } from 'react';
+import { log } from '@/lib/log';
 import { toast } from 'sonner';
-import {
-  IN_PALETTE_VIEW_COMMAND_TITLES,
-  PALETTE_TRIGGER_KEYS,
-  type ActiveFilter,
-  type CommandGroupData,
-  type CommandView,
-  type PaletteLabel,
-  type QuickSearchThread,
-} from './command-registry';
 
 /**
  * Presentational views for the command palette. State and behaviour are owned by
@@ -140,7 +140,8 @@ export function MainView({
             <Loader2 className="m-auto h-4 w-4 animate-spin" />
           ) : (
             <>
-              No results found, press <span className="font-bold">ENTER</span> for an exact local search
+              No results found, press <span className="font-bold">ENTER</span> for an exact local
+              search
             </>
           )}
         </CommandEmpty>

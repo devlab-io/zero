@@ -1,24 +1,24 @@
-import { memo, useCallback, useEffect, useMemo, useRef } from 'react';
 import { focusedIndexAtom, useMailNavigation } from '@/hooks/use-mail-navigation';
-import { useMailListData } from '@/hooks/use-mail-list-data';
-import { useMailSelection } from '@/hooks/use-mail-selection';
+import { useCommandPalette } from '@/components/context/command-palette-context';
 import { useOptimisticActions } from '@/hooks/use-optimistic-actions';
+import { memo, useCallback, useEffect, useMemo, useRef } from 'react';
+import { useMailSelection } from '@/hooks/use-mail-selection';
+import { useMailListData } from '@/hooks/use-mail-list-data';
+import { selectMailListState } from '@/lib/mail-list-state';
 import { useSearchValue } from '@/hooks/use-search-value';
 import { EmptyStateIcon } from '../icons/empty-state-svg';
-import type { ParsedMessage } from '@/types';
-import { useSettings } from '@/hooks/use-settings';
-import { selectMailListState } from '@/lib/mail-list-state';
 import { useIsOffline } from '@/hooks/use-online-status';
+import { useSettings } from '@/hooks/use-settings';
 import { VList, type VListHandle } from 'virtua';
-import { RefreshCcw } from 'lucide-react';
-import { m } from '@/paraglide/messages';
-import { cn, FOLDERS } from '@/lib/utils';
+import type { ParsedMessage } from '@/types';
 import { Thread } from './mail-list-thread';
 import { Draft } from './mail-list-draft';
+import { RefreshCcw } from 'lucide-react';
+import { cn, FOLDERS } from '@/lib/utils';
+import { m } from '@/paraglide/messages';
 import { useParams } from 'react-router';
 import { useQueryState } from 'nuqs';
 import { useAtom } from 'jotai';
-import { useCommandPalette } from '@/components/context/command-palette-context';
 
 // The list presentation consumes the thread list exclusively through the
 // `useMailListData()` contract and the `useMailSelection()` layer; the row
@@ -163,7 +163,8 @@ export const MailList = memo(
               index={index}
               onClick={handleMailClick}
             />
-            {index === filteredItems.length - 1 && (isFetchingNextPage || isFetchingThreadBodies) ? (
+            {index === filteredItems.length - 1 &&
+            (isFetchingNextPage || isFetchingThreadBodies) ? (
               <div className="flex w-full justify-center py-4">
                 <div className="h-4 w-4 animate-spin rounded-full border-2 border-neutral-900 border-t-transparent dark:border-white dark:border-t-transparent" />
               </div>
@@ -229,13 +230,25 @@ export const MailList = memo(
                   <EmptyStateIcon width={200} height={200} />
                   <div className="mt-5">
                     <p className="text-lg">
-                      {isFiltering ? 'No messages match these filters' : m['states.mailList.emptyTitle']()}
+                      {isFiltering
+                        ? 'No messages match these filters'
+                        : m['states.mailList.emptyTitle']()}
                     </p>
                     <p className="text-md text-muted-foreground dark:text-white/50">
-                      {isFiltering ? 'Try another search or ' : m['states.mailList.emptyDescription']()}{' '}
-                      <button type="button" className="underline cursor-pointer" onClick={clearFilters}>
-                        {m['states.mailList.clearFilters']()}
-                      </button>
+                      {isFiltering ? (
+                        <>
+                          Try another search or{' '}
+                          <button
+                            type="button"
+                            className="cursor-pointer underline"
+                            onClick={clearFilters}
+                          >
+                            {m['states.mailList.clearFilters']()}
+                          </button>
+                        </>
+                      ) : (
+                        m['states.mailList.emptyDescription']()
+                      )}
                     </p>
                   </div>
                 </div>

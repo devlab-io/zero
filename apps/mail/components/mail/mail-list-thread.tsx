@@ -6,6 +6,7 @@ import {
 import { useOptimisticThreadState } from '@/components/mail/optimistic-thread-state';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { ThreadContextMenu } from '@/components/context/thread-context';
+import { deriveThreadTriageTransition } from './thread-display.triage';
 import { useOptimisticActions } from '@/hooks/use-optimistic-actions';
 import { highlightText } from '@/lib/email-utils-highlight.client';
 import { useMail, type Config } from '@/components/mail/use-mail';
@@ -62,8 +63,8 @@ export const Thread = memo(function Thread({
   const getThreadData = isProjected ? projectedData : thread.data;
   const isGroupThread = isProjected ? false : thread.isGroupThread;
   const latestDraft = isProjected ? undefined : thread.latestDraft;
-  const [id, setThreadId] = useQueryState('threadId');
-  const [focusedIndex, setFocusedIndex] = useAtom(focusedIndexAtom);
+  const [, setThreadId] = useQueryState('threadId');
+  const [, setFocusedIndex] = useAtom(focusedIndexAtom);
 
   const { latestMessage, idToUse, cleanName } = useMemo(() => {
     const latestMessage = getThreadData?.latest;
@@ -164,18 +165,12 @@ export const Thread = memo(function Thread({
   );
 
   const handleNext = useCallback(
-    (id: string) => {
-      if (!id || !threads.length || focusedIndex === null) return setThreadId(null);
-      if (focusedIndex < threads.length - 1) {
-        const nextThread = threads[focusedIndex];
-        if (nextThread) {
-          setThreadId(nextThread.id);
-          // Don't clear activeReplyId - let ThreadDisplay handle Reply All auto-opening
-          setFocusedIndex(focusedIndex);
-        }
-      }
+    (currentId: string) => {
+      const transition = deriveThreadTriageTransition(threads, currentId);
+      setThreadId(transition?.thread.id ?? null);
+      setFocusedIndex(transition?.focusedIndex ?? null);
     },
-    [threads, id, focusedIndex],
+    [setFocusedIndex, setThreadId, threads],
   );
 
   const moveThreadTo = useCallback(
