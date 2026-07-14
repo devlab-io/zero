@@ -30,7 +30,8 @@ const contextualActionCatalogs = [
   frMessages.pages.settings.shortcuts.actions,
 ] as Array<Record<string, string>>;
 
-globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean })
+  .IS_REACT_ACT_ENVIRONMENT = true;
 
 let root: Root | undefined;
 let container: HTMLDivElement | undefined;
