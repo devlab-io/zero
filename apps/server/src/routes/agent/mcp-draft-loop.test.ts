@@ -34,6 +34,19 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { sanitizeMailContent } from '../../lib/mail-sanitize';
 import { describe, expect, it, vi } from 'vitest';
 
+vi.mock('../../lib/sanitize-tip-tap-html', () => ({
+  sanitizeTipTapHtml: vi.fn(async (html: string) => ({ html, inlineImages: [] })),
+}));
+vi.mock('../../lib/driver/utils', () => ({
+  deleteActiveConnection: vi.fn(),
+  FatalErrors: [],
+  fromBase64Url: (value: string) => value,
+  sanitizeContext: (value: unknown) => value,
+  StandardizedError: class StandardizedError extends Error {},
+}));
+
+const { OutlookMailManager } = await import('../../lib/driver/microsoft');
+
 const memoryStorage = (): AtomicIdempotencyStorage => {
   const values = new Map<string, unknown>();
   const transaction: IdempotencyTransaction = {
@@ -353,6 +366,75 @@ describe('revisable draft handlers', () => {
     );
     expect(await handlers.getDraft({ draftId: 'missing' })).toBe(MCP_DRAFT_NOT_FOUND);
     expect(await handlers.getDraft({ draftId: 'other-user-draft' })).toBe(MCP_DRAFT_NOT_FOUND);
+  });
+});
+
+describe('Outlook reply-draft provider seam', () => {
+  const makeManager = () => {
+    const calls: Array<{ path: string; operation: 'post' | 'patch'; body: unknown }> = [];
+    const manager = new OutlookMailManager({
+      auth: {
+        userId: 'user-owned',
+        accessToken: 'unused-test-token',
+        refreshToken: 'unused-test-refresh',
+        email: 'thomas@devlab.io',
+      },
+    });
+    const graphClient = {
+      api: (path: string) => ({
+        post: async (body: unknown) => {
+          calls.push({ path, operation: 'post', body });
+          if (path.endsWith('/createReply')) return { id: 'outlook-reply-draft' };
+          return { id: 'generic-draft' };
+        },
+        patch: async (body: unknown) => {
+          calls.push({ path, operation: 'patch', body });
+          const id = path.split('/').at(-1);
+          return { id };
+        },
+      }),
+    };
+    Object.assign(manager, { graphClient });
+    return { manager, calls };
+  };
+
+  it('uses Graph createReply then patches that exact unsent draft', async () => {
+    const { manager, calls } = makeManager();
+    const result = await manager.createDraft({
+      to: 'client@example.com',
+      cc: 'observer@example.com',
+      subject: 'Re: Quarterly review',
+      message: '<p>Server-derived reply</p>',
+      attachments: [],
+      id: null,
+      threadId: 'outlook-conversation',
+      replyToMessageId: 'outlook-message-owned',
+      fromEmail: null,
+    } as Parameters<typeof manager.createDraft>[0] & { replyToMessageId: string });
+
+    expect(calls.map(({ path, operation }) => `${operation} ${path}`)).toEqual([
+      'post /me/messages/outlook-message-owned/createReply',
+      'patch /me/messages/outlook-reply-draft',
+    ]);
+    expect(result.id).toBe('outlook-reply-draft');
+  });
+
+  it('updates an existing Outlook draft in place without delete/recreate fallback', async () => {
+    const { manager, calls } = makeManager();
+    const result = await manager.createDraft({
+      to: 'client@example.com',
+      subject: 'Re: Quarterly review',
+      message: '<p>Revised body</p>',
+      attachments: [],
+      id: 'outlook-existing-draft',
+      threadId: 'outlook-conversation',
+      fromEmail: null,
+    });
+
+    expect(calls.map(({ path, operation }) => `${operation} ${path}`)).toEqual([
+      'patch /me/mailfolders/drafts/messages/outlook-existing-draft',
+    ]);
+    expect(result.id).toBe('outlook-existing-draft');
   });
 });
 

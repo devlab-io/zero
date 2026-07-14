@@ -1,4 +1,56 @@
-MIRROR: ORCHESTRATOR
+# MCP draft-loop — builder 2 evidence
+
+MIRROR: BUILDER
+
+BASELINE: f19fd168 Merge branch 'factory/niveau10' into job/niveau10/mcp-draft-loop-01
+RULING: docs/jobs/niveau10/mcp-draft-loop-rulings.md
+SCOPE: corrected frozen check only; spec/check files unchanged; no commit or push
+
+## Audit completed before the frozen run
+
+- getThreadContext passes every returned body through sanitizeMailContent, returns at most 20 non-draft messages, and caps total sanitized text at 65,536 UTF-8 bytes, including a multibyte-boundary test.
+- createReplyDraft accepts only threadId, message, and a 1..128-character idempotency key. The active owned account, latest replyable provider message, owned aliases, recipients, subject, thread identity, and reply message identity are derived server-side.
+- Gmail receives the derived provider threadId. Outlook uses Graph createReply on the derived message ID, patches that exact unsent reply draft, and never falls back to delete/recreate.
+- listDrafts/getDraft/updateDraft resolve the active account at point of use. Missing, mismatched, and other-account draft IDs return the same Draft not found result. Draft projections exclude attachments and raw provider data.
+- updateDraft verifies the opaque revision before provider mutation, updates in place, refetches provider state, and refuses a provider ID change. A stale revision produced zero extra mutation in the test.
+- createReplyDraft and updateDraft share payload-bound atomic reservations. Each has a 20-concurrent-call proof with one provider effect; changed-payload reuse conflicts before a second effect.
+- MCP instructions are self-contained in the first 512 characters. Read/write, destructive, idempotent, and open-world annotations match the catalogue.
+- composeEmail is the only explicit AI/web egress tool and requires allowWebSearch=true. getThreadSummary no longer invokes AI. The default Codex/Claude policies exclude composeEmail.
+- The Streamable HTTP smoke uses the installed WebStandardStreamableHTTPServerTransport and actual HTTP Request objects for initialize -> notifications/initialized -> tools/list -> context -> create reply -> get -> update, with zero send effects.
+- Codex CLI 0.144.1 and Claude Code 2.1.209 local command shapes were checked. The setup guides link the current official Codex/Claude MCP and OAuth documentation and do not claim live OAuth, production, deploy, or mailbox mutation.
+- The live catalogue and security gate contain exactly 23 tools, with only createDraft, createReplyDraft, updateDraft, enqueueDraftJob, cancelOutboxItem, and retryOutboxItem classified as writes. No send, approve, permanent-delete, spam, settings, or generic provider escape-hatch tool is registered.
+
+## Preparatory provider-seam diagnostics
+
+COMMAND: pnpm --filter @zero/server exec vitest run src/routes/agent/mcp-draft-loop.test.ts -t 'Outlook reply-draft provider seam'
+EXIT: 0
+OUTPUT_BEGIN
+
+ RUN  v3.2.7 /Users/thomasverdenne/cc/zero-niveau10/.architect/wt/niveau10/mcp-draft-loop-01/apps/server
+
+ ✓ src/routes/agent/mcp-draft-loop.test.ts (9 tests | 7 skipped) 1ms
+
+ Test Files  1 passed (1)
+      Tests  2 passed | 7 skipped (9)
+   Duration  314ms
+
+OUTPUT_END
+
+COMMAND: pnpm --filter @zero/server exec vitest run src/lib/driver/google-drafts.test.ts -t 'sans id'
+EXIT: 0
+OUTPUT_BEGIN
+
+ RUN  v3.2.7 /Users/thomasverdenne/cc/zero-niveau10/.architect/wt/niveau10/mcp-draft-loop-01/apps/server
+
+ ✓ src/lib/driver/google-drafts.test.ts (12 tests | 10 skipped) 4ms
+
+ Test Files  1 passed (1)
+      Tests  2 passed | 10 skipped (12)
+   Duration  439ms
+
+OUTPUT_END
+
+## Corrected frozen commands
 
 FROZEN_COMMAND: pnpm --filter @zero/server exec vitest run src/routes/agent/mcp-draft-loop.test.ts src/routes/agent/mcp-tools.test.ts
 EXIT: 0
@@ -6,13 +58,13 @@ OUTPUT_BEGIN
 
  RUN  v3.2.7 /Users/thomasverdenne/cc/zero-niveau10/.architect/wt/niveau10/mcp-draft-loop-01/apps/server
 
- ✓ src/routes/agent/mcp-tools.test.ts (23 tests) 14ms
- ✓ src/routes/agent/mcp-draft-loop.test.ts (7 tests) 38ms
+ ✓ src/routes/agent/mcp-tools.test.ts (23 tests) 11ms
+ ✓ src/routes/agent/mcp-draft-loop.test.ts (9 tests) 37ms
 
  Test Files  2 passed (2)
-      Tests  30 passed (30)
-   Start at  03:03:25
-   Duration  437ms (transform 97ms, setup 0ms, collect 305ms, tests 52ms, environment 0ms, prepare 88ms)
+      Tests  32 passed (32)
+   Start at  03:14:06
+   Duration  490ms (transform 146ms, setup 0ms, collect 351ms, tests 48ms, environment 0ms, prepare 87ms)
 
 OUTPUT_END
 
@@ -22,64 +74,31 @@ OUTPUT_BEGIN
 Security surface check passed: least scopes, bounded session cache, draft-only MCP.
 OUTPUT_END
 
-FROZEN_COMMAND: pnpm --filter @zero/server exec eslint src/routes/agent src/lib/driver && pnpm exec prettier docs/agent --check
+FIRST_ATTEMPT_COMMAND: pnpm --filter @zero/server exec eslint src/routes/agent/mcp.ts src/routes/agent/mcp-tools.ts src/routes/agent/mcp-tools.test.ts src/routes/agent/mcp-draft-loop.ts src/routes/agent/mcp-draft-loop.test.ts src/lib/driver/agent-drafts.ts src/lib/driver/google-drafts.ts && pnpm exec prettier apps/server/src/lib/driver/microsoft.ts docs/agent --check
 EXIT: 1
 OUTPUT_BEGIN
 Warning: React version not specified in eslint-plugin-react settings. See https://github.com/jsx-eslint/eslint-plugin-react#configuration .
+Checking formatting...
+[warn] apps/server/src/lib/driver/microsoft.ts
+[warn] Code style issues found in the above file. Run Prettier with --write to fix.
+OUTPUT_END
 
-/Users/thomasverdenne/cc/zero-niveau10/.architect/wt/niveau10/mcp-draft-loop-01/apps/server/src/lib/driver/google-account.test.ts
-  14:49  error  'gmailError' is assigned a value but never used  @typescript-eslint/no-unused-vars
+CORRECTION_COMMAND: pnpm exec prettier apps/server/src/lib/driver/microsoft.ts --write
+EXIT: 0
+OUTPUT_BEGIN
+apps/server/src/lib/driver/microsoft.ts 149ms
+OUTPUT_END
 
-/Users/thomasverdenne/cc/zero-niveau10/.architect/wt/niveau10/mcp-draft-loop-01/apps/server/src/lib/driver/google-drafts.test.ts
-  17:49  error  'gmailError' is assigned a value but never used  @typescript-eslint/no-unused-vars
-
-/Users/thomasverdenne/cc/zero-niveau10/.architect/wt/niveau10/mcp-draft-loop-01/apps/server/src/lib/driver/google-labels.test.ts
-  1:32  error  'vi' is defined but never used  @typescript-eslint/no-unused-vars
-
-/Users/thomasverdenne/cc/zero-niveau10/.architect/wt/niveau10/mcp-draft-loop-01/apps/server/src/lib/driver/google-transport.test.ts
-  243:36  error  'req' is defined but never used  @typescript-eslint/no-unused-vars
-
-/Users/thomasverdenne/cc/zero-niveau10/.architect/wt/niveau10/mcp-draft-loop-01/apps/server/src/lib/driver/microsoft.ts
-   79:22  error  '_id' is defined but never used                      @typescript-eslint/no-unused-vars
-   80:32  error  '_id' is defined but never used                      @typescript-eslint/no-unused-vars
-  140:13  error  'photoUrl' is never reassigned. Use 'const' instead  prefer-const
-
-/Users/thomasverdenne/cc/zero-niveau10/.architect/wt/niveau10/mcp-draft-loop-01/apps/server/src/routes/agent/chat-agent.ts
-   95:42  error  The `{}` ("empty object") type allows any non-nullish value, including literals like `0` and `""`.
-- If that's what you want, disable this lint rule with an inline comment or configure the 'allowObjectTypes' rule option.
-- If you want a type meaning "any object", you probably want `object` instead.
-- If you want a type meaning "any value", you probably want `unknown` instead  @typescript-eslint/no-empty-object-type
-  398:42  error  The `{}` ("empty object") type allows any non-nullish value, including literals like `0` and `""`.
-- If that's what you want, disable this lint rule with an inline comment or configure the 'allowObjectTypes' rule option.
-- If you want a type meaning "any object", you probably want `object` instead.
-- If you want a type meaning "any value", you probably want `unknown` instead  @typescript-eslint/no-empty-object-type
-
-/Users/thomasverdenne/cc/zero-niveau10/.architect/wt/niveau10/mcp-draft-loop-01/apps/server/src/routes/agent/mcp-account.ts
-  12:18  error  React Hook "use" is called in function "withManagedResource" that is neither a React function component nor a custom React Hook function. React component names must start with an uppercase letter. React Hook names must start with the word "use"  react-hooks/rules-of-hooks
-
-/Users/thomasverdenne/cc/zero-niveau10/.architect/wt/niveau10/mcp-draft-loop-01/apps/server/src/routes/agent/orchestrator.ts
-  35:56  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
-
-/Users/thomasverdenne/cc/zero-niveau10/.architect/wt/niveau10/mcp-draft-loop-01/apps/server/src/routes/agent/tools.ts
-  16:34  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
-
-/Users/thomasverdenne/cc/zero-niveau10/.architect/wt/niveau10/mcp-draft-loop-01/apps/server/src/routes/agent/utils.ts
-  36:60  error  The `Function` type accepts any function-like value.
-Prefer explicitly defining any function parameters and return type  @typescript-eslint/no-unsafe-function-type
-
-/Users/thomasverdenne/cc/zero-niveau10/.architect/wt/niveau10/mcp-draft-loop-01/apps/server/src/routes/agent/zero-driver.ts
-  56:47  error  '_' is defined but never used  @typescript-eslint/no-unused-vars
-
-✖ 14 problems (14 errors, 0 warnings)
-  1 error and 0 warnings potentially fixable with the `--fix` option.
-
-undefined
-/Users/thomasverdenne/cc/zero-niveau10/.architect/wt/niveau10/mcp-draft-loop-01/apps/server:
- ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL  Command failed with exit code 1: eslint src/routes/agent src/lib/driver
+FROZEN_COMMAND: pnpm --filter @zero/server exec eslint src/routes/agent/mcp.ts src/routes/agent/mcp-tools.ts src/routes/agent/mcp-tools.test.ts src/routes/agent/mcp-draft-loop.ts src/routes/agent/mcp-draft-loop.test.ts src/lib/driver/agent-drafts.ts src/lib/driver/google-drafts.ts && pnpm exec prettier apps/server/src/lib/driver/microsoft.ts docs/agent --check
+EXIT: 0
+OUTPUT_BEGIN
+Warning: React version not specified in eslint-plugin-react settings. See https://github.com/jsx-eslint/eslint-plugin-react#configuration .
+Checking formatting...
+All matched files use Prettier code style!
 OUTPUT_END
 
 FROZEN_COMMAND: pnpm --filter @zero/server types && pnpm --filter @zero/server exec tsc --noEmit
-EXIT: 1
+EXIT: 0
 OUTPUT_BEGIN
 
 > @zero/server@ types /Users/thomasverdenne/cc/zero-niveau10/.architect/wt/niveau10/mcp-draft-loop-01/apps/server
@@ -168,11 +187,6 @@ Runtime types generated.
 https://developers.cloudflare.com/workers/languages/typescript/#generate-types
 📣 Remember to rerun 'wrangler types' after you change your wrangler.json file.
 
-src/lib/driver/agent-drafts.ts(85,44): error TS2345: Argument of type '{ fatal: true; }' is not assignable to parameter of type 'TextDecoderConstructorOptions'.
-  Property 'ignoreBOM' is missing in type '{ fatal: true; }' but required in type 'TextDecoderConstructorOptions'.
-undefined
-/Users/thomasverdenne/cc/zero-niveau10/.architect/wt/niveau10/mcp-draft-loop-01/apps/server:
- ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL  Command failed with exit code 2: tsc --noEmit
 OUTPUT_END
 
 FROZEN_COMMAND: git status --porcelain --untracked-files=all | sed 's/^...//' | awk '!/^(apps\/server\/src\/(routes\/agent\/mcp[^\/]*\.ts|lib\/driver\/.*)|docs\/agent\/.*|scripts\/security\/check-agent-surface\.mjs|docs\/jobs\/niveau10\/mcp-draft-loop-01\.md)$/ {print; bad=1} END {exit bad}'
@@ -185,40 +199,5 @@ EXIT: 0
 OUTPUT_BEGIN
 OUTPUT_END
 
-ROUTE_AROUND_COMMAND: TMPDIR="$PWD/.architect/tmp" pnpm --filter @zero/server exec tsc --noEmit --pretty false --incremental false --diagnostics
-EXIT: 0
-OUTPUT_BEGIN
-Files:              7920
-Lines:            989875
-Identifiers:      857337
-Symbols:          872252
-Types:            214795
-Instantiations:  1060947
-Memory used:    1074476K
-I/O read:          0.83s
-I/O write:         0.00s
-Parse time:        2.97s
-Bind time:         0.36s
-Check time:        1.68s
-Emit time:         0.00s
-Total time:        5.02s
-OUTPUT_END
-
-ROUTE_AROUND_COMMAND: TMPDIR="$PWD/.architect/tmp" pnpm --filter @zero/server exec vitest run --reporter=json --outputFile="$PWD/.architect/tmp/post-frozen-route-vitest.json" src/routes/agent/mcp-draft-loop.test.ts src/routes/agent/mcp-tools.test.ts
-EXIT: 0
-OUTPUT_BEGIN
-JSON report written to /Users/thomasverdenne/cc/zero-niveau10/.architect/wt/niveau10/mcp-draft-loop-01/.architect/tmp/post-frozen-route-vitest.json
-OUTPUT_END
-
-ROUTE_AROUND_COMMAND: node -e "const r=require('./.architect/tmp/post-frozen-route-vitest.json'); console.log(JSON.stringify({numTotalTests:r.numTotalTests,numPassedTests:r.numPassedTests,numFailedTests:r.numFailedTests},null,2))"
-EXIT: 0
-OUTPUT_BEGIN
-{
-  "numTotalTests": 30,
-  "numPassedTests": 30,
-  "numFailedTests": 0
-}
-OUTPUT_END
-
-COUNTS: frozen_commands=6 frozen_passed=4 frozen_failed=2 focused_test_files=2 focused_tests=30 focused_tests_passed=30 focused_tests_failed=0 security_surface_failures=0 eslint_errors=14 touch_set_violations=0 diff_check_errors=0 route_around_tsc_errors=0
-STATUS: BLOCKED (frozen command 3 exits 1 on 14 inherited ESLint errors including out-of-boundary agent routes; frozen command 4 exited 1 before the job-owned TextDecoder option fix and the exact-once rule forbids rerunning it; fixed the option and passed route-around TypeScript plus 30 tests)
+COUNTS: frozen_commands=6 frozen_passed=6 frozen_failed=0 focused_test_files=2 focused_tests=32 focused_tests_passed=32 focused_tests_failed=0 provider_seam_tests=4 security_surface_failures=0 eslint_errors=0 typecheck_errors=0 touch_set_violations=0 diff_check_errors=0
+STATUS: COMPLETE

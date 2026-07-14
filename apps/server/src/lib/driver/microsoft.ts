@@ -5,7 +5,6 @@ import {
   sanitizeContext,
   StandardizedError,
 } from './utils';
-import { logger } from '../logger';
 import type {
   OutlookCategory as Category,
   MailFolder,
@@ -13,12 +12,13 @@ import type {
   User,
 } from '@microsoft/microsoft-graph-types';
 import type { IOutgoingMessage, Label, ParsedMessage } from '../../types';
+import type { MailManager, ManagerConfig, ParsedDraft } from './types';
 import { sanitizeTipTapHtml } from '../sanitize-tip-tap-html';
 import { Client } from '@microsoft/microsoft-graph-client';
-import type { MailManager, ManagerConfig, ParsedDraft } from './types';
 import { getContext } from 'hono/context-storage';
 import type { CreateDraftData } from '../schemas';
 import type { HonoContext } from '../../ctx';
+import { logger } from '../logger';
 import * as he from 'he';
 
 export class OutlookMailManager implements MailManager {
@@ -76,8 +76,12 @@ export class OutlookMailManager implements MailManager {
     );
   }
   // MailManager methods the Gmail driver implements but the Outlook driver does not (yet).
-  public getRawEmail(_id: string): Promise<string> { return Promise.reject(new Error('getRawEmail not implemented for Outlook driver')); }
-  public getMessageAttachments(_id: string): ReturnType<MailManager['getMessageAttachments']> { return Promise.reject(new Error('getMessageAttachments not implemented for Outlook driver')); }
+  public getRawEmail(_id: string): Promise<string> {
+    return Promise.reject(new Error('getRawEmail not implemented for Outlook driver'));
+  }
+  public getMessageAttachments(_id: string): ReturnType<MailManager['getMessageAttachments']> {
+    return Promise.reject(new Error('getMessageAttachments not implemented for Outlook driver'));
+  }
   public getEmailAliases() {
     return this.withErrorHandler('getEmailAliases', async () => {
       const user: User = await this.graphClient.api('/me').select('mail,userPrincipalName').get();
