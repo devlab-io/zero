@@ -28,3 +28,29 @@ Immédiatement avant d'ajouter réellement le serveur MCP à Codex ou Claude et 
 consentement, l'orchestrateur doit demander une confirmation explicite à Thomas. Sans cette
 confirmation, le rapport s'arrête honnêtement à cette frontière et ne transforme pas les preuves
 locales en preuve d'une connexion OAuth live.
+
+## 2026-07-14 — Le premier RUN global révèle un fixture Gmail incomplet
+
+`pnpm test` échoue sur l'unique assertion `google-drafts.test.ts:192`. Le code de production
+projette le `threadId` de la réponse complète `users.drafts.get`, conformément à la ressource
+Message Gmail. Le fixture place seulement des identifiants dans la réponse `drafts.list`, puis
+omet `message.threadId` dans chaque réponse `drafts.get` tout en attendant `thr-new`.
+
+La correction propriétaire est test-only : les deux réponses `drafts.get` reçoivent leur
+`threadId` attendu. Aucun fallback vers `message.id`, aucune modification du driver et aucun
+changement de comportement fournisseur ne sont autorisés. La suite complète doit ensuite être
+rejouée depuis un freeze frais.
+
+## 2026-07-14 — `pnpm check` global ne mesure pas le diff Niveau 10
+
+Le deuxième RUN s'arrête avant lint sur deux fichiers historiques portant l'extension JSON mais
+contenant du texte libre, puis signale 1 198 fichiers non formatés. Exécuté séparément, le lint
+global expose 128 erreurs et 3 warnings antérieurs, concentrés notamment dans des emails React,
+déclarations vendor et routes hors run. Ce baseline n'était pas vert au freeze et ne peut donc pas
+certifier une régression de cette livraison.
+
+Le gate final est remplacé par un ratchet explicite : Prettier vérifie tous les fichiers de code,
+documentation agent et sécurité modifiés entre la base Niveau 10 `bc3dab47` et le HEAD ; ESLint
+rejoue l'union des surfaces serveur/mail déjà gelées et certifiées par les slices. Dix fichiers du
+diff Niveau 10 identifiés par ce ratchet peuvent recevoir uniquement la mise en forme mécanique
+Prettier. Aucun fichier historique hors diff, aucune règle lint et aucun baseline ne sont modifiés.
