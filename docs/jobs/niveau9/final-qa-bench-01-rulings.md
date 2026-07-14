@@ -30,3 +30,16 @@ sont des PREUVES à produire ou des constats à documenter, jamais des fixes :
    dossier du juge froid final.
 6. Chiffres de référence au merge V5 : JS critique 435,9 KiB gz (gate 420 FAIL −15,9,
    plancher structurel), console serveur 8, tests 327+, tsc 0/0.
+
+## Ruling fan-in A10 (superviseur, 2026-07-14)
+
+#40 capture A10/docs-governance sur le gel 1c82b196 où ARCHITECTURE.md/FORK.md/
+LICENSE-NOTES.md n'existent PAS ENCORE (#39 les crée en parallèle). C'est ATTENDU et
+non un défaut. Règles :
+
+1. Toute évidence A10 produite par #40 est ÉTIQUETÉE « pre-#39 » (dans le nom de
+   fichier ET dans le contenu) — jamais présentée comme verdict d'axe.
+2. Le JUGE FROID FINAL ré-exécute OBLIGATOIREMENT A10/docs-governance sur le HEAD
+   FUSIONNÉ post-#39+#40 ; l'A10 pre-#39 est irrecevable comme verdict final.
+3. Cette exigence de rerun est consignée ici et sera reprise verbatim dans le mandat
+   du juge final.
