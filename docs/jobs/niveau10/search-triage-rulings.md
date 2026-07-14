@@ -28,3 +28,8 @@
 - The judge-1 correction necessarily extends the existing `command-palette-context.test.tsx` so reset is exercised against the real label/category/query-state setters instead of another isolated helper.
 - The first expanded touch audit named `command-palette-context.tsx` but omitted its already-frozen test file. The allowlist and focused lint/format command now include exactly that sibling test; no additional product surface is authorised.
 - A fresh builder must consume the corrected check before the result can be accepted.
+
+## 2026-07-14 — Existing context-test lint debt stays outside the delta gate
+
+- `command-palette-context.test.tsx` is authorised for reset integration and remains in the frozen Vitest and full Prettier checks, but its inherited explicit-`any` lint debt predates this slice.
+- The focused ESLint command therefore remains on the clean changed subset instead of turning unrelated test-fixture typing into a false blocker. TypeScript, Vitest, Prettier, touch audit, and final diff hygiene still cover the authorised test.
