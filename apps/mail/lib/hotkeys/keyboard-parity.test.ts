@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 
-import { keyboardShortcuts, type Shortcut } from '@/config/shortcuts';
 import {
   GLOBAL_HANDLED_ACTIONS,
   NAV_SEQUENCE_ACTIONS,
@@ -11,6 +10,7 @@ import {
   COMPOSER_EXTERNAL_ACTIONS,
   QUEUE_HANDLED_ACTIONS,
 } from './handler-manifest';
+import { keyboardShortcuts, type Shortcut } from '@/config/shortcuts';
 import { isTypingOrModalTarget } from './use-hotkey-utils';
 
 // Actions bound through the generic registry binder (useShortcuts), by scope.
@@ -53,7 +53,9 @@ describe('Shortwave keyboard parity — registry ↔ handler coverage (frozen ch
         continue;
       }
       if (!resolved.set.includes(shortcut.action)) {
-        unresolved.push(`${shortcut.action} — advertised in ${shortcut.scope} but absent from ${resolved.where}`);
+        unresolved.push(
+          `${shortcut.action} — advertised in ${shortcut.scope} but absent from ${resolved.where}`,
+        );
       }
     }
     expect(unresolved).toEqual([]);
@@ -91,11 +93,45 @@ describe('Shortwave keyboard parity — registry ↔ handler coverage (frozen ch
     }
   });
 
+  it('covers the complete canonical queue action and variant matrix', () => {
+    const queueRows = keyboardShortcuts.filter((shortcut) => shortcut.scope === 'queue');
+    expect(queueRows.every((shortcut) => shortcut.ignore !== true)).toBe(true);
+    expect(queueRows.map((shortcut) => `${combo(shortcut)}:${shortcut.action}`)).toEqual([
+      'j:focusNext',
+      'arrowdown:focusNext',
+      'k:focusPrevious',
+      'arrowup:focusPrevious',
+      'enter:openSelected',
+      'space:openSelected',
+      'd:approveSelected',
+      'a:approveSelected',
+      'r:rejectSelected',
+      'f:openSelected',
+      'h:openSelected',
+    ]);
+    expect(new Set(queueRows.map((shortcut) => shortcut.action))).toEqual(
+      new Set(QUEUE_HANDLED_ACTIONS),
+    );
+  });
+
   // The frozen check #6 browser smoke exercises these; guard them against silent removal.
   it('the check #6 smoke keys are present and each resolves to a handler', () => {
     const SMOKE_COMBOS = [
-      '/', 'c', 'r', 'a', 'f', 'd', 'h', 's', 'j', 'k', 'x',
-      'g+i', 'mod+k', 'shift+?', 'escape',
+      '/',
+      'c',
+      'r',
+      'a',
+      'f',
+      'd',
+      'h',
+      's',
+      'j',
+      'k',
+      'x',
+      'g+i',
+      'mod+k',
+      'shift+?',
+      'escape',
     ];
     expectCombosWired(SMOKE_COMBOS);
   });
@@ -107,20 +143,64 @@ describe('Shortwave keyboard parity — registry ↔ handler coverage (frozen ch
   it('every in-scope frozen-table key combo is registered and wired', () => {
     const REQUIRED_TABLE_COMBOS = [
       // Compose
-      'c', 'r', 'a', 'f', 'mod+enter', 'mod+shift+enter',
+      'c',
+      'r',
+      'a',
+      'f',
+      'mod+enter',
+      'mod+shift+enter',
       // Global
-      '/', 'escape', 'shift+?', 'mod+/', 'mod+k', 'mod+shift+k', 'mod+shift+p', 'mod+,',
-      'mod+shift+l', 'mod+z',
+      '/',
+      'escape',
+      'shift+?',
+      'mod+/',
+      'mod+k',
+      'mod+shift+k',
+      'mod+shift+p',
+      'mod+,',
+      'mod+shift+l',
+      'mod+z',
       // Thread
-      'd', 'e', '[', ']', 'b', 'h', 's', 'l', 'v', '#', 'delete', 'mod+backspace',
-      'u', 'shift+u', 'shift+i', '+', '-',
+      'd',
+      'e',
+      '[',
+      ']',
+      'b',
+      'h',
+      's',
+      'l',
+      'v',
+      '#',
+      'delete',
+      'mod+backspace',
+      'u',
+      'shift+u',
+      'shift+i',
+      '+',
+      '-',
       // List
-      'j', 'arrowdown', 'k', 'arrowup', 'x', 'enter', 'arrowright', 'arrowleft',
-      'space', 'shift+space',
+      'j',
+      'arrowdown',
+      'k',
+      'arrowup',
+      'x',
+      'enter',
+      'arrowright',
+      'arrowleft',
+      'space',
+      'shift+space',
       // Layout
       'mod+\\',
       // Navigate (g …)
-      'g+i', 'g+s', 'g+b', 'g+h', 'g+e', 'g+t', 'g+d', 'g+!', 'g+#',
+      'g+i',
+      'g+s',
+      'g+b',
+      'g+h',
+      'g+e',
+      'g+t',
+      'g+d',
+      'g+!',
+      'g+#',
     ];
     expectCombosWired(REQUIRED_TABLE_COMBOS);
   });
