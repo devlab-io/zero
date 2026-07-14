@@ -75,6 +75,9 @@ export const MAILLIST_HANDLED_ACTIONS = [
 /** `compose` scope — bound by ComposeHotkeys via useShortcuts (sendEmail is external, below). */
 export const COMPOSE_HANDLED_ACTIONS = ['closeCompose'] as const;
 
+/** `queue` scope — bound by QueueReview from the canonical registry. */
+export const QUEUE_HANDLED_ACTIONS = ['approveSelected', 'rejectSelected', 'openSelected'] as const;
+
 /**
  * `list` scope — imperative rows (registry `ignore`), bound in hooks/use-mail-navigation.ts
  * via react-hotkeys-hook because they need the live list container + repeat handling.
@@ -94,4 +97,4 @@ export const LIST_IMPERATIVE_ACTIONS = [
  * `sendAndArchive` (mod+shift+Enter) via a useHotkeys → send + archive the open thread.
  * Listed so the coverage test accounts for their external binding, not as unhandled.
  */
-export const COMPOSER_EXTERNAL_ACTIONS = ['sendEmail', 'sendAndArchive'] as const;
+export const COMPOSER_EXTERNAL_ACTIONS = ['sendEmail', 'sendAndArchive', 'closeCompose'] as const;

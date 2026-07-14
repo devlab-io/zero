@@ -260,7 +260,15 @@ const composeShortcuts: Shortcut[] = [
     preventDefault: true,
     ignore: true,
   }),
-  shortcut(['escape'], 'closeCompose', 'Close composer', 'compose'),
+  shortcut(['escape'], 'closeCompose', 'Close composer', 'compose', { type: 'single', ignore: true }),
+];
+
+const queueShortcuts: Shortcut[] = [
+  shortcut(['d'], 'approveSelected', 'Approve selected queue item', 'queue'),
+  shortcut(['a'], 'approveSelected', 'Approve selected queue item', 'queue'),
+  shortcut(['r'], 'rejectSelected', 'Reject selected queue item', 'queue'),
+  shortcut(['f'], 'openSelected', 'Open selected queue item', 'queue'),
+  shortcut(['h'], 'openSelected', 'Open selected queue item', 'queue'),
 ];
 
 // List focus/paging keys handled imperatively in hooks/use-mail-navigation.ts (they need
@@ -288,6 +296,7 @@ export const keyboardShortcuts: Shortcut[] = [
   ...mailListShortcuts,
   ...threadDisplayShortcuts,
   ...composeShortcuts,
+  ...queueShortcuts,
   ...listShortcuts,
 ];
 

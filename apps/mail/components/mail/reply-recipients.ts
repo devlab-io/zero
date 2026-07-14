@@ -25,6 +25,8 @@ export interface DeriveReplyRecipientsArgs {
   message: Pick<ParsedMessage, 'sender' | 'to' | 'cc'>;
   /** The active connection's email address. */
   userEmail: string;
+  /** Other addresses owned by the active connection, such as configured aliases. */
+  ownedEmails?: string[];
 }
 
 export interface ReplyRecipients {
@@ -36,42 +38,44 @@ export function deriveReplyRecipients({
   mode,
   message,
   userEmail,
+  ownedEmails = [],
 }: DeriveReplyRecipientsArgs): ReplyRecipients {
   const to: string[] = [];
   const cc: string[] = [];
 
   if (!mode || !userEmail) return { to, cc };
 
-  const user = userEmail.toLowerCase();
+  const owned = new Set([userEmail, ...ownedEmails].map((email) => email.toLowerCase()));
   const senderEmail = message.sender.email.toLowerCase();
+
+  const addUnique = (recipients: string[], email: string) => {
+    if (!owned.has(email.toLowerCase()) && !recipients.some((recipient) => recipient.toLowerCase() === email.toLowerCase())) {
+      recipients.push(email);
+    }
+  };
 
   if (mode === 'reply') {
     // Reply to sender. If replying to our own email, reply to the first recipient.
-    if (senderEmail !== user) {
-      to.push(message.sender.email);
-    } else if (message.to && message.to.length > 0 && message.to[0]?.email) {
-      to.push(message.to[0].email);
+    if (!owned.has(senderEmail)) {
+      addUnique(to, message.sender.email);
+    } else {
+      const firstExternalRecipient = message.to?.find((recipient) => !owned.has(recipient.email.toLowerCase()));
+      if (firstExternalRecipient) addUnique(to, firstExternalRecipient.email);
     }
   } else if (mode === 'replyAll') {
     // Add original sender if not current user.
-    if (senderEmail !== user) {
-      to.push(message.sender.email);
-    }
+    addUnique(to, message.sender.email);
 
     // Add original recipients from the To field.
     message.to?.forEach((recipient: Sender) => {
       const recipientEmail = recipient.email.toLowerCase();
-      if (recipientEmail !== user && recipientEmail !== senderEmail) {
-        to.push(recipient.email);
-      }
+      if (recipientEmail !== senderEmail) addUnique(to, recipient.email);
     });
 
     // Add CC recipients not already in To.
     message.cc?.forEach((recipient: Sender) => {
       const recipientEmail = recipient.email.toLowerCase();
-      if (recipientEmail !== user && !to.includes(recipient.email)) {
-        cc.push(recipient.email);
-      }
+      if (recipientEmail !== senderEmail && !to.some((email) => email.toLowerCase() === recipientEmail)) addUnique(cc, recipient.email);
     });
   }
 
