@@ -203,3 +203,41 @@ Le run transforme 3,3 → **8,45** et remonte spectaculairement le plancher (0 a
 ## Provenance / reproductibilité
 
 Toutes les commandes (audit, tsc, tests, coverage, ratchets, measure-critical, gitleaks git+dir, migrations-consistency) ont été **exécutées par le juge** sur l'arbre `c80d4bf4` après `pnpm install --frozen-lockfile` + génération des types wrangler/react-router + build mail. Les évidences `docs/research/niveau9/` ont servi d'index, jamais de verdict. `git status --porcelain` reste vide hors artefacts gitignorés (node_modules, build, .react-router) et ce fichier.
+
+---
+
+## Contre-jugement post-correctif gitleaks (append-only)
+
+- **Ancrage** : arbre re-noté = **`70ab6f8eb6f39b5a37faecd0a9c6667cf5854fa6`** (factory HEAD, correctif gitleaks-fix mergé en local ; `git merge-base --is-ancestor` confirme que le commit noté `c80d4bf4` en est l'ancêtre). Checkout détaché dans le worktree final-grading-01. Périmètre borné : **A7 et A4 uniquement** (le finding #1 de la notation).
+- **Diff du correctif** (vs `c80d4bf4`, 2 fichiers de code) :
+  - `apps/server/.dev.vars.example:51` : marqueur inline `# gitleaks:allow` sur `ANTHROPIC_API_KEY=""` (la ligne **réellement** flaggée — le rapport builder confirme l.51 = ANTHROPIC capturant `GROQ_API_KEY=`, pas PERPLEXITY ; **erratum** : ma notation initiale l'avait étiquetée PERPLEXITY/l.53, la ligne 51 était ANTHROPIC — sans effet sur la substance).
+  - `scripts/checks/gitleaks.toml` : nouveau `[[allowlists]]` `regexTarget="line"`, regex `freeze_sha: [0-9a-f]{40}` — scope ultra-étroit (label littéral + 40 hex), ne peut matcher un vrai secret.
+
+### Preuves reproduites par le juge
+
+1. **Commande CI gitleaks EXACTE** (`docker run … ghcr.io/gitleaks/gitleaks:v8.30.1 dir /repo --config /repo/scripts/checks/gitleaks.toml --no-banner --redact --exit-code 1`) sur l'arbre corrigé → **RC=0, « no leaks found »**. Le gate est **VERT**. (`build/` gitignoré, honoré par `gitleaks dir` comme en CI.)
+2. **Canary (rejoué par le juge)** : secret factice haute-entropie dans un fichier **non tracké** (hors `i18n.lock`, sans `freeze_sha`, sans `gitleaks:allow`) → **RC=1, « leaks found »** ; après suppression → **RC=0**. ⇒ l'allowlist **n'a rien affaibli** : la détection des vrais secrets reste active. (La clé d'exemple AWS canonique `AKIA…EXAMPLE` n'est pas un canary valide : allowlistée par le ruleset built-in de gitleaks, sans lien avec cette config.)
+3. **Scan historique** (`gitleaks git`, 3428 commits) : **6 → 4 findings**. Les **2 faux positifs `…-checkrun.md` du run sont supprimés** par la regex `freeze_sha` (appliquée aussi à l'historique). Restent : 1 faux positif run-era `.dev.vars.example@063fd425` (placeholder vide, working-tree désormais propre ; instance historique immuable par la règle anti-réécriture) + **3 hérités upstream** (env.ts/wrangler.jsonc 2025, dette de fork documentée dans `audit-triage.md`, hors périmètre du gate CI par design).
+
+### Re-notation
+
+- **A7 — Sécurité : 8,5 → 9,0.** Mon unique déduction (`−0,5 : « la CI gitleaks casserait sur HEAD »`) est **levée** — la commande CI exacte retourne RC=0. Les autres critères palier-9 restaient acquis (triage 100 % des 93 GHSA high+moderate inchangé, tests auth verts, `security.md` dont la condition « no credential-like additions » désormais satisfaite). Le canary prouve que le correctif ne troque pas la propreté contre une cécité. → **palier 9 plein = 9,0.**
+- **A4 — CI/CD & gates : 9,0 (inchangé).** Ma déduction A4 portait **uniquement** sur « durée <15 min non prouvée » (indépendant de gitleaks), donc pas de changement de note. **Statut « CI verte » re-statué** : le seul step qui aurait viré la CI au rouge sur HEAD était gitleaks ; il passe désormais (RC=0), et tous les autres steps que le juge peut exécuter passent (tsc 0/0, 327 tests, ratchets, audit 0 critical, migrations, build, dry-runs). L'hypothèse « CI verte sur HEAD » est **restaurée** et le gate deploy (exige CI verte) autoriserait donc correctement le déploiement. Intégrité A4 pleinement confirmée ; note maintenue 9,0 (plafonnée par la seule durée non mesurable).
+
+### Nouveau tableau & verdict
+
+| Axe | Notation initiale | Post-correctif |
+|---|---|---|
+| A1 | 8,0 | 8,0 |
+| A2 | 8,0 | 8,0 |
+| A3 | 8,0 | 8,0 |
+| A4 | 9,0 | 9,0 |
+| A5 | 8,0 | 8,0 |
+| A6 | 9,0 | 9,0 |
+| A7 | 8,5 | **9,0** |
+| A8 | 8,0 | 8,0 |
+| A9 | 8,5 | 8,5 |
+| A10 | 9,5 | 9,5 |
+| **Moyenne** | **8,45** | **8,50** |
+
+**Verdict re-statué : NON PASS.** Moyenne = **8,50** < 9 (barre haute non atteinte) ; **aucun axe <7** (plancher 8,0). Le correctif gitleaks lève proprement le défaut A7 (+0,5) et solidifie la posture « CI verte » d'A4, mais ne suffit pas à porter la moyenne à ≥9 : les résidus qui plafonnent le PASS sont désormais **hors gitleaks** (JS critique 435,9>420 sur A8, cold-start non prouvé, non-null assertions A2, couverture `lib/driver` A3, front console A5, latences p75 / soak BLOCKED-AS). Le run reste une remontée 3,3 → 8,50 sans axe faible.
