@@ -140,6 +140,10 @@ vi.mock('@/app/(routes)/settings/shortcuts/contextual-shortcut-sheet', () => ({
   ContextualShortcutSheet: () => null,
 }));
 
+import useSearchLabels, {
+  clearMailQueryFilters,
+  hasActiveMailFilters,
+} from '@/hooks/use-labels-search';
 import { GlobalHotkeys } from '@/lib/hotkeys/global-hotkeys';
 import { SearchView } from './command-palette-views';
 import { useQueryState } from 'nuqs';
@@ -214,6 +218,21 @@ function LexicalSearchSurface() {
   return open && showSearch ? <SearchView {...makeViewProps()} /> : null;
 }
 
+function FilterResetSurface() {
+  const { labels, setLabels } = useSearchLabels();
+  const [category, setCategory] = useQueryState('category');
+
+  return (
+    <button
+      type="button"
+      data-filter-reset
+      onClick={() => clearMailQueryFilters({ setLabels, setCategory })}
+    >
+      {labels.join(',')}|{category}
+    </button>
+  );
+}
+
 beforeEach(() => {
   queryStore.values.clear();
   queryStore.listeners.clear();
@@ -230,6 +249,41 @@ afterEach(() => {
 });
 
 describe('SearchView lexical entry', () => {
+  it('clears real label/category query states and treats label-only results as filtered', () => {
+    queryStore.values.set('labels', 'IMPORTANT,STARRED');
+    queryStore.values.set('category', 'Promotions');
+
+    act(() => root.render(<FilterResetSurface />));
+    expect(container.textContent).toBe('IMPORTANT,STARRED|Promotions');
+    expect(
+      hasActiveMailFilters({
+        searchText: '',
+        labels: ['IMPORTANT'],
+        category: null,
+        activeFilterCount: 0,
+      }),
+    ).toBe(true);
+    expect(
+      hasActiveMailFilters({
+        searchText: '',
+        labels: [],
+        category: null,
+        activeFilterCount: 0,
+      }),
+    ).toBe(false);
+
+    act(() => container.querySelector<HTMLButtonElement>('[data-filter-reset]')?.click());
+
+    expect(queryStore.values.get('labels')).toBeNull();
+    expect(queryStore.values.get('category')).toBeNull();
+    expect(queryStore.writes).toEqual(
+      expect.arrayContaining([
+        { key: 'labels', value: null },
+        { key: 'category', value: null },
+      ]),
+    );
+  });
+
   it('keeps Enter lexical and requires selection of the explicit AI command', () => {
     const handleSearch = vi.fn<(query: string, useAI?: boolean) => void>();
     renderSearchView({ searchQuery: 'invoice', handleSearch });

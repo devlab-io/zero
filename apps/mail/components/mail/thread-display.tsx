@@ -19,11 +19,11 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { focusedIndexAtom, runThreadRemovalNavigation } from '@/hooks/use-mail-navigation';
 import { useOptimisticThreadState } from '@/components/mail/optimistic-thread-state';
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { useOptimisticActions } from '@/hooks/use-optimistic-actions';
 import { selectThreadViewState } from '@/lib/thread-view-state';
-import { focusedIndexAtom } from '@/hooks/use-mail-navigation';
 import { useAISidebar } from '@/components/ui/use-ai-sidebar';
 import { type ThreadDestination } from '@/lib/thread-actions';
 import { handleUnsubscribe } from '@/lib/email-utils.client';
@@ -49,9 +49,9 @@ import { log } from '@/lib/log';
 import { useAtom } from 'jotai';
 import { toast } from 'sonner';
 
-import { deriveThreadTriageTransition, runImportantToggle } from './thread-display.triage';
 import { THREAD_TRANSITION_WRAPPER_CLASS } from './thread-display.transition';
 import { ThreadActionButton } from './thread-display.action-button';
+import { runImportantToggle } from './thread-display.triage';
 import { MessageList } from './thread-display.message-list';
 import { printThread } from './thread-display.print';
 
@@ -120,44 +120,6 @@ export function ThreadDisplay() {
   // Get optimistic state for this thread
   const optimisticState = useOptimisticThreadState(id ?? '');
 
-  const handleNext = useCallback(() => {
-    if (!id) {
-      setThreadId(null);
-      setFocusedIndex(null);
-      setMode(null);
-      setActiveReplyId(null);
-      setDraftId(null);
-      return;
-    }
-    const transition = deriveThreadTriageTransition(items, id);
-    if (!transition) {
-      setThreadId(null);
-      setFocusedIndex(null);
-      setMode(null);
-      setActiveReplyId(null);
-      setDraftId(null);
-      return;
-    }
-
-    setMode(null);
-    setActiveReplyId(null);
-    setDraftId(null);
-    setThreadId(transition.thread.id);
-    setFocusedIndex(transition.focusedIndex);
-    if (animationsEnabled) {
-      setNavigationDirection('next');
-    }
-  }, [
-    items,
-    id,
-    setThreadId,
-    setFocusedIndex,
-    setMode,
-    setActiveReplyId,
-    setDraftId,
-    animationsEnabled,
-  ]);
-
   const handleUnsubscribeProcess = () => {
     if (!emailData?.latest) return;
     toast.promise(handleUnsubscribe({ emailData: emailData.latest }), {
@@ -186,10 +148,29 @@ export function ThreadDisplay() {
       setActiveReplyId(null);
       setDraftId(null);
 
-      handleNext();
-      optimisticMoveThreadsTo([id], folder, destination);
+      const navigation = runThreadRemovalNavigation({
+        items,
+        currentId: id,
+        mutate: () => optimisticMoveThreadsTo([id], folder, destination),
+        setThreadId,
+        setFocusedIndex,
+      });
+      if (navigation.threadId && animationsEnabled) {
+        setNavigationDirection('next');
+      }
     },
-    [id, folder, optimisticMoveThreadsTo, handleNext, setMode, setActiveReplyId, setDraftId],
+    [
+      id,
+      items,
+      folder,
+      optimisticMoveThreadsTo,
+      setThreadId,
+      setFocusedIndex,
+      setMode,
+      setActiveReplyId,
+      setDraftId,
+      animationsEnabled,
+    ],
   );
 
   const { optimisticToggleStar } = useOptimisticActions();

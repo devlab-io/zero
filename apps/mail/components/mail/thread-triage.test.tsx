@@ -1,29 +1,43 @@
-import {
-  deriveThreadTriageTransition,
-  runImportantToggle,
-  type ThreadTriageTransition,
-} from './thread-display.triage';
+import { runThreadRemovalNavigation } from '@/hooks/use-mail-navigation';
+import { runImportantToggle } from './thread-display.triage';
 import { describe, expect, it, vi } from 'vitest';
 
-function runSuccessiveTriage(count: number) {
+function runSuccessiveTriage(count: number, workflow: string) {
   let items = Array.from({ length: count }, (_, index) => ({ id: `thread-${index}` }));
   let currentId: string | null = items[0]?.id ?? null;
   let focusedIndex: number | null = items.length ? 0 : null;
   const visited: string[] = [];
+  const callOrder: string[] = [];
 
   while (currentId) {
-    visited.push(currentId);
+    const removedId = currentId;
+    visited.push(removedId);
+    let mutationFinished = false;
 
-    // Resolve by the open thread's identity from the immutable pre-mutation list.
-    const transition: ThreadTriageTransition<{ id: string }> | null = deriveThreadTriageTransition(
+    // This is the exact identity-first helper consumed by click archive, header archive and the
+    // thread-display archive/snooze hotkeys. The mutation deliberately clears URL/focus just like
+    // the optimistic action, so the assertions prove restoration happens afterwards.
+    runThreadRemovalNavigation({
       items,
-      currentId,
-    );
-    const afterMutation = items.filter((item) => item.id !== currentId);
-
-    currentId = transition?.thread.id ?? null;
-    focusedIndex = transition?.focusedIndex ?? null;
-    items = afterMutation;
+      currentId: removedId,
+      mutate: () => {
+        callOrder.push(`${workflow}:mutate:${removedId}`);
+        items = items.filter((item) => item.id !== removedId);
+        currentId = null;
+        focusedIndex = null;
+        mutationFinished = true;
+      },
+      setThreadId: (nextId) => {
+        expect(mutationFinished).toBe(true);
+        callOrder.push(`${workflow}:url:${nextId ?? 'closed'}`);
+        currentId = nextId;
+      },
+      setFocusedIndex: (nextIndex) => {
+        expect(mutationFinished).toBe(true);
+        callOrder.push(`${workflow}:focus:${nextIndex ?? 'closed'}`);
+        focusedIndex = nextIndex;
+      },
+    });
 
     if (currentId) {
       // URL identity and focus index point to the same successor after removal.
@@ -33,24 +47,51 @@ function runSuccessiveTriage(count: number) {
     }
   }
 
-  return { visited, items, currentId, focusedIndex };
+  return { visited, items, currentId, focusedIndex, callOrder };
 }
 
 describe('thread triage successor', () => {
   it.each([1, 2, 20])(
     'keeps archive, snooze and navigation identity-safe across %i threads',
     (count) => {
-      for (const workflow of ['archive', 'snooze', 'navigation']) {
-        const result = runSuccessiveTriage(count);
+      for (const workflow of ['click-archive', 'hotkey-archive', 'hotkey-snooze']) {
+        const result = runSuccessiveTriage(count, workflow);
         expect(result.visited, workflow).toEqual(
           Array.from({ length: count }, (_, index) => `thread-${index}`),
         );
         expect(result.items, workflow).toEqual([]);
         expect(result.currentId, workflow).toBeNull();
         expect(result.focusedIndex, workflow).toBeNull();
+        expect(result.callOrder[0], workflow).toBe(`${workflow}:mutate:thread-0`);
       }
     },
   );
+
+  it('resolves archive-previous by identity before removal and restores its shifted index', () => {
+    let items = [{ id: 'thread-0' }, { id: 'thread-1' }, { id: 'thread-2' }];
+    let threadId: string | null = 'thread-1';
+    let focusedIndex: number | null = 1;
+
+    const navigation = runThreadRemovalNavigation({
+      items,
+      currentId: 'thread-1',
+      direction: 'previous',
+      mutate: () => {
+        items = items.filter((item) => item.id !== 'thread-1');
+        threadId = null;
+        focusedIndex = null;
+      },
+      setThreadId: (nextId) => {
+        threadId = nextId;
+      },
+      setFocusedIndex: (nextIndex) => {
+        focusedIndex = nextIndex;
+      },
+    });
+
+    expect(navigation).toEqual({ threadId: 'thread-0', focusedIndex: 0 });
+    expect(items[focusedIndex ?? -1]?.id).toBe(threadId);
+  });
 
   it('reports important success only after mutation and refresh succeed', async () => {
     const calls: string[] = [];

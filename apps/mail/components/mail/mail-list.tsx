@@ -1,4 +1,5 @@
 import { focusedIndexAtom, useMailNavigation } from '@/hooks/use-mail-navigation';
+import useSearchLabels, { hasActiveMailFilters } from '@/hooks/use-labels-search';
 import { useCommandPalette } from '@/components/context/command-palette-context';
 import { useOptimisticActions } from '@/hooks/use-optimistic-actions';
 import { memo, useCallback, useEffect, useMemo, useRef } from 'react';
@@ -32,7 +33,9 @@ export const MailList = memo(
     const [, setThreadId] = useQueryState('threadId');
     const [, setDraftId] = useQueryState('draftId');
     const [searchValue, setSearchValue] = useSearchValue();
-    const { clearAllFilters } = useCommandPalette();
+    const { activeFilters, clearAllFilters } = useCommandPalette();
+    const { labels } = useSearchLabels();
+    const [category] = useQueryState('category');
 
     const {
       items,
@@ -123,7 +126,12 @@ export const MailList = memo(
       ],
     );
 
-    const isFiltering = searchValue.value.trim().length > 0;
+    const isFiltering = hasActiveMailFilters({
+      searchText: searchValue.value,
+      labels,
+      category,
+      activeFilterCount: activeFilters.length,
+    });
 
     useEffect(() => {
       if (isFiltering && !isLoading) {

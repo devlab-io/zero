@@ -3,15 +3,14 @@ import {
   threadRowPropsAreEqual,
   type ThreadRowProps,
 } from './mail-list-thread-projection';
+import { focusedIndexAtom, runThreadRemovalNavigation } from '@/hooks/use-mail-navigation';
 import { useOptimisticThreadState } from '@/components/mail/optimistic-thread-state';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { ThreadContextMenu } from '@/components/context/thread-context';
-import { deriveThreadTriageTransition } from './thread-display.triage';
 import { useOptimisticActions } from '@/hooks/use-optimistic-actions';
 import { highlightText } from '@/lib/email-utils-highlight.client';
 import { useMail, type Config } from '@/components/mail/use-mail';
 import { ThreadHoverActions } from './mail-list-thread-actions';
-import { focusedIndexAtom } from '@/hooks/use-mail-navigation';
 import { type ThreadDestination } from '@/lib/thread-actions';
 import { useThread, useThreads } from '@/hooks/use-threads';
 import { GroupPeople, PencilCompose } from '../icons/icons';
@@ -164,22 +163,18 @@ export const Thread = memo(function Thread({
     [getThreadData, idToUse, displayImportant, optimisticToggleImportant],
   );
 
-  const handleNext = useCallback(
-    (currentId: string) => {
-      const transition = deriveThreadTriageTransition(threads, currentId);
-      setThreadId(transition?.thread.id ?? null);
-      setFocusedIndex(transition?.focusedIndex ?? null);
-    },
-    [setFocusedIndex, setThreadId, threads],
-  );
-
   const moveThreadTo = useCallback(
     async (destination: ThreadDestination) => {
       if (!idToUse) return;
-      handleNext(idToUse);
-      optimisticMoveThreadsTo([idToUse], folder ?? '', destination);
+      runThreadRemovalNavigation({
+        items: threads,
+        currentId: idToUse,
+        mutate: () => optimisticMoveThreadsTo([idToUse], folder ?? '', destination),
+        setThreadId,
+        setFocusedIndex,
+      });
     },
-    [idToUse, folder, optimisticMoveThreadsTo, handleNext],
+    [idToUse, threads, folder, optimisticMoveThreadsTo, setThreadId, setFocusedIndex],
   );
 
   const { labels: threadLabels } = useThreadLabels(

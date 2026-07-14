@@ -1,11 +1,11 @@
-import { mailNavigationCommandAtom } from '@/hooks/use-mail-navigation';
+import { focusedIndexAtom, runThreadRemovalNavigation } from '@/hooks/use-mail-navigation';
 import { useOptimisticActions } from '@/hooks/use-optimistic-actions';
 import { THREAD_DISPLAY_HANDLED_ACTIONS } from './handler-manifest';
 import { enhancedKeyboardShortcuts } from '@/config/shortcuts';
+import { useThread, useThreads } from '@/hooks/use-threads';
 import useMoveTo from '@/hooks/driver/use-move-to';
 import useDelete from '@/hooks/driver/use-delete';
 import { useShortcuts } from './use-hotkey-utils';
-import { useThread } from '@/hooks/use-threads';
 import { useParams } from 'react-router';
 import { useQueryState } from 'nuqs';
 import { useSetAtom } from 'jotai';
@@ -21,14 +21,15 @@ export function ThreadDisplayHotkeys() {
   const [, setMode] = useQueryState('mode');
   const [, setActiveReplyId] = useQueryState('activeReplyId');
   const [, setPicker] = useQueryState('picker');
-  const [openThreadId] = useQueryState('threadId');
+  const [openThreadId, setThreadId] = useQueryState('threadId');
   const { data: thread } = useThread(openThreadId);
+  const [, items] = useThreads();
   const params = useParams<{
     folder: string;
   }>();
   const { mutate: deleteThread } = useDelete();
   const { mutate: moveTo } = useMoveTo();
-  const setMailNavigationCommand = useSetAtom(mailNavigationCommandAtom);
+  const setFocusedIndex = useSetAtom(focusedIndexAtom);
   const {
     optimisticMoveThreadsTo,
     optimisticSnooze,
@@ -43,11 +44,17 @@ export function ThreadDisplayHotkeys() {
   const isStarred = tags?.some((tag) => tag.name === 'STARRED') ?? false;
 
   // Devlab: d/e/[ = done — archive the open thread and move on. `]` archives and opens
-  // the PREVIOUS item (use-mail-navigation consumes the 'previous' command).
-  const archiveAndMove = (command: 'next' | 'previous') => {
+  // the PREVIOUS item. Both targets are resolved before the optimistic removal.
+  const archiveAndMove = (direction: 'next' | 'previous') => {
     if (!openThreadId) return;
-    optimisticMoveThreadsTo([openThreadId], folder, 'archive');
-    setMailNavigationCommand(command);
+    runThreadRemovalNavigation({
+      items,
+      currentId: openThreadId,
+      direction,
+      mutate: () => optimisticMoveThreadsTo([openThreadId], folder, 'archive'),
+      setThreadId,
+      setFocusedIndex,
+    });
   };
 
   const handlers: Record<(typeof THREAD_DISPLAY_HANDLED_ACTIONS)[number], () => void> = {
@@ -60,8 +67,13 @@ export function ThreadDisplayHotkeys() {
       const wakeAt = new Date();
       wakeAt.setDate(wakeAt.getDate() + 1);
       wakeAt.setHours(8, 0, 0, 0);
-      optimisticSnooze([openThreadId], folder, wakeAt);
-      setMailNavigationCommand('next');
+      runThreadRemovalNavigation({
+        items,
+        currentId: openThreadId,
+        mutate: () => optimisticSnooze([openThreadId], folder, wakeAt),
+        setThreadId,
+        setFocusedIndex,
+      });
     },
     toggleStar: () => {
       if (!openThreadId) return;
@@ -107,17 +119,23 @@ export function ThreadDisplayHotkeys() {
     },
     delete: () => {
       if (!openThreadId) return;
-      if (folder === 'bin') {
-        deleteThread(openThreadId);
-        setMailNavigationCommand('next');
-      } else {
-        moveTo({
-          threadIds: [openThreadId],
-          currentFolder: folder,
-          destination: 'bin',
-        });
-        setMailNavigationCommand('next');
-      }
+      runThreadRemovalNavigation({
+        items,
+        currentId: openThreadId,
+        mutate: () => {
+          if (folder === 'bin') {
+            deleteThread(openThreadId);
+          } else {
+            moveTo({
+              threadIds: [openThreadId],
+              currentFolder: folder,
+              destination: 'bin',
+            });
+          }
+        },
+        setThreadId,
+        setFocusedIndex,
+      });
     },
   };
 

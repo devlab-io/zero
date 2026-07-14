@@ -2,36 +2,31 @@ MIRROR: ORCHESTRATOR
 
 ## PHASE 0
 
-- Inputs lus intégralement : check gelé, spec section recherche/triage, rulings et rapport
-  builder 1.
-- Désaccord constaté et corrigé : le checkpoint builder 1 ajoutait un listener `keydown` natif
-  pour `/`, contrairement au ruling. La correction supprime ce listener et fait porter
-  l'ouverture/focus par l'action `search` déjà liée par `GlobalHotkeys`.
-- Aucun raccourci, commande ou binder n'a été modifié. Dans `command-registry.ts`, le seul
-  changement fonctionnel consommé reste `QuickSearchThread.from` vers `sender` ; l'autre diff est
-  le tri d'import imposé par Prettier.
-- Frontière à juger : le chemin `ThreadDisplayHotkeys` / `use-mail-navigation`, propriétaire du
-  snooze clavier, est hors may-touch. Cette correction n'élargit pas la frontière ; elle fournit
-  et consomme la transition identité -> successeur/index dans les chemins autorisés
-  `thread-display` et `mail-list-thread`.
+- Le check gelé, la section recherche/triage de la spec, les rulings, le FAIL du juge 1 et le
+  rapport builder précédent ont été lus intégralement.
+- Le correctif reste dans le touch-set autorisé. La spec et le check ne sont pas modifiés ; aucun
+  raccourci, binder, outil agent ou surface MCP ne change.
+- Les acquis du checkpoint sont conservés : `/` passe par `GlobalHotkeys`, Enter reste lexical,
+  l'IA exige une sélection explicite, les résultats utilisent `sender` et la route inbox exacte,
+  le test chaud p75 couvre 20 vrais `KeyboardEvent`, le toast important reste couplé à la mutation
+  réelle, et les cibles header restent nommées et dimensionnées.
 
-## Résultat produit
+## Correction du FAIL juge 1
 
-- `/` traverse le registre global, demande d'abord la vue lexicale puis ouvre la palette ; aucune
-  écoute parallèle n'existe. Le test envoie 20 vrais `KeyboardEvent`, exige une seule écriture de
-  chaque état, vérifie le focus à chaque ouverture et `p75 < 100 ms` cache chaud.
-- Enter reste lexical (`useAI=false`) ; l'IA n'est appelée qu'après sélection de la commande
-  `Smart Search`.
-- 20 cas déterministes affichent `sender` et ouvrent exactement
-  `/mail/inbox?threadId=<id>`.
-- Le reset existant efface recherche, filtres actifs et persistance ; l'état boîte vide n'affiche
-  plus l'action de reset réservée à l'état sans résultat.
-- La transition de triage cherche le fil courant par identité avant mutation et retourne l'index
-  du successeur après retrait. Les tests parcourent 1, 2 et 20 fils sans skip/dup, avec identité URL
-  et focus synchrones puis fermeture finale déterministe.
-- Le feedback important est émis après mutation + refresh réels ; l'échec ne peut plus produire
-  un faux succès. Les cibles du header restent 44 px mobile / 40 px desktop et nommées.
-- Le garde `idToUse` de `mail-list-thread.tsx` est conservé.
+- `clearAllFilters` appelle désormais les vrais setters URL de `labels` et `category`, en plus de
+  vider la recherche lexicale, `activeFilters` et son stockage local. Le test monte le vrai hook
+  `useSearchLabels` sur un store query-state et observe les deux écritures `null`.
+- L'état vide de la liste considère désormais recherche, labels, catégorie et filtres actifs. Une
+  recherche label-only sans résultat rend donc « No messages match these filters » et non l'état
+  de boîte vide.
+- `runThreadRemovalNavigation` calcule le fil cible par identité sur la liste immuable, exécute
+  ensuite la mutation, puis restaure `threadId` et `focusedIndex` après tout clear interne.
+- Ce seam est consommé directement par les clics archive du reader et des lignes, ainsi que par
+  les hotkeys archive suivant/précédent, snooze et delete. L'ancien command post-mutation basé sur
+  l'index a été retiré.
+- Les tests 1/2/20 exécutent ce seam de production pour clic archive, hotkey archive et hotkey
+  snooze ; leur mutation de test efface réellement URL/focus avant restauration. Le cas
+  archive-previous vérifie aussi l'identité et l'index décalé.
 
 ## RUN 1
 
@@ -42,21 +37,24 @@ exit: 0
 ```text
  RUN  v3.2.7 .../apps/mail
 
- ✓ components/mail/thread-triage.test.tsx (5 tests) 4ms
+stderr | components/mail/thread-triage.test.tsx
+KeyboardLayoutMap API is not supported in this browser
+
 stderr | components/context/command-palette-search.test.tsx
 KeyboardLayoutMap API is not supported in this browser
 
- ✓ components/context/command-palette-search.test.tsx (22 tests) 84ms
- ✓ components/context/command-palette-context.test.tsx (6 tests) 18ms
+ ✓ components/context/command-palette-search.test.tsx (23 tests) 105ms
+ ✓ components/context/command-palette-context.test.tsx (6 tests) 17ms
+ ✓ components/mail/thread-triage.test.tsx (6 tests) 4ms
 
  Test Files  3 passed (3)
-      Tests  33 passed (33)
-   Duration  1.06s
+      Tests  35 passed (35)
+   Duration  1.80s
 ```
 
 ## RUN 2
 
-`pnpm --filter @zero/mail exec eslint components/context/command-palette-search.test.tsx components/mail/thread-triage.test.tsx components/mail/thread-display.action-button.tsx components/mail/mail-list.tsx components/mail/mail-list-thread.tsx lib/hotkeys/global-hotkeys.tsx && pnpm exec prettier apps/mail/components/context/command-palette-dialog.tsx apps/mail/components/context/command-palette-views.tsx apps/mail/components/context/command-palette-search.test.tsx apps/mail/components/context/command-registry.ts apps/mail/components/mail/mail-list.tsx apps/mail/components/mail/mail-list-thread.tsx apps/mail/components/mail/thread-display.tsx apps/mail/components/mail/thread-display.action-button.tsx apps/mail/components/mail/thread-triage.test.tsx apps/mail/lib/hotkeys/global-hotkeys.tsx --check`
+`pnpm --filter @zero/mail exec eslint components/context/command-palette-search.test.tsx components/mail/thread-triage.test.tsx components/mail/thread-display.action-button.tsx components/mail/mail-list.tsx components/mail/mail-list-thread.tsx components/mail/mail.tsx hooks/use-labels-search.ts hooks/use-mail-navigation.ts lib/hotkeys/global-hotkeys.tsx lib/hotkeys/thread-display-hotkeys.tsx && pnpm exec prettier apps/mail/components/context/command-palette-context.tsx apps/mail/components/context/command-palette-dialog.tsx apps/mail/components/context/command-palette-views.tsx apps/mail/components/context/command-palette-search.test.tsx apps/mail/components/context/command-registry.ts apps/mail/components/mail/mail.tsx apps/mail/components/mail/mail-list.tsx apps/mail/components/mail/mail-list-thread.tsx apps/mail/components/mail/thread-display.tsx apps/mail/components/mail/thread-display.action-button.tsx apps/mail/components/mail/thread-display.triage.tsx apps/mail/components/mail/thread-triage.test.tsx apps/mail/hooks/use-labels-search.ts apps/mail/hooks/use-mail-navigation.ts apps/mail/lib/hotkeys/global-hotkeys.tsx apps/mail/lib/hotkeys/thread-display-hotkeys.tsx --check`
 
 exit: 0
 
@@ -64,15 +62,22 @@ exit: 0
 Warning: React version not specified in eslint-plugin-react settings.
 
 apps/mail/components/mail/mail-list-thread.tsx
-  132:8  warning  React Hook useMemo has a missing dependency: 'getThreadData?.latest?.body'
-  437:6  warning  React Hook useMemo has missing dependencies
+  131:8  warning  React Hook useMemo has a missing dependency
+  432:6  warning  React Hook useMemo has missing dependencies
 
 apps/mail/components/mail/mail-list.tsx
-  113:7  warning  React Hook useCallback has a missing dependency: 'setAnchorIndex'
-  135:8  warning  React Hook useEffect has a missing dependency: 'searchValue'
-  177:7  warning  React Hook useCallback has a missing dependency: 'Comp'
+  116:7  warning  React Hook useCallback has a missing dependency
+  143:8  warning  React Hook useEffect has a missing dependency
+  185:7  warning  React Hook useCallback has a missing dependency
 
-5 problems (0 errors, 5 warnings)
+apps/mail/components/mail/mail.tsx
+  349:6  warning  React Hook useEffect has a missing dependency
+
+apps/mail/hooks/use-mail-navigation.ts
+  143:5  warning  React Hook useCallback has a missing dependency
+  274:5  warning  React Hook useCallback has an unnecessary dependency
+
+8 problems (0 errors, 8 warnings)
 
 Checking formatting...
 All matched files use Prettier code style!
@@ -110,11 +115,12 @@ typecheck-report OK — no regression above baseline.
 
 ## RUN 4
 
-`git status --porcelain --untracked-files=all | sed 's/^...//' | awk '!/^(apps\/mail\/(components\/context\/(command-palette-dialog\.tsx|command-palette-views\.tsx|command-palette-search\.test\.tsx|command-registry\.ts)|components\/mail\/(mail-list\.tsx|mail-list-thread\.tsx|thread-display(\.[^.]+)?\.tsx|thread-triage\.test\.tsx)|lib\/hotkeys\/global-hotkeys\.tsx)|docs\/jobs\/niveau10\/search-triage-01\.md)$/ {print; bad=1} END {exit bad}'`
+`git status --porcelain --untracked-files=all | sed 's/^...//' | awk '!/^(apps\/mail\/(components\/context\/(command-palette-context\.tsx|command-palette-dialog\.tsx|command-palette-views\.tsx|command-palette-search\.test\.tsx|command-registry\.ts)|components\/mail\/(mail\.tsx|mail-list\.tsx|mail-list-thread\.tsx|thread-display(\.[^.]+)?\.tsx|thread-triage\.test\.tsx)|hooks\/(use-labels-search|use-mail-navigation)\.ts|lib\/hotkeys\/(global-hotkeys|thread-display-hotkeys)\.tsx)|docs\/jobs\/niveau10\/search-triage-01\.md)$/ {print; bad=1} END {exit bad}'`
 
 exit: 0
 
 ```text
+[no output]
 ```
 
 ## RUN 5
@@ -124,6 +130,7 @@ exit: 0
 exit: 0
 
 ```text
+[no output]
 ```
 
 STATUS: COMPLETE — 5/5 RUNs gelés passent ; aucun commit ni push effectué.
