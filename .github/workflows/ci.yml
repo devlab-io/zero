@@ -66,6 +66,20 @@ jobs:
           apps/server/src/routes/agent/mcp.ts
           scripts/security/check-agent-surface.mjs
 
+      # Frontière front→serveur (issue #25 / V2.4). La règle no-restricted-imports
+      # existe dans packages/eslint-config/config.ts, mais n'était appliquée que par
+      # `pnpm --filter @zero/mail lint` en local — jamais en CI (ci ne lance pas eslint).
+      # Ce step l'EXÉCUTE réellement sur tout apps/mail via oxlint, avec une config dédiée
+      # (categories.correctness=off + la seule règle frontière) : vert sur l'arbre sain,
+      # rouge dès qu'un import relatif `**/server/src/**` réapparaît. oxlint (Rust) ~0,1 s
+      # sur 353 fichiers ; l'alternative `eslint .` coûte ~4,3 s ET remonte 142 erreurs
+      # préexistantes hors périmètre (rules react/tseslint), donc inéligible comme gate.
+      - name: Enforce front→server import boundary (A1 — apps/mail)
+        run: >-
+          pnpm dlx oxlint@1.9.0
+          --config packages/eslint-config/oxlint-frontier.json
+          apps/mail
+
       - name: LOC ratchet (A1 — non-growing)
         run: node scripts/checks/loc-ratchet.mjs
 
