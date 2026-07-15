@@ -1,7 +1,8 @@
 import { backgroundQueueAtom, isThreadInBackgroundQueueAtom } from '@/store/backgroundQueue';
+import { emailContentQueryKey, resolveEmailContentTheme } from '@/lib/email-content-cache';
 import { useInfiniteQuery, useQuery, useMutation } from '@tanstack/react-query';
-import type { IGetThreadResponse } from '@zero/types';
 import { useSearchValue } from '@/hooks/use-search-value';
+import type { IGetThreadResponse } from '@zero/types';
 import { useTRPC } from '@/providers/query-provider';
 import useSearchLabels from './use-labels-search';
 import { useSession } from '@/lib/auth-client';
@@ -20,6 +21,8 @@ export const useThreads = () => {
   const trpc = useTRPC();
   const { labels } = useSearchLabels();
 
+  // Keep the default 20-row first page: server-utils routes that exact request through
+  // the active-shard fast path. The body warmer expands to 50 only after first paint.
   const threadsQuery = useInfiniteQuery(
     trpc.mail.listThreads.infiniteQueryOptions(
       {
@@ -68,7 +71,7 @@ export const useThread = (threadId: string | null, options?: { enabled?: boolean
   const id = threadId ? threadId : _threadId;
   const trpc = useTRPC();
   const { data: settings } = useSettings();
-  const { theme: systemTheme } = useTheme();
+  const { resolvedTheme } = useTheme();
 
   // #30: list rows served from the rich projection pass { enabled: false } so opening the
   // inbox triggers NO per-row mail.get (and no processEmailContent). The body is fetched
@@ -128,31 +131,30 @@ export const useThread = (threadId: string | null, options?: { enabled?: boolean
   // Extract image loading condition to avoid duplication
   const shouldLoadImages = useMemo(() => {
     if (!settings?.settings || !latestMessage?.sender?.email) return false;
-    
-    return settings.settings.externalImages ||
+
+    return (
+      settings.settings.externalImages ||
       settings.settings.trustedSenders?.includes(latestMessage.sender.email) ||
-      false;
+      false
+    );
   }, [settings?.settings, latestMessage?.sender?.email]);
 
-  // Prefetch query - intentionally unused, just for caching
+  const contentTheme = resolveEmailContentTheme(resolvedTheme);
+
+  // Prefetch query - intentionally unused, just for caching.
+  // CONTRACT: key and inputs MUST mirror the consumer in mail-content.tsx (same
+  // ['email-content', messageId, shouldLoadImages, theme] key, same effective theme fed
+  // to processEmailContent). A normalized light/dark value avoids the initial
+  // next-themes `undefined` key missing after hydration resolves.
   useQuery({
-    queryKey: [
-      'email-content',
-      latestMessage?.id,
-      shouldLoadImages,
-      systemTheme,
-    ],
+    queryKey: emailContentQueryKey(latestMessage?.id, shouldLoadImages, contentTheme),
     queryFn: async () => {
       if (!latestMessage?.decodedBody || !settings?.settings) return null;
-
-      const userTheme =
-        settings.settings.colorTheme === 'system' ? systemTheme : settings.settings.colorTheme;
-      const theme = userTheme === 'dark' ? 'dark' : 'light';
 
       const result = await processEmailContent({
         html: latestMessage.decodedBody,
         shouldLoadImages,
-        theme,
+        theme: contentTheme,
       });
 
       return {

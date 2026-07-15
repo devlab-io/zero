@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 
-import { keyboardShortcuts, type Shortcut } from '@/config/shortcuts';
 import {
   GLOBAL_HANDLED_ACTIONS,
   NAV_SEQUENCE_ACTIONS,
@@ -10,7 +9,8 @@ import {
   LIST_IMPERATIVE_ACTIONS,
   COMPOSER_EXTERNAL_ACTIONS,
 } from './handler-manifest';
-import { isTypingOrModalTarget } from './use-hotkey-utils';
+import { buildBindingMap, formatKeys, isTypingOrModalTarget } from './use-hotkey-utils';
+import { keyboardShortcuts, type Shortcut } from '@/config/shortcuts';
 
 // Actions bound through the generic registry binder (useShortcuts), by scope.
 const HANDLED_BY_SCOPE: Record<string, readonly string[]> = {
@@ -51,7 +51,9 @@ describe('Shortwave keyboard parity — registry ↔ handler coverage (frozen ch
         continue;
       }
       if (!resolved.set.includes(shortcut.action)) {
-        unresolved.push(`${shortcut.action} — advertised in ${shortcut.scope} but absent from ${resolved.where}`);
+        unresolved.push(
+          `${shortcut.action} — advertised in ${shortcut.scope} but absent from ${resolved.where}`,
+        );
       }
     }
     expect(unresolved).toEqual([]);
@@ -92,8 +94,21 @@ describe('Shortwave keyboard parity — registry ↔ handler coverage (frozen ch
   // The frozen check #6 browser smoke exercises these; guard them against silent removal.
   it('the check #6 smoke keys are present and each resolves to a handler', () => {
     const SMOKE_COMBOS = [
-      '/', 'c', 'r', 'a', 'f', 'd', 'h', 's', 'j', 'k', 'x',
-      'g+i', 'mod+k', 'shift+?', 'escape',
+      '/',
+      'c',
+      'r',
+      'a',
+      'f',
+      'd',
+      'h',
+      's',
+      'j',
+      'k',
+      'x',
+      'g+i',
+      'mod+k',
+      'shift+?',
+      'escape',
     ];
     expectCombosWired(SMOKE_COMBOS);
   });
@@ -105,20 +120,64 @@ describe('Shortwave keyboard parity — registry ↔ handler coverage (frozen ch
   it('every in-scope frozen-table key combo is registered and wired', () => {
     const REQUIRED_TABLE_COMBOS = [
       // Compose
-      'c', 'r', 'a', 'f', 'mod+enter', 'mod+shift+enter',
+      'c',
+      'r',
+      'a',
+      'f',
+      'mod+enter',
+      'mod+shift+enter',
       // Global
-      '/', 'escape', 'shift+?', 'mod+/', 'mod+k', 'mod+shift+k', 'mod+shift+p', 'mod+,',
-      'mod+shift+l', 'mod+z',
+      '/',
+      'escape',
+      'shift+?',
+      'mod+/',
+      'mod+k',
+      'mod+shift+k',
+      'mod+shift+p',
+      'mod+,',
+      'mod+shift+l',
+      'mod+z',
       // Thread
-      'd', 'e', '[', ']', 'b', 'h', 's', 'l', 'v', '#', 'delete', 'mod+backspace',
-      'u', 'shift+u', 'shift+i', '+', '-',
+      'd',
+      'e',
+      '[',
+      ']',
+      'b',
+      'h',
+      's',
+      'l',
+      'v',
+      '#',
+      'delete',
+      'mod+backspace',
+      'u',
+      'shift+u',
+      'shift+i',
+      '+',
+      '-',
       // List
-      'j', 'arrowdown', 'k', 'arrowup', 'x', 'enter', 'arrowright', 'arrowleft',
-      'space', 'shift+space',
+      'j',
+      'arrowdown',
+      'k',
+      'arrowup',
+      'x',
+      'enter',
+      'arrowright',
+      'arrowleft',
+      'space',
+      'shift+space',
       // Layout
       'mod+\\',
       // Navigate (g …)
-      'g+i', 'g+s', 'g+b', 'g+h', 'g+e', 'g+t', 'g+d', 'g+!', 'g+#',
+      'g+i',
+      'g+s',
+      'g+b',
+      'g+h',
+      'g+e',
+      'g+t',
+      'g+d',
+      'g+!',
+      'g+#',
     ];
     expectCombosWired(REQUIRED_TABLE_COMBOS);
   });
@@ -141,6 +200,70 @@ function expectCombosWired(combos: string[]) {
   }
   expect(missing).toEqual([]);
 }
+
+// Regression — the binder used to key its map by ACTION, so key aliases sharing an
+// action (d/e → archive, b/h → remind, u/shift+u, #/delete/mod+backspace) collapsed to
+// the last registered row and the others (notably `d`) were silently unbound.
+describe('binder — every key alias binds (buildBindingMap keyed by binding)', () => {
+  const noop = () => {};
+  const handlersFor = (actions: readonly string[]) =>
+    Object.fromEntries(actions.map((action) => [action, noop]));
+  const scopeShortcuts = (scope: string) =>
+    keyboardShortcuts.filter((shortcut) => shortcut.scope === scope);
+
+  it('every non-sequence, non-ignore registered shortcut keeps its own binding', () => {
+    const broken: string[] = [];
+    for (const [scope, actions] of Object.entries(HANDLED_BY_SCOPE)) {
+      const map = buildBindingMap(scopeShortcuts(scope), handlersFor(actions));
+      for (const row of scopeShortcuts(scope)) {
+        if (row.type === 'sequence' || row.ignore) continue;
+        const binding = formatKeys(row.keys);
+        if (map[binding]?.action !== row.action) {
+          broken.push(
+            `${scope}: ${binding} → expected ${row.action}, got ${map[binding]?.action ?? 'nothing'}`,
+          );
+        }
+      }
+    }
+    expect(broken).toEqual([]);
+  });
+
+  it('d and e both bind and share the archive action, in both scopes', () => {
+    for (const scope of ['mail-list', 'thread-display']) {
+      const set = HANDLED_BY_SCOPE[scope];
+      if (!set) throw new Error(`missing handler set for ${scope}`);
+      const map = buildBindingMap(scopeShortcuts(scope), handlersFor(set));
+      const aliasKeys = [
+        ['d'],
+        ['e'],
+        ['b'],
+        ['h'],
+        ['u'],
+        ['shift', 'u'],
+        ['#'],
+        ['delete'],
+        ['mod', 'backspace'],
+      ];
+      for (const keys of aliasKeys) {
+        expect(map[formatKeys(keys)], `${scope}: ${keys.join('+')} must be bound`).toBeDefined();
+      }
+      expect(map[formatKeys(['d'])]?.action).toBe(map[formatKeys(['e'])]?.action);
+    }
+  });
+
+  it('sequences and ignore rows never enter the binder map', () => {
+    const map = buildBindingMap(
+      keyboardShortcuts,
+      handlersFor(keyboardShortcuts.map((shortcut) => shortcut.action)),
+    );
+    expect(map[formatKeys(['j'])]).toBeUndefined();
+    expect(map[formatKeys(['space'])]).toBeUndefined();
+    for (const bound of Object.values(map)) {
+      expect(bound.type).not.toBe('sequence');
+      expect(bound.ignore).not.toBe(true);
+    }
+  });
+});
 
 describe('single-key exclusion — isTypingOrModalTarget (frozen check #4)', () => {
   it('is true for input, textarea and select elements', () => {

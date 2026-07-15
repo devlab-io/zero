@@ -1,29 +1,60 @@
-import { log } from '@/lib/log';
+import {
+  QueryCache,
+  QueryClient,
+  defaultShouldDehydrateQuery,
+  hashKey,
+  type InfiniteData,
+} from '@tanstack/react-query';
 import {
   PersistQueryClientProvider,
   type PersistedClient,
   type Persister,
 } from '@tanstack/react-query-persist-client';
-import { QueryCache, QueryClient, hashKey, type InfiniteData } from '@tanstack/react-query';
+import { readRetryDelay, shouldRetryRead } from '@/lib/query-retry';
 import { createTRPCContext } from '@trpc/tanstack-react-query';
 import { createTRPCClient, httpBatchLink } from '@trpc/client';
 import { useMemo, type PropsWithChildren } from 'react';
 import type { AppRouter } from '@zero/server/trpc';
 import { CACHE_BURST_KEY } from '@/lib/constants';
-import { readRetryDelay, shouldRetryRead } from '@/lib/query-retry';
 import { signOut } from '@/lib/auth-client';
 import { get, set, del } from 'idb-keyval';
 import superjson from 'superjson';
+import { log } from '@/lib/log';
+
+export function shouldPersistQuery(query: Parameters<typeof defaultShouldDehydrateQuery>[0]) {
+  const path = query.queryKey[0];
+  const isThreadList = Array.isArray(path) && path[0] === 'mail' && path[1] === 'listThreads';
+
+  return defaultShouldDehydrateQuery(query) && (query.meta?.persist === true || isThreadList);
+}
 
 function createIDBPersister(idbValidKey: IDBValidKey = 'zero-query-cache') {
+  let pendingClient: PersistedClient | undefined;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+
+  const flush = async () => {
+    timer = undefined;
+    const client = pendingClient;
+    pendingClient = undefined;
+    if (client) await set(idbValidKey, client);
+  };
+
   return {
     persistClient: async (client: PersistedClient) => {
-      await set(idbValidKey, client);
+      pendingClient = client;
+      if (!timer) {
+        timer = setTimeout(() => {
+          void flush().catch((error) => log.warn('Failed to persist query cache', error));
+        }, 1000);
+      }
     },
     restoreClient: async () => {
       return await get<PersistedClient>(idbValidKey);
     },
     removeClient: async () => {
+      pendingClient = undefined;
+      if (timer) clearTimeout(timer);
+      timer = undefined;
       await del(idbValidKey);
     },
   } satisfies Persister;
@@ -132,6 +163,10 @@ export function QueryProvider({
         persister,
         buster: CACHE_BURST_KEY,
         maxAge: 1000 * 60 * 60 * 24, // 24 hours
+        dehydrateOptions: {
+          shouldDehydrateQuery: shouldPersistQuery,
+          shouldDehydrateMutation: () => false,
+        },
       }}
       onSuccess={() => {
         const threadQueryKey = [['mail', 'listThreads'], { type: 'infinite' }];

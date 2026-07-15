@@ -225,11 +225,18 @@ export const Thread = memo(function Thread({
         // Devlab: hover targeting restored — required for Superhuman-style
         // single-key actions (d/r/a/f/h) on the thread under the cursor.
         onMouseEnter={() => {
+          if (!idToUse) return;
           window.dispatchEvent(new CustomEvent('emailHover', { detail: { id: idToUse } }));
           if (hoverPrefetchTimer.current) clearTimeout(hoverPrefetchTimer.current);
           hoverPrefetchTimer.current = setTimeout(() => {
             void queryClient.prefetchQuery(
-              trpc.mail.get.queryOptions({ id: idToUse }, { staleTime: 1000 * 60 * 60 }),
+              trpc.mail.get.queryOptions(
+                { id: idToUse },
+                {
+                  staleTime: 1000 * 60,
+                  meta: { persist: true },
+                },
+              ),
             );
           }, 120);
         }}

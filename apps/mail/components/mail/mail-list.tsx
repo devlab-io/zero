@@ -1,20 +1,21 @@
-import { memo, useCallback, useEffect, useMemo, useRef } from 'react';
 import { focusedIndexAtom, useMailNavigation } from '@/hooks/use-mail-navigation';
-import { useMailListData } from '@/hooks/use-mail-list-data';
-import { useMailSelection } from '@/hooks/use-mail-selection';
 import { useOptimisticActions } from '@/hooks/use-optimistic-actions';
+import { usePrefetchThreadBodies } from '@/hooks/use-thread-prefetch';
+import { memo, useCallback, useEffect, useMemo, useRef } from 'react';
+import { useMailSelection } from '@/hooks/use-mail-selection';
+import { useMailListData } from '@/hooks/use-mail-list-data';
+import { selectMailListState } from '@/lib/mail-list-state';
 import { useSearchValue } from '@/hooks/use-search-value';
 import { EmptyStateIcon } from '../icons/empty-state-svg';
-import type { ParsedMessage } from '@/types';
-import { useSettings } from '@/hooks/use-settings';
-import { selectMailListState } from '@/lib/mail-list-state';
 import { useIsOffline } from '@/hooks/use-online-status';
+import { useSettings } from '@/hooks/use-settings';
 import { VList, type VListHandle } from 'virtua';
-import { RefreshCcw } from 'lucide-react';
-import { m } from '@/paraglide/messages';
-import { cn, FOLDERS } from '@/lib/utils';
+import type { ParsedMessage } from '@/types';
 import { Thread } from './mail-list-thread';
 import { Draft } from './mail-list-draft';
+import { RefreshCcw } from 'lucide-react';
+import { cn, FOLDERS } from '@/lib/utils';
+import { m } from '@/paraglide/messages';
 import { useParams } from 'react-router';
 import { useQueryState } from 'nuqs';
 import { useAtom } from 'jotai';
@@ -28,7 +29,7 @@ export const MailList = memo(
   function MailList() {
     const { folder } = useParams<{ folder: string }>();
     const { data: settingsData } = useSettings();
-    const [, setThreadId] = useQueryState('threadId');
+    const [threadId, setThreadId] = useQueryState('threadId');
     const [, setDraftId] = useQueryState('draftId');
     const [searchValue, setSearchValue] = useSearchValue();
 
@@ -43,6 +44,10 @@ export const MailList = memo(
       loadMore,
       refetch,
     } = useMailListData();
+
+    // Devlab: warm mail.get for the newest 50 rows (persisted by the IDB persister) so
+    // opening a thread — including after a reload — is served from cache.
+    usePrefetchThreadBodies(items, threadId);
 
     const isOffline = useIsOffline();
 
@@ -165,7 +170,8 @@ export const MailList = memo(
               index={index}
               onClick={handleMailClick}
             />
-            {index === filteredItems.length - 1 && (isFetchingNextPage || isFetchingThreadBodies) ? (
+            {index === filteredItems.length - 1 &&
+            (isFetchingNextPage || isFetchingThreadBodies) ? (
               <div className="flex w-full justify-center py-4">
                 <div className="h-4 w-4 animate-spin rounded-full border-2 border-neutral-900 border-t-transparent dark:border-white dark:border-t-transparent" />
               </div>
@@ -233,7 +239,11 @@ export const MailList = memo(
                     <p className="text-lg">{m['states.mailList.emptyTitle']()}</p>
                     <p className="text-md text-muted-foreground dark:text-white/50">
                       {m['states.mailList.emptyDescription']()}{' '}
-                      <button type="button" className="underline cursor-pointer" onClick={clearFilters}>
+                      <button
+                        type="button"
+                        className="cursor-pointer underline"
+                        onClick={clearFilters}
+                      >
                         {m['states.mailList.clearFilters']()}
                       </button>
                     </p>
@@ -273,7 +283,6 @@ export const MailList = memo(
                       Math.abs(filteredItems.length - 1 - endIndex) < 7 &&
                       !isLoading &&
                       !isFetchingNextPage &&
-                      !isFetchingThreadBodies &&
                       hasNextPage
                     ) {
                       void loadMore();

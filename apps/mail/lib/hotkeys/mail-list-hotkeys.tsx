@@ -1,21 +1,22 @@
+import { resolveRowTargetId, resolveTargetIds } from './target-resolution';
 import { useOptimisticActions } from '@/hooks/use-optimistic-actions';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { focusedIndexAtom } from '@/hooks/use-mail-navigation';
-import { MAILLIST_HANDLED_ACTIONS } from './handler-manifest';
 import { enhancedKeyboardShortcuts } from '@/config/shortcuts';
+import { MAILLIST_HANDLED_ACTIONS } from './handler-manifest';
 // import { useSearchValue } from '@/hooks/use-search-value';
 import {
   // useLocation,
   useParams,
 } from 'react-router';
-import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { useMail } from '@/components/mail/use-mail';
 // import { Categories } from '@/components/mail/mail';
 import { useShortcuts } from './use-hotkey-utils';
 import { useThreads } from '@/hooks/use-threads';
 // import { cleanSearchValue } from '@/lib/utils';
 import { m } from '@/paraglide/messages';
-import { useQueryState } from 'nuqs';
 import { useAtomValue } from 'jotai';
+import { useQueryState } from 'nuqs';
 import { toast } from 'sonner';
 
 // Space/shift+Space paging is NOT in this scope — it is imperative in the `list` scope
@@ -30,7 +31,6 @@ export function MailListHotkeys() {
   // const pathname = useLocation().pathname;
   const params = useParams<{ folder: string }>();
   const folder = params?.folder ?? 'inbox';
-  const shouldUseHover = mail.bulkSelected.length === 0;
   const focusedIndex = useAtomValue(focusedIndexAtom);
   const [, setThreadId] = useQueryState('threadId');
   const [, setMode] = useQueryState('mode');
@@ -58,14 +58,12 @@ export function MailListHotkeys() {
     };
   }, []);
 
-  // Devlab: resolve the action target — priority: hover, then keyboard focus (j/k),
-  // then bulk selection. Returns [] when nothing is targeted.
-  const getTargetIds = useCallback((): string[] => {
-    if (shouldUseHover && hoveredEmailId.current) return [hoveredEmailId.current];
-    if (shouldUseHover && focusedIndex !== null && items[focusedIndex])
-      return [items[focusedIndex].id];
-    return mail.bulkSelected;
-  }, [shouldUseHover, focusedIndex, items, mail.bulkSelected]);
+  // Bulk selection wins for actions; without one, explicit J/K focus wins over hover.
+  const getTargetIds = useCallback(
+    (): string[] =>
+      resolveTargetIds(hoveredEmailId.current, focusedIndex, items, mail.bulkSelected),
+    [focusedIndex, items, mail.bulkSelected],
+  );
 
   const selectAll = useCallback(() => {
     if (mail.bulkSelected.length > 0) {
@@ -84,121 +82,65 @@ export function MailListHotkeys() {
     }
   }, [items, mail]);
 
-  const markAsRead = useCallback(() => {
-    if (shouldUseHover && hoveredEmailId.current) {
-      optimisticMarkAsRead([hoveredEmailId.current]);
-      return;
-    }
+  // Devlab: every list action targets through getTargetIds() — bulk selection, then
+  // keyboard focus (j/k), then pointer hover.
+  const withTargets = useCallback(
+    (act: (ids: string[]) => void) => () => {
+      const ids = getTargetIds();
+      if (ids.length === 0) {
+        toast.info(m['common.mail.noEmailsToSelect']());
+        return;
+      }
+      act(ids);
+    },
+    [getTargetIds],
+  );
 
-    const idsToMark = mail.bulkSelected;
-    if (idsToMark.length === 0) {
-      toast.info(m['common.mail.noEmailsToSelect']());
-      return;
-    }
+  const markAsRead = useMemo(
+    () => withTargets((ids) => optimisticMarkAsRead(ids)),
+    [withTargets, optimisticMarkAsRead],
+  );
 
-    optimisticMarkAsRead(idsToMark);
-  }, [mail.bulkSelected, optimisticMarkAsRead, shouldUseHover]);
+  const markAsUnread = useMemo(
+    () => withTargets((ids) => optimisticMarkAsUnread(ids)),
+    [withTargets, optimisticMarkAsUnread],
+  );
 
-  const markAsUnread = useCallback(() => {
-    if (shouldUseHover && hoveredEmailId.current) {
-      optimisticMarkAsUnread([hoveredEmailId.current]);
-      return;
-    }
+  const markAsImportant = useMemo(
+    () => withTargets((ids) => optimisticToggleImportant(ids, true)),
+    [withTargets, optimisticToggleImportant],
+  );
 
-    const idsToMark = mail.bulkSelected;
-    if (idsToMark.length === 0) {
-      toast.info(m['common.mail.noEmailsToSelect']());
-      return;
-    }
+  const markAsNotImportant = useMemo(
+    () => withTargets((ids) => optimisticToggleImportant(ids, false)),
+    [withTargets, optimisticToggleImportant],
+  );
 
-    optimisticMarkAsUnread(idsToMark);
-  }, [mail.bulkSelected, optimisticMarkAsUnread, shouldUseHover]);
+  const archiveEmail = useMemo(
+    () => withTargets((ids) => optimisticMoveThreadsTo(ids, folder, 'archive')),
+    [withTargets, folder, optimisticMoveThreadsTo],
+  );
 
-  const markAsImportant = useCallback(() => {
-    if (shouldUseHover && hoveredEmailId.current) {
-      optimisticToggleImportant([hoveredEmailId.current], true);
-      return;
-    }
+  const bulkDelete = useMemo(
+    () => withTargets((ids) => optimisticDeleteThreads(ids, folder)),
+    [withTargets, folder, optimisticDeleteThreads],
+  );
 
-    const idsToMark = mail.bulkSelected;
-    if (idsToMark.length === 0) {
-      toast.info(m['common.mail.noEmailsToSelect']());
-      return;
-    }
-
-    optimisticToggleImportant(idsToMark, true);
-  }, [mail.bulkSelected, optimisticToggleImportant, shouldUseHover]);
-
-  const markAsNotImportant = useCallback(() => {
-    if (shouldUseHover && hoveredEmailId.current) {
-      optimisticToggleImportant([hoveredEmailId.current], false);
-      return;
-    }
-
-    const idsToMark = mail.bulkSelected;
-    if (idsToMark.length === 0) {
-      toast.info(m['common.mail.noEmailsToSelect']());
-      return;
-    }
-
-    optimisticToggleImportant(idsToMark, false);
-  }, [mail.bulkSelected, optimisticToggleImportant, shouldUseHover]);
-
-  const archiveEmail = useCallback(async () => {
-    if (shouldUseHover && hoveredEmailId.current) {
-      optimisticMoveThreadsTo([hoveredEmailId.current], folder, 'archive');
-      return;
-    }
-
-    const idsToArchive = mail.bulkSelected;
-    if (idsToArchive.length === 0) {
-      toast.info(m['common.mail.noEmailsToSelect']());
-      return;
-    }
-
-    optimisticMoveThreadsTo(idsToArchive, folder, 'archive');
-  }, [mail.bulkSelected, folder, optimisticMoveThreadsTo, shouldUseHover]);
-
-  const bulkDelete = useCallback(() => {
-    if (shouldUseHover && hoveredEmailId.current) {
-      optimisticDeleteThreads([hoveredEmailId.current], folder);
-      return;
-    }
-
-    const idsToDelete = mail.bulkSelected;
-    if (idsToDelete.length === 0) {
-      toast.info(m['common.mail.noEmailsToSelect']());
-      return;
-    }
-
-    optimisticDeleteThreads(idsToDelete, folder);
-  }, [mail.bulkSelected, folder, optimisticDeleteThreads, shouldUseHover]);
-
-  const bulkStar = useCallback(() => {
-    if (shouldUseHover && hoveredEmailId.current) {
-      optimisticToggleStar([hoveredEmailId.current], true);
-      return;
-    }
-
-    const idsToStar = mail.bulkSelected;
-    if (idsToStar.length === 0) {
-      toast.info(m['common.mail.noEmailsToSelect']());
-      return;
-    }
-
-    optimisticToggleStar(idsToStar, true);
-  }, [mail.bulkSelected, optimisticToggleStar, shouldUseHover]);
+  const bulkStar = useMemo(
+    () => withTargets((ids) => optimisticToggleStar(ids, true)),
+    [withTargets, optimisticToggleStar],
+  );
 
   const exitSelectionMode = useCallback(() => {
     setMail((prev) => ({
       ...prev,
       bulkSelected: [],
     }));
-  }, [shouldUseHover]);
+  }, [setMail]);
 
   // `x` — toggle bulk selection of the focused/hovered row (Shortwave "select").
   const toggleFocusedSelection = useCallback(() => {
-    const [targetId] = getTargetIds();
+    const targetId = resolveRowTargetId(hoveredEmailId.current, focusedIndex, items);
     if (!targetId) {
       toast.info(m['common.mail.noEmailsToSelect']());
       return;
@@ -209,7 +151,7 @@ export function MailListHotkeys() {
         ? prev.bulkSelected.filter((existing) => existing !== targetId)
         : [...prev.bulkSelected, targetId],
     }));
-  }, [getTargetIds, setMail]);
+  }, [focusedIndex, items, setMail]);
 
   // Devlab — Superhuman-style keys. Open the targeted thread directly in a
   // compose mode; ThreadDisplay resolves the reply target to the latest message.

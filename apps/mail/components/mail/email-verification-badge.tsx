@@ -1,3 +1,4 @@
+import { useSecondaryQueriesEnabled } from '@/hooks/use-secondary-queries';
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
 import { useTRPC } from '@/providers/query-provider';
 import { useQuery } from '@tanstack/react-query';
@@ -10,6 +11,9 @@ interface EmailVerificationBadgeProps {
 
 export const EmailVerificationBadge: React.FC<EmailVerificationBadgeProps> = ({ messageId }) => {
   const trpc = useTRPC();
+  // Secondary on thread open (one verifyEmail per rendered message) — yield the
+  // network to the body first.
+  const secondaryEnabled = useSecondaryQueriesEnabled();
 
   const {
     data: verificationResult,
@@ -17,7 +21,7 @@ export const EmailVerificationBadge: React.FC<EmailVerificationBadgeProps> = ({ 
     isError,
   } = useQuery({
     ...trpc.mail.verifyEmail.queryOptions({ id: messageId || '' }),
-    enabled: !!messageId,
+    enabled: !!messageId && secondaryEnabled,
     staleTime: 5 * 60 * 1000,
     retry: 1,
     refetchOnWindowFocus: false,

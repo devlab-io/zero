@@ -1,9 +1,9 @@
 // TODO: Implement shortcuts syncing and caching
 import { type Shortcut, keyboardShortcuts, enhancedKeyboardShortcuts } from '@/config/shortcuts';
 import { keyboardLayoutMapper, type KeyboardLayout } from '@/utils/keyboard-layout-map';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { getKeyCodeFromKey } from '@/utils/keyboard-utils';
 import { useHotkeys } from 'react-hotkeys-hook';
-import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { isMac } from '@/lib/platform';
 
 export const useShortcutCache = () => {
@@ -284,27 +284,36 @@ export function isTypingOrModalTarget(target: EventTarget | null): boolean {
   );
 }
 
+/**
+ * Index registry rows by their formatted BINDING (the react-hotkeys-hook string), never by
+ * action: several keys legitimately share one action (d/e → archive, b/h → remind,
+ * #/delete/mod+backspace → delete, u/shift+u → unread) and an action-keyed map keeps only
+ * the last row, silently unbinding the aliases (`d` was dead). Sequences belong to
+ * useShortcutSequences and `ignore` rows are bound outside the registry, so both are
+ * excluded here. Pure and exported so the keyboard-parity test can assert every alias binds.
+ */
+export function buildBindingMap(
+  shortcuts: Shortcut[],
+  handlers: { [key: string]: () => void },
+): Record<string, Shortcut> {
+  return shortcuts.reduce<Record<string, Shortcut>>((acc, shortcut) => {
+    if (shortcut.type === 'sequence' || shortcut.ignore || !handlers[shortcut.action]) {
+      return acc;
+    }
+    const binding = formatKeys(shortcut.keys);
+    if (binding) acc[binding] = shortcut;
+    return acc;
+  }, {});
+}
+
 export function useShortcuts(
   shortcuts: Shortcut[],
   handlers: { [key: string]: () => void },
   options: Partial<HotkeyOptions> = {},
 ) {
-  // Sequences are driven separately (useShortcutSequences); the react-hotkeys-hook
-  // binder only owns single keys and modifier chords.
-  const shortcutMap = useMemo(() => {
-    return shortcuts.reduce<Record<string, Shortcut>>((acc, shortcut) => {
-      if (shortcut.type !== 'sequence' && handlers[shortcut.action]) {
-        acc[shortcut.action] = shortcut;
-      }
-      return acc;
-    }, {});
-  }, [shortcuts, handlers]);
+  const shortcutMap = useMemo(() => buildBindingMap(shortcuts, handlers), [shortcuts, handlers]);
 
-  const shortcutString = useMemo(() => {
-    return [...new Set(Object.values(shortcutMap).map((shortcut) => formatKeys(shortcut.keys)))]
-      .filter(Boolean)
-      .join(',');
-  }, [shortcutMap]);
+  const shortcutString = useMemo(() => Object.keys(shortcutMap).join(','), [shortcutMap]);
 
   useHotkeys(
     shortcutString,
@@ -323,18 +332,15 @@ export function useShortcuts(
 
       const pressedKeys = getModifierString(hotkeysEvent) + (hotkeysEvent.keys?.join('+') || '');
 
-      const matchingEntry = Object.entries(shortcutMap).find(
-        ([_, shortcut]) => formatKeys(shortcut.keys) === pressedKeys,
-      );
+      const shortcut = shortcutMap[pressedKeys];
 
-      if (matchingEntry) {
-        const [action, shortcut] = matchingEntry;
+      if (shortcut) {
         // A bare key must never fire while typing or inside a dialog. Modifier chords
         // (mod+…) are safe there and stay live (e.g. ⌘K to dismiss the palette).
         if (shortcut.type === 'single' && isTypingOrModalTarget(event.target)) {
           return;
         }
-        const handlerFn = handlers[action];
+        const handlerFn = handlers[shortcut.action];
         if (handlerFn) {
           if (shortcut.preventDefault || options.preventDefault) {
             event.preventDefault();
