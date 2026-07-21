@@ -6,8 +6,13 @@ import { SidebarProvider } from '@/components/ui/sidebar';
 import { useSettings } from '@/hooks/use-settings';
 import { Provider as JotaiProvider } from 'jotai';
 import type { PropsWithChildren } from 'react';
-import Toaster from '@/components/ui/toast';
 import { ThemeProvider } from 'next-themes';
+import { lazy, Suspense } from 'react';
+
+// w2cd (client weight): sonner is only needed when a toast fires. Lazy-mount the
+// Toaster; sonner keeps a module-level store so toasts emitted before the mount
+// still render once it loads.
+const Toaster = lazy(() => import('@/components/ui/toast'));
 
 export function ClientProviders({ children }: PropsWithChildren) {
   const { data } = useSettings();
@@ -27,7 +32,9 @@ export function ClientProviders({ children }: PropsWithChildren) {
           <SidebarProvider>
             <LoadingProvider>
               {children}
-              <Toaster />
+              <Suspense fallback={null}>
+                <Toaster />
+              </Suspense>
               <PostHogAnalytics />
             </LoadingProvider>
           </SidebarProvider>

@@ -1,14 +1,35 @@
+import { useState, useCallback, useMemo, useEffect } from 'react';
 import { Avatar, AvatarFallback, AvatarImage } from './avatar';
-import { useState, useCallback, useMemo } from 'react';
 import { useTRPC } from '@/providers/query-provider';
 import { useQuery } from '@tanstack/react-query';
 import { getEmailLogo } from '@/lib/utils';
-import DOMPurify from 'dompurify';
 
 export const getFirstLetterCharacter = (name?: string) => {
   if (!name) return '';
   const match = name.match(/[a-zA-Z]/);
   return match ? match[0].toUpperCase() : '';
+};
+
+// w2cd (client weight): DOMPurify is only needed when a BIMI SVG logo actually
+// exists (rare). Dynamic import keeps it out of the critical inbox bundle.
+const BimiSvgLogo = ({ svgContent, className }: { svgContent: string; className?: string }) => {
+  const [sanitized, setSanitized] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void import('dompurify').then((mod) => {
+      if (cancelled) return;
+      setSanitized(mod.default.sanitize(svgContent));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [svgContent]);
+
+  if (sanitized === null) {
+    return <div className={className} aria-hidden />;
+  }
+  return <div className={className} dangerouslySetInnerHTML={{ __html: sanitized }} />;
 };
 
 interface BimiAvatarProps {
@@ -64,9 +85,9 @@ export const BimiAvatar = ({
   return (
     <Avatar className={className}>
       {bimiData?.logo?.svgContent && !isLoading ? (
-        <div
+        <BimiSvgLogo
+          svgContent={bimiData.logo.svgContent}
           className="flex h-full w-full items-center justify-center overflow-hidden rounded-full bg-white dark:bg-[#373737]"
-          dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(bimiData.logo.svgContent) }}
         />
       ) : fallbackImageSrc && !useDefaultFallback ? (
         <AvatarImage

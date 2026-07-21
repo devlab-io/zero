@@ -24,15 +24,21 @@ import {
   Plus,
   Trash,
 } from 'lucide-react';
+import { useMemo, type ReactNode, useState, useCallback, lazy, Suspense } from 'react';
 import { useOptimisticThreadState } from '@/components/mail/optimistic-thread-state';
-import { useMemo, type ReactNode, useState, useCallback } from 'react';
 import { useOptimisticActions } from '@/hooks/use-optimistic-actions';
 import { ExclamationCircle, Mail, Clock } from '../icons/icons';
-import { LabelDialog } from '@/components/labels/label-dialog';
 import { SnoozeDialog } from '@/components/mail/snooze-dialog';
 import { type ThreadDestination } from '@/lib/thread-actions';
 import { useThread, useThreads } from '@/hooks/use-threads';
 import { useTRPC } from '@/providers/query-provider';
+
+// w2cd (client weight): the label creation dialog pulls in react-hook-form.
+// Lazy-load it so it stays out of the critical inbox bundle; it only renders
+// when the user actually creates a label from the context menu.
+const LabelDialog = lazy(() =>
+  import('@/components/labels/label-dialog').then((mod) => ({ default: mod.LabelDialog })),
+);
 import { useMutation } from '@tanstack/react-query';
 import type { Label as LabelType } from '@/types';
 import { useLabels } from '@/hooks/use-labels';
@@ -588,11 +594,15 @@ export function ThreadContextMenu({
 
   return (
     <>
-      <LabelDialog
-        open={createLabelOpen}
-        onOpenChange={setCreateLabelOpen}
-        onSubmit={handleCreateLabel}
-      />
+      {createLabelOpen && (
+        <Suspense fallback={null}>
+          <LabelDialog
+            open={createLabelOpen}
+            onOpenChange={setCreateLabelOpen}
+            onSubmit={handleCreateLabel}
+          />
+        </Suspense>
+      )}
       <ContextMenu>
         <ContextMenuTrigger disabled={isLoading || isFetching} className="w-full">
           {children}

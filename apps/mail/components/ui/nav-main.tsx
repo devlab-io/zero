@@ -1,8 +1,6 @@
-import { log } from '@/lib/log';
 import { SidebarGroup, SidebarMenu, SidebarMenuButton, SidebarMenuItem } from './sidebar';
 import { Collapsible, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { useCommandPalette } from '../context/command-palette-context.jsx';
-import { LabelDialog } from '@/components/labels/label-dialog';
 import { useActiveConnection } from '@/hooks/use-connections';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import Intercom, { show } from '@intercom/messenger-js-sdk';
@@ -13,6 +11,15 @@ import { type NavItem } from '@/config/navigation';
 import type { Label as LabelType } from '@/types';
 import { Link, useLocation } from 'react-router';
 import { m } from '../../paraglide/messages.js';
+import { lazy, Suspense } from 'react';
+import { log } from '@/lib/log';
+
+// w2cd (client weight): the label creation dialog pulls in react-hook-form.
+// Lazy-load it so it stays out of the critical inbox bundle; the chunk starts
+// loading on mount, so the + trigger appears without interaction delay.
+const LabelDialog = lazy(() =>
+  import('@/components/labels/label-dialog').then((mod) => ({ default: mod.LabelDialog })),
+);
 import { Button } from '@/components/ui/button';
 import { useLabels } from '@/hooks/use-labels';
 import { Badge } from '@/components/ui/badge';
@@ -172,13 +179,13 @@ export function NavMain({ items }: NavMainProps) {
         await refetch();
         return result;
       });
-      
+
       toast.promise(promise, {
         loading: 'Creating label...',
         success: 'Label created successfully',
         error: 'Failed to create label',
       });
-      
+
       await promise;
     } catch (error) {
       log.error('Failed to create label:', error);
@@ -248,18 +255,20 @@ export function NavMain({ items }: NavMainProps) {
                   {activeAccount?.providerId === 'google' ? 'Labels' : 'Folders'}
                 </span>
                 {activeAccount?.providerId === 'google' ? (
-                  <LabelDialog
-                    trigger={
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="mr-1 h-4 w-4 p-0 hover:bg-transparent"
-                      >
-                        <Plus className="text-muted-foreground h-3 w-3 dark:text-[#898989]" />
-                      </Button>
-                    }
-                    onSubmit={onSubmit}
-                  />
+                  <Suspense fallback={null}>
+                    <LabelDialog
+                      trigger={
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="mr-1 h-4 w-4 p-0 hover:bg-transparent"
+                        >
+                          <Plus className="text-muted-foreground h-3 w-3 dark:text-[#898989]" />
+                        </Button>
+                      }
+                      onSubmit={onSubmit}
+                    />
+                  </Suspense>
                 ) : activeAccount?.providerId === 'microsoft' ? null : null}
               </div>
 

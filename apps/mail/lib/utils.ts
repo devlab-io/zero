@@ -1,13 +1,11 @@
-import { log } from '@/lib/log';
 import { isToday, isThisMonth, differenceInCalendarMonths } from 'date-fns';
 import { getBrowserTimezone } from './timezones';
 import { formatInTimeZone } from 'date-fns-tz';
-import { MAX_URL_LENGTH } from './constants';
 import { clsx, type ClassValue } from 'clsx';
 import type { Customer } from 'autumn-js';
 import { twMerge } from 'tailwind-merge';
 import type { Sender } from '@/types';
-import LZString from 'lz-string';
+import { log } from '@/lib/log';
 
 export const FOLDERS = {
   SPAM: 'spam',
@@ -55,15 +53,6 @@ export const getFolderTags = (folder: string): string[] => {
 };
 
 export const cn = (...inputs: ClassValue[]) => twMerge(clsx(inputs));
-
-export const compressText = (text: string): string => {
-  const compressed = LZString.compressToEncodedURIComponent(text);
-  return compressed.slice(0, MAX_URL_LENGTH);
-};
-
-export const decompressText = (compressed: string): string => {
-  return LZString.decompressFromEncodedURIComponent(compressed) || '';
-};
 
 export const getCookie = (key: string): string | null => {
   const cookies = Object.fromEntries(
