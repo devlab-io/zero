@@ -22,9 +22,12 @@ export function selectRecentThreadIds(ids: readonly string[]): string[] {
  * Warms only the most probable next opens. Requests run sequentially after the
  * inbox is interactive so they never compete with the list's critical path.
  */
-export function useRecentThreadPrefetch(ids: readonly string[]) {
+export function useRecentThreadPrefetch(threads: readonly { id: string }[]) {
   const prefetchThread = usePrefetchThread();
-  const selectedIds = useMemo(() => selectRecentThreadIds(ids), [ids]);
+  const selectedIds = useMemo(
+    () => selectRecentThreadIds(threads.map((thread) => thread.id)),
+    [threads],
+  );
 
   useEffect(() => {
     const connection = (navigator as Navigator & { connection?: NetworkInformation }).connection;

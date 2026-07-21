@@ -6,9 +6,9 @@ import {
 } from '../ui/dropdown-menu';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { ThreadReaderSurface, PricingDialogSurface } from '@/components/mail/mail-lazy-surfaces';
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Bell, Lightning, Mail, ScanEye, Tag, User, X, Search } from '../icons/icons';
 import { useCategorySettings, useDefaultCategoryId } from '@/hooks/use-categories';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable';
 import { useCommandPalette } from '../context/command-palette-context';
 import { useHotkeys, useHotkeysContext } from 'react-hotkeys-hook';
@@ -350,10 +350,8 @@ export function MailLayout() {
   }, [session?.user, isPending]);
 
   const [{ isFetching, refetch: refetchThreads }, threads] = useThreads();
-  const recentThreadIds = useMemo(() => threads.slice(0, 3).map((thread) => thread.id), [threads]);
-  useRecentThreadPrefetch(recentThreadIds);
+  useRecentThreadPrefetch(threads);
   const isDesktop = useMediaQuery('(min-width: 768px)');
-
   const [threadId] = useQueryState('threadId');
   const [pricingDialogOpen] = useQueryState('pricingDialog');
 
