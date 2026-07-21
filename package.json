@@ -77,6 +77,7 @@
       "linkifyjs": "4.3.3",
       "linkify-it": "5.0.2",
       "js-cookie@3": "3.0.8",
+      "tar": "7.5.19",
       "tar-fs": "2.1.5"
     }
   }

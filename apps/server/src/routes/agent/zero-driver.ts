@@ -84,7 +84,7 @@ export class ZeroDriver extends DurableObject<ZeroEnv> {
           await this.setupAuth();
         }
       } catch (error) {
-        console.error('[ZeroDriver] Self-init from storage failed, deferring to setName:', error);
+        logger.error('[ZeroDriver] Self-init from storage failed, deferring to setName:', error);
       }
     });
   }
