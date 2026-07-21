@@ -1,4 +1,3 @@
-import { log } from '@/lib/log';
 import {
   isRouteErrorResponse,
   Links,
@@ -24,6 +23,7 @@ import { m } from '@/paraglide/messages';
 import { ArrowLeft } from 'lucide-react';
 import { Loader2 } from 'lucide-react';
 import superjson from 'superjson';
+import { log } from '@/lib/log';
 import './globals.css';
 
 // w2cd (client weight): @sentry/react is loaded via dynamic import() so it stays out
@@ -43,7 +43,6 @@ export const getServerTrpc = (req: Request) =>
   createTRPCClient<AppRouter>({
     links: [
       httpBatchLink({
-        maxItems: 1,
         url: getUrl(),
         transformer: superjson,
         headers: req.headers,
@@ -73,6 +72,18 @@ export function Layout({ children }: PropsWithChildren) {
         <meta name="theme-color" content="#141414" media="(prefers-color-scheme: dark)" />
         <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
         <link rel="manifest" href="/manifest.json" />
+        {/* Warm up the connection to the tRPC backend early: saves one DNS+TLS
+            round-trip (~150-200ms from Tahiti) on the first data fetch. */}
+        {import.meta.env.VITE_PUBLIC_BACKEND_URL && (
+          <>
+            <link
+              rel="preconnect"
+              href={import.meta.env.VITE_PUBLIC_BACKEND_URL}
+              crossOrigin="anonymous"
+            />
+            <link rel="dns-prefetch" href={import.meta.env.VITE_PUBLIC_BACKEND_URL} />
+          </>
+        )}
         <Meta />
         {import.meta.env.REACT_SCAN && (
           <script crossOrigin="anonymous" src="//unpkg.com/react-scan/dist/auto.global.js" />
