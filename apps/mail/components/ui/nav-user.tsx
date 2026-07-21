@@ -1,4 +1,3 @@
-import { log } from '@/lib/log';
 import {
   HelpCircle,
   LogOut,
@@ -39,6 +38,7 @@ import { useTheme } from 'next-themes';
 import { useQueryState } from 'nuqs';
 import { Button } from './button';
 import { cn } from '@/lib/utils';
+import { log } from '@/lib/log';
 import { toast } from 'sonner';
 
 const bytesToMB = (bytes: number) => (bytes / 1024 / 1024).toFixed(2);
@@ -120,7 +120,7 @@ export function NavUser() {
     queryClient.clear();
     await idbClear();
     toast.success(m['common.navUser.cacheCleared']());
-  }, []);
+  }, [queryClient]);
 
   const handleCopyConnectionId = useCallback(async () => {
     await navigator.clipboard.writeText(activeConnection?.id || '');
@@ -139,6 +139,7 @@ export function NavUser() {
       setThreadId(null);
       await setDefaultConnection({ connectionId });
       queryClient.clear();
+      await idbClear();
       await queryClient.refetchQueries({ queryKey: trpc.mail.listThreads.infiniteQueryKey() });
     } catch (error) {
       log.error('Error switching accounts:', error);
@@ -156,7 +157,8 @@ export function NavUser() {
       success: () => 'Signed out successfully!',
       error: 'Error signing out',
       async finally() {
-        // await handleClearCache();
+        queryClient.clear();
+        await idbClear();
         window.location.href = '/login';
       },
     });
@@ -336,7 +338,7 @@ export function NavUser() {
                   <DropdownMenuSeparator className="mt-1" />
                   <DropdownMenuItem onSelect={() => handleThemeToggle()} className="cursor-pointer">
                     <div className="flex w-full items-center gap-2">
-                    {resolvedTheme === 'dark' ? (
+                      {resolvedTheme === 'dark' ? (
                         <MoonIcon className="size-4 opacity-60" />
                       ) : (
                         <SunIcon className="size-4 opacity-60" />

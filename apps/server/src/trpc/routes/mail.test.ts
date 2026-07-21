@@ -88,7 +88,9 @@ const modifyThreadLabelsInDB = vi.fn(async (): Promise<any> => ({ ok: true }));
 const deleteAllSpam = vi.fn(async (): Promise<any> => ({ deletedCount: 3 }));
 const reSyncThread = vi.fn(async () => {});
 const forceReSync = vi.fn(async (): Promise<any> => ({ resynced: true }));
-const findUserSettings = vi.fn(async (): Promise<any> => ({ settings: { undoSendEnabled: false } }));
+const findUserSettings = vi.fn(
+  async (): Promise<any> => ({ settings: { undoSendEnabled: false } }),
+);
 const getZeroDB = vi.fn(async (): Promise<any> => ({ findUserSettings }));
 
 vi.mock('../../lib/server-utils', () => ({
@@ -149,6 +151,64 @@ describe('mail router — lectures simples', () => {
     const r = await call('get', { id: 'th-1' });
     expect(getThread).toHaveBeenCalledWith('conn-1', 'th-1');
     expect(r).toEqual({ messages: [{ id: 'm1' }] });
+  });
+
+  it('openThread renvoie le fil et les HTML traites dans le meme aller-retour', async () => {
+    getThread.mockResolvedValueOnce({
+      result: {
+        messages: [
+          { id: 'm1', decodedBody: '<p>one</p>', isDraft: false },
+          { id: 'draft', decodedBody: '<p>draft</p>', isDraft: true },
+          { id: 'm2', decodedBody: '<p>two</p>', isDraft: false },
+        ],
+      },
+    });
+
+    const r = await call('openThread', {
+      id: 'th-1',
+      shouldLoadImages: false,
+      theme: 'dark',
+    });
+
+    expect(getThread).toHaveBeenCalledWith('conn-1', 'th-1');
+    expect(processEmailHtml).toHaveBeenCalledTimes(2);
+    expect(processEmailHtml).toHaveBeenCalledWith({
+      html: '<p>one</p>',
+      shouldLoadImages: false,
+      theme: 'dark',
+    });
+    expect(r.thread.messages).toHaveLength(3);
+    expect(r.rendered).toEqual({
+      m1: { html: '<p>ok</p>', hasBlockedImages: false },
+      m2: { html: '<p>ok</p>', hasBlockedImages: false },
+    });
+  });
+
+  it('openThread borne le pretraitement et isole un HTML invalide', async () => {
+    getThread.mockResolvedValueOnce({
+      result: {
+        messages: Array.from({ length: 10 }, (_, index) => ({
+          id: `m${index}`,
+          decodedBody: `<p>${index}</p>`,
+          isDraft: false,
+        })),
+      },
+    });
+    processEmailHtml.mockImplementationOnce(() => {
+      throw new Error('invalid html');
+    });
+
+    const r = await call('openThread', { id: 'th-1' });
+
+    expect(processEmailHtml).toHaveBeenCalledTimes(8);
+    expect(processEmailHtml).not.toHaveBeenCalledWith(
+      expect.objectContaining({ html: '<p>0</p>' }),
+    );
+    expect(processEmailHtml).not.toHaveBeenCalledWith(
+      expect.objectContaining({ html: '<p>1</p>' }),
+    );
+    expect(Object.keys(r.rendered)).toHaveLength(7);
+    expect(r.thread.messages).toHaveLength(10);
   });
 
   it('getEmailAliases / getMessageAttachments / getRawEmail délèguent', async () => {

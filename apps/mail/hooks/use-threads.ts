@@ -1,16 +1,66 @@
+import { queryOptions, useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query';
 import { backgroundQueueAtom, isThreadInBackgroundQueueAtom } from '@/store/backgroundQueue';
-import { useInfiniteQuery, useQuery, useMutation } from '@tanstack/react-query';
-import type { IGetThreadResponse } from '@zero/types';
+import { emailContentQueryKey, resolveEmailContentTheme } from '@/lib/email-content-query';
+import { useTRPC, useTRPCClient } from '@/providers/query-provider';
 import { useSearchValue } from '@/hooks/use-search-value';
-import { useTRPC } from '@/providers/query-provider';
+import type { IGetThreadResponse } from '@zero/types';
 import useSearchLabels from './use-labels-search';
 import { useSession } from '@/lib/auth-client';
 import { useAtom, useAtomValue } from 'jotai';
 import { useSettings } from './use-settings';
+import { useCallback, useMemo } from 'react';
 import { useParams } from 'react-router';
 import { useTheme } from 'next-themes';
 import { useQueryState } from 'nuqs';
-import { useMemo } from 'react';
+
+const THREAD_STALE_MS = 60 * 60 * 1000;
+
+function useOpenThreadQueryOptions() {
+  const trpc = useTRPC();
+  const trpcClient = useTRPCClient();
+  const queryClient = useQueryClient();
+  const { data: settings } = useSettings();
+  const { resolvedTheme } = useTheme();
+  const theme = resolveEmailContentTheme(resolvedTheme);
+  const shouldLoadImages = Boolean(settings?.settings?.externalImages);
+
+  return useCallback(
+    (id: string, enabled = true) =>
+      queryOptions({
+        // Keep the historic mail.get cache key so websocket invalidations and
+        // every existing consumer continue to target the same thread detail.
+        queryKey: trpc.mail.get.queryKey({ id }),
+        queryFn: async ({ signal }) => {
+          const result = await trpcClient.mail.openThread.query(
+            { id, shouldLoadImages, theme },
+            { signal },
+          );
+
+          for (const [messageId, processed] of Object.entries(result.rendered)) {
+            queryClient.setQueryData(
+              emailContentQueryKey(messageId, shouldLoadImages, theme),
+              processed,
+            );
+          }
+
+          return result.thread;
+        },
+        enabled,
+        staleTime: THREAD_STALE_MS,
+      }),
+    [queryClient, shouldLoadImages, theme, trpc, trpcClient],
+  );
+}
+
+export function usePrefetchThread() {
+  const queryClient = useQueryClient();
+  const openThreadQueryOptions = useOpenThreadQueryOptions();
+
+  return useCallback(
+    (id: string) => queryClient.prefetchQuery(openThreadQueryOptions(id)),
+    [openThreadQueryOptions, queryClient],
+  );
+}
 
 export const useThreads = () => {
   const { folder } = useParams<{ folder: string }>();
@@ -66,32 +116,29 @@ export const useThread = (threadId: string | null, options?: { enabled?: boolean
   const { data: session } = useSession();
   const [_threadId] = useQueryState('threadId');
   const id = threadId ? threadId : _threadId;
-  const trpc = useTRPC();
-  const { data: settings } = useSettings();
-  const { theme: systemTheme } = useTheme();
+  const openThreadQueryOptions = useOpenThreadQueryOptions();
+  const queryClient = useQueryClient();
+  const prefetch = useCallback(
+    () => (id ? queryClient.prefetchQuery(openThreadQueryOptions(id)) : Promise.resolve()),
+    [id, openThreadQueryOptions, queryClient],
+  );
 
   // #30: list rows served from the rich projection pass { enabled: false } so opening the
   // inbox triggers NO per-row mail.get (and no processEmailContent). The body is fetched
   // only for the active thread and for thin paths (search) that lack the projection.
   const threadQuery = useQuery(
-    trpc.mail.get.queryOptions(
-      {
-        id: id ?? '',
-      },
-      {
-        enabled: (options?.enabled ?? true) && !!id && !!session?.user?.id,
-        staleTime: 1000 * 60 * 60, // 1 minute
-      },
+    openThreadQueryOptions(
+      id ?? '',
+      (options?.enabled ?? true) && Boolean(id) && Boolean(session?.user?.id),
     ),
   );
 
-  const { latestDraft, isGroupThread, finalData, latestMessage } = useMemo(() => {
+  const { latestDraft, isGroupThread, finalData } = useMemo(() => {
     if (!threadQuery.data) {
       return {
         latestDraft: undefined,
         isGroupThread: false,
         finalData: undefined,
-        latestMessage: undefined,
       };
     }
 
@@ -111,61 +158,19 @@ export const useThread = (threadId: string | null, options?: { enabled?: boolean
       : false;
 
     const nonDraftMessages = threadQuery.data.messages.filter((e) => !e.isDraft);
-    const latestMessage = nonDraftMessages[nonDraftMessages.length - 1];
-
     const finalData: IGetThreadResponse = {
       ...threadQuery.data,
       messages: nonDraftMessages,
     };
 
-    return { latestDraft, isGroupThread, finalData, latestMessage };
+    return { latestDraft, isGroupThread, finalData };
   }, [threadQuery.data]);
 
-  const { mutateAsync: processEmailContent } = useMutation(
-    trpc.mail.processEmailContent.mutationOptions(),
-  );
-
-  // Extract image loading condition to avoid duplication
-  const shouldLoadImages = useMemo(() => {
-    if (!settings?.settings || !latestMessage?.sender?.email) return false;
-    
-    return settings.settings.externalImages ||
-      settings.settings.trustedSenders?.includes(latestMessage.sender.email) ||
-      false;
-  }, [settings?.settings, latestMessage?.sender?.email]);
-
-  // Prefetch query - intentionally unused, just for caching
-  useQuery({
-    queryKey: [
-      'email-content',
-      latestMessage?.id,
-      shouldLoadImages,
-      systemTheme,
-    ],
-    queryFn: async () => {
-      if (!latestMessage?.decodedBody || !settings?.settings) return null;
-
-      const userTheme =
-        settings.settings.colorTheme === 'system' ? systemTheme : settings.settings.colorTheme;
-      const theme = userTheme === 'dark' ? 'dark' : 'light';
-
-      const result = await processEmailContent({
-        html: latestMessage.decodedBody,
-        shouldLoadImages,
-        theme,
-      });
-
-      return {
-        html: result.processedHtml,
-        hasBlockedImages: result.hasBlockedImages,
-      };
-    },
-    enabled: !!latestMessage?.decodedBody && !!settings?.settings,
-    staleTime: 30 * 60 * 1000, // 30 minutes
-    gcTime: 60 * 60 * 1000, // 1 hour
-    refetchOnWindowFocus: false,
-    refetchOnMount: false,
-  });
-
-  return { ...threadQuery, data: finalData, isGroupThread, latestDraft };
+  return {
+    ...threadQuery,
+    data: finalData,
+    isGroupThread,
+    latestDraft,
+    prefetch,
+  };
 };

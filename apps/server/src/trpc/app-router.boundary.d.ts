@@ -584,9 +584,9 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
         }>;
         list: import("@trpc/server").TRPCQueryProcedure<{
             input: {
-                pageToken?: string | undefined;
-                maxResults?: number | undefined;
                 q?: string | undefined;
+                maxResults?: number | undefined;
+                pageToken?: string | undefined;
             };
             output: {
                 threads: {
@@ -870,12 +870,140 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
             };
             meta: object;
         }>;
+        openThread: import("@trpc/server").TRPCQueryProcedure<{
+            input: {
+                id: string;
+                theme?: "light" | "dark" | undefined;
+                shouldLoadImages?: boolean | undefined;
+            };
+            output: {
+                thread: {
+                    messages: {
+                        id: string;
+                        title: string;
+                        subject: string;
+                        tags: {
+                            name: string;
+                            id: string;
+                            type: string;
+                        }[];
+                        sender: {
+                            email: string;
+                            name?: string | undefined;
+                        };
+                        to: {
+                            email: string;
+                            name?: string | undefined;
+                        }[];
+                        cc: {
+                            email: string;
+                            name?: string | undefined;
+                        }[] | null;
+                        bcc: {
+                            email: string;
+                            name?: string | undefined;
+                        }[] | null;
+                        tls: boolean;
+                        receivedOn: string;
+                        unread: boolean;
+                        body: string;
+                        processedHtml: string;
+                        blobUrl: string;
+                        connectionId?: string | undefined;
+                        listUnsubscribe?: string | undefined;
+                        listUnsubscribePost?: string | undefined;
+                        decodedBody?: string | undefined;
+                        references?: string | undefined;
+                        inReplyTo?: string | undefined;
+                        replyTo?: string | undefined;
+                        messageId?: string | undefined;
+                        threadId?: string | undefined;
+                        attachments?: {
+                            body: string;
+                            attachmentId: string;
+                            filename: string;
+                            mimeType: string;
+                            size: number;
+                            headers: {
+                                name: string | null;
+                                value: string | null;
+                            }[];
+                        }[] | undefined;
+                        isDraft?: boolean | undefined;
+                    }[];
+                    hasUnread: boolean;
+                    totalReplies: number;
+                    labels: {
+                        name: string;
+                        id: string;
+                    }[];
+                    latest?: {
+                        id: string;
+                        title: string;
+                        subject: string;
+                        tags: {
+                            name: string;
+                            id: string;
+                            type: string;
+                        }[];
+                        sender: {
+                            email: string;
+                            name?: string | undefined;
+                        };
+                        to: {
+                            email: string;
+                            name?: string | undefined;
+                        }[];
+                        cc: {
+                            email: string;
+                            name?: string | undefined;
+                        }[] | null;
+                        bcc: {
+                            email: string;
+                            name?: string | undefined;
+                        }[] | null;
+                        tls: boolean;
+                        receivedOn: string;
+                        unread: boolean;
+                        body: string;
+                        processedHtml: string;
+                        blobUrl: string;
+                        connectionId?: string | undefined;
+                        listUnsubscribe?: string | undefined;
+                        listUnsubscribePost?: string | undefined;
+                        decodedBody?: string | undefined;
+                        references?: string | undefined;
+                        inReplyTo?: string | undefined;
+                        replyTo?: string | undefined;
+                        messageId?: string | undefined;
+                        threadId?: string | undefined;
+                        attachments?: {
+                            body: string;
+                            attachmentId: string;
+                            filename: string;
+                            mimeType: string;
+                            size: number;
+                            headers: {
+                                name: string | null;
+                                value: string | null;
+                            }[];
+                        }[] | undefined;
+                        isDraft?: boolean | undefined;
+                    } | undefined;
+                };
+                rendered: Record<string, {
+                    html: string;
+                    hasBlockedImages: boolean;
+                }>;
+            };
+            meta: object;
+        }>;
         listThreads: import("@trpc/server").TRPCQueryProcedure<{
             input: {
                 folder?: string | undefined;
+                q?: string | undefined;
                 maxResults?: number | undefined;
                 labelIds?: string[] | undefined;
-                q?: string | undefined;
                 cursor?: string | undefined;
             };
             output: {
@@ -1196,8 +1324,8 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
         }>;
         processEmailContent: import("@trpc/server").TRPCMutationProcedure<{
             input: {
-                theme: "light" | "dark";
                 html: string;
+                theme: "light" | "dark";
                 shouldLoadImages: boolean;
             };
             output: {

@@ -1,4 +1,3 @@
-import { logger } from '../../lib/logger';
 import {
   forceReSync,
   getThreadsFromDB,
@@ -10,9 +9,6 @@ import {
   reSyncThread,
 } from '../../lib/server-utils';
 import { IGetThreadResponseSchema, type IGetThreadsResponse } from '../../lib/driver/types';
-// V4.1 list-projection (issue #30) : la liste sert la projection riche (superset de
-// IGetThreadsResponse). Élargit le .output() pour ne PAS stripper subject/sender/date/labels/unread.
-import { ThreadsResponseSchema } from '@zero/types';
 import { updateWritingStyleMatrix } from '../../services/writing-style-service';
 import type { DeleteAllSpamResponse, IEmailSendBatch } from '../../types';
 import { activeDriverProcedure, router, privateProcedure } from '../trpc';
@@ -20,11 +16,22 @@ import { processEmailHtml } from '../../lib/email-processor';
 import { defaultPageSize, FOLDERS } from '../../lib/utils';
 import { toAttachmentFiles } from '../../lib/attachments';
 import { serializedFileSchema } from '../../lib/schemas';
+// V4.1 list-projection (issue #30) : la liste sert la projection riche (superset de
+// IGetThreadsResponse). Élargit le .output() pour ne PAS stripper subject/sender/date/labels/unread.
+import { ThreadsResponseSchema } from '@zero/types';
 import { getContext } from 'hono/context-storage';
 import { type HonoContext } from '../../ctx';
+import { logger } from '../../lib/logger';
 import { TRPCError } from '@trpc/server';
 import { env } from '../../env';
 import { z } from 'zod';
+
+const MAX_PREPROCESSED_MESSAGES = 8;
+
+const renderedEmailSchema = z.object({
+  html: z.string(),
+  hasBlockedImages: z.boolean(),
+});
 
 const senderSchema = z.object({
   name: z.string().optional(),
@@ -70,6 +77,57 @@ export const mailRouter = router({
       const { activeConnection } = ctx;
       const result = await getThread(activeConnection.id, input.id);
       return result.result;
+    }),
+  openThread: activeDriverProcedure
+    .input(
+      z.object({
+        id: z.string().min(1),
+        shouldLoadImages: z.boolean().optional().default(false),
+        theme: z.enum(['light', 'dark']).optional().default('light'),
+      }),
+    )
+    .output(
+      z.object({
+        thread: IGetThreadResponseSchema,
+        rendered: z.record(z.string(), renderedEmailSchema),
+      }),
+    )
+    .query(async ({ input, ctx }) => {
+      const result = await getThread(ctx.activeConnection.id, input.id);
+      const thread = result.result;
+      const candidates = thread.messages
+        .flatMap((message) =>
+          !message.isDraft && message.decodedBody
+            ? [{ id: message.id, html: message.decodedBody }]
+            : [],
+        )
+        .slice(-MAX_PREPROCESSED_MESSAGES);
+
+      const rendered = Object.fromEntries(
+        candidates.flatMap(({ id, html }) => {
+          try {
+            const processed = processEmailHtml({
+              html,
+              shouldLoadImages: input.shouldLoadImages,
+              theme: input.theme,
+            });
+            return [
+              [
+                id,
+                {
+                  html: processed.processedHtml,
+                  hasBlockedImages: processed.hasBlockedImages,
+                },
+              ] as const,
+            ];
+          } catch (error) {
+            logger.warn('[openThread] Failed to preprocess message', { id, error });
+            return [];
+          }
+        }),
+      );
+
+      return { thread, rendered };
     }),
   listThreads: activeDriverProcedure
     .input(

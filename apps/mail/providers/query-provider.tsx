@@ -1,24 +1,31 @@
-import { log } from '@/lib/log';
 import {
   PersistQueryClientProvider,
   type PersistedClient,
   type Persister,
 } from '@tanstack/react-query-persist-client';
 import { QueryCache, QueryClient, hashKey, type InfiniteData } from '@tanstack/react-query';
+import { selectQueriesForPersistence, shouldPersistQuery } from '@/lib/query-persistence';
+import { readRetryDelay, shouldRetryRead } from '@/lib/query-retry';
 import { createTRPCContext } from '@trpc/tanstack-react-query';
 import { createTRPCClient, httpBatchLink } from '@trpc/client';
+import { signOut, useSession } from '@/lib/auth-client';
 import { useMemo, type PropsWithChildren } from 'react';
 import type { AppRouter } from '@zero/server/trpc';
 import { CACHE_BURST_KEY } from '@/lib/constants';
-import { readRetryDelay, shouldRetryRead } from '@/lib/query-retry';
-import { signOut } from '@/lib/auth-client';
 import { get, set, del } from 'idb-keyval';
 import superjson from 'superjson';
+import { log } from '@/lib/log';
 
 function createIDBPersister(idbValidKey: IDBValidKey = 'zero-query-cache') {
   return {
     persistClient: async (client: PersistedClient) => {
-      await set(idbValidKey, client);
+      await set(idbValidKey, {
+        ...client,
+        clientState: {
+          ...client.clientState,
+          queries: selectQueriesForPersistence(client.clientState.queries),
+        },
+      });
     },
     restoreClient: async () => {
       return await get<PersistedClient>(idbValidKey);
@@ -29,7 +36,7 @@ function createIDBPersister(idbValidKey: IDBValidKey = 'zero-query-cache') {
   } satisfies Persister;
 }
 
-export const makeQueryClient = (connectionId: string | null) =>
+export const makeQueryClient = (cacheOwner: string) =>
   new QueryClient({
     queryCache: new QueryCache({
       onError: (err, { meta }) => {
@@ -58,7 +65,7 @@ export const makeQueryClient = (connectionId: string | null) =>
         retry: shouldRetryRead,
         retryDelay: readRetryDelay,
         refetchOnWindowFocus: false,
-        queryKeyHashFn: (queryKey) => hashKey([{ connectionId }, ...queryKey]),
+        queryKeyHashFn: (queryKey) => hashKey([{ cacheOwner }, ...queryKey]),
         gcTime: 1000 * 60 * 60 * 24, // 24 hours,
       },
       mutations: {
@@ -68,21 +75,21 @@ export const makeQueryClient = (connectionId: string | null) =>
     },
   });
 
-let browserQueryClient = {
+const browserQueryClient = {
   queryClient: null,
-  activeConnectionId: null,
+  activeCacheOwner: null,
 } as {
   queryClient: QueryClient | null;
-  activeConnectionId: string | null;
+  activeCacheOwner: string | null;
 };
 
-const getQueryClient = (connectionId: string | null) => {
+const getQueryClient = (cacheOwner: string) => {
   if (typeof window === 'undefined') {
-    return makeQueryClient(connectionId);
+    return makeQueryClient(cacheOwner);
   } else {
-    if (!browserQueryClient.queryClient || browserQueryClient.activeConnectionId !== connectionId) {
-      browserQueryClient.queryClient = makeQueryClient(connectionId);
-      browserQueryClient.activeConnectionId = connectionId;
+    if (!browserQueryClient.queryClient || browserQueryClient.activeCacheOwner !== cacheOwner) {
+      browserQueryClient.queryClient = makeQueryClient(cacheOwner);
+      browserQueryClient.activeCacheOwner = cacheOwner;
     }
     return browserQueryClient.queryClient;
   }
@@ -119,11 +126,13 @@ export function QueryProvider({
   children,
   connectionId,
 }: PropsWithChildren<{ connectionId: string | null }>) {
+  const { data: session } = useSession();
+  const cacheOwner = `${session?.user.id ?? 'anonymous'}-${connectionId ?? 'default'}`;
   const persister = useMemo(
-    () => createIDBPersister(`zero-query-cache-${connectionId ?? 'default'}`),
-    [connectionId],
+    () => createIDBPersister(`zero-query-cache-${cacheOwner}`),
+    [cacheOwner],
   );
-  const queryClient = useMemo(() => getQueryClient(connectionId), [connectionId]);
+  const queryClient = useMemo(() => getQueryClient(cacheOwner), [cacheOwner]);
 
   return (
     <PersistQueryClientProvider
@@ -132,6 +141,7 @@ export function QueryProvider({
         persister,
         buster: CACHE_BURST_KEY,
         maxAge: 1000 * 60 * 60 * 24, // 24 hours
+        dehydrateOptions: { shouldDehydrateQuery: shouldPersistQuery },
       }}
       onSuccess={() => {
         const threadQueryKey = [['mail', 'listThreads'], { type: 'infinite' }];

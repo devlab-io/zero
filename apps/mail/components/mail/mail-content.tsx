@@ -1,4 +1,4 @@
-import { log } from '@/lib/log';
+import { emailContentQueryKey, resolveEmailContentTheme } from '@/lib/email-content-query';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { defaultUserSettings } from '@zero/server/schemas';
@@ -8,6 +8,7 @@ import { useSettings } from '@/hooks/use-settings';
 import { m } from '@/paraglide/messages';
 import { useTheme } from 'next-themes';
 import { cn } from '@/lib/utils';
+import { log } from '@/lib/log';
 import { toast } from 'sonner';
 
 interface MailContentProps {
@@ -67,13 +68,15 @@ export function MailContent({ id, html, senderEmail }: MailContentProps) {
     trpc.mail.processEmailContent.mutationOptions(),
   );
 
+  const allowRemoteImages = Boolean(isTrustedSender || temporaryImagesEnabled);
+  const emailTheme = resolveEmailContentTheme(resolvedTheme);
   const { data: processedData } = useQuery({
-    queryKey: ['email-content', id, isTrustedSender || temporaryImagesEnabled, resolvedTheme],
+    queryKey: emailContentQueryKey(id, allowRemoteImages, emailTheme),
     queryFn: async () => {
       const result = await processEmailContent({
         html,
-        shouldLoadImages: isTrustedSender || temporaryImagesEnabled,
-        theme: (resolvedTheme as 'light' | 'dark') || 'light',
+        shouldLoadImages: allowRemoteImages,
+        theme: emailTheme,
       });
 
       return {
@@ -182,7 +185,12 @@ export function MailContent({ id, html, senderEmail }: MailContentProps) {
           </button>
         </div>
       )}
-      <div ref={hostRef} className={cn('mail-content w-full flex-1 overflow-scroll no-scrollbar px-4 text-black dark:text-white')} />
+      <div
+        ref={hostRef}
+        className={cn(
+          'mail-content no-scrollbar w-full flex-1 overflow-scroll px-4 text-black dark:text-white',
+        )}
+      />
     </>
   );
 }
