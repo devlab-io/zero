@@ -16,7 +16,6 @@
 
 import {
   buildCapabilities,
-  draftIdempotencyStorageKey,
   formatCompactThreadList,
   formatOutboxItem,
   formatSender,
@@ -37,12 +36,12 @@ import {
   retryDraftOutboxJob,
 } from '../../lib/draft-outbox';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { invariant } from '../../lib/invariant';
 import { getThread, getZeroAgent } from '../../lib/server-utils';
 import { sanitizeMailContent } from '../../lib/mail-sanitize';
 import { composeEmail } from '../../trpc/routes/ai/compose';
-import type { ThreadsResponse } from '@zero/types';
 import { getCurrentDateContext } from '../../lib/prompts';
+import type { ThreadsResponse } from '@zero/types';
+import { invariant } from '../../lib/invariant';
 import { connection } from '../../db/schema';
 import { logger } from '../../lib/logger';
 import { env } from 'cloudflare:workers';
@@ -99,7 +98,10 @@ export class ZeroMCP extends McpAgent<typeof env, Record<string, unknown>, { use
     // --- health / capabilities ------------------------------------------------
     this.server.registerTool(
       'getServerCapabilities',
-      { description: descriptions.getServerCapabilities, inputSchema: schemas.getServerCapabilities },
+      {
+        description: descriptions.getServerCapabilities,
+        inputSchema: schemas.getServerCapabilities,
+      },
       async () => {
         const capabilities = buildCapabilities(
           MCP_TOOL_DEFINITIONS.map((d) => ({
@@ -209,7 +211,10 @@ export class ZeroMCP extends McpAgent<typeof env, Record<string, unknown>, { use
               type: 'text' as const,
               text: `Latest Message Received: ${thread.latest?.receivedOn ?? 'unknown'}`,
             },
-            { type: 'text' as const, text: `Latest Message Sender: ${formatSender(thread.latest?.sender)}` },
+            {
+              type: 'text' as const,
+              text: `Latest Message Sender: ${formatSender(thread.latest?.sender)}`,
+            },
             {
               type: 'text' as const,
               text: `Latest Message Sanitized Content: ${
@@ -259,7 +264,9 @@ export class ZeroMCP extends McpAgent<typeof env, Record<string, unknown>, { use
       async () => {
         const labels = await agent.getUserLabels();
         return text(
-          labels.map((label) => `Name: ${label.name} ID: ${label.id} Color: ${label.color}`).join('\n'),
+          labels
+            .map((label) => `Name: ${label.name} ID: ${label.id} Color: ${label.color}`)
+            .join('\n'),
         );
       },
     );
