@@ -1,20 +1,21 @@
-import { memo, useCallback, useEffect, useMemo, useRef } from 'react';
 import { focusedIndexAtom, useMailNavigation } from '@/hooks/use-mail-navigation';
-import { useMailListData } from '@/hooks/use-mail-list-data';
-import { useMailSelection } from '@/hooks/use-mail-selection';
 import { useOptimisticActions } from '@/hooks/use-optimistic-actions';
+import { memo, useCallback, useEffect, useMemo, useRef } from 'react';
+import { useMailSelection } from '@/hooks/use-mail-selection';
+import { useMailListData } from '@/hooks/use-mail-list-data';
+import { selectMailListState } from '@/lib/mail-list-state';
 import { useSearchValue } from '@/hooks/use-search-value';
 import { EmptyStateIcon } from '../icons/empty-state-svg';
-import type { ParsedMessage } from '@/types';
-import { useSettings } from '@/hooks/use-settings';
-import { selectMailListState } from '@/lib/mail-list-state';
 import { useIsOffline } from '@/hooks/use-online-status';
+import { usePrefetchThread } from '@/hooks/use-threads';
+import { useSettings } from '@/hooks/use-settings';
 import { VList, type VListHandle } from 'virtua';
-import { RefreshCcw } from 'lucide-react';
-import { m } from '@/paraglide/messages';
-import { cn, FOLDERS } from '@/lib/utils';
+import type { ParsedMessage } from '@/types';
 import { Thread } from './mail-list-thread';
 import { Draft } from './mail-list-draft';
+import { RefreshCcw } from 'lucide-react';
+import { cn, FOLDERS } from '@/lib/utils';
+import { m } from '@/paraglide/messages';
 import { useParams } from 'react-router';
 import { useQueryState } from 'nuqs';
 import { useAtom } from 'jotai';
@@ -77,6 +78,8 @@ export const MailList = memo(
       containerRef: parentRef,
       onNavigate: handleNavigateToThread,
     });
+
+    const prefetchThread = usePrefetchThread();
 
     const { getSelectMode, handleSelectMail, setAnchorIndex } = useMailSelection(itemsRef);
 
@@ -142,6 +145,17 @@ export const MailList = memo(
 
     const filteredItems = useMemo(() => items.filter((item) => item.id), [items]);
 
+    // Smart prefetch: when the keyboard focus moves, warm the focused thread's
+    // neighborhood (2 ahead, 1 behind — the most likely next opens). Hover and
+    // focus prefetch of the row itself already live in mail-list-thread.
+    useEffect(() => {
+      if (!keyboardActive || focusedIndex == null || focusedIndex < 0) return;
+      for (const neighborIndex of [focusedIndex - 1, focusedIndex + 1, focusedIndex + 2]) {
+        const neighbor = filteredItems[neighborIndex];
+        if (neighbor?.id) void prefetchThread(neighbor.id);
+      }
+    }, [focusedIndex, keyboardActive, filteredItems, prefetchThread]);
+
     // Honest network/state selection (issue #34): a failed read never renders as
     // "empty" and cached rows survive a failed refresh.
     const viewState = selectMailListState({
@@ -165,7 +179,8 @@ export const MailList = memo(
               index={index}
               onClick={handleMailClick}
             />
-            {index === filteredItems.length - 1 && (isFetchingNextPage || isFetchingThreadBodies) ? (
+            {index === filteredItems.length - 1 &&
+            (isFetchingNextPage || isFetchingThreadBodies) ? (
               <div className="flex w-full justify-center py-4">
                 <div className="h-4 w-4 animate-spin rounded-full border-2 border-neutral-900 border-t-transparent dark:border-white dark:border-t-transparent" />
               </div>
@@ -233,7 +248,11 @@ export const MailList = memo(
                     <p className="text-lg">{m['states.mailList.emptyTitle']()}</p>
                     <p className="text-md text-muted-foreground dark:text-white/50">
                       {m['states.mailList.emptyDescription']()}{' '}
-                      <button type="button" className="underline cursor-pointer" onClick={clearFilters}>
+                      <button
+                        type="button"
+                        className="cursor-pointer underline"
+                        onClick={clearFilters}
+                      >
                         {m['states.mailList.clearFilters']()}
                       </button>
                     </p>

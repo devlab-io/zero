@@ -47,6 +47,10 @@ function useOpenThreadQueryOptions() {
         },
         enabled,
         staleTime: THREAD_STALE_MS,
+        // Instant-from-IndexedDB, then silent background refresh: cached thread
+        // renders immediately on open (persisted cache), and react-query refetches
+        // in the background on every mount without blanking the view.
+        refetchOnMount: 'always',
       }),
     [queryClient, shouldLoadImages, theme, trpc, trpcClient],
   );

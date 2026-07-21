@@ -6,15 +6,39 @@ import {
 import { QueryCache, QueryClient, hashKey, type InfiniteData } from '@tanstack/react-query';
 import { selectQueriesForPersistence, shouldPersistQuery } from '@/lib/query-persistence';
 import { readRetryDelay, shouldRetryRead } from '@/lib/query-retry';
+import { useEffect, useMemo, type PropsWithChildren } from 'react';
 import { createTRPCContext } from '@trpc/tanstack-react-query';
 import { createTRPCClient, httpBatchLink } from '@trpc/client';
 import { signOut, useSession } from '@/lib/auth-client';
-import { useMemo, type PropsWithChildren } from 'react';
 import type { AppRouter } from '@zero/server/trpc';
 import { CACHE_BURST_KEY } from '@/lib/constants';
-import { get, set, del } from 'idb-keyval';
+import { get, set, del, keys } from 'idb-keyval';
 import superjson from 'superjson';
 import { log } from '@/lib/log';
+
+const QUERY_CACHE_PREFIX = 'zero-query-cache';
+
+// Purge persisted query caches that do not belong to the current user+account:
+// - on logout (anonymous owner): every persisted cache is removed;
+// - on account/user switch: caches of other owners are removed.
+// Runs once per owner per session. Only runs once the session has resolved so a
+// cold load never wipes the real user's cache before auth completes.
+const purgedOwners = new Set<string>();
+function purgeForeignQueryCaches(currentKey: string, isAuthenticated: boolean) {
+  if (purgedOwners.has(currentKey)) return;
+  purgedOwners.add(currentKey);
+  void keys()
+    .then((allKeys) =>
+      Promise.all(
+        allKeys.flatMap((key) => {
+          if (typeof key !== 'string' || !key.startsWith(QUERY_CACHE_PREFIX)) return [];
+          if (isAuthenticated && key === currentKey) return [];
+          return [del(key)];
+        }),
+      ),
+    )
+    .catch((error) => log.warn('Failed to purge stale query caches', error));
+}
 
 function createIDBPersister(idbValidKey: IDBValidKey = 'zero-query-cache') {
   return {
@@ -125,13 +149,21 @@ export function QueryProvider({
   children,
   connectionId,
 }: PropsWithChildren<{ connectionId: string | null }>) {
-  const { data: session } = useSession();
+  const { data: session, isPending: isSessionPending } = useSession();
   const cacheOwner = `${session?.user.id ?? 'anonymous'}-${connectionId ?? 'default'}`;
   const persister = useMemo(
     () => createIDBPersister(`zero-query-cache-${cacheOwner}`),
     [cacheOwner],
   );
   const queryClient = useMemo(() => getQueryClient(cacheOwner), [cacheOwner]);
+
+  // Purge other users'/accounts' persisted caches on switch, and all of them on
+  // logout — but only once the session has resolved, so a cold load never wipes
+  // the signed-in user's cache before auth completes.
+  useEffect(() => {
+    if (isSessionPending) return;
+    purgeForeignQueryCaches(`zero-query-cache-${cacheOwner}`, Boolean(session?.user.id));
+  }, [isSessionPending, cacheOwner, session?.user.id]);
 
   return (
     <PersistQueryClientProvider

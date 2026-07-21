@@ -149,6 +149,9 @@
 
       "observability": {
         "enabled": true,
+        // Native Workers Traces: automatic spans for DO/R2/fetch + custom spans
+        // via cloudflare:workers tracing API. Full sampling while we audit latency.
+        "traces": { "enabled": true, "head_sampling_rate": 1 },
       },
       "hyperdrive": [
         {
@@ -350,6 +353,9 @@
       ],
       "observability": {
         "enabled": true,
+        // Native Workers Traces: automatic spans for DO/R2/fetch + custom spans
+        // via cloudflare:workers tracing API. Full sampling while we audit latency.
+        "traces": { "enabled": true, "head_sampling_rate": 1 },
       },
       "hyperdrive": [
         {
@@ -450,6 +456,10 @@
       ],
       "observability": {
         "enabled": true,
+        // Native Workers Traces: automatic spans for DO/R2/fetch + custom spans
+        // via cloudflare:workers tracing API. Full sampling during the latency
+        // audit; lower head_sampling_rate once the baseline is established.
+        "traces": { "enabled": true, "head_sampling_rate": 1 },
       },
       "hyperdrive": [
         {
