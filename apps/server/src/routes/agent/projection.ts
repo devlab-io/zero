@@ -25,15 +25,16 @@
  * projection *content*.
  */
 
-import { logger } from '../../lib/logger';
-import { invariant } from '../../lib/invariant';
 import { threadLabels as threadLabelsTable, labels as labelsTable } from './db/schema';
 import { GmailSearchAssistantSystemPrompt } from '../../lib/prompts';
 import type { IGetThreadResponse } from '../../lib/driver/types';
 import type { ParsedMessage, Sender } from '../../types';
 import type { ZeroDriverInternal } from './internal';
 import type { ThreadsResponse } from '@zero/types';
+import { invariant } from '../../lib/invariant';
+import { TtlCache } from '../../lib/ttl-cache';
 import { get, getThreadLabels } from './db';
+import { logger } from '../../lib/logger';
 import { inArray, eq } from 'drizzle-orm';
 import { openai } from '@ai-sdk/openai';
 import { generateText } from 'ai';
@@ -111,6 +112,16 @@ async function getLabelsForThreads(
 /** R2 object key for a thread's stored message bodies. */
 function threadKey(name: string, threadId: string) {
   return `${name}/${threadId}.json`;
+}
+
+// In-memory cache of R2 thread bodies (read + JSON.parse), keyed by
+// `${connectionName}:${threadId}`; syncThread invalidates on rewrite and the
+// 60 s TTL bounds any residual staleness.
+const threadBodyCache = new TtlCache<ParsedMessage[]>(60_000, 50);
+
+/** Drop the cached R2 body for a thread — called when the sync rewrites it. */
+export function invalidateThreadBodyCache(connectionName: string, threadId: string) {
+  threadBodyCache.delete(`${connectionName}:${threadId}`);
 }
 
 /** `bin` is the user-facing alias for the `trash` folder. */
@@ -198,7 +209,8 @@ export async function searchThreads(
   const driver = self.driver;
   invariant(driver, 'driver is not available');
   const rawEffect = Effect.tryPromise(() =>
-    driver.list({
+    driver
+      .list({
         folder,
         query: genQueryResult,
         labelIds,
@@ -422,11 +434,16 @@ export async function getThreadFromDB(
         labels: [],
       } satisfies IGetThreadResponse;
     }
-    const storedThread = await self.env.THREADS_BUCKET.get(threadKey(self.name, id));
-
-    let messages: ParsedMessage[] = storedThread
-      ? (JSON.parse(await storedThread.text()) as IGetThreadResponse).messages
-      : [];
+    const bodyCacheKey = `${self.name}:${id}`;
+    let messages = threadBodyCache.get(bodyCacheKey);
+    if (!messages) {
+      const storedThread = await self.env.THREADS_BUCKET.get(threadKey(self.name, id));
+      messages = storedThread
+        ? (JSON.parse(await storedThread.text()) as IGetThreadResponse).messages
+        : [];
+      // Cache positive hits only: a missing body may just precede the sync write.
+      if (storedThread) threadBodyCache.set(bodyCacheKey, messages);
+    }
 
     const isLatestDraft = messages.some((e) => e.isDraft === true);
 

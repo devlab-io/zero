@@ -1,11 +1,12 @@
 import type { IGetThreadResponse, IGetThreadsResponse } from './driver/types';
 import { OutgoingMessageType } from '../routes/agent/types';
+import { defaultPageSize, FOLDERS } from './utils';
 import { getContext } from 'hono/context-storage';
 import { connection } from '../db/schema';
-import { defaultPageSize } from './utils';
 import type { HonoContext } from '../ctx';
 import { createClient } from 'dormroom';
 import { createDriver } from './driver';
+import { TtlCache } from './ttl-cache';
 import { logger } from './logger';
 import { eq } from 'drizzle-orm';
 import { createDb } from '../db';
@@ -33,6 +34,13 @@ const invalidateShardTopology = (connectionId: string) => {
   activeShardCache.delete(connectionId);
   shardListCache.delete(connectionId);
 };
+
+// Isolate cache for hot listThreads calls: 5 s collapses the repeated reads of a
+// single navigation; the sync pushes real updates over the websocket anyway.
+const threadsListCache = new TtlCache<IGetThreadsResponse>(5_000, 200);
+// sendDoState wakes the ZeroAgent DO; broadcasting state at most once a minute
+// per connection is enough for a background refresh.
+const doStateThrottle = new TtlCache<true>(60_000, 500);
 
 export const getZeroDB = async (userId: string) => {
   const stub = env.ZERO_DB.get(env.ZERO_DB.idFromName(userId));
@@ -436,21 +444,39 @@ export const getThreadsFromDB = async (
   // Fire and forget - don't block the thread query on state updates
   //   const agent = await getZeroSocketAgent(connectionId);
   //   await agent.invalidateDoStateCache();
-  void sendDoState(connectionId);
+  if (!doStateThrottle.get(connectionId)) {
+    doStateThrottle.set(connectionId, true);
+    void sendDoState(connectionId);
+  }
 
   const maxResults = params.maxResults ?? defaultPageSize;
 
+  // Only the DO projection path is cacheable: live Gmail search (q) and drafts
+  // go through other routes and must stay fresh.
+  const cacheable = !params.q && params.folder !== FOLDERS.DRAFT;
+  const cacheKey = cacheable
+    ? `${connectionId}:${params.folder ?? ''}:${maxResults}:${params.pageToken ?? ''}:${[...(params.labelIds ?? [])].sort().join(',')}`
+    : null;
+  const cached = cacheKey ? threadsListCache.get(cacheKey) : undefined;
+  if (cached) return cached;
+
+  const store = (response: IGetThreadsResponse) => {
+    if (cacheKey) threadsListCache.set(cacheKey, response);
+    return response;
+  };
+
   if (maxResults === defaultPageSize && !params.pageToken && !params.q) {
-    return Effect.promise(async () => {
+    const response = await Effect.promise(async () => {
       const agent = await getZeroAgent(connectionId);
       return await agent.stub.getThreadsFromDB({
         ...params,
         maxResults: maxResults,
       });
     }).pipe(Effect.runPromise);
+    return store(response);
   }
 
-  return Effect.runPromise(
+  const aggregated = await Effect.runPromise(
     aggregateShardDataEffect<IGetThreadsResponse>(
       connectionId,
       (shard) =>
@@ -483,6 +509,7 @@ export const getThreadsFromDB = async (
       },
     ),
   );
+  return store(aggregated);
 };
 
 export const getDatabaseSize = async (connectionId: string): Promise<number> => {
@@ -630,13 +657,18 @@ export const verifyToken = async (token: string) => {
 };
 
 export const resetConnection = async (connectionId: string) => {
+  // Route through the ZeroDB DO (not a direct Hyperdrive write) so its in-memory
+  // active-connection cache is invalidated by the update.
   const { db, conn } = createDb(env.HYPERDRIVE.connectionString);
-  await db
-    .update(connection)
-    .set({
-      accessToken: null,
-      refreshToken: null,
-    })
-    .where(eq(connection.id, connectionId));
+  const row = await db.query.connection.findFirst({
+    where: eq(connection.id, connectionId),
+  });
   await conn.end();
+  if (!row) return;
+
+  const zeroDb = await getZeroDB(row.userId);
+  await zeroDb.updateConnection(connectionId, {
+    accessToken: null,
+    refreshToken: null,
+  });
 };

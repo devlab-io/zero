@@ -186,7 +186,10 @@ export class ZeroDB extends DurableObject<ZeroEnv> {
     data: typeof connection.$inferSelect;
     expiresAt: number;
   } | null = null;
-  private static readonly ACTIVE_CONNECTION_TTL_MS = 60_000;
+  // 10 min: every user/connection write transits through this DO and invalidates
+  // the cache (resetConnection included, routed via updateConnection), so a long
+  // TTL only expires on idle eviction.
+  private static readonly ACTIVE_CONNECTION_TTL_MS = 600_000;
 
   private invalidateActiveConnectionCache() {
     this.activeConnectionCache = null;

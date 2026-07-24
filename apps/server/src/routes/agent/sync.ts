@@ -14,12 +14,13 @@
  * Reuse or distribution of this file requires a license from Zero Email Inc.
  */
 
-import { logger } from '../../lib/logger';
-import { invariant } from '../../lib/invariant';
 import { DateNormalizationError, type ThreadSyncResult } from './errors';
+import { invalidateThreadBodyCache } from './projection';
 import type { ZeroDriverInternal } from './internal';
 import migrations from './db/drizzle/migrations';
+import { invariant } from '../../lib/invariant';
 import { OutgoingMessageType } from './types';
+import { logger } from '../../lib/logger';
 import type { Sender } from '../../types';
 import { Effect } from 'effect';
 import { create } from './db';
@@ -105,6 +106,9 @@ export async function syncThread(
           threadId,
         ),
       );
+
+      // The worker just rewrote the thread body in R2: drop the cached copy.
+      yield* Effect.sync(() => invalidateThreadBodyCache(this.name, threadId));
 
       if (!latest) {
         this.syncThreadsInProgress.delete(threadId);
@@ -242,10 +246,7 @@ export async function storeThreadInDB(
   }
 }
 
-export async function triggerSyncWorkflow(
-  self: ZeroDriverInternal,
-  folder: string,
-): Promise<void> {
+export async function triggerSyncWorkflow(self: ZeroDriverInternal, folder: string): Promise<void> {
   try {
     logger.info(`[ZeroDriver] Triggering sync coordinator workflow for ${self.name}/${folder}`);
 
