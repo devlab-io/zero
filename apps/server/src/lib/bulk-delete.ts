@@ -42,18 +42,39 @@ export const bulkDeleteKeys = async (
   }
 
   try {
-    // The cloudflare SDK (~50 MB on disk) is only needed on this cold path — keep it
-    // out of the isolate's static import graph.
-    const { default: Cloudflare } = await import('cloudflare');
-    const cloudflareClient = new Cloudflare({
-      apiToken: env.CLOUDFLARE_API_TOKEN || '',
-    });
-    const response = await cloudflareClient.kv.namespaces.bulkDelete(namespaceId, {
-      account_id: accountId,
-      body: keys,
-    });
+    // Devlab/perf — le SDK `cloudflare` était importé dynamiquement, ce qui
+    // évitait son évaluation au démarrage mais PAS son parse : wrangler (y
+    // compris en 4.114, vérifié) inline les `await import()` dans un unique
+    // `main.js`, sans code splitting. Ces 1,75 Mio étaient donc parsés à chaque
+    // démarrage d'isolate pour un seul appel, ici. L'endpoint REST correspondant
+    // attend un tableau de clés en corps ; le SDK ne faisait rien de plus.
+    const response = await fetch(
+      `https://api.cloudflare.com/client/v4/accounts/${accountId}/storage/kv/namespaces/${namespaceId}/bulk/delete`,
+      {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          authorization: `Bearer ${env.CLOUDFLARE_API_TOKEN || ''}`,
+        },
+        body: JSON.stringify(keys),
+      },
+    );
 
-    const successful = response?.successful_key_count || 0;
+    const payload = (await response.json().catch(() => null)) as {
+      success?: boolean;
+      result?: { successful_key_count?: number };
+      errors?: { message?: string }[];
+    } | null;
+
+    if (!response.ok || payload?.success === false) {
+      logger.error('[BULK_DELETE] KV bulk delete rejected', {
+        status: response.status,
+        errors: payload?.errors?.map((e) => e.message).join('; '),
+      });
+      return { successful: 0, failed: keys.length };
+    }
+
+    const successful = payload?.result?.successful_key_count ?? 0;
     const failed = keys.length - successful;
 
     logger.info(`[BULK_DELETE] Successfully deleted ${successful}/${keys.length} keys`);
