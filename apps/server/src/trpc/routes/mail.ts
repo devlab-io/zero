@@ -20,6 +20,7 @@ import { openThreadProcedure } from './open-thread';
 // IGetThreadsResponse). Élargit le .output() pour ne PAS stripper subject/sender/date/labels/unread.
 import { ThreadsResponseSchema } from '@zero/types';
 import { getContext } from 'hono/context-storage';
+import { TtlCache } from '../../lib/ttl-cache';
 import { type HonoContext } from '../../ctx';
 import { logger } from '../../lib/logger';
 import { TRPCError } from '@trpc/server';
@@ -30,6 +31,13 @@ const senderSchema = z.object({
   name: z.string().optional(),
   email: z.string(),
 });
+
+// Verdicts DKIM/SPF par message. Le message brut étant immuable, le verdict
+// l'est aussi ; la durée de vie ne borne que l'occupation mémoire de l'isolate.
+const emailVerificationCache = new TtlCache<{ isVerified: boolean; logoUrl?: string }>(
+  30 * 60_000,
+  1_000,
+);
 
 // const getFolderLabelId = (folder: string) => {
 //   // Handle special cases first
@@ -869,12 +877,24 @@ export const mailRouter = router({
     .query(async ({ input, ctx }) => {
       try {
         const { activeConnection } = ctx;
+
+        // Devlab/perf — la vérification télécharge le message BRUT complet
+        // (RFC822, souvent plusieurs centaines de kio) puis contrôle DKIM et
+        // SPF. Mesuré sur staging : p50 944 ms, p95 4,2 s, 29 appels en quatre
+        // minutes de navigation. Or le message brut est immuable et le verdict
+        // avec lui : le même fil rouvert refaisait tout le travail. Le résultat
+        // ne pèse qu'un booléen et une URL.
+        const cacheKey = `${activeConnection.id}:${input.id}`;
+        const cached = emailVerificationCache.get(cacheKey);
+        if (cached) return cached;
+
         const { stub: agent } = await getZeroAgent(activeConnection.id);
 
         const rawEmail = await agent.getRawEmail(input.id);
 
         const { verify } = await import('../../lib/email-verification');
         const result = await verify(rawEmail);
+        emailVerificationCache.set(cacheKey, result);
         return result;
       } catch (error) {
         logger.error('Email verification error:', error);

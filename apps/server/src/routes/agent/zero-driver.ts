@@ -14,8 +14,14 @@
  * Reuse or distribution of this file requires a license from Zero Email Inc.
  */
 
+import {
+  countThreads,
+  countThreadsByLabels,
+  deleteSpamThreads,
+  get as getThreadRow,
+  type DB,
+} from './db';
 import type { IGetThreadResponse, IGetThreadsResponse, MailManager } from '../../lib/driver/types';
-import { countThreads, countThreadsByLabels, deleteSpamThreads, type DB } from './db';
 import { connectionToDriver, getZeroSocketAgent } from '../../lib/server-utils';
 import type { IOutgoingMessage, ISnoozeBatch, Sender } from '../../types';
 import { OutgoingMessageType, type OutgoingMessage } from './types';
@@ -424,6 +430,19 @@ export class ZeroDriver extends DurableObject<ZeroEnv> {
 
   async modifyThreadLabelsInDB(threadId: string, addLabels: string[], removeLabels: string[]) {
     return labels.modifyThreadLabelsInDB(internal(this), threadId, addLabels, removeLabels);
+  }
+
+  /**
+   * Devlab/perf — sonde d'appartenance, SQLite seul.
+   *
+   * Localiser le shard d'un fil passait par `getThread`, qui lit le corps
+   * complet dans R2 et le désérialise. Marquer un message comme lu relisait
+   * donc tout le fil depuis le stockage objet pour n'en tirer qu'un
+   * identifiant de shard. Cette sonde répond à la même question sur la seule
+   * ligne `threads`, sans toucher R2 ni le driver Gmail.
+   */
+  async hasThread(threadId: string): Promise<boolean> {
+    return (await getThreadRow(this.db, { id: threadId })) !== null;
   }
 
   async getThreadFromDB(id: string, includeDrafts: boolean = false): Promise<IGetThreadResponse> {

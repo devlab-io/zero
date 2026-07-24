@@ -319,7 +319,67 @@ export const getThread: (
   if (!result.shardId) {
     throw new Error(`Thread ${threadId} not found in any shard`);
   }
+  // Le shard gagnant est mémorisé : toute écriture ultérieure sur ce fil
+  // (marquer comme lu, étoiler, déplacer) sait désormais où aller.
+  threadShardCache.set(`${connectionId}:${threadId}`, result.shardId);
   return { result: result.result, shardId: result.shardId };
+};
+
+// Un fil ne change pas de shard : la seule péremption possible est une purge
+// de la connexion, déjà couverte par `invalidateShardTopology`.
+const threadShardCache = new TtlCache<string>(10 * 60_000, 2_000);
+
+/**
+ * Devlab/perf — localise le shard d'un fil SANS lire son contenu.
+ *
+ * `modifyThreadLabelsInDB` passait par `getThread`, donc par la course sur
+ * tous les shards où chacun lit la ligne SQLite, PUIS le corps complet dans
+ * R2, PUIS le désérialise — pour n'en retenir qu'un identifiant de shard.
+ * Marquer un message comme lu relisait ainsi tout le fil depuis le stockage
+ * objet (mesuré : markAsRead p50 599 ms, modifyLabels p50 475 ms sur staging).
+ *
+ * Trois niveaux, du moins cher au plus cher :
+ *  1. le shard connu pour ce fil, mémorisé par une lecture précédente ;
+ *  2. l'unique shard, quand la topologie n'en compte qu'un — cas courant, la
+ *     création d'un second shard n'intervenant qu'au-delà de 8 Gio ;
+ *  3. sinon, une course sur `hasThread`, sonde SQLite qui ne touche pas R2.
+ */
+const locateThreadShard = async (connectionId: string, threadId: string): Promise<string> => {
+  const cacheKey = `${connectionId}:${threadId}`;
+  const cached = threadShardCache.get(cacheKey);
+  if (cached) return cached;
+
+  const allShards = await listShardsCached(connectionId);
+  if (allShards.length === 0) {
+    throw new Error(`No shard registered for connection ${connectionId}`);
+  }
+  if (allShards.length === 1) {
+    const only = allShards[0].shard_id;
+    threadShardCache.set(cacheKey, only);
+    return only;
+  }
+
+  const located = await Effect.runPromise(
+    raceShardDataEffect<string | null, Error>(
+      connectionId,
+      (shard, shardId) =>
+        Effect.gen(function* () {
+          const present = yield* Effect.tryPromise({
+            try: async () => shard.stub.hasThread(threadId),
+            catch: (error) => new Error(`hasThread failed on shard ${shardId}: ${error}`),
+          });
+          if (present) return shardId;
+          return yield* Effect.fail(new Error(`Thread ${threadId} absent from shard ${shardId}`));
+        }),
+      null,
+    ),
+  );
+
+  if (!located.result) {
+    throw new Error(`Thread ${threadId} not found in any shard`);
+  }
+  threadShardCache.set(cacheKey, located.result);
+  return located.result;
 };
 
 export const modifyThreadLabelsInDB = async (
@@ -328,14 +388,28 @@ export const modifyThreadLabelsInDB = async (
   addLabels: string[],
   removeLabels: string[],
 ) => {
-  const threadResult = await getThread(connectionId, threadId);
-  const shard = await getShardClient(connectionId, threadResult.shardId);
+  const shardId = await locateThreadShard(connectionId, threadId);
+  const shard = await getShardClient(connectionId, shardId);
   await shard.stub.modifyThreadLabelsInDB(threadId, addLabels, removeLabels);
 
-  const agent = await getZeroSocketAgent(connectionId);
-  await agent.invalidateDoStateCache();
+  // Devlab/perf — la propagation d'état réveille le DO ZeroAgent et diffuse
+  // sur les shards. Elle était attendue avant de répondre, ajoutant deux
+  // allers DO à chaque clic. Le client, lui, applique déjà la mutation de
+  // façon optimiste : ce travail appartient à l'après-réponse.
+  const propagate = (async () => {
+    const agent = await getZeroSocketAgent(connectionId);
+    await agent.invalidateDoStateCache();
+    await sendDoState(connectionId);
+  })().catch((error) => {
+    logger.warn('[modifyThreadLabelsInDB] state propagation failed', error);
+  });
 
-  await sendDoState(connectionId);
+  try {
+    getContext<HonoContext>().executionCtx.waitUntil(propagate);
+  } catch {
+    // Hors contexte de requête (alarme, workflow) : on attend sur place.
+    await propagate;
+  }
 };
 
 const getActiveShardId = async (connectionId: string) => {

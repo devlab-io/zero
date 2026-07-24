@@ -486,7 +486,31 @@ describe('mail router — traitement de contenu', () => {
 
   it('verifyEmail → {isVerified:false} en cas d’erreur', async () => {
     stub.getRawEmail.mockRejectedValueOnce(new Error('nope'));
-    const r = await call('verifyEmail', { id: 'th-1' });
+    // Identifiant distinct du cas nominal : les verdicts sont mémorisés par
+    // message (perf — le message brut est immuable), donc réutiliser `th-1`
+    // servirait le verdict déjà calculé au lieu d'emprunter le chemin d'erreur.
+    const r = await call('verifyEmail', { id: 'th-erreur' });
     expect(r).toEqual({ isVerified: false });
+  });
+
+  it("verifyEmail → le verdict d'un message n'est calculé qu'une fois", async () => {
+    stub.getRawEmail.mockClear();
+    const first = await call('verifyEmail', { id: 'th-cache' });
+    const second = await call('verifyEmail', { id: 'th-cache' });
+
+    expect(first).toEqual({ isVerified: true });
+    expect(second).toEqual(first);
+    // Le message brut n'est téléchargé qu'au premier appel.
+    expect(stub.getRawEmail).toHaveBeenCalledTimes(1);
+  });
+
+  it("verifyEmail → un échec n'est pas mémorisé", async () => {
+    stub.getRawEmail.mockRejectedValueOnce(new Error('réseau'));
+    const failed = await call('verifyEmail', { id: 'th-transitoire' });
+    expect(failed).toEqual({ isVerified: false });
+
+    // L'appel suivant doit retenter, pas servir l'échec.
+    const retried = await call('verifyEmail', { id: 'th-transitoire' });
+    expect(retried).toEqual({ isVerified: true });
   });
 });
