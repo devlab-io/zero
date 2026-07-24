@@ -9,7 +9,6 @@ import {
   reSyncThread,
 } from '../../lib/server-utils';
 import { IGetThreadResponseSchema, type IGetThreadsResponse } from '../../lib/driver/types';
-import { updateWritingStyleMatrix } from '../../services/writing-style-service';
 import type { DeleteAllSpamResponse, IEmailSendBatch } from '../../types';
 import { activeDriverProcedure, router, privateProcedure } from '../trpc';
 import { processEmailHtml } from '../../lib/email-processor';
@@ -486,6 +485,8 @@ export const mailRouter = router({
       const afterTask = async () => {
         try {
           logger.warn('Saving writing style matrix...');
+          // Post-send bookkeeping pulls in the AI SDK stack — load it off the hot path.
+          const { updateWritingStyleMatrix } = await import('../../services/writing-style-service');
           await updateWritingStyleMatrix(activeConnection.id, input.message);
           logger.warn('Saved writing style matrix.');
         } catch (error) {

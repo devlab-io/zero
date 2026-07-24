@@ -1,11 +1,13 @@
 import { activeDriverProcedure } from '../../trpc';
-import { perplexity } from '@ai-sdk/perplexity';
-import { generateText } from 'ai';
 import { z } from 'zod';
 
 export const webSearch = activeDriverProcedure
   .input(z.object({ query: z.string() }))
   .mutation(async ({ input }) => {
+    const [{ generateText }, { perplexity }] = await Promise.all([
+      import('ai'),
+      import('@ai-sdk/perplexity'),
+    ]);
     const result = await generateText({
       model: perplexity('sonar'),
       system:

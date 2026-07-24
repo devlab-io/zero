@@ -1,6 +1,5 @@
-import { Autumn, fetchPricingTable } from 'autumn-js';
-import type { HonoContext } from '../ctx';
 import { invariant } from '../lib/invariant';
+import type { HonoContext } from '../ctx';
 import { env } from '../env';
 import { Hono } from 'hono';
 
@@ -86,6 +85,8 @@ export const autumnApi = new Hono<AutumnContext>()
       // attach / cancel / billing portals: billing is not available in self-host
       return c.json({ error: 'Billing disabled in self-hosted mode' }, 200);
     }
+    // autumn-js stays out of the isolate's static import graph (billing is off the hot path).
+    const { Autumn } = await import('autumn-js');
     c.set('autumn', new Autumn({ secretKey: env.AUTUMN_SECRET_KEY }));
     await next();
   })
@@ -182,9 +183,7 @@ export const autumnApi = new Hono<AutumnContext>()
     if (!customerData) return c.json({ error: 'No customer ID found' }, 401);
 
     return c.json(
-      await autumn.customers
-        .billingPortal(customerData.customerId, body)
-        .then((data) => data.data),
+      await autumn.customers.billingPortal(customerData.customerId, body).then((data) => data.data),
     );
   })
   .post('/openBillingPortal', async (c) => {
@@ -261,6 +260,7 @@ export const autumnApi = new Hono<AutumnContext>()
     const { autumn, customerData } = c.var;
     invariant(autumn, 'Autumn client is not initialized');
 
+    const { fetchPricingTable } = await import('autumn-js');
     return c.json(
       await fetchPricingTable({
         instance: autumn,

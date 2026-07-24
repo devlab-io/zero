@@ -5,7 +5,6 @@ import {
   sanitizeContext,
   StandardizedError,
 } from './utils';
-import { logger } from '../logger';
 import type {
   OutlookCategory as Category,
   MailFolder,
@@ -13,16 +12,19 @@ import type {
   User,
 } from '@microsoft/microsoft-graph-types';
 import type { IOutgoingMessage, Label, ParsedMessage } from '../../types';
-import { sanitizeTipTapHtml } from '../sanitize-tip-tap-html';
-import { Client } from '@microsoft/microsoft-graph-client';
 import type { MailManager, ManagerConfig, ParsedDraft } from './types';
+import type { Client } from '@microsoft/microsoft-graph-client';
+import { sanitizeTipTapHtml } from '../sanitize-tip-tap-html';
 import { getContext } from 'hono/context-storage';
 import type { CreateDraftData } from '../schemas';
 import type { HonoContext } from '../../ctx';
+import { logger } from '../logger';
 import * as he from 'he';
 
 export class OutlookMailManager implements MailManager {
-  private graphClient: Client;
+  // Kept as a promise: the graph client SDK is loaded lazily so it stays out of the
+  // isolate's static import graph (Outlook connections only).
+  private graphClient: Promise<Client>;
 
   constructor(public config: ManagerConfig) {
     const getAccessToken = async () => {
@@ -39,11 +41,13 @@ export class OutlookMailManager implements MailManager {
       return data.accessToken;
     };
 
-    this.graphClient = Client.initWithMiddleware({
-      authProvider: {
-        getAccessToken,
-      },
-    });
+    this.graphClient = import('@microsoft/microsoft-graph-client').then(({ Client }) =>
+      Client.initWithMiddleware({
+        authProvider: {
+          getAccessToken,
+        },
+      }),
+    );
   }
 
   public getScope(): string {
@@ -58,7 +62,7 @@ export class OutlookMailManager implements MailManager {
     return this.withErrorHandler(
       'getAttachment',
       async () => {
-        const response = await this.graphClient
+        const response = await (await this.graphClient)
           .api(`/me/messages/${messageId}/attachments/${attachmentId}`)
           .get();
 
@@ -76,11 +80,18 @@ export class OutlookMailManager implements MailManager {
     );
   }
   // MailManager methods the Gmail driver implements but the Outlook driver does not (yet).
-  public getRawEmail(_id: string): Promise<string> { return Promise.reject(new Error('getRawEmail not implemented for Outlook driver')); }
-  public getMessageAttachments(_id: string): ReturnType<MailManager['getMessageAttachments']> { return Promise.reject(new Error('getMessageAttachments not implemented for Outlook driver')); }
+  public getRawEmail(_id: string): Promise<string> {
+    return Promise.reject(new Error('getRawEmail not implemented for Outlook driver'));
+  }
+  public getMessageAttachments(_id: string): ReturnType<MailManager['getMessageAttachments']> {
+    return Promise.reject(new Error('getMessageAttachments not implemented for Outlook driver'));
+  }
   public getEmailAliases() {
     return this.withErrorHandler('getEmailAliases', async () => {
-      const user: User = await this.graphClient.api('/me').select('mail,userPrincipalName').get();
+      const user: User = await (await this.graphClient)
+        .api('/me')
+        .select('mail,userPrincipalName')
+        .get();
       const primaryEmail = user.mail || user.userPrincipalName || '';
 
       const aliases: { email: string; name?: string; primary?: boolean }[] = [
@@ -122,7 +133,7 @@ export class OutlookMailManager implements MailManager {
     }));
 
     try {
-      await this.graphClient.api('/$batch').post({ requests: batchRequests });
+      await (await this.graphClient).api('/$batch').post({ requests: batchRequests });
     } catch (error) {
       logger.error('Error during batch update of message read status:', error);
       throw error;
@@ -132,7 +143,7 @@ export class OutlookMailManager implements MailManager {
     return this.withErrorHandler(
       'getUserInfo',
       async () => {
-        const user: User = await this.graphClient
+        const user: User = await (await this.graphClient)
           .api('/me')
           .select('id,displayName,userPrincipalName,mail')
           .get();
@@ -175,7 +186,7 @@ export class OutlookMailManager implements MailManager {
     return this.withErrorHandler(
       'count',
       async () => {
-        const userLabels = await this.graphClient.api('/me/mailfolders').get();
+        const userLabels = await (await this.graphClient).api('/me/mailfolders').get();
 
         if (!userLabels.value) {
           return [];
@@ -184,7 +195,7 @@ export class OutlookMailManager implements MailManager {
         const folders = await Promise.all(
           userLabels.value.map(async (folder: MailFolder) => {
             try {
-              const res = await this.graphClient.api(`/me/mailfolders/${folder.id}`).get();
+              const res = await (await this.graphClient).api(`/me/mailfolders/${folder.id}`).get();
 
               let normalizedLabel = res.displayName || res.id || '';
 
@@ -229,7 +240,7 @@ export class OutlookMailManager implements MailManager {
       { email: this.config.auth?.email },
     );
   }
-  public list(params: {
+  public async list(params: {
     folder: string;
     query?: string;
     maxResults?: number;
@@ -243,7 +254,9 @@ export class OutlookMailManager implements MailManager {
       folderId = folder;
     }
 
-    let request = this.graphClient.api(`/me/mailFolders/${folderId}/messages`).top(maxResults);
+    let request = (await this.graphClient)
+      .api(`/me/mailFolders/${folderId}/messages`)
+      .top(maxResults);
 
     // if (q) {
     //   request = request.search(`"${q}"`);
@@ -350,7 +363,7 @@ export class OutlookMailManager implements MailManager {
     return this.withErrorHandler(
       'get',
       async () => {
-        const message: Message = await this.graphClient
+        const message: Message = await (await this.graphClient)
           .api(`/me/messages/${id}`)
           .select(
             'id,subject,body,from,toRecipients,ccRecipients,bccRecipients,sentDateTime,receivedDateTime,isRead,internetMessageId,inferenceClassification,categories,attachments',
@@ -378,7 +391,7 @@ export class OutlookMailManager implements MailManager {
             if (!att.id || !att.name || att.size === undefined || att.contentType === undefined) {
               return null;
             }
-            const attachmentContent = await this.graphClient
+            const attachmentContent = await (await this.graphClient)
               .api(`/me/messages/${message.id}/attachments/${att.id}`)
               .get();
 
@@ -425,7 +438,7 @@ export class OutlookMailManager implements MailManager {
       async () => {
         const messagePayload = await this.parseOutgoingOutlook(data);
 
-        const res = await this.graphClient.api('/me/sendMail').post({
+        const res = await (await this.graphClient).api('/me/sendMail').post({
           message: messagePayload,
           saveToSentItems: true,
         });
@@ -439,7 +452,7 @@ export class OutlookMailManager implements MailManager {
     return this.withErrorHandler(
       'delete',
       async () => {
-        await this.graphClient.api(`/me/messages/${id}`).delete();
+        await (await this.graphClient).api(`/me/messages/${id}`).delete();
       },
       { id },
     );
@@ -527,7 +540,7 @@ export class OutlookMailManager implements MailManager {
     }
 
     try {
-      await this.graphClient.api('/$batch').post({ requests: validBatchRequests });
+      await (await this.graphClient).api('/$batch').post({ requests: validBatchRequests });
     } catch (error) {
       logger.error('Error during batch modification of messages:', error);
       throw error;
@@ -537,7 +550,7 @@ export class OutlookMailManager implements MailManager {
     return this.withErrorHandler(
       'sendDraft',
       async () => {
-        await this.graphClient.api(`/me/messages/${draftId}/send`).post({});
+        await (await this.graphClient).api(`/me/messages/${draftId}/send`).post({});
       },
       { draftId, data },
     );
@@ -546,7 +559,9 @@ export class OutlookMailManager implements MailManager {
     return this.withErrorHandler(
       'getDraft',
       async () => {
-        const draftMessage: Message = await this.graphClient
+        const draftMessage: Message = await (
+          await this.graphClient
+        )
           .api(`/me/messages/${draftId}`) // Drafts are messages in the drafts folder
           .select('id,subject,body,from,toRecipients,ccRecipients,bccRecipients')
           .get();
@@ -569,7 +584,7 @@ export class OutlookMailManager implements MailManager {
     return this.withErrorHandler(
       'deleteDraft',
       async () => {
-        await this.graphClient.api(`/me/messages/${draftId}`).delete();
+        await (await this.graphClient).api(`/me/messages/${draftId}`).delete();
       },
       { draftId },
     );
@@ -579,7 +594,7 @@ export class OutlookMailManager implements MailManager {
     return this.withErrorHandler(
       'listDrafts',
       async () => {
-        let request = this.graphClient.api('/me/mailfolders/drafts/messages');
+        let request = (await this.graphClient).api('/me/mailfolders/drafts/messages');
 
         // if (q) {
         //   request = request.search(`"${q}"`);
@@ -721,23 +736,27 @@ export class OutlookMailManager implements MailManager {
 
         if (data.id) {
           try {
-            res = await this.graphClient
+            res = await (await this.graphClient)
               .api(`/me/mailfolders/drafts/messages/${data.id}`)
               .patch(outlookMessage);
           } catch (error) {
             logger.warn(`Failed to update draft ${data.id}, creating a new one`, error);
             try {
-              await this.graphClient.api(`/me/mailfolders/drafts/messages/${data.id}`).delete();
+              await (await this.graphClient)
+                .api(`/me/mailfolders/drafts/messages/${data.id}`)
+                .delete();
             } catch (deleteError) {
               logger.error(`Failed to delete draft ${data.id}`, deleteError);
             }
 
-            res = await this.graphClient
+            res = await (await this.graphClient)
               .api('/me/mailfolders/drafts/messages')
               .post(outlookMessage);
           }
         } else {
-          res = await this.graphClient.api('/me/mailfolders/drafts/messages').post(outlookMessage);
+          res = await (await this.graphClient)
+            .api('/me/mailfolders/drafts/messages')
+            .post(outlookMessage);
         }
 
         return res;
@@ -748,7 +767,7 @@ export class OutlookMailManager implements MailManager {
   public async getUserLabels() {
     try {
       // Get root mail folders
-      const rootFoldersResponse = await this.graphClient.api('/me/mailfolders').get();
+      const rootFoldersResponse = await (await this.graphClient).api('/me/mailfolders').get();
       const rootFolders: MailFolder[] = rootFoldersResponse.value || [];
 
       // System folders to identify
@@ -803,7 +822,7 @@ export class OutlookMailManager implements MailManager {
         const folderType = systemFolderNames.includes(folder.displayName?.toLowerCase() || '')
           ? 'system'
           : 'user';
-        const childFoldersResponse = await this.graphClient
+        const childFoldersResponse = await (await this.graphClient)
           .api(`/me/mailFolders/${folder.id}/childFolders`)
           .get();
 
@@ -842,7 +861,9 @@ export class OutlookMailManager implements MailManager {
     logger.warn('getLabel needs to differentiate between Category ID and Mail Folder ID.');
 
     try {
-      const folder: MailFolder = await this.graphClient.api(`/me/mailfolders/${labelId}`).get();
+      const folder: MailFolder = await (await this.graphClient)
+        .api(`/me/mailfolders/${labelId}`)
+        .get();
       return {
         id: folder.id || '',
         name: folder.displayName || '',
@@ -851,7 +872,7 @@ export class OutlookMailManager implements MailManager {
       };
     } catch (folderError) {
       try {
-        const category: Category = await this.graphClient
+        const category: Category = await (await this.graphClient)
           .api(`/me/outlook/masterCategories/${labelId}`)
           .get();
         return {
@@ -879,14 +900,14 @@ export class OutlookMailManager implements MailManager {
     );
 
     try {
-      const newFolder: MailFolder = await this.graphClient.api('/me/mailfolders').post({
+      const newFolder: MailFolder = await (await this.graphClient).api('/me/mailfolders').post({
         displayName: label.name,
         // parentFolderId: 'inbox', // Optional: Create under a specific parent folder
       });
       logger.info('Mail Folder created:', newFolder);
 
       // create a Category:
-      // const newCategory: Category = await this.graphClient.api('/me/outlook/masterCategories').post({
+      // const newCategory: Category = await (await this.graphClient).api('/me/outlook/masterCategories').post({
       //     displayName: label.name,
       //      color: 'presetColorEnum' // Graph category color is a string enum
       // });
@@ -899,14 +920,14 @@ export class OutlookMailManager implements MailManager {
     logger.warn('updateLabel needs to differentiate between Category and Mail Folder updates.');
 
     try {
-      await this.graphClient.api(`/me/mailfolders/${id}`).patch({
+      await (await this.graphClient).api(`/me/mailfolders/${id}`).patch({
         displayName: label.name,
         // Folder colors are not updateable via Graph API
       });
       logger.info(`Mail Folder ${id} updated.`);
     } catch (folderError) {
       try {
-        await this.graphClient.api(`/me/outlook/masterCategories/${id}`).patch({
+        await (await this.graphClient).api(`/me/outlook/masterCategories/${id}`).patch({
           displayName: label.name,
           // color: label.color?.backgroundColor, // Requires mapping hex to Graph color enum
         });
@@ -922,7 +943,7 @@ export class OutlookMailManager implements MailManager {
     }
   }
   public async deleteLabel(id: string) {
-    await this.graphClient.api(`/me/mailfolders/${id}`).delete();
+    await (await this.graphClient).api(`/me/mailfolders/${id}`).delete();
   }
   public async revokeToken(token: string) {
     if (!token) return false;

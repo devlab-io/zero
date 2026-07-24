@@ -1,6 +1,5 @@
-import { logger } from './logger';
 import { env } from 'cloudflare:workers';
-import Cloudflare from 'cloudflare';
+import { logger } from './logger';
 
 // KV namespace IDs for different environments
 const KV_NAMESPACE_IDS = {
@@ -43,6 +42,9 @@ export const bulkDeleteKeys = async (
   }
 
   try {
+    // The cloudflare SDK (~50 MB on disk) is only needed on this cold path — keep it
+    // out of the isolate's static import graph.
+    const { default: Cloudflare } = await import('cloudflare');
     const cloudflareClient = new Cloudflare({
       apiToken: env.CLOUDFLARE_API_TOKEN || '',
     });

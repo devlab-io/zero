@@ -5,10 +5,12 @@
 // REAL better-auth session (from `createAuth().api.getSession`) is assignable to that shape —
 // so the boundary can never claim a required field the real session does not provide. If
 // better-auth's session shape changes incompatibly, the server typecheck fails here.
-import type { createAuth } from './auth';
 import type { Auth as BoundaryAuth } from './auth.boundary';
+import type { createAuth } from './auth';
 
-type RealSessionRet = Awaited<ReturnType<ReturnType<typeof createAuth>['api']['getSession']>>;
+type RealSessionRet = Awaited<
+  ReturnType<Awaited<ReturnType<typeof createAuth>>['api']['getSession']>
+>;
 type BoundarySessionRet = Awaited<ReturnType<BoundaryAuth['api']['getSession']>>;
 
 // Real session (whatever better-auth infers) must satisfy the boundary view.

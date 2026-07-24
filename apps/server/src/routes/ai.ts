@@ -1,8 +1,6 @@
-import { logger } from '../lib/logger';
 import { systemPrompt } from '../services/call-service/system-prompt';
-import { openai } from '@ai-sdk/openai';
-import { tools } from './agent/tools';
-import { generateText } from 'ai';
+import type { tools } from './agent/tools';
+import { logger } from '../lib/logger';
 import { Tools } from '../types';
 import { createDb } from '../db';
 import { env } from '../env';
@@ -52,6 +50,7 @@ aiRouter.post('/do/:action', async (c) => {
     logger.info('[DEBUG] action', action, body);
 
     // Get all tools for this connection
+    const { tools } = await import('./agent/tools');
     const toolset: ToolsReturnType = await tools(connection.id, action === Tools.InboxRag);
     const tool = toolset[action as keyof ToolsReturnType];
 
@@ -132,6 +131,11 @@ aiRouter.post('/call', async (c) => {
   }
 
   logger.info('[DEBUG] Creating toolset for connection:', connection.id);
+  const [{ tools }, { generateText }, { openai }] = await Promise.all([
+    import('./agent/tools'),
+    import('ai'),
+    import('@ai-sdk/openai'),
+  ]);
   const toolset = await tools(connection.id);
   const { text } = await generateText({
     model: openai(env.OPENAI_MODEL || 'gpt-4o'),

@@ -1,13 +1,3 @@
-import { logger } from './logger';
-import {
-  AIWritingAssistantEmail,
-  AutoLabelingEmail,
-  CategoriesEmail,
-  Mail0ProEmail,
-  ShortcutsEmail,
-  SuperSearchEmail,
-  WelcomeEmail,
-} from './react-emails/email-sequences';
 import { type Account, betterAuth, type BetterAuthOptions } from 'better-auth';
 import { phoneNumber, jwt, bearer, mcp } from 'better-auth/plugins';
 import { getBrowserTimezone, isValidTimezone } from './timezones';
@@ -16,21 +6,22 @@ import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import { getZeroDB, resetConnection } from './server-utils';
 import { getSocialProviders } from './auth-providers';
 import { redis, resend, twilio } from './services';
-import { dubAnalytics } from '@dub/better-auth';
 import { defaultUserSettings } from './schemas';
 import { disableBrainFunction } from './brain';
 import { type EProviders } from '../types';
 import { createDriver } from './driver';
-import { Autumn } from 'autumn-js';
+import { logger } from './logger';
 import { createDb } from '../db';
 import { Effect } from 'effect';
 import { env } from '../env';
-import { Dub } from 'dub';
 
 const scheduleCampaign = (userInfo: { address: string; name: string }) =>
   Effect.gen(function* () {
     const name = userInfo.name || 'there';
-    const resendService = resend();
+    const resendService = yield* Effect.promise(() => resend());
+    // react-email components are only rendered for the onboarding campaign — keep
+    // react/@react-email out of the isolate's static import graph.
+    const emails = yield* Effect.promise(() => import('./react-emails/email-sequences'));
 
     const sendEmail = (subject: string, react: unknown, scheduledAt?: string) =>
       Effect.promise(() =>
@@ -45,46 +36,46 @@ const scheduleCampaign = (userInfo: { address: string; name: string }) =>
           .then(() => void 0),
       );
 
-    const emails = [
+    const campaign = [
       {
         subject: 'Welcome to 0.email',
-        react: WelcomeEmail({ name }),
+        react: emails.WelcomeEmail({ name }),
         scheduledAt: undefined,
       },
       {
         subject: 'Mail0 Pro is here 🚀💼',
-        react: Mail0ProEmail({ name }),
+        react: emails.Mail0ProEmail({ name }),
         scheduledAt: 'in 1 day',
       },
       {
         subject: 'Auto-labeling is here 🎉📥',
-        react: AutoLabelingEmail({ name }),
+        react: emails.AutoLabelingEmail({ name }),
         scheduledAt: 'in 2 days',
       },
       {
         subject: 'AI Writing Assistant is here 🤖💬',
-        react: AIWritingAssistantEmail({ name }),
+        react: emails.AIWritingAssistantEmail({ name }),
         scheduledAt: 'in 3 days',
       },
       {
         subject: 'Shortcuts are here 🔧🚀',
-        react: ShortcutsEmail({ name }),
+        react: emails.ShortcutsEmail({ name }),
         scheduledAt: 'in 4 days',
       },
       {
         subject: 'Categories are here 📂🔍',
-        react: CategoriesEmail({ name }),
+        react: emails.CategoriesEmail({ name }),
         scheduledAt: 'in 5 days',
       },
       {
         subject: 'Super Search is here 🔍🚀',
-        react: SuperSearchEmail({ name }),
+        react: emails.SuperSearchEmail({ name }),
         scheduledAt: 'in 6 days',
       },
     ];
 
     yield* Effect.all(
-      emails.map((email) => sendEmail(email.subject, email.react, email.scheduledAt)),
+      campaign.map((email) => sendEmail(email.subject, email.react, email.scheduledAt)),
       { concurrency: 'unbounded' },
     );
   });
@@ -166,14 +157,23 @@ const connectionHandlerHook = async (account: Account) => {
 // request ». De plus le flux réel n'appelle createAuth qu'UNE fois par requête (middleware /api
 // OU un mount /mcp|/sse|discovery — jamais cumulés), donc « multiple par requête » est faux.
 // Une connexion neuve par requête est le contrat correct en Workers. Voir rapport #31.
-export const createAuth = () => {
+export const createAuth = async () => {
   const twilioClient = twilio();
+  // Devlab: Dub attribution analytics is opt-in — only wire the plugin when a
+  // DUB_API_KEY is configured; otherwise auth events tried to phone dub.co.
+  // The dub SDKs (~22 MB on disk) are dynamically imported to stay out of the
+  // isolate's static import graph.
+  const dubPlugin = env.DUB_API_KEY
+    ? await (async () => {
+        const { dubAnalytics } = await import('@dub/better-auth');
+        const { Dub } = await import('dub');
+        return dubAnalytics({ dubClient: new Dub() });
+      })()
+    : null;
 
   return betterAuth({
     plugins: [
-      // Devlab: Dub attribution analytics is opt-in — only wire the plugin when a
-      // DUB_API_KEY is configured; otherwise auth events tried to phone dub.co.
-      ...(env.DUB_API_KEY ? [dubAnalytics({ dubClient: new Dub() })] : []),
+      ...(dubPlugin ? [dubPlugin] : []),
       mcp({
         loginPage: env.VITE_PUBLIC_APP_URL + '/login',
       }),
@@ -198,7 +198,9 @@ export const createAuth = () => {
         async sendDeleteAccountVerification(data) {
           const verificationUrl = data.url;
 
-          await resend().emails.send({
+          await (
+            await resend()
+          ).emails.send({
             from: '0.email <no-reply@0.email>',
             to: data.user.email,
             subject: 'Delete your 0.email account',
@@ -213,6 +215,7 @@ export const createAuth = () => {
           if (!request) throw new APIError('BAD_REQUEST', { message: 'Request object is missing' });
           const db = await getZeroDB(user.id);
           const connections = await db.findManyConnections();
+          const { Autumn } = await import('autumn-js');
           const autumn = new Autumn({ secretKey: env.AUTUMN_SECRET_KEY });
           try {
             await autumn.customers.delete(user.id);
@@ -270,7 +273,9 @@ export const createAuth = () => {
       enabled: false,
       requireEmailVerification: true,
       sendResetPassword: async ({ user, url }) => {
-        await resend().emails.send({
+        await (
+          await resend()
+        ).emails.send({
           from: '0.email <onboarding@0.email>',
           to: user.email,
           subject: 'Reset your password',
@@ -289,7 +294,9 @@ export const createAuth = () => {
       sendVerificationEmail: async ({ user, token }) => {
         const verificationUrl = `${env.VITE_PUBLIC_APP_URL}/api/auth/verify-email?token=${token}&callbackURL=/settings/connections`;
 
-        await resend().emails.send({
+        await (
+          await resend()
+        ).emails.send({
           from: '0.email <onboarding@0.email>',
           to: user.email,
           subject: 'Verify your 0.email account',
@@ -410,5 +417,5 @@ export const createSimpleAuth = () => {
   return betterAuth(createAuthConfig());
 };
 
-export type Auth = ReturnType<typeof createAuth>;
+export type Auth = Awaited<ReturnType<typeof createAuth>>;
 export type SimpleAuth = ReturnType<typeof createSimpleAuth>;

@@ -4,26 +4,26 @@
 // /public sub-routers + tRPC at /api/trpc) and the root `app` (CORS, OAuth
 // discovery, MCP/SSE mounts, agents websocket middleware, health, Sentry
 // tunnel and provider webhooks). Frontier rationale: docs/adr/0001-routing-hono-vs-trpc.md.
-import { logger } from '../lib/logger';
-import { invariant } from '../lib/invariant';
 import { oAuthDiscoveryMetadata } from 'better-auth/plugins';
-import { contextStorage } from 'hono/context-storage';
 import { getZeroDB, verifyToken } from '../lib/server-utils';
 import { ThinkingMCP } from '../lib/sequential-thinking';
+import { contextStorage } from 'hono/context-storage';
 import { createLocalJWKSet, jwtVerify } from 'jose';
 import { trpcServer } from '@hono/trpc-server';
 import { agentsMiddleware } from 'hono-agents';
-import { ZeroMCP } from './agent/mcp';
+import { invariant } from '../lib/invariant';
 import { initTracing } from '../lib/tracing';
 import type { HonoContext } from '../ctx';
+import { createAuth } from '../lib/auth';
+import { logger } from '../lib/logger';
+import { ZeroMCP } from './agent/mcp';
 import { EProviders } from '../types';
 import { publicRouter } from './auth';
-import { createAuth } from '../lib/auth';
 import { autumnApi } from './autumn';
-import { env } from '../env';
 import { appRouter } from '../trpc';
-import { aiRouter } from './ai';
 import { cors } from 'hono/cors';
+import { aiRouter } from './ai';
+import { env } from '../env';
 import { Hono } from 'hono';
 
 const SENTRY_HOST = 'o4509328786915328.ingest.us.sentry.io';
@@ -41,7 +41,7 @@ function hashIpAddress(ip: string | undefined): string | undefined {
 
   for (let i = 0; i < str.length; i++) {
     const char = str.charCodeAt(i);
-    hash = ((hash << 5) - hash) + char;
+    hash = (hash << 5) - hash + char;
     hash = hash & hash; // Convert to 32bit integer
   }
 
@@ -75,26 +75,36 @@ export const api = new Hono<HonoContext>()
     });
 
     // Start authentication span
-    const authSpan = TraceContext.startSpan(traceId, 'authentication', {
-      method: c.req.method,
-      url: c.req.url,
-      hasAuthHeader: !!c.req.header('Authorization'),
-    }, {
-      'auth.method': c.req.header('Authorization') ? 'bearer_token' : 'session_cookie'
-    });
+    const authSpan = TraceContext.startSpan(
+      traceId,
+      'authentication',
+      {
+        method: c.req.method,
+        url: c.req.url,
+        hasAuthHeader: !!c.req.header('Authorization'),
+      },
+      {
+        'auth.method': c.req.header('Authorization') ? 'bearer_token' : 'session_cookie',
+      },
+    );
 
-    const auth = createAuth();
+    const auth = await createAuth();
     c.set('auth', auth);
     const session = await auth.api.getSession({ headers: c.req.raw.headers });
     c.set('sessionUser', session?.user);
 
     if (c.req.header('Authorization') && !session?.user) {
       // Start token verification span
-      const tokenSpan = TraceContext.startSpan(traceId, 'token_verification', {
-        tokenPresent: true,
-      }, {
-        'auth.token_type': 'jwt'
-      });
+      const tokenSpan = TraceContext.startSpan(
+        traceId,
+        'token_verification',
+        {
+          tokenPresent: true,
+        },
+        {
+          'auth.token_type': 'jwt',
+        },
+      );
 
       const token = c.req.header('Authorization')?.split(' ')[1];
 
@@ -122,10 +132,15 @@ export const api = new Hono<HonoContext>()
             });
           }
         } catch (error) {
-          TraceContext.completeSpan(traceId, tokenSpan.id, {
-            success: false,
-            reason: 'token_verification_failed',
-          }, error instanceof Error ? error.message : 'Unknown token error');
+          TraceContext.completeSpan(
+            traceId,
+            tokenSpan.id,
+            {
+              success: false,
+              reason: 'token_verification_failed',
+            },
+            error instanceof Error ? error.message : 'Unknown token error',
+          );
         }
       } else {
         TraceContext.completeSpan(traceId, tokenSpan.id, {
@@ -139,7 +154,7 @@ export const api = new Hono<HonoContext>()
     TraceContext.completeSpan(traceId, authSpan.id, {
       authenticated: !!c.var.sessionUser,
       userId: c.var.sessionUser?.id,
-      authMethod: session?.user ? 'session' : (c.req.header('Authorization') ? 'token' : 'none'),
+      authMethod: session?.user ? 'session' : c.req.header('Authorization') ? 'token' : 'none',
     });
 
     // Update trace metadata with user info
@@ -156,11 +171,16 @@ export const api = new Hono<HonoContext>()
       await next();
       // Don't complete the request span here - let TRPC middleware handle it
     } catch (error) {
-      TraceContext.completeSpan(traceId, requestSpan.id, {
-        success: false,
+      TraceContext.completeSpan(
+        traceId,
+        requestSpan.id,
+        {
+          success: false,
 
-        statusCode: c.res.status,
-      }, error instanceof Error ? error.message : 'Unknown request error');
+          statusCode: c.res.status,
+        },
+        error instanceof Error ? error.message : 'Unknown request error',
+      );
       throw error;
     }
     // Note: Trace will be completed by TRPC middleware after logging
@@ -225,7 +245,7 @@ export const app = new Hono<HonoContext>()
     }),
   )
   .get('.well-known/oauth-authorization-server', async (c) => {
-    const auth = createAuth();
+    const auth = await createAuth();
     return oAuthDiscoveryMetadata(auth)(c.req.raw);
   })
   .mount(
@@ -236,7 +256,7 @@ export const app = new Hono<HonoContext>()
         logger.info('No auth provided');
         return new Response('Unauthorized', { status: 401 });
       }
-      const auth = createAuth();
+      const auth = await createAuth();
       const session = await auth.api.getMcpSession({ headers: request.headers });
       if (!session) {
         logger.info('Invalid auth provided', Array.from(request.headers.entries()));
@@ -267,7 +287,7 @@ export const app = new Hono<HonoContext>()
       if (!authBearer) {
         return new Response('Unauthorized', { status: 401 });
       }
-      const auth = createAuth();
+      const auth = await createAuth();
       const session = await auth.api.getMcpSession({ headers: request.headers });
       if (!session) {
         logger.info('Invalid auth provided', Array.from(request.headers.entries()));

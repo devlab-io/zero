@@ -1,17 +1,10 @@
-import {
-  getWritingStyleMatrixForConnectionId,
-  type WritingStyleMatrix,
-} from '../../../services/writing-style-service';
+import { type WritingStyleMatrix } from '../../../services/writing-style-service';
 import { escapeXml } from '../../../thread-workflow-utils/workflow-utils';
 import { StyledEmailAssistantSystemPrompt } from '../../../lib/prompts';
-import { webSearch } from '../../../routes/agent/tools';
 import { activeConnectionProcedure } from '../../trpc';
 import { getPrompt } from '../../../lib/brain';
-import { stripHtml } from 'string-strip-html';
 import { EPrompts } from '../../../types';
 import { env } from '../../../env';
-import { openai } from '@ai-sdk/openai';
-import { generateText } from 'ai';
 import { z } from 'zod';
 
 type ComposeEmailInput = {
@@ -32,6 +25,22 @@ type ComposeEmailInput = {
 
 export async function composeEmail(input: ComposeEmailInput) {
   const { prompt, threadMessages = [], cc, emailSubject, to, username, connectionId } = input;
+
+  // The AI SDK stack (and the agent toolset) is only exercised on this cold path —
+  // keep it out of the isolate's static import graph.
+  const [
+    { getWritingStyleMatrixForConnectionId },
+    { stripHtml },
+    { generateText },
+    { openai },
+    { webSearch },
+  ] = await Promise.all([
+    import('../../../services/writing-style-service'),
+    import('string-strip-html'),
+    import('ai'),
+    import('@ai-sdk/openai'),
+    import('../../../routes/agent/tools'),
+  ]);
 
   const writingStyleMatrix = await getWritingStyleMatrixForConnectionId({
     connectionId,
@@ -155,6 +164,9 @@ export const generateEmailSubject = activeConnectionProcedure
     const { activeConnection } = ctx;
     const { message } = input;
 
+    const { getWritingStyleMatrixForConnectionId } = await import(
+      '../../../services/writing-style-service'
+    );
     const writingStyleMatrix = await getWritingStyleMatrixForConnectionId({
       connectionId: activeConnection.id,
     });
@@ -266,6 +278,10 @@ const generateSubject = async (message: string, styleProfile?: WritingStyleMatri
     'Generate a concise, clear subject line that summarizes the main point of the email. The subject should be professional and under 100 characters.',
   );
 
+  const [{ generateText }, { openai }] = await Promise.all([
+    import('ai'),
+    import('@ai-sdk/openai'),
+  ]);
   const { text } = await generateText({
     model: openai(env.OPENAI_MODEL || 'gpt-4o'),
     messages: [

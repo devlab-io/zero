@@ -2,9 +2,8 @@ import { parseAddressList, parseFrom, wasSentWithTLS } from '../email-utils';
 import type { IOutgoingMessage, ParsedMessage } from '../../types';
 import { sanitizeTipTapHtml } from '../sanitize-tip-tap-html';
 import { type gmail_v1 } from '@googleapis/gmail';
-import type { ManagerConfig } from './types';
 import { getSimpleLoginSender } from './utils';
-import { createMimeMessage } from 'mimetext';
+import type { ManagerConfig } from './types';
 import * as he from 'he';
 
 export function parseMessage({
@@ -35,8 +34,7 @@ export function parseMessage({
   const messageId =
     payload?.headers?.find((h) => h.name?.toLowerCase() === 'message-id')?.value || '';
   const listUnsubscribe =
-    payload?.headers?.find((h) => h.name?.toLowerCase() === 'list-unsubscribe')?.value ||
-    undefined;
+    payload?.headers?.find((h) => h.name?.toLowerCase() === 'list-unsubscribe')?.value || undefined;
   const listUnsubscribePost =
     payload?.headers?.find((h) => h.name?.toLowerCase() === 'list-unsubscribe-post')?.value ||
     undefined;
@@ -107,6 +105,7 @@ export async function parseOutgoing(
   }: IOutgoingMessage,
   config: ManagerConfig,
 ) {
+  const { createMimeMessage } = await import('mimetext');
   const msg = createMimeMessage();
 
   const defaultFromEmail = config.auth?.email || 'nobody@example.com';

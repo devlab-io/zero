@@ -1,12 +1,11 @@
+import { sanitizeTipTapHtml } from '../sanitize-tip-tap-html';
 import { parseMessage, parseOutgoing } from './google-parse';
 import type { GmailTransport } from './google-transport';
 import type { GmailMessages } from './google-messages';
+import type { IOutgoingMessage } from '../../types';
 import { normalizeSearch } from './google-threads';
 import { type gmail_v1 } from '@googleapis/gmail';
 import type { CreateDraftData } from '../schemas';
-import { sanitizeTipTapHtml } from '../sanitize-tip-tap-html';
-import type { IOutgoingMessage } from '../../types';
-import { createMimeMessage } from 'mimetext';
 import { fromBinary } from './utils';
 import { logger } from '../logger';
 import * as he from 'he';
@@ -154,6 +153,7 @@ export class GmailDrafts {
       'createDraft',
       async () => {
         const { html: message, inlineImages } = await sanitizeTipTapHtml(data.message);
+        const { createMimeMessage } = await import('mimetext');
         const msg = createMimeMessage();
         msg.setSender('me');
         // name <email@example.com>
@@ -195,7 +195,10 @@ export class GmailDrafts {
         if (data.attachments && data.attachments?.length > 0) {
           for (const attachment of data.attachments) {
             let base64Data: string | undefined;
-            const att = attachment as { base64?: unknown; arrayBuffer?: () => Promise<ArrayBuffer> };
+            const att = attachment as {
+              base64?: unknown;
+              arrayBuffer?: () => Promise<ArrayBuffer>;
+            };
             if (typeof att.base64 === 'string') base64Data = att.base64;
             else if (typeof att.arrayBuffer === 'function') {
               const buffer = Buffer.from(await att.arrayBuffer());

@@ -3,14 +3,10 @@ import { logger } from '../lib/logger';
 
 import { writingStyleMatrix } from '../db/schema';
 
-
-import { env } from '../env';
-import { google } from '@ai-sdk/google';
-import { jsonrepair } from 'jsonrepair';
-import { generateObject } from 'ai';
 import { eq } from 'drizzle-orm';
 import { createDb } from '../db';
 import pRetry from 'p-retry';
+import { env } from '../env';
 import { z } from 'zod';
 
 // leaving these in here for testing between them
@@ -338,6 +334,14 @@ const extractStyleMatrix = async (emailBody: string) => {
   if (!emailBody.trim()) {
     throw new Error('Invalid body provided.');
   }
+
+  // The AI SDK stack is only exercised on this cold path — keep it out of the
+  // isolate's static import graph.
+  const [{ generateObject }, { google }, { jsonrepair }] = await Promise.all([
+    import('ai'),
+    import('@ai-sdk/google'),
+    import('jsonrepair'),
+  ]);
 
   const { object: result } = await generateObject({
     model: google('gemini-2.0-flash'),
