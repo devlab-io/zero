@@ -41,12 +41,15 @@ type AttachmentMeta = {
  * refait pas l'aller-retour. Rien n'est téléchargé tant que l'utilisateur n'a
  * pas cliqué.
  */
-export const useAttachmentBodyLoader = (messageId: string) => {
+export const useAttachmentBodyLoader = () => {
   const queryClient = useQueryClient();
   const trpc = useTRPC();
 
   return useCallback(
-    async <T extends AttachmentMeta>(attachment: T): Promise<T & { body: string }> => {
+    async <T extends AttachmentMeta>(
+      messageId: string,
+      attachment: T,
+    ): Promise<T & { body: string }> => {
       const { body } = await queryClient.fetchQuery(
         trpc.mail.getAttachmentBody.queryOptions(
           { messageId, attachmentId: attachment.attachmentId },
@@ -55,6 +58,6 @@ export const useAttachmentBodyLoader = (messageId: string) => {
       );
       return { ...attachment, body };
     },
-    [queryClient, trpc, messageId],
+    [queryClient, trpc],
   );
 };

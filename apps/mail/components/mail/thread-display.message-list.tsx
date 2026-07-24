@@ -1,7 +1,8 @@
-import type { Attachment, ParsedMessage } from '@/types';
+import type { ThreadAttachment } from './mail-display.attachments';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { lazy, Suspense } from 'react';
+import type { ParsedMessage } from '@/types';
 import MailDisplay from './mail-display';
+import { lazy, Suspense } from 'react';
 import { cn } from '@/lib/utils';
 
 // #44 (gate A8): the reply composer statically pulls posthog-js (+ its own shell) into the
@@ -17,7 +18,7 @@ interface MessageListProps {
   messages: ParsedMessage[];
   isFullscreen: boolean;
   totalReplies?: number;
-  allThreadAttachments?: Attachment[];
+  allThreadAttachments?: ThreadAttachment[];
   mode?: string;
   activeReplyId?: string;
   isMobile: boolean;

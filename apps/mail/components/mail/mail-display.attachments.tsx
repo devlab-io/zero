@@ -1,3 +1,4 @@
+import { useAttachmentBodyLoader } from '@/hooks/use-attachments';
 import { Docx, Figma, ImageFile, PDF } from '../icons/icons';
 import type { Attachment } from '@/types';
 import { m } from '@/paraglide/messages';
@@ -183,11 +184,18 @@ export const openAttachment = async (attachment: {
   }
 };
 
-export const ThreadAttachments = ({ attachments }: { attachments: Attachment[] }) => {
+export type ThreadAttachment = Attachment & { messageId: string };
+
+export const ThreadAttachments = ({ attachments }: { attachments: ThreadAttachment[] }) => {
+  const loadAttachmentBody = useAttachmentBodyLoader();
+
   if (!attachments || attachments.length === 0) return null;
 
-  const handleDownload = async (attachment: Attachment) => {
+  const handleDownload = async (meta: ThreadAttachment) => {
     try {
+      // Les corps arrivent vides dans la projection du fil : ils sont chargés
+      // ici, au clic, depuis le message d'origine de la pièce.
+      const attachment = await loadAttachmentBody(meta.messageId, meta);
       // Convert base64 to blob
       const byteCharacters = atob(attachment.body);
       const byteNumbers: number[] = Array(byteCharacters.length);

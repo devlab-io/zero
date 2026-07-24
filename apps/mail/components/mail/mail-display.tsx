@@ -12,9 +12,9 @@ import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover';
 import { EmailVerificationBadge } from './email-verification-badge';
 import { useAttachmentBodyLoader } from '@/hooks/use-attachments';
 import { CopyIcon, HardDriveDownload, Lock } from 'lucide-react';
-import type { Sender, ParsedMessage, Attachment } from '@/types';
 import { useActiveConnection } from '@/hooks/use-connections';
 import { useThreadLabels } from '@/hooks/use-labels';
+import type { Sender, ParsedMessage } from '@/types';
 import { useThread } from '@/hooks/use-threads';
 import { BimiAvatar } from '../ui/bimi-avatar';
 import { RenderLabels } from './render-labels';
@@ -34,6 +34,7 @@ import {
   handleDownloadAllAttachments,
   openAttachment,
   reportAttachmentFailure,
+  type ThreadAttachment,
 } from './mail-display.attachments';
 import { MoreAboutPerson, MoreAboutQuery } from './mail-display.research';
 import { ActionButton, AiSummary } from './mail-display.parts';
@@ -52,7 +53,7 @@ type Props = {
   onReply?: () => void;
   onReplyAll?: () => void;
   onForward?: () => void;
-  threadAttachments?: Attachment[];
+  threadAttachments?: ThreadAttachment[];
 };
 
 const cleanEmailDisplay = (email?: string) => {
@@ -77,7 +78,7 @@ const MailDisplay = ({ emailData, index, totalEmails, demo, threadAttachments }:
   // afficher qu'un nom et une taille. Les octets sont désormais cherchés au
   // clic, pièce par pièce.
   const messageAttachments = emailData.attachments;
-  const loadAttachmentBody = useAttachmentBodyLoader(emailData.id);
+  const loadAttachmentBody = useAttachmentBodyLoader();
   //   const [unsubscribed, setUnsubscribed] = useState(false);
   //   const [isUnsubscribing, setIsUnsubscribing] = useState(false);
   const [preventCollapse, setPreventCollapse] = useState(false);
@@ -566,7 +567,11 @@ const MailDisplay = ({ emailData, index, totalEmails, demo, threadAttachments }:
                                     // Le téléchargement groupé est le seul geste
                                     // qui réclame tous les corps : ils sont
                                     // cherchés ici, au clic, et non à l'ouverture.
-                                    Promise.all((messageAttachments || []).map(loadAttachmentBody))
+                                    Promise.all(
+                                      (messageAttachments || []).map((a) =>
+                                        loadAttachmentBody(emailData.id, a),
+                                      ),
+                                    )
                                       .then((withBodies) =>
                                         handleDownloadAllAttachments(
                                           emailData.subject || 'email',
@@ -715,7 +720,7 @@ const MailDisplay = ({ emailData, index, totalEmails, demo, threadAttachments }:
                         <button
                           className="flex cursor-pointer items-center gap-1 rounded-[5px] bg-[#FAFAFA] px-1.5 py-1 text-sm font-medium hover:bg-[#F0F0F0] dark:bg-[#262626] dark:hover:bg-[#303030]"
                           onClick={() =>
-                            loadAttachmentBody(attachment)
+                            loadAttachmentBody(emailData.id, attachment)
                               .then(openAttachment)
                               .catch(reportAttachmentFailure)
                           }
@@ -730,7 +735,7 @@ const MailDisplay = ({ emailData, index, totalEmails, demo, threadAttachments }:
                         </button>
                         <button
                           onClick={() =>
-                            loadAttachmentBody(attachment)
+                            loadAttachmentBody(emailData.id, attachment)
                               .then(downloadAttachment)
                               .catch(reportAttachmentFailure)
                           }
