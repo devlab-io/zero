@@ -175,6 +175,22 @@ export class ZeroDriver extends DurableObject<ZeroEnv> {
     return await this.driver.getMessageAttachments(messageId);
   }
 
+  /**
+   * Devlab/perf — corps d'UNE pièce jointe, à la demande.
+   *
+   * `getMessageAttachments` télécharge le message complet puis le contenu de
+   * TOUTES ses pièces jointes (mesuré : p50 3,4 s). Or l'interface n'affiche
+   * qu'un nom et une taille, déjà présents dans la projection du fil : les
+   * octets ne servent qu'au clic d'ouverture ou de téléchargement. Ce point
+   * d'entrée les sert un par un, quand ils sont réellement demandés.
+   */
+  async getAttachmentBody(messageId: string, attachmentId: string) {
+    if (!this.driver) {
+      throw new Error('No driver available');
+    }
+    return await this.driver.getAttachment(messageId, attachmentId);
+  }
+
   async getRawEmail(messageId: string) {
     if (!this.driver) throw new Error('No driver available');
     return await this.driver.getRawEmail(messageId);

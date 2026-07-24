@@ -25,6 +25,9 @@ describe('query persistence policy', () => {
     expect(
       shouldPersistQuery(query([['mail', 'getMessageAttachments']], [{ name: 'invoice.pdf' }])),
     ).toBe(false);
+    expect(
+      shouldPersistQuery(query([['mail', 'getAttachmentBody']], { body: 'JVBERi0xLjQK' })),
+    ).toBe(false);
     expect(shouldPersistQuery(query([['mail', 'get']], null, 1, 'error'))).toBe(false);
     expect(shouldPersistQuery(query([['mail', 'get']], 'x'.repeat(3 * 1024 * 1024 + 1)))).toBe(
       false,

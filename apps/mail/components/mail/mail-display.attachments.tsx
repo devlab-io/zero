@@ -1,8 +1,8 @@
-import { log } from '@/lib/log';
-import { m } from '@/paraglide/messages';
-import type { Attachment } from '@/types';
 import { Docx, Figma, ImageFile, PDF } from '../icons/icons';
+import type { Attachment } from '@/types';
+import { m } from '@/paraglide/messages';
 import { FileText } from 'lucide-react';
+import { log } from '@/lib/log';
 import { toast } from 'sonner';
 
 // Attachment helpers + thread-level attachments row, extracted verbatim from
@@ -36,6 +36,18 @@ export const getFileIcon = (filename: string) => {
     default:
       return <FileText className="h-4 w-4 text-[#8B5CF6]" />;
   }
+};
+
+/**
+ * Échec du chargement d'un corps de pièce jointe.
+ *
+ * Les octets ne sont plus rapatriés à l'ouverture du message mais au clic
+ * (perf) : le réseau peut donc échouer à un moment où l'utilisateur attend un
+ * résultat, ce qui n'existait pas avant. Cet échec doit être visible.
+ */
+export const reportAttachmentFailure = (error: unknown) => {
+  log.error('Error loading attachment body:', error);
+  toast.error(m['common.mailDisplay.failedToDownloadAttachment']());
 };
 
 export const downloadAttachment = async (attachment: {

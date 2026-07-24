@@ -33,7 +33,12 @@ function isDetailQuery(query: PersistableQuery) {
 export function shouldPersistQuery(query: PersistableQuery) {
   if (query.state.status !== 'success' || query.state.data == null) return false;
 
-  if (getTRPCProcedurePath(query.queryKey) === 'mail.getMessageAttachments') return false;
+  // Les corps de pièces jointes sont volumineux et binaires : jamais persistés,
+  // que l'appel les rapatrie en bloc ou pièce par pièce.
+  const procedure = getTRPCProcedurePath(query.queryKey);
+  if (procedure === 'mail.getMessageAttachments' || procedure === 'mail.getAttachmentBody') {
+    return false;
+  }
 
   return (
     !isDetailQuery(query) || getSerializedSize(query.state.data) <= SINGLE_DETAIL_QUERY_LIMIT_BYTES

@@ -4,16 +4,16 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '../ui/dropdown-menu';
-import { Forward, Printer, Reply, ReplyAll, ThreeDots } from '../icons/icons';
 import { formatDate, formatTime, shouldShowSeparateTime } from '@/lib/date-utils';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Forward, Printer, Reply, ReplyAll, ThreeDots } from '../icons/icons';
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
 import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover';
 import { EmailVerificationBadge } from './email-verification-badge';
+import { useAttachmentBodyLoader } from '@/hooks/use-attachments';
 import { CopyIcon, HardDriveDownload, Lock } from 'lucide-react';
 import type { Sender, ParsedMessage, Attachment } from '@/types';
 import { useActiveConnection } from '@/hooks/use-connections';
-import { useAttachments } from '@/hooks/use-attachments';
 import { useThreadLabels } from '@/hooks/use-labels';
 import { useThread } from '@/hooks/use-threads';
 import { BimiAvatar } from '../ui/bimi-avatar';
@@ -33,6 +33,7 @@ import {
   getFileIcon,
   handleDownloadAllAttachments,
   openAttachment,
+  reportAttachmentFailure,
 } from './mail-display.attachments';
 import { MoreAboutPerson, MoreAboutQuery } from './mail-display.research';
 import { ActionButton, AiSummary } from './mail-display.parts';
@@ -68,7 +69,15 @@ const cleanNameDisplay = (name?: string) => {
 const MailDisplay = ({ emailData, index, totalEmails, demo, threadAttachments }: Props) => {
   const [isCollapsed, setIsCollapsed] = useState<boolean>(false);
   const { data: threadData } = useThread(emailData.threadId ?? null);
-  const { data: messageAttachments } = useAttachments(emailData.id);
+  // Devlab/perf — les métadonnées des pièces jointes (nom, taille, type,
+  // identifiant) voyagent DÉJÀ dans la projection du fil, corps vides. La
+  // liste se peint donc sans aucun appel réseau. L'ancien `useAttachments`
+  // rapatriait le message entier puis le contenu de toutes les pièces à
+  // chaque ouverture de message — p50 3,4 s mesuré sur staging — pour n'en
+  // afficher qu'un nom et une taille. Les octets sont désormais cherchés au
+  // clic, pièce par pièce.
+  const messageAttachments = emailData.attachments;
+  const loadAttachmentBody = useAttachmentBodyLoader(emailData.id);
   //   const [unsubscribed, setUnsubscribed] = useState(false);
   //   const [isUnsubscribing, setIsUnsubscribing] = useState(false);
   const [preventCollapse, setPreventCollapse] = useState(false);
@@ -554,10 +563,17 @@ const MailDisplay = ({ emailData, index, totalEmails, demo, threadAttachments }:
                                   onClick={(e) => {
                                     e.stopPropagation();
                                     e.preventDefault();
-                                    handleDownloadAllAttachments(
-                                      emailData.subject || 'email',
-                                      messageAttachments || [],
-                                    )();
+                                    // Le téléchargement groupé est le seul geste
+                                    // qui réclame tous les corps : ils sont
+                                    // cherchés ici, au clic, et non à l'ouverture.
+                                    Promise.all((messageAttachments || []).map(loadAttachmentBody))
+                                      .then((withBodies) =>
+                                        handleDownloadAllAttachments(
+                                          emailData.subject || 'email',
+                                          withBodies,
+                                        )(),
+                                      )
+                                      .catch(reportAttachmentFailure);
                                   }}
                                 >
                                   <HardDriveDownload className="fill-iconLight dark:text-iconDark dark:fill-iconLight mr-2 h-4 w-4" />
@@ -698,7 +714,11 @@ const MailDisplay = ({ emailData, index, totalEmails, demo, threadAttachments }:
                       >
                         <button
                           className="flex cursor-pointer items-center gap-1 rounded-[5px] bg-[#FAFAFA] px-1.5 py-1 text-sm font-medium hover:bg-[#F0F0F0] dark:bg-[#262626] dark:hover:bg-[#303030]"
-                          onClick={() => openAttachment(attachment)}
+                          onClick={() =>
+                            loadAttachmentBody(attachment)
+                              .then(openAttachment)
+                              .catch(reportAttachmentFailure)
+                          }
                         >
                           {getFileIcon(attachment.filename)}
                           <span className="max-w-[15ch] truncate text-sm text-black dark:text-white">
@@ -709,7 +729,11 @@ const MailDisplay = ({ emailData, index, totalEmails, demo, threadAttachments }:
                           </span>
                         </button>
                         <button
-                          onClick={() => downloadAttachment(attachment)}
+                          onClick={() =>
+                            loadAttachmentBody(attachment)
+                              .then(downloadAttachment)
+                              .catch(reportAttachmentFailure)
+                          }
                           className="flex cursor-pointer items-center gap-1 rounded-[5px] px-1.5 py-1 text-sm"
                         >
                           <HardDriveDownload className="text-muted-foreground dark:text-muted-foreground h-4 w-4 fill-[#FAFAFA] dark:fill-[#262626]" />

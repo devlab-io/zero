@@ -829,6 +829,35 @@ export const mailRouter = router({
         }[]
       >;
     }),
+  /**
+   * Corps d'une pièce jointe, servi à la demande.
+   *
+   * `getMessageAttachments` rapatrie le message entier puis le contenu de
+   * toutes ses pièces jointes — p50 3,4 s mesuré sur staging — alors que la
+   * liste affichée (nom, taille) est déjà dans la projection du fil. Cette
+   * procédure ne sert que le clic d'ouverture ou de téléchargement.
+   */
+  getAttachmentBody: activeDriverProcedure
+    .input(
+      z.object({
+        messageId: z.string().min(1),
+        attachmentId: z.string().min(1),
+      }),
+    )
+    .output(z.object({ body: z.string() }))
+    .query(async ({ ctx, input }) => {
+      const { activeConnection } = ctx;
+      const executionCtx = getContext<HonoContext>().executionCtx;
+      const { stub: agent } = await getZeroAgent(activeConnection.id, executionCtx);
+      const body = await agent.getAttachmentBody(input.messageId, input.attachmentId);
+      if (!body) {
+        throw new TRPCError({
+          code: 'NOT_FOUND',
+          message: `Attachment ${input.attachmentId} not found on message ${input.messageId}`,
+        });
+      }
+      return { body };
+    }),
   processEmailContent: privateProcedure
     .input(
       z.object({
