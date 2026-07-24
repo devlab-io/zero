@@ -1,10 +1,5 @@
-import { useKeyboardLayout } from '@/components/keyboard-layout-indicator';
-import { LoadingProvider } from '@/components/context/loading-context';
 import { PostHogAnalytics } from '@/providers/posthog-analytics';
 import { NuqsAdapter } from 'nuqs/adapters/react-router/v7';
-import { SidebarProvider } from '@/components/ui/sidebar';
-import { useSettings } from '@/hooks/use-settings';
-import { Provider as JotaiProvider } from 'jotai';
 import type { PropsWithChildren } from 'react';
 import { ThemeProvider } from 'next-themes';
 import { lazy, Suspense } from 'react';
@@ -14,32 +9,25 @@ import { lazy, Suspense } from 'react';
 // still render once it loads.
 const Toaster = lazy(() => import('@/components/ui/toast'));
 
+// w2cd (client weight): only what the public shell (landing, login, full-width
+// pages) actually needs stays at the root. App-only providers (React Query/tRPC,
+// jotai, sidebar, loading state) moved to app/(routes)/layout.tsx so their code
+// stays out of the __spa-fallback shell bundle.
+//
+// The settings-driven `defaultTheme` was dropped: `defaultTheme` is only read at
+// mount (when the settings query has not resolved yet, so it was always 'system'
+// in practice) and theme changes go through next-themes' setTheme → localStorage
+// (see settings/appearance). Behavior is unchanged.
 export function ClientProviders({ children }: PropsWithChildren) {
-  const { data } = useSettings();
-  useKeyboardLayout();
-
-  const theme = data?.settings.colorTheme || 'system';
-
   return (
     <NuqsAdapter>
-      <JotaiProvider>
-        <ThemeProvider
-          attribute="class"
-          enableSystem
-          disableTransitionOnChange
-          defaultTheme={theme}
-        >
-          <SidebarProvider>
-            <LoadingProvider>
-              {children}
-              <Suspense fallback={null}>
-                <Toaster />
-              </Suspense>
-              <PostHogAnalytics />
-            </LoadingProvider>
-          </SidebarProvider>
-        </ThemeProvider>
-      </JotaiProvider>
+      <ThemeProvider attribute="class" enableSystem disableTransitionOnChange defaultTheme="system">
+        {children}
+        <Suspense fallback={null}>
+          <Toaster />
+        </Suspense>
+        <PostHogAnalytics />
+      </ThemeProvider>
     </NuqsAdapter>
   );
 }

@@ -11,7 +11,6 @@ import { GitHub, Twitter, Discord, LinkedIn, Star } from './icons/icons';
 import { AnimatedNumber } from '@/components/ui/animated-number';
 import { signIn, useSession } from '@/lib/auth-client';
 import { Separator } from '@/components/ui/separator';
-import { useQuery } from '@tanstack/react-query';
 import { Link, useNavigate } from 'react-router';
 import { Button } from '@/components/ui/button';
 import { useState, useEffect } from 'react';
@@ -86,26 +85,22 @@ export function Navigation() {
   const { data: session } = useSession();
   const navigate = useNavigate();
 
-  const { data: githubData } = useQuery({
-    queryKey: ['githubStars'],
-    queryFn: async () => {
-      const response = await fetch('https://api.github.com/repos/Mail-0/Zero', {
-        headers: {
-          Accept: 'application/vnd.github.v3+json',
-        },
-      });
-      if (!response.ok) {
-        throw new Error('Failed to fetch GitHub stars');
-      }
-      return response.json() as Promise<GitHubApiResponse>;
-    },
-  });
-
+  // w2cd (client weight): plain fetch instead of react-query — the public shell
+  // (landing, full-width pages) no longer ships a QueryClientProvider, and this
+  // component renders there. Failure leaves the fallback star count, as before.
   useEffect(() => {
-    if (githubData) {
-      setStars(githubData.stargazers_count || 0);
-    }
-  }, [githubData]);
+    fetch('https://api.github.com/repos/Mail-0/Zero', {
+      headers: {
+        Accept: 'application/vnd.github.v3+json',
+      },
+    })
+      .then((response) => {
+        if (!response.ok) throw new Error('Failed to fetch GitHub stars');
+        return response.json() as Promise<GitHubApiResponse>;
+      })
+      .then((data) => setStars(data.stargazers_count || 0))
+      .catch(() => {});
+  }, []);
 
   return (
     <>
@@ -122,7 +117,7 @@ export function Navigation() {
             <NavigationMenu>
               <NavigationMenuList className="gap-1">
                 <NavigationMenuItem>
-                  <NavigationMenuTrigger className="bg-transparent text-white cursor-pointer">
+                  <NavigationMenuTrigger className="cursor-pointer bg-transparent text-white">
                     Company
                   </NavigationMenuTrigger>
                   <NavigationMenuContent>
@@ -136,7 +131,7 @@ export function Navigation() {
                   </NavigationMenuContent>
                 </NavigationMenuItem>
                 <NavigationMenuItem>
-                  <NavigationMenuTrigger className="bg-transparent text-white cursor-pointer">
+                  <NavigationMenuTrigger className="cursor-pointer bg-transparent text-white">
                     Resources
                   </NavigationMenuTrigger>
                   <NavigationMenuContent>
@@ -155,11 +150,11 @@ export function Navigation() {
                   </NavigationMenuContent>
                 </NavigationMenuItem>
                 <NavigationMenuItem className="bg-transparent text-white">
-                  <Button asChild variant="ghost" className="h-9 bg-transparent cursor-pointer">
+                  <Button asChild variant="ghost" className="h-9 cursor-pointer bg-transparent">
                     <a href="/pricing">Pricing</a>
                   </Button>
                 </NavigationMenuItem>
-                <NavigationMenuItem className="bg-transparent text-white cursor-pointer">
+                <NavigationMenuItem className="cursor-pointer bg-transparent text-white">
                   <a href="/privacy">
                     <Button variant="ghost" className="ml-1 h-9 bg-transparent">
                       Privacy
@@ -189,7 +184,7 @@ export function Navigation() {
               </div>
             </a>
             <Button
-              className="h-8 bg-white text-black hover:bg-white hover:text-black cursor-pointer"
+              className="h-8 cursor-pointer bg-white text-black hover:bg-white hover:text-black"
               onClick={() => {
                 if (session) {
                   navigate('/mail/inbox');

@@ -18,15 +18,30 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
+import { useContributorsData, REPOSITORY, specialRoles } from './contributors-data';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ThemeToggle } from '@/components/theme/theme-toggle';
 import { Discord, Twitter } from '@/components/icons/icons';
 import { Separator } from '@/components/ui/separator';
 import { Navigation } from '@/components/navigation';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
-import { useContributorsData, REPOSITORY, specialRoles } from './contributors-data';
+
+// w2cd (client weight): the root QueryProvider moved to app/(routes)/layout.tsx so
+// the query stack stays out of the public shell. This page still needs a client for
+// its plain GitHub API queries, so it gets a small local one (no tRPC, no IDB
+// persistence — public data, refetched on every visit anyway).
+const queryClient = new QueryClient();
+
+export default function OpenPage() {
+  return (
+    <QueryClientProvider client={queryClient}>
+      <ContributorsPage />
+    </QueryClientProvider>
+  );
+}
 
 const ChartControls = ({
   showAll,
@@ -47,7 +62,7 @@ const ChartControls = ({
   </div>
 );
 
-export default function OpenPage() {
+function ContributorsPage() {
   const {
     repoStats,
     timelineData,
@@ -753,4 +768,3 @@ export default function OpenPage() {
     </div>
   );
 }
-

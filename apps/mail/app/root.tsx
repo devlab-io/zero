@@ -10,9 +10,7 @@ import {
 } from 'react-router';
 import { ServerProviders } from '@/providers/server-providers';
 import { ClientProviders } from '@/providers/client-providers';
-import { createTRPCClient, httpBatchLink } from '@trpc/client';
 import { useEffect, type PropsWithChildren } from 'react';
-import type { AppRouter } from '@zero/server/trpc';
 import { Button } from '@/components/ui/button';
 import { getLocale } from '@/paraglide/runtime';
 import { siteConfig } from '@/lib/site-config';
@@ -22,7 +20,6 @@ import { AlertCircle } from 'lucide-react';
 import { m } from '@/paraglide/messages';
 import { ArrowLeft } from 'lucide-react';
 import { Loader2 } from 'lucide-react';
-import superjson from 'superjson';
 import { log } from '@/lib/log';
 import './globals.css';
 
@@ -37,18 +34,10 @@ function captureToSentry(error: unknown, context: Record<string, unknown>) {
   });
 }
 
-const getUrl = () => import.meta.env.VITE_PUBLIC_BACKEND_URL + '/api/trpc';
-
-export const getServerTrpc = (req: Request) =>
-  createTRPCClient<AppRouter>({
-    links: [
-      httpBatchLink({
-        url: getUrl(),
-        transformer: superjson,
-        headers: req.headers,
-      }),
-    ],
-  });
+// w2cd (client weight): getServerTrpc used to be defined here, which dragged
+// @trpc/client + superjson (~11 kB gz) into the client shell for nothing — nothing
+// imports it from the root. The canonical server-side version lives in
+// lib/trpc.server.ts.
 
 export const meta: MetaFunction = () => {
   return [
@@ -91,7 +80,7 @@ export function Layout({ children }: PropsWithChildren) {
         <Links />
       </head>
       <body className="antialiased">
-        <ServerProviders connectionId={null}>
+        <ServerProviders>
           <ClientProviders>{children}</ClientProviders>
           {/* Devlab: DubAnalytics removed — click/referral tracking phoning dub.co
               for the editor's mail0.com domain. Nothing to gain in self-host. */}

@@ -1,5 +1,5 @@
+import { formatDate } from './date-utils';
 import { m } from '@/paraglide/messages';
-import { formatDate } from './utils';
 import type { Note } from '@/types';
 import React from 'react';
 

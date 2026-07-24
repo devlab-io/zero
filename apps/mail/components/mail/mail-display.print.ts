@@ -1,8 +1,8 @@
-import { log } from '@/lib/log';
-import { m } from '@/paraglide/messages';
 import type { Attachment, ParsedMessage } from '@/types';
 import { cleanHtml } from '@/lib/email-utils';
-import { formatDate } from '@/lib/utils';
+import { formatDate } from '@/lib/date-utils';
+import { m } from '@/paraglide/messages';
+import { log } from '@/lib/log';
 import { toast } from 'sonner';
 
 import { PRINT_STYLES } from './print-styles';
@@ -21,24 +21,21 @@ const cleanNameDisplay = (name?: string) => {
   return name.trim();
 };
 
-export function printMail(
-  emailData: ParsedMessage,
-  messageAttachments: Attachment[] | undefined,
-) {
-    try {
-      // Create a hidden iframe for printing
-      const printFrame = document.createElement('iframe');
-      printFrame.style.position = 'absolute';
-      printFrame.style.top = '-9999px';
-      printFrame.style.left = '-9999px';
-      printFrame.style.width = '0px';
-      printFrame.style.height = '0px';
-      printFrame.style.border = 'none';
+export function printMail(emailData: ParsedMessage, messageAttachments: Attachment[] | undefined) {
+  try {
+    // Create a hidden iframe for printing
+    const printFrame = document.createElement('iframe');
+    printFrame.style.position = 'absolute';
+    printFrame.style.top = '-9999px';
+    printFrame.style.left = '-9999px';
+    printFrame.style.width = '0px';
+    printFrame.style.height = '0px';
+    printFrame.style.border = 'none';
 
-      document.body.appendChild(printFrame);
+    document.body.appendChild(printFrame);
 
-      // Generate clean, simple HTML content for printing
-      const printContent = `
+    // Generate clean, simple HTML content for printing
+    const printContent = `
       <!DOCTYPE html>
       <html>
         <head>
@@ -168,43 +165,43 @@ export function printMail(
       </html>
     `;
 
-      if (printFrame.contentWindow) {
-        // Write content to the iframe
-        const iframeDoc = printFrame.contentDocument || printFrame.contentWindow.document;
-        iframeDoc.open();
-        iframeDoc.write(printContent);
-        iframeDoc.close();
+    if (printFrame.contentWindow) {
+      // Write content to the iframe
+      const iframeDoc = printFrame.contentDocument || printFrame.contentWindow.document;
+      iframeDoc.open();
+      iframeDoc.write(printContent);
+      iframeDoc.close();
 
-        // Wait for content to load, then print
-        printFrame.onload = function () {
-          setTimeout(() => {
-            try {
-              if (!printFrame.contentWindow) {
-                log.error('Failed to get iframe window');
-                return;
-              }
-              // Focus the iframe and print
-              printFrame.contentWindow.focus();
-              printFrame.contentWindow.print();
+      // Wait for content to load, then print
+      printFrame.onload = function () {
+        setTimeout(() => {
+          try {
+            if (!printFrame.contentWindow) {
+              log.error('Failed to get iframe window');
+              return;
+            }
+            // Focus the iframe and print
+            printFrame.contentWindow.focus();
+            printFrame.contentWindow.print();
 
-              // Clean up - remove the iframe after a delay
-              setTimeout(() => {
-                if (printFrame && printFrame.parentNode) {
-                  document.body.removeChild(printFrame);
-                }
-              }, 1000);
-            } catch (error) {
-              log.error('Error during print:', error);
-              // Clean up on error
+            // Clean up - remove the iframe after a delay
+            setTimeout(() => {
               if (printFrame && printFrame.parentNode) {
                 document.body.removeChild(printFrame);
               }
+            }, 1000);
+          } catch (error) {
+            log.error('Error during print:', error);
+            // Clean up on error
+            if (printFrame && printFrame.parentNode) {
+              document.body.removeChild(printFrame);
             }
-          }, 500);
-        };
-      }
-    } catch (error) {
-      log.error('Error printing email:', error);
-      toast.error(m['common.mailDisplay.failedToPrint']());
+          }
+        }, 500);
+      };
     }
-  };
+  } catch (error) {
+    log.error('Error printing email:', error);
+    toast.error(m['common.mailDisplay.failedToPrint']());
+  }
+}

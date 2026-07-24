@@ -1,17 +1,11 @@
 import {
-  Forward,
-  Printer,
-  Reply,
-  ReplyAll,
-  ThreeDots,
-} from '../icons/icons';
-import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '../ui/dropdown-menu';
-import { cn, formatDate, formatTime, shouldShowSeparateTime } from '@/lib/utils';
+import { Forward, Printer, Reply, ReplyAll, ThreeDots } from '../icons/icons';
+import { formatDate, formatTime, shouldShowSeparateTime } from '@/lib/date-utils';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
 import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover';
@@ -29,10 +23,9 @@ import { m } from '@/paraglide/messages';
 import { useParams } from 'react-router';
 import { useQueryState } from 'nuqs';
 import { format } from 'date-fns';
+import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 
-import { printMail } from './mail-display.print';
-import { MailDisplayLabels } from './mail-display.labels';
 import {
   ThreadAttachments,
   downloadAttachment,
@@ -43,6 +36,8 @@ import {
 } from './mail-display.attachments';
 import { MoreAboutPerson, MoreAboutQuery } from './mail-display.research';
 import { ActionButton, AiSummary } from './mail-display.parts';
+import { MailDisplayLabels } from './mail-display.labels';
+import { printMail } from './mail-display.print';
 
 type Props = {
   emailData: ParsedMessage;
@@ -196,8 +191,6 @@ const MailDisplay = ({ emailData, index, totalEmails, demo, threadAttachments }:
     await navigator.clipboard.writeText(personEmail || '');
     toast.success(m['common.mailDisplay.emailCopied']());
   }, []);
-
-
 
   const renderPerson = useCallback(
     (person: Sender) => (
@@ -389,7 +382,7 @@ const MailDisplay = ({ emailData, index, totalEmails, demo, threadAttachments }:
                           <Popover open={openDetailsPopover} onOpenChange={handlePopoverChange}>
                             <PopoverTrigger asChild>
                               <button
-                                className="hover:bg-iconLight/10 dark:hover:bg-iconDark/20 flex items-center gap-2 rounded-md p-2 cursor-pointer"
+                                className="hover:bg-iconLight/10 dark:hover:bg-iconDark/20 flex cursor-pointer items-center gap-2 rounded-md p-2"
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   e.preventDefault();
@@ -534,7 +527,7 @@ const MailDisplay = ({ emailData, index, totalEmails, demo, threadAttachments }:
                                   e.stopPropagation();
                                   e.preventDefault();
                                 }}
-                                className="inline-flex h-7 w-7 items-center justify-center gap-1 overflow-hidden rounded-md bg-white hover:bg-gray-100 focus:outline-none focus:ring-0 dark:bg-[#313131] dark:hover:bg-[#3d3d3d] cursor-pointer transition-colors"
+                                className="inline-flex h-7 w-7 cursor-pointer items-center justify-center gap-1 overflow-hidden rounded-md bg-white transition-colors hover:bg-gray-100 focus:outline-none focus:ring-0 dark:bg-[#313131] dark:hover:bg-[#3d3d3d]"
                               >
                                 <ThreeDots className="fill-iconLight dark:fill-iconDark" />
                               </button>

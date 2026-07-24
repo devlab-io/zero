@@ -4,14 +4,15 @@ import { useOptimisticActions } from '@/hooks/use-optimistic-actions';
 import { type UseQueryResult } from '@tanstack/react-query';
 import { cleanNameDisplay } from './mail-list-utils';
 import type { ParsedDraft } from '@zero/types';
-import { memo, useCallback } from 'react';
-import { cn, formatDate } from '@/lib/utils';
 import { useDraft } from '@/hooks/use-drafts';
+import { formatDate } from '@/lib/date-utils';
 import { Skeleton } from '../ui/skeleton';
-import { Trash } from '../icons/icons';
+import { memo, useCallback } from 'react';
 import { m } from '@/paraglide/messages';
+import { Trash } from '../icons/icons';
 import { Button } from '../ui/button';
 import { useQueryState } from 'nuqs';
+import { cn } from '@/lib/utils';
 
 export const Draft = memo(({ message, index }: { message: { id: string }; index: number }) => {
   const draftQuery = useDraft(message.id) as UseQueryResult<ParsedDraft>;
