@@ -64,3 +64,6 @@ tsx-0/
 tools.json
 .architect/
 .gstack/
+
+# Cookie de session pour le harnais de mesure perf (jamais versionné)
+.perf-cookie
