@@ -87,12 +87,22 @@ export const mailRouter = router({
       const { folder, maxResults, cursor, q, labelIds } = input;
       const { activeConnection } = ctx;
       const executionCtx = getContext<HonoContext>().executionCtx;
-      const { stub: agent } = await getZeroAgent(activeConnection.id, executionCtx);
+
+      // Devlab/perf : `getZeroAgent` était résolu inconditionnellement ici, en
+      // tête de resolver — donc AVANT le cache de liste et avant l'aiguillage.
+      // Il déclenche `getActiveShardId`, c'est-à-dire, à l'expiration du TTL
+      // 60 s, un fan-out `getDatabaseSize` sur tous les shards et parfois le
+      // handshake `setName`. Résultat : même un hit de cache payait jusqu'à
+      // deux ou trois sauts DO, et le pic périodique se produisait quoi qu'il
+      // arrive. L'agent n'est utile qu'aux branches `DRAFT` et recherche `q` :
+      // il n'est désormais résolu que dans celles-ci.
+      const resolveAgent = async () => (await getZeroAgent(activeConnection.id, executionCtx)).stub;
 
       logger.debug('[listThreads] input:', { folder, maxResults, cursor, q, labelIds });
 
       if (folder === FOLDERS.DRAFT) {
         logger.debug('[listThreads] Listing drafts');
+        const agent = await resolveAgent();
         const drafts = await agent.listDrafts({
           q,
           maxResults,
@@ -110,6 +120,7 @@ export const mailRouter = router({
       const effectiveLabelIds = labelIds;
 
       if (q) {
+        const agent = await resolveAgent();
         threadsResponse = await agent.rawListThreads({
           query: q,
           maxResults,

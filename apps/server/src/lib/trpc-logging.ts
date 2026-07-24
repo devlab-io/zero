@@ -71,7 +71,10 @@ export const createLoggingMiddleware = () => {
         procedure: opts.path,
         type: opts.type,
         hasInput: !!opts.input,
-        inputSize: opts.input ? JSON.stringify(opts.input).length : 0,
+        // Devlab/perf : la taille n'est calculée que si un export consomme
+        // réellement le span. Sinon `JSON.stringify` parcourait l'entrée à
+        // chaque appel pour alimenter un span jeté en fin de requête.
+        inputSize: loggingService && opts.input ? JSON.stringify(opts.input).length : 0,
       },
       {
         'trpc.procedure': opts.path,
@@ -83,12 +86,28 @@ export const createLoggingMiddleware = () => {
       // Execute the TRPC call
       output = await opts.next();
 
+      // Sink console (visible via `wrangler tail` / logpush) — une ligne de
+      // timing par appel. Devlab/perf : elle vivait auparavant dans la branche
+      // `if (loggingService)`, donc conditionnée à DD_API_KEY/DD_APP_KEY, tous
+      // deux vides en staging — l'instrument de profilage ne s'émettait jamais
+      // là où il devait servir. Elle est désormais inconditionnelle.
+      logger.info('trpc.call', {
+        procedure: opts.path,
+        method: opts.type,
+        durationMs: Date.now() - startTime,
+      });
+
       // Complete procedure span
       if (procedureSpan) {
         completeRequestSpan(c, procedureSpan.id, {
           success: true,
           hasOutput: !!output,
-          outputSize: output ? JSON.stringify(output).length : 0,
+          // Devlab/perf : `openThread` renvoie les corps de messages et les
+          // images inline en base64 — jusqu'à plusieurs Mio. Sérialiser cette
+          // sortie à chaque appel pour un span jeté coûtait des dizaines de ms
+          // de CPU par ouverture de fil. Le coût n'est payé que si un export
+          // le consomme.
+          outputSize: loggingService && output ? JSON.stringify(output).length : 0,
         });
       }
 
@@ -165,14 +184,6 @@ export const createLoggingMiddleware = () => {
           callData.metadata.requestDuration = trace.duration;
         }
 
-        // Console sink (visible via wrangler tail / logpush) — one timing
-        // line per call, independent of the Datadog export being configured.
-        logger.info('trpc.call', {
-          procedure: opts.path,
-          method: opts.type,
-          durationMs: callData.duration,
-        });
-
         // Log using the new service which will immediately log to Datadog
         loggingService.logCall(callData).catch((err) => {
           logger.error('Failed to log TRPC call:', err);
@@ -186,6 +197,14 @@ export const createLoggingMiddleware = () => {
       }
     } catch (err) {
       error = err instanceof Error ? err.message : 'Unknown error';
+
+      // Même sink inconditionnel que le chemin nominal (cf. commentaire ci-dessus).
+      logger.info('trpc.call', {
+        procedure: opts.path,
+        method: opts.type,
+        durationMs: Date.now() - startTime,
+        error: true,
+      });
 
       // Complete procedure span with error
       if (procedureSpan) {
@@ -247,13 +266,6 @@ export const createLoggingMiddleware = () => {
           callData.metadata.traceId = trace.traceId;
           callData.metadata.requestDuration = trace.duration;
         }
-
-        logger.info('trpc.call', {
-          procedure: opts.path,
-          method: opts.type,
-          durationMs: callData.duration,
-          error: true,
-        });
 
         // Log using the new service which will immediately log to Datadog
         loggingService.logCall(callData).catch((logErr) => {

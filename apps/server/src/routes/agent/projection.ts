@@ -117,7 +117,10 @@ function threadKey(name: string, threadId: string) {
 // In-memory cache of R2 thread bodies (read + JSON.parse), keyed by
 // `${connectionName}:${threadId}`; syncThread invalidates on rewrite and the
 // 60 s TTL bounds any residual staleness.
-const threadBodyCache = new TtlCache<ParsedMessage[]>(60_000, 50);
+// Devlab/perf : 50 entrées étaient sous-dimensionnées pour une navigation
+// clavier avec préfetch des voisins — la fenêtre utile dépasse largement 50
+// fils, et l'éviction LRU annulait le cache avant sa péremption.
+const threadBodyCache = new TtlCache<ParsedMessage[]>(60_000, 400);
 
 /** Drop the cached R2 body for a thread — called when the sync rewrites it. */
 export function invalidateThreadBodyCache(connectionName: string, threadId: string) {
@@ -435,6 +438,10 @@ export async function getThreadFromDB(
       } satisfies IGetThreadResponse;
     }
     const bodyCacheKey = `${self.name}:${id}`;
+    // Devlab/perf : la lecture R2 des corps et la requête SQLite des labels
+    // n'ont aucune dépendance de données entre elles — elles étaient pourtant
+    // enchaînées, ajoutant un aller-retour complet au chemin d'ouverture.
+    const labelsPromise = getThreadLabels(self.db, id);
     let messages = threadBodyCache.get(bodyCacheKey);
     if (!messages) {
       const storedThread = await self.env.THREADS_BUCKET.get(threadKey(self.name, id));
@@ -451,7 +458,7 @@ export async function getThreadFromDB(
       messages = messages.filter((e) => e.isDraft !== true);
     }
 
-    const labelsList = await getThreadLabels(self.db, id);
+    const labelsList = await labelsPromise;
     const labelIds = labelsList.map((l) => l.id);
 
     return {

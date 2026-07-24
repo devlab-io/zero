@@ -441,14 +441,6 @@ export const getThreadsFromDB = async (
     pageToken?: string;
   },
 ): Promise<IGetThreadsResponse> => {
-  // Fire and forget - don't block the thread query on state updates
-  //   const agent = await getZeroSocketAgent(connectionId);
-  //   await agent.invalidateDoStateCache();
-  if (!doStateThrottle.get(connectionId)) {
-    doStateThrottle.set(connectionId, true);
-    void sendDoState(connectionId);
-  }
-
   const maxResults = params.maxResults ?? defaultPageSize;
 
   // Only the DO projection path is cacheable: live Gmail search (q) and drafts
@@ -459,6 +451,26 @@ export const getThreadsFromDB = async (
     : null;
   const cached = cacheKey ? threadsListCache.get(cacheKey) : undefined;
   if (cached) return cached;
+
+  // Rafraîchissement de l'état DO — hors du chemin de réponse.
+  // Devlab/perf, deux corrections : (1) le bloc précédait la consultation du
+  // cache, donc un hit de cache déclenchait quand même le réveil de l'agent et
+  // le fan-out `getDatabaseSize` ; il est désormais placé après. (2) le `void`
+  // laissait le travail se faire annuler à la fin de la réponse alors que le
+  // throttle avait déjà été marqué consommé — le rafraîchissement pouvait donc
+  // sauter un tour complet de 60 s. Il passe par `waitUntil`.
+  if (!doStateThrottle.get(connectionId)) {
+    doStateThrottle.set(connectionId, true);
+    const pending = sendDoState(connectionId).catch((error) => {
+      logger.warn('[getThreadsFromDB] doState refresh failed', error);
+    });
+    try {
+      getContext<HonoContext>().executionCtx.waitUntil(pending);
+    } catch {
+      // Hors contexte de requête (alarme, workflow) : pas d'executionCtx.
+      void pending;
+    }
+  }
 
   const store = (response: IGetThreadsResponse) => {
     if (cacheKey) threadsListCache.set(cacheKey, response);
@@ -602,15 +614,48 @@ export const getZeroSocketAgent = async (connectionId: string) => {
   return stub;
 };
 
+// Devlab/perf — mémoïsation par requête du RPC ZeroDB.
+//
+// Le cache de connexion active vit DANS le DO : le saut réseau Worker→ZeroDB
+// est donc payé intégralement à chaque appel, et surtout UNE FOIS PAR PROCÉDURE
+// d'un batch tRPC. Comme un DO est mono-thread, les N appels d'un même batch
+// vers le même DO se sérialisent : le coût est (N × RTT), pas (1 × RTT).
+//
+// La clé est le contexte Hono, qui est strictement per-requête ; la valeur est
+// la promesse, pour que les procédures concurrentes du batch partagent le même
+// vol au lieu d'en lancer N. Aucune péremption possible : la mémoïsation meurt
+// avec la requête, donc la fraîcheur est identique à celle d'avant.
+const activeConnectionByRequest = new WeakMap<
+  object,
+  Promise<Awaited<ReturnType<typeof resolveActiveConnection>>>
+>();
+
+const resolveActiveConnection = async (userId: string) => {
+  // Un seul RPC : la logique défaut-sinon-première vit dans le DO ZeroDB, qui
+  // mémorise le résultat en local (invalidé par ses propres écritures).
+  const stub = env.ZERO_DB.get(env.ZERO_DB.idFromName(userId));
+  return stub.getActiveConnection(userId);
+};
+
 export const getActiveConnection = async () => {
   const c = getContext<HonoContext>();
   const { sessionUser, auth } = c.var;
   if (!sessionUser) throw new Error('Session Not Found');
 
-  // Un seul RPC : la logique défaut-sinon-première vit dans le DO ZeroDB, qui
-  // mémorise le résultat en local (invalidé par ses propres écritures).
-  const stub = env.ZERO_DB.get(env.ZERO_DB.idFromName(sessionUser.id));
-  const activeConnection = await stub.getActiveConnection(sessionUser.id);
+  let pending = activeConnectionByRequest.get(c);
+  if (!pending) {
+    pending = resolveActiveConnection(sessionUser.id);
+    activeConnectionByRequest.set(c, pending);
+  }
+
+  let activeConnection: Awaited<typeof pending>;
+  try {
+    activeConnection = await pending;
+  } catch (err) {
+    // Un échec ne doit pas rester collé au reste de la requête.
+    activeConnectionByRequest.delete(c);
+    throw err;
+  }
   if (activeConnection) return activeConnection;
 
   try {
