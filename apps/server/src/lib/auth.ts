@@ -9,10 +9,12 @@ import { redis, resend, twilio } from './services';
 import { defaultUserSettings } from './schemas';
 import { disableBrainFunction } from './brain';
 import { type EProviders } from '../types';
+// Devlab/perf : sous-chemin plutôt que le barrel `effect`, qui réexporte
+// `FastCheck` (et donc fast-check, 185 kB) dans le graphe du Worker.
+import * as Effect from 'effect/Effect';
 import { createDriver } from './driver';
 import { logger } from './logger';
 import { createDb } from '../db';
-import { Effect } from 'effect';
 import { env } from '../env';
 
 const scheduleCampaign = (userInfo: { address: string; name: string }) =>

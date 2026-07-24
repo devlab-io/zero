@@ -11,7 +11,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import { logger } from './lib/logger';
 import {
   createDefaultWorkflows,
   type WorkflowContext,
@@ -21,11 +20,15 @@ import { getThread, getZeroAgent } from './lib/server-utils';
 import { DurableObject } from 'cloudflare:workers';
 import { bulkDeleteKeys } from './lib/bulk-delete';
 import { type gmail_v1 } from '@googleapis/gmail';
-import { Effect, Console, Logger } from 'effect';
-import { connection } from './db/schema';
 import { EPrompts, EProviders } from './types';
-import type { ZeroEnv } from './env';
 import { initTracing } from './lib/tracing';
+import * as Console from 'effect/Console';
+import { connection } from './db/schema';
+import * as Logger from 'effect/Logger';
+// Devlab/perf : sous-chemins plutôt que le barrel `effect` (cf. server-utils).
+import * as Effect from 'effect/Effect';
+import { logger } from './lib/logger';
+import type { ZeroEnv } from './env';
 import { eq } from 'drizzle-orm';
 import { createDb } from './db';
 
@@ -146,8 +149,8 @@ export class WorkflowRunner extends DurableObject<ZeroEnv> {
       attributes: {
         'provider.id': params.providerId,
         'history.id': params.historyId,
-        'subscription.name': params.subscriptionName
-      }
+        'subscription.name': params.subscriptionName,
+      },
     });
 
     return Effect.gen(this, function* () {
@@ -195,7 +198,9 @@ export class WorkflowRunner extends DurableObject<ZeroEnv> {
         });
 
         yield* Console.log('[MAIN_WORKFLOW] Zero workflow result:', result);
-        span.setAttributes({ 'workflow.result': typeof result === 'string' ? result : JSON.stringify(result) });
+        span.setAttributes({
+          'workflow.result': typeof result === 'string' ? result : JSON.stringify(result),
+        });
       } else {
         yield* Console.log('[MAIN_WORKFLOW] Unsupported provider:', providerId);
         span.setAttributes({ 'error.type': 'unsupported_provider' });
@@ -210,11 +215,13 @@ export class WorkflowRunner extends DurableObject<ZeroEnv> {
       return 'Workflow completed successfully';
     }).pipe(
       Effect.tap(() => Effect.sync(() => span.end())),
-      Effect.tapError((error) => Effect.sync(() => {
-        span.recordException(error as unknown as Error);
-        span.setStatus({ code: 2, message: String(error) });
-        span.end();
-      })),
+      Effect.tapError((error) =>
+        Effect.sync(() => {
+          span.recordException(error as unknown as Error);
+          span.setStatus({ code: 2, message: String(error) });
+          span.end();
+        }),
+      ),
       Effect.tapError((error) => Console.log('[MAIN_WORKFLOW] Error in workflow:', error)),
       Effect.provide(loggerLayer),
       Effect.runPromise,

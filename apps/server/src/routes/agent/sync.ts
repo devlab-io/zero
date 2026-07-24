@@ -22,7 +22,9 @@ import { invariant } from '../../lib/invariant';
 import { OutgoingMessageType } from './types';
 import { logger } from '../../lib/logger';
 import type { Sender } from '../../types';
-import { Effect } from 'effect';
+// Devlab/perf : sous-chemin plutôt que le barrel `effect`, qui réexporte
+// `FastCheck` (et donc fast-check, 185 kB) dans le graphe du Worker.
+import * as Effect from 'effect/Effect';
 import { create } from './db';
 
 const maxCount = 20;

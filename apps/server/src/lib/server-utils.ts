@@ -4,13 +4,15 @@ import { defaultPageSize, FOLDERS } from './utils';
 import { getContext } from 'hono/context-storage';
 import { connection } from '../db/schema';
 import type { HonoContext } from '../ctx';
+// Devlab/perf : sous-chemin plutôt que le barrel `effect`, qui réexporte
+// `FastCheck` (et donc fast-check, 185 kB) dans le graphe du Worker.
+import * as Effect from 'effect/Effect';
 import { createClient } from 'dormroom';
 import { createDriver } from './driver';
 import { TtlCache } from './ttl-cache';
 import { logger } from './logger';
 import { eq } from 'drizzle-orm';
 import { createDb } from '../db';
-import { Effect } from 'effect';
 import { env } from '../env';
 
 const mbToBytes = (mb: number) => mb * 1024 * 1024;

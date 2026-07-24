@@ -14,7 +14,6 @@
  * Reuse or distribution of this file requires a license from Zero Email Inc.
  */
 
-import { logger } from '../../lib/logger';
 import {
   TOPIC_CACHE_KEY,
   TOPIC_CACHE_TTL,
@@ -24,7 +23,10 @@ import {
 import { generateWhatUserCaresAbout, type UserTopic } from '../../lib/analyze/interests';
 import type { ZeroDriverInternal } from './internal';
 import { OutgoingMessageType } from './types';
-import { Effect } from 'effect';
+import { logger } from '../../lib/logger';
+// Devlab/perf : sous-chemin plutôt que le barrel `effect`, qui réexporte
+// `FastCheck` (et donc fast-check, 185 kB) dans le graphe du Worker.
+import * as Effect from 'effect/Effect';
 
 export function getUserTopics(self: ZeroDriverInternal): Promise<UserTopic[]> {
   // Create the Effect with proper types - no external requirements needed
@@ -119,10 +121,7 @@ export function getUserTopics(self: ZeroDriverInternal): Promise<UserTopic[]> {
         }),
       ),
       Effect.catchAll((error) => {
-        logger.warn(
-          `[getUserTopics] Failed to get existing labels for topic generation:`,
-          error,
-        );
+        logger.warn(`[getUserTopics] Failed to get existing labels for topic generation:`, error);
         return Effect.succeed([]);
       }),
     );
@@ -188,9 +187,7 @@ export function getUserTopics(self: ZeroDriverInternal): Promise<UserTopic[]> {
           timestamp: Date.now(),
         }),
       ).pipe(
-        Effect.tap(() =>
-          Effect.sync(() => logger.info(`[getUserTopics] Stored topics in cache`)),
-        ),
+        Effect.tap(() => Effect.sync(() => logger.info(`[getUserTopics] Stored topics in cache`))),
         Effect.catchAll((error) => {
           logger.error(`[getUserTopics] Failed to store topics in cache:`, error);
           return Effect.succeed(undefined);

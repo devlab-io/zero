@@ -13,8 +13,6 @@
  *
  * Reuse or distribution of this file requires a license from Zero Email Inc.
  */
-import { logger } from '../lib/logger';
-import { invariant } from '../lib/invariant';
 import {
   SummarizeMessage,
   ReSummarizeThread,
@@ -27,9 +25,13 @@ import { getPrompt, getEmbeddingVector } from '../pipelines.effect';
 import { messageToXML, threadToXML } from './workflow-utils';
 import type { WorkflowContext } from './workflow-engine';
 import { bulkDeleteKeys } from '../lib/bulk-delete';
+import { invariant } from '../lib/invariant';
 import { getPromptName } from '../pipelines';
 import { env } from 'cloudflare:workers';
-import { Effect } from 'effect';
+// Devlab/perf : sous-chemin plutôt que le barrel `effect`, qui réexporte
+// `FastCheck` (et donc fast-check, 185 kB) dans le graphe du Worker.
+import * as Effect from 'effect/Effect';
+import { logger } from '../lib/logger';
 
 export type WorkflowFunction = (context: WorkflowContext) => Promise<unknown>;
 
@@ -79,8 +81,7 @@ type StepResultMap = {
 const getStepResult = <K extends keyof StepResultMap>(
   context: WorkflowContext,
   key: K,
-): StepResultMap[K] | undefined =>
-  context.results?.get(key) as StepResultMap[K] | undefined;
+): StepResultMap[K] | undefined => context.results?.get(key) as StepResultMap[K] | undefined;
 
 // `env.AI.run` returns the model output as a string; the label prompt asks for a
 // JSON array. Parse it defensively — the model may return prose or malformed JSON —

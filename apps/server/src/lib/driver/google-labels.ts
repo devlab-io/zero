@@ -2,7 +2,9 @@ import { mapGoogleLabelColor, mapToGoogleLabelColor } from './google-label-color
 import type { GmailTransport } from './google-transport';
 import { type gmail_v1 } from '@googleapis/gmail';
 import type { Label } from '../../types';
-import { Effect } from 'effect';
+// Devlab/perf : sous-chemin plutôt que le barrel `effect`, qui réexporte
+// `FastCheck` (et donc fast-check, 185 kB) dans le graphe du Worker.
+import * as Effect from 'effect/Effect';
 
 export class GmailLabels {
   private labelIdCache: Record<string, string> = {};

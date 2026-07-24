@@ -37,8 +37,10 @@ import { get, getThreadLabels } from './db';
 import { logger } from '../../lib/logger';
 import { inArray, eq } from 'drizzle-orm';
 import { openai } from '@ai-sdk/openai';
+// Devlab/perf : sous-chemin plutôt que le barrel `effect`, qui réexporte
+// `FastCheck` (et donc fast-check, 185 kB) dans le graphe du Worker.
+import * as Effect from 'effect/Effect';
 import { generateText } from 'ai';
-import { Effect } from 'effect';
 
 /** Row shape carried out of {@link queryThreads}: id + the rich list columns (#30). */
 type ThreadRow = {
