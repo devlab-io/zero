@@ -11,8 +11,8 @@
     "dev": "turbo run dev",
     "build": "turbo run build",
     "build:frontend": "pnpm run --filter=@zero/mail build",
-    "deploy:frontend": "pnpm run --filter=@zero/mail deploy",
-    "deploy:backend": "pnpm run --filter=@zero/server deploy",
+    "deploy:frontend": "echo 'ERREUR: `wrangler deploy` sans --env deploie le worker racine (pas staging/production) et echoue au build car les regles de chargement .sql vivent dans les blocs d env. Utiliser deploy:staging ou deploy:production.' && exit 1",
+    "deploy:backend": "echo 'ERREUR: `wrangler deploy` sans --env deploie le worker racine (pas staging/production) et echoue au build car les regles de chargement .sql vivent dans les blocs d env. Utiliser deploy:staging ou deploy:production.' && exit 1",
     "start": "turbo run start",
     "lint": "turbo run lint",
     "format": "prettier --write apps/**/*.{ts,tsx} --log-level silent",
@@ -31,7 +31,9 @@
     "test": "turbo run test",
     "test:e2e": "pnpm --filter=@zero/testing test:e2e",
     "eval": "dotenv -- pnpm --filter=@zero/server run eval",
-    "eval:dev": "dotenv -- pnpm --filter=@zero/server run eval:dev"
+    "eval:dev": "dotenv -- pnpm --filter=@zero/server run eval:dev",
+    "deploy:staging": "pnpm run --filter=@zero/server deploy:staging && pnpm run --filter=@zero/mail deploy:staging",
+    "deploy:production": "pnpm run --filter=@zero/server deploy:production && pnpm run --filter=@zero/mail deploy:production"
   },
   "lint-staged": {
     "*.{ts,tsx}": [

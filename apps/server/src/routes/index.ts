@@ -22,7 +22,9 @@ import { EProviders } from '../types';
 import { publicRouter } from './auth';
 import { autumnApi } from './autumn';
 import { appRouter } from '../trpc';
+import { sql } from 'drizzle-orm';
 import { cors } from 'hono/cors';
+import { createDb } from '../db';
 import { aiRouter } from './ai';
 import { env } from '../env';
 import { Hono } from 'hono';
@@ -329,7 +331,52 @@ export const app = new Hono<HonoContext>()
       },
     }),
   )
+  // Liveness : l'isolate répond. Ne touche AUCUNE dépendance, à dessein — une sonde de
+  // vivacité qui échoue parce que la base est lente provoque des redémarrages inutiles.
   .get('/health', (c) => c.json({ message: 'Zero Server is Up!' }))
+  // Readiness (pitbull A11, axe 10) : vérifie réellement les dépendances dont dépend le
+  // service. `/health` renvoyait 200 en dur, base et bindings à terre compris, donc ne
+  // pouvait servir ni de sonde de déploiement ni d'alerte. Chaque sonde est bornée dans le
+  // temps pour que l'endpoint réponde même quand une dépendance pend.
+  .get('/health/ready', async (c) => {
+    const withTimeout = async <T>(label: string, probe: Promise<T>, ms = 2_000) => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        await Promise.race([
+          probe,
+          new Promise((_, reject) => {
+            timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+          }),
+        ]);
+        return { name: label, ok: true as const };
+      } catch (error) {
+        return { name: label, ok: false as const, error: (error as Error).message };
+      } finally {
+        if (timer) clearTimeout(timer);
+      }
+    };
+
+    const probeDatabase = async () => {
+      const { db, conn } = createDb(env.HYPERDRIVE.connectionString);
+      try {
+        await db.execute(sql`select 1`);
+      } finally {
+        await conn.end();
+      }
+    };
+
+    const checks = await Promise.all([
+      withTimeout('database', probeDatabase()),
+      withTimeout('kv', env.pending_emails_status.get('__readiness_probe__')),
+    ]);
+
+    const failed = checks.filter((check) => !check.ok);
+    if (failed.length) {
+      logger.warn('[readiness] dependency check failed', { failed });
+      return c.json({ ready: false, checks }, 503);
+    }
+    return c.json({ ready: true, checks });
+  })
   .get('/', (c) => c.redirect(`${env.VITE_PUBLIC_APP_URL}`))
   .post('/monitoring/sentry', async (c) => {
     try {

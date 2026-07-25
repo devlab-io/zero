@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "wrangler dev --show-interactive-dev-session=false --experimental-vectorize-bind-to-prod --env local",
-    "deploy": "wrangler deploy",
+    "deploy": "echo 'ERREUR: `wrangler deploy` sans --env deploie le worker racine (pas staging/production) et echoue au build car les regles de chargement .sql vivent dans les blocs d env. Utiliser deploy:staging ou deploy:production.' && exit 1",
     "types": "wrangler types --env local",
     "gen:trpc-boundary": "node scripts/gen-trpc-boundary.mjs",
     "lint": "eslint .",
@@ -15,7 +15,9 @@
     "eval": "evalite",
     "eval:dev": "evalite watch",
     "test": "vitest run",
-    "test:cron": "curl 'http://localhost:8787/cdn-cgi/handler/scheduled'"
+    "test:cron": "curl 'http://localhost:8787/cdn-cgi/handler/scheduled'",
+    "deploy:staging": "wrangler deploy --env staging",
+    "deploy:production": "wrangler deploy --env production"
   },
   "exports": {
     "./trpc": "./src/trpc/index.ts",
