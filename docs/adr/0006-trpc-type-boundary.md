@@ -37,7 +37,7 @@ par better-auth via `zod/v4/core`, `MCPOptions` d'un sous-chemin interne non exp
 les seuls exports non-émissibles sont `serverTrpc` (interne `@trpc/server`
 `unstable-core-do-not-import`), les 3 procédures et `createAuth` — **tous** parce que le
 **contexte tRPC porte `auth: Auth`** (via `HonoVariables`) et que `Auth` n'est même pas
-*référençable* (son alias `ReturnType<typeof createAuth>` doit être expansé et bute sur
+_référençable_ (son alias `ReturnType<typeof createAuth>` doit être expansé et bute sur
 MCPOptions/zod v4). `appRouter`/`AppRouter` **ne sont PAS** dans la liste des bloqueurs, et
 aucune erreur ne porte sur `ZeroEnv` (alias concret nommable en relatif). Cartographie du
 contexte : `ctx.auth` (top-level) n'est **jamais** lu (seulement `ctx.c.var.auth.api.
@@ -53,9 +53,10 @@ Le seul barrage que `tsc` ne traverse pas est un `.d.ts` auto-contenu. Les deux 
 sans arête vers `env.ts → main`. Deux esquisses partageant ce socle :
 
 **Piste A (RETENUE) — frontière `.d.ts` émise + contexte dé-Auth-ifié + env neutralisé.**
+
 1. Redéfinir `TrpcContext` (dans `trpc/trpc.ts`, MAY TOUCH) avec des **façades leaf** au lieu
    de `Auth`/`SessionUser`/`HonoContext` : `auth` → surface minimale `{api:{signOut,
-   deleteUser}}`, `sessionUser` → `{id,name,email}`, `c.env` → `ZeroEnv` (nommable). Purge
+deleteUser}}`, `sessionUser` → `{id,name,email}`, `c.env` → `ZeroEnv` (nommable). Purge
    `Auth` du type du router → procédures/`appRouter` **émissibles** (mesuré : les TS2742/4023
    disparaissent). Runtime inchangé (objets better-auth réels ; cast interne dans `serverTrpc`).
 2. Isoler `serverTrpc` (seul bloqueur restant, interne @trpc) dans `trpc/server-caller.ts` ;
@@ -69,7 +70,7 @@ sans arête vers `env.ts → main`. Deux esquisses partageant ce socle :
    un test de dérive assérant l'assignabilité réel→boundary.
 5. `apps/mail/tsconfig.json` `paths` redirige `@zero/server/trpc` et `@zero/server/auth` vers
    ces `.d.ts`. Les autres refs de la frontière (`../types`, `../types/logging`, `../lib/
-   cookies`, `../lib/draft-outbox`) sont **leaf** (vérifié : n'importent que node_modules +
+cookies`, `../lib/draft-outbox`) sont **leaf** (vérifié : n'importent que node_modules +
    `@zero/types`) → mail les résout vers les vrais fichiers sans tirer le graphe.
 
 **Piste B (REJETÉE) — bundle `.d.ts` self-contained (rollup-plugin-dts / api-extractor).**
@@ -101,7 +102,7 @@ router sans casser le typecheck serveur. Shim `dormroom` de mail **retiré** (mo
    `serverTrpc`/procédures/`createAuth` (reproduit ce job). Cause racine : `Auth` dans le
    contexte. La Piste A retire précisément cette cause.
 3. **Contexte type-only seul** (option a du spec, sans frontière `.d.ts`) — rejeté : neutraliser
-   le contexte ne coupe PAS l'arête *module* (mail charge toujours `@zero/server/trpc` = la
+   le contexte ne coupe PAS l'arête _module_ (mail charge toujours `@zero/server/trpc` = la
    source `index.ts` → routes → `env.ts → main`). Nécessaire (catalyseur d'émissibilité) mais
    insuffisant seul.
 4. **`paths` sur specifier relatif** (option 3 du spec) — rejeté : `tsc` n'applique `paths`
@@ -109,13 +110,13 @@ router sans casser le typecheck serveur. Shim `dormroom` de mail **retiré** (mo
    frontière `.d.ts` (barrage) et en neutralisant `../env` à la génération.
 5. **Bundle self-contained** — rejeté : cf. Piste B (MCPOptions resurgit à l'inline de `ZeroEnv`).
 6. **Déplacer `AppRouter`/`Auth` dans un package** (option 2 du spec) — rejeté : `AppRouter =
-   typeof appRouter` / `Auth = typeof createAuth` sont liés à des valeurs serveur ; non déplaçables.
+typeof appRouter` / `Auth = typeof createAuth` sont liés à des valeurs serveur ; non déplaçables.
 
 ## Conséquences
 
 - `apps/mail` ne compile plus aucune source serveur (17 → 0). `BASELINE.mail` 17 → 0 (ratchet).
 - La frontière est **générée + committée + déterministe** : CI = `pnpm --filter @zero/server
-  gen:trpc-boundary && git diff --exit-code apps/server/src/trpc/app-router.boundary.d.ts`.
+gen:trpc-boundary && git diff --exit-code apps/server/src/trpc/app-router.boundary.d.ts`.
   Double garde : le test `boundary.test-d.ts` casse le gate `tsc server` si la frontière dérive.
 - Nouveaux fichiers infra (hors listes MAY, justifiés) : `trpc/server-caller.ts` (isolation
   d'exposition de type), `tsconfig.boundary.json` + `scripts/gen-trpc-boundary.mjs` (générateur),
@@ -125,3 +126,26 @@ router sans casser le typecheck serveur. Shim `dormroom` de mail **retiré** (mo
   façade `lib/auth.boundary.d.ts` est fidèle (drift-test réel→boundary) mais volontairement
   minimale. Si un futur consommateur mail lit un champ de session absent de la façade, le
   `tsc mail` le signalera et la façade sera étendue (le drift-test garantit qu'elle ne ment pas).
+
+## Amendement — 2026-07-26 (run pitbull, axe 1)
+
+**Constat.** `src/trpc/index.ts` réexportait `serverTrpc` depuis `./server-caller`, lequel
+importe `appRouter` depuis `./index` : un cycle d'imports de **valeur** entre le routeur
+applicatif — le module le plus cœur de l'API — et son caller. Le commentaire d'origine le
+qualifiait d'« inerte » parce que `appRouter` n'est lu que dans le corps de la fonction ;
+c'est exact à l'exécution, mais le cycle existait bel et bien dans le graphe et l'audit
+appliquait le plafond « dépendance cyclique entre modules cœur → max 5 » sur tout l'axe.
+
+**Décision.** `serverTrpc` et son module `server-caller.ts` sont **supprimés**. Un grep sur
+`apps/` et `packages/` ne trouve aucun consommateur : c'était un export mort dont le seul
+effet observable était ce cycle. Un appel serveur-à-serveur reste à une ligne —
+`appRouter.createCaller(ctx)` — et le contournement TS2742 documenté ci-dessus reste valable
+si le besoin réapparaît : le caller devra alors vivre dans un module qui n'est pas réexporté
+par `./index`.
+
+**Conséquences.** Le générateur `scripts/gen-trpc-boundary.mjs` n'a plus de re-export à
+retirer de la déclaration émise ; son assertion sur la présence de cette ligne est retirée,
+le filet qui interdit toute référence résiduelle à `server-caller` dans la frontière
+committée est conservé. La frontière régénérée est sémantiquement identique — seul l'ordre
+d'émission de quelques propriétés a changé, ce qui confirme au passage que le fichier
+committé avait dérivé faute de vérification en CI (voir `docs/solutions/known-issues.md`).

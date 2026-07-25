@@ -48,7 +48,7 @@ export async function composeEmail(input: ComposeEmailInput) {
     import('string-strip-html'),
     import('ai'),
     import('@ai-sdk/openai'),
-    import('../routes/agent/tools'),
+    import('./web-search-tool'),
   ]);
 
   const writingStyleMatrix = await getWritingStyleMatrixForConnectionId({

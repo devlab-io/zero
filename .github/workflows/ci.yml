@@ -17,7 +17,7 @@ env:
   # its error count is compared to the frozen baseline, but the step never fails
   # the build. Flip to "true" (one-line edit) to make a typecheck regression above
   # baseline a hard gate — the orchestrator's call at the end of wave 1.
-  TYPECHECK_BLOCKING: "false"
+  TYPECHECK_BLOCKING: 'false'
 
 jobs:
   verify:
@@ -51,6 +51,13 @@ jobs:
       # Le libellé « vert » est licite depuis le merge 9f9ac5fe (ruling #13).
       - name: Typecheck — server 0 · mail 0 (bloquants stricts)
         run: TYPECHECK_BLOCKING=1 node scripts/checks/typecheck-report.mjs
+
+      # ADR 0006 affirme depuis l'origine que ce contrôle existe ; il n'avait jamais été
+      # posé (constat du run pitbull). La frontière de types committée avait dérivé.
+      - name: tRPC type boundary — pas de dérive (ADR 0006)
+        run: >-
+          pnpm --filter @zero/server gen:trpc-boundary &&
+          git diff --exit-code apps/server/src/trpc/app-router.boundary.d.ts
 
       - name: Run unit tests
         run: pnpm test
