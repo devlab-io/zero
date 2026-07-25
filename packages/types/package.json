@@ -7,7 +7,9 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
+    "date-fns": "catalog:",
     "dedent": "catalog:",
+    "email-addresses": "catalog:",
     "zod": "catalog:"
   },
   "devDependencies": {

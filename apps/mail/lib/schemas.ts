@@ -1,12 +1,14 @@
-import { z } from 'zod';
-
-export const serializedFileSchema = z.object({
-  name: z.string(),
-  type: z.string(),
-  size: z.number(),
-  lastModified: z.number(),
-  base64: z.string(),
-});
+// serializedFileSchema / deserializeFiles / createDraftData moved to
+// packages/types/src/schemas.ts (pitbull quality/pitbull, GAP 1). This copy of
+// createDraftData was missing `threadId`/`fromEmail` — every real compose call
+// site (email-composer.tsx, reply-composer.tsx) already sends both, but
+// nothing in the client actually imported this schema/type, so the gap went
+// unnoticed. The server's (authoritative, and actually validated) version
+// wins. `serializeFiles` stays local: it uses the browser FileReader API,
+// which the server never needed.
+export { serializedFileSchema, createDraftData } from '@zero/types';
+export type { CreateDraftData } from '@zero/types';
+export { deserializeFiles } from '@zero/types';
 
 export const serializeFiles = async (files: File[]) => {
   return await Promise.all(
@@ -30,29 +32,3 @@ export const serializeFiles = async (files: File[]) => {
     }),
   );
 };
-
-export const deserializeFiles = async (serializedFiles: z.infer<typeof serializedFileSchema>[]) => {
-  return await Promise.all(
-    serializedFiles.map((data) => {
-      const file = Buffer.from(data.base64, 'base64');
-      const blob = new Blob([file], { type: data.type });
-      const newFile = new File([blob], data.name, {
-        type: data.type,
-        lastModified: data.lastModified,
-      });
-      return newFile;
-    }),
-  );
-};
-
-export const createDraftData = z.object({
-  to: z.string(),
-  cc: z.string().optional(),
-  bcc: z.string().optional(),
-  subject: z.string(),
-  message: z.string(),
-  attachments: z.array(serializedFileSchema).optional(),
-  id: z.string().nullable(),
-});
-
-export type CreateDraftData = z.infer<typeof createDraftData>;

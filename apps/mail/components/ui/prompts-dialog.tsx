@@ -1,4 +1,11 @@
 import {
+  SummarizeMessage,
+  SummarizeThread,
+  ReSummarizeThread,
+  AiChatPrompt,
+  StyledEmailAssistantSystemPrompt,
+} from '@zero/types';
+import {
   BookDashedIcon,
   GitBranchPlus,
   MessageSquareIcon,
@@ -6,8 +13,6 @@ import {
   SendIcon,
   RotateCcwIcon,
 } from 'lucide-react';
-import { SummarizeMessage, SummarizeThread, ReSummarizeThread } from '@zero/types';
-import { m } from '@/paraglide/messages';
 import {
   Dialog,
   DialogContent,
@@ -17,15 +22,15 @@ import {
   DialogTrigger,
 } from './dialog';
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip';
-import { AiChatPrompt, StyledEmailAssistantSystemPrompt } from '@/lib/prompts';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './tabs';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTRPC } from '@/providers/query-provider';
-import { EPrompts } from '@zero/types';
 import { useMutation } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { useForm } from 'react-hook-form';
+import { m } from '@/paraglide/messages';
 import { Paper } from '../icons/icons';
+import { EPrompts } from '@zero/types';
 import { Textarea } from './textarea';
 import { Link } from 'react-router';
 import { useMemo } from 'react';

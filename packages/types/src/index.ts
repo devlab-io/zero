@@ -4,3 +4,6 @@ export * from './message';
 export * from './driver';
 export * from './enums';
 export * from './fallback-prompts';
+export * from './email-utils';
+export * from './utils';
+export * from './schemas';
