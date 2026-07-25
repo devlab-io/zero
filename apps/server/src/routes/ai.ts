@@ -1,4 +1,5 @@
 import { systemPrompt } from '../services/call-service/system-prompt';
+import { isAuthorizedVoiceCaller } from '../lib/voice-auth';
 import type { tools } from './agent/tools';
 import { logger } from '../lib/logger';
 import { Tools } from '../types';
@@ -13,20 +14,18 @@ export const aiRouter = new Hono();
 
 aiRouter.get('/', (c) => c.text('Twilio + ElevenLabs + AI Phone System Ready'));
 
-// Add CORS headers for /do/* routes
+// Pas d'en-têtes CORS ici (pitbull A7, axe 4) : ces routes s'authentifient par un secret
+// partagé serveur-à-serveur. Un `Access-Control-Allow-Origin: *` n'y servait aucun appelant
+// légitime — un navigateur qui détiendrait ce secret l'aurait déjà divulgué — et exposait la
+// surface à n'importe quelle origine.
 aiRouter.use('/do/*', async (c, next) => {
-  c.header('Access-Control-Allow-Origin', '*');
-  c.header('Access-Control-Allow-Headers', 'Content-Type, X-Voice-Secret, X-Caller');
-  c.header('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  if (c.req.method === 'OPTIONS') {
-    return c.text('');
-  }
+  if (c.req.method === 'OPTIONS') return c.body(null, 204);
   return next();
 });
 
 aiRouter.post('/do/:action', async (c) => {
-  //   if (env.DISABLE_CALLS) return c.json({ success: false, error: 'Not implemented' }, 400);
-  if (env.VOICE_SECRET !== c.req.header('X-Voice-Secret'))
+  if (env.DISABLE_CALLS) return c.json({ success: false, error: 'Not implemented' }, 400);
+  if (!isAuthorizedVoiceCaller(env.VOICE_SECRET, c.req.header('X-Voice-Secret')))
     return c.json({ success: false, error: 'Unauthorized' }, 401);
   const caller = c.req.header('X-Caller');
   if (!caller) return c.json({ success: false, error: 'Unauthorized' }, 401);
@@ -80,7 +79,7 @@ aiRouter.post('/call', async (c) => {
     return c.json({ success: false, error: 'Not implemented' }, 400);
   }
 
-  if (env.VOICE_SECRET !== c.req.header('X-Voice-Secret')) {
+  if (!isAuthorizedVoiceCaller(env.VOICE_SECRET, c.req.header('X-Voice-Secret'))) {
     logger.info('[DEBUG] Invalid voice secret');
     return c.json({ success: false, error: 'Unauthorized' }, 401);
   }

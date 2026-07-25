@@ -59,7 +59,7 @@ function buttonTexts() {
 
 describe('root ErrorBoundary — no dead-end "{}" dump (pitbull P0)', () => {
   it('application error: never dumps the raw object, shows a readable message and exit actions', () => {
-    mount(<ErrorBoundary error={new Error('boom: network down') as never} />);
+    mount(<ErrorBoundary params={{}} error={new Error('boom: network down') as never} />);
     const text = container.textContent ?? '';
 
     // the exact failure the audit reported: a bare serialized empty object
@@ -81,7 +81,7 @@ describe('root ErrorBoundary — no dead-end "{}" dump (pitbull P0)', () => {
       internal: false,
       data: null,
     };
-    mount(<ErrorBoundary error={routeError as never} />);
+    mount(<ErrorBoundary params={{}} error={routeError as never} />);
     const text = container.textContent ?? '';
 
     expect(text).not.toContain('{}');
@@ -91,7 +91,7 @@ describe('root ErrorBoundary — no dead-end "{}" dump (pitbull P0)', () => {
   });
 
   it('the Home action navigates away from the crashed route instead of looping through it again', () => {
-    mount(<ErrorBoundary error={new Error('boom') as never} />);
+    mount(<ErrorBoundary params={{}} error={new Error('boom') as never} />);
     const homeButton = Array.from(container.querySelectorAll('button')).find((b) =>
       b.textContent?.includes('Return to home'),
     );
@@ -104,7 +104,7 @@ describe('root ErrorBoundary — no dead-end "{}" dump (pitbull P0)', () => {
   });
 
   it('technical detail is present but collapsed behind a <details> disclosure, not dumped inline', () => {
-    mount(<ErrorBoundary error={new Error('boom: network down') as never} />);
+    mount(<ErrorBoundary params={{}} error={new Error('boom: network down') as never} />);
     const details = container.querySelector('details');
     expect(details).not.toBeNull();
     expect(details?.hasAttribute('open')).toBe(false);
