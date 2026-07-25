@@ -11,8 +11,14 @@ const ALLOWED_FOLDERS = new Set(['inbox', 'draft', 'sent', 'spam', 'bin', 'archi
 export async function clientLoader({ params, request }: Route.ClientLoaderArgs) {
   if (!params.folder) return Response.redirect(`${import.meta.env.VITE_PUBLIC_APP_URL}/mail/inbox`);
 
-  const session = await authProxy.api.getSession({ headers: request.headers });
-  if (!session) return Response.redirect(`${import.meta.env.VITE_PUBLIC_APP_URL}/login`);
+  // Devlab (perf) : ne pas bloquer le rendu sur la session. Mesuré sur staging,
+  // cet `await` retenait la route 2,4 s en régime établi (8,8 s au premier
+  // chargement) et retardait d'autant le batch tRPC de la liste, alors que le
+  // backend refuse déjà toute requête non authentifiée. La garde reste en
+  // place : elle s'exécute en parallèle et redirige si la session est absente.
+  void authProxy.api.getSession({ headers: request.headers }).then((session) => {
+    if (!session) window.location.href = `${import.meta.env.VITE_PUBLIC_APP_URL}/login`;
+  });
 
   return {
     folder: params.folder,
