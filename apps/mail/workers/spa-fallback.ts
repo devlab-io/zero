@@ -46,29 +46,85 @@ function isHtmlNavigation(request: Request): boolean {
   return (request.headers.get('Accept') ?? '').includes('text/html');
 }
 
+// --- Security headers (audit: CSP/frame-ancestors gap on the SPA shell) --------------------
+//
+// script-src/style-src keep 'unsafe-inline': the prerendered shell (this build's index.html /
+// __spa-fallback.html) ships several un-nonced inline <script> tags baked in by the framework —
+// the dark/light theme flash-prevention snippet, React Router's hydration payload
+// (`window.__reactRouterContext`), scroll-restoration, and react-wrap-balancer. Dropping
+// 'unsafe-inline' would break hydration outright; doing so safely needs nonce-threading through
+// the prerender step, which is a build-pipeline change out of this fix's scope. connect-src/img-src
+// stay origin-broad (https:) because the backend origin differs per environment (staging/prod are
+// different Worker hostnames than the mail app) and optional third parties (Sentry, PostHog, the
+// image proxy) are configured via env vars not visible to this worker at header-authoring time —
+// hardcoding the wrong origin would silently break API calls or error reporting.
+//
+// frame-ancestors 'none' (+ the legacy X-Frame-Options: DENY) is the actual audit ask: the app must
+// never be embeddable in a third-party frame (clickjacking). That guarantee holds regardless of the
+// script-src/style-src trade-offs above.
+const CONTENT_SECURITY_POLICY = [
+  "default-src 'self'",
+  "base-uri 'self'",
+  "object-src 'none'",
+  "frame-ancestors 'none'",
+  "script-src 'self' 'unsafe-inline'",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data: blob: https:",
+  "font-src 'self' data:",
+  "connect-src 'self' https: wss:",
+  "manifest-src 'self'",
+  "worker-src 'self'",
+].join('; ');
+
+function isHtmlResponse(response: Response): boolean {
+  return (response.headers.get('content-type') ?? '').includes('text/html');
+}
+
+/**
+ * Applies the security header set to every response this worker returns. nosniff/Referrer-Policy/
+ * Permissions-Policy are cheap and safe on any response (assets included). CSP/X-Frame-Options are
+ * only meaningful — and only added — on HTML documents; stamping a CSP on a hashed JS/CSS/image
+ * asset response is a no-op at best (browsers scope CSP enforcement to the document that serves it).
+ */
+function withSecurityHeaders(response: Response): Response {
+  const headers = new Headers(response.headers);
+  headers.set('X-Content-Type-Options', 'nosniff');
+  headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
+  headers.set('Permissions-Policy', 'geolocation=(), microphone=(), camera=()');
+  if (isHtmlResponse(response)) {
+    headers.set('Content-Security-Policy', CONTENT_SECURITY_POLICY);
+    headers.set('X-Frame-Options', 'DENY');
+  }
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     // Fail loud and legibly at the first request if the ASSETS binding is missing/misconfigured,
     // rather than crashing opaquely on `env.ASSETS.fetch` below.
     bootEnv(env);
     const response = await env.ASSETS.fetch(request);
-    if (response.status !== 404) return response;
+    if (response.status !== 404) return withSecurityHeaders(response);
 
     // Only substitute the neutral shell for genuine HTML navigations. Everything else (missing
     // chunk/asset, API, non-GET) keeps its original 404 so errors are never masked as HTML 200.
-    if (!isHtmlNavigation(request)) return response;
+    if (!isHtmlNavigation(request)) return withSecurityHeaders(response);
 
     const url = new URL(request.url);
     const shell = await env.ASSETS.fetch(new URL('/__spa-fallback.html', url.origin));
     // If the neutral shell asset is itself missing or errored, propagate ITS real error
     // response (surface the true failure — never mask it as a 404 or as a broken 200).
-    if (!shell.ok) return shell;
+    if (!shell.ok) return withSecurityHeaders(shell);
 
     // Preserve the shell response's headers, forcing the HTML content type for the navigation.
     const headers = new Headers(shell.headers);
     headers.set('content-type', 'text/html; charset=utf-8');
     // A HEAD navigation must carry no body — return status + headers only.
     const body = request.method === 'HEAD' ? null : shell.body;
-    return new Response(body, { status: 200, headers });
+    return withSecurityHeaders(new Response(body, { status: 200, headers }));
   },
 };
