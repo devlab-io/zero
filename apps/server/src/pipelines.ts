@@ -37,6 +37,11 @@ const isValidUUID = (str: string): boolean => {
   return regex.test(str);
 };
 
+// Une instance de ShardRegistry par connexion — le DO qui porte le verrou d'idempotence
+// et le curseur historyId ; le pourquoi est dans routes/agent/shard-registry.ts.
+const getConnectionRegistry = (env: ZeroEnv, connectionId: string) =>
+  env.SHARD_REGISTRY.get(env.SHARD_REGISTRY.idFromName(`connection:${connectionId}:registry`));
+
 const validateArguments = (
   params: MainWorkflowParams,
   serviceAccount: { project_id: string },
@@ -96,7 +101,6 @@ export type MainWorkflowError =
   | { _tag: 'WorkflowCreationFailed'; error: unknown };
 
 export type ZeroWorkflowError =
-  | { _tag: 'HistoryAlreadyProcessing'; connectionId: string; historyId: string }
   | { _tag: 'ConnectionNotFound'; connectionId: string }
   | { _tag: 'ConnectionNotAuthorized'; connectionId: string }
   | { _tag: 'HistoryNotFound'; historyId: string; connectionId: string }
@@ -165,7 +169,7 @@ export class WorkflowRunner extends DurableObject<ZeroEnv> {
       }
 
       const previousHistoryId = yield* Effect.tryPromise({
-        try: () => this.env.gmail_history_id.get(connectionId),
+        try: () => getConnectionRegistry(this.env, connectionId).getLastProcessedHistoryId(),
         catch: () => ({
           _tag: 'WorkflowCreationFailed' as const,
           error: 'Failed to get history ID',
@@ -225,40 +229,35 @@ export class WorkflowRunner extends DurableObject<ZeroEnv> {
       yield* Console.log('[ZERO_WORKFLOW] Starting workflow with payload:', params);
       const { connectionId, historyId, nextHistoryId } = params;
 
-      const historyProcessingKey = `history_${connectionId}__${historyId}`;
-      const keysToDelete: string[] = [];
+      const registry = getConnectionRegistry(this.env, connectionId);
+      const notificationHistoryId = nextHistoryId.toString();
 
-      // Atomic lock acquisition to prevent race conditions
-      const lockAcquired = yield* Effect.tryPromise({
-        try: async () => {
-          const response = await this.env.gmail_processing_threads.put(
-            historyProcessingKey,
-            'true',
-            {
-              expirationTtl: 3600,
-            },
-          );
-          return response !== null; // null means key already existed
-        },
+      // Verrou d'idempotence. La clé est le historyId de CETTE notification : la seule
+      // valeur que chaque redélivrance du même push porte à l'identique. Voir
+      // lib/history-lock.ts (décision) et routes/agent/shard-registry.ts (stockage).
+      const claim = yield* Effect.tryPromise({
+        try: () => registry.claimHistoryNotification(notificationHistoryId, Date.now()),
         catch: (error) => ({ _tag: 'WorkflowCreationFailed' as const, error }),
       });
 
-      if (!lockAcquired) {
-        yield* Console.log('[ZERO_WORKFLOW] History already being processed:', {
+      if (claim.action === 'skip') {
+        yield* Console.log('[ZERO_WORKFLOW] Skipping duplicate/redelivered notification:', {
           connectionId,
-          historyId,
+          notificationHistoryId,
+          reason: claim.reason,
         });
-        return yield* Effect.fail({
-          _tag: 'HistoryAlreadyProcessing' as const,
-          connectionId,
-          historyId,
-        });
+        // A skip is a deliberate no-op, not a failure: it must resolve successfully so
+        // the caller ACKs the message (no retry), and it must not run the failure-path
+        // cleanup below — that would wrongly release a lock a concurrent in-flight
+        // attempt still owns, or wipe a still-valid post-success mark.
+        return 'Skipped: duplicate notification';
       }
 
-      yield* Console.log(
-        '[ZERO_WORKFLOW] Acquired processing lock for history:',
-        historyProcessingKey,
-      );
+      yield* Console.log('[ZERO_WORKFLOW] Acquired processing lock for history notification:', {
+        connectionId,
+        notificationHistoryId,
+        reason: claim.reason,
+      });
 
       const { db, conn } = createDb(this.env.HYPERDRIVE.connectionString);
 
@@ -310,18 +309,26 @@ export class WorkflowRunner extends DurableObject<ZeroEnv> {
           catch: (error) => ({ _tag: 'GmailApiError' as const, error }),
         });
 
-        yield* Effect.tryPromise({
-          try: () => {
-            logger.info('[ZERO_WORKFLOW] Updating next history ID:', nextHistoryId);
-            return this.env.gmail_history_id.put(connectionId.toString(), nextHistoryId.toString());
-          },
-          catch: (error) => ({ _tag: 'WorkflowCreationFailed' as const, error }),
-        });
+        // Note: the processed-historyId cursor is advanced only in
+        // completeHistoryNotification below, once this notification has actually
+        // finished (successfully or as a confirmed no-op) — not here, before threads
+        // are synced and labels are applied. Advancing it this early (the previous
+        // behavior, via a KV write mid-workflow) meant a crash between this point and
+        // completion left the cursor already past `nextHistoryId`: the next run's
+        // history.list would start from a point *after* the unprocessed batch and
+        // silently skip it forever.
 
         if (!history.length) {
           yield* Console.log('[ZERO_WORKFLOW] No history found, skipping');
-          // Add the history processing key to cleanup list
-          keysToDelete.push(historyProcessingKey);
+          yield* Effect.tryPromise({
+            try: () =>
+              registry.completeHistoryNotification(
+                notificationHistoryId,
+                nextHistoryId.toString(),
+                Date.now(),
+              ),
+            catch: (error) => ({ _tag: 'WorkflowCreationFailed' as const, error }),
+          });
           return 'No history found';
         }
 
@@ -506,23 +513,19 @@ export class WorkflowRunner extends DurableObject<ZeroEnv> {
           yield* Console.log('[ZERO_WORKFLOW] No threads with label changes to process');
         }
 
-        // Add history processing key to cleanup list
-        keysToDelete.push(historyProcessingKey);
-
-        // Bulk delete all collected keys
-        if (keysToDelete.length > 0) {
-          yield* Effect.tryPromise({
-            try: async () => {
-              logger.info('[ZERO_WORKFLOW] Bulk deleting keys:', keysToDelete);
-              const result = await bulkDeleteKeys(keysToDelete);
-              logger.info('[ZERO_WORKFLOW] Bulk delete result:', result);
-              return result;
-            },
-            catch: (error) => ({ _tag: 'WorkflowCreationFailed' as const, error }),
-          }).pipe(
-            Effect.orElse(() => Effect.succeed({ successful: 0, failed: keysToDelete.length })),
-          );
-        }
+        // Mark the notification done — the mark is kept (TTL ~24h), not deleted, so a
+        // redelivery arriving after this point is skipped rather than replayed — and
+        // advance the processed-historyId cursor in the same DO write, now that
+        // threads/labels have actually been applied.
+        yield* Effect.tryPromise({
+          try: () =>
+            registry.completeHistoryNotification(
+              notificationHistoryId,
+              nextHistoryId.toString(),
+              Date.now(),
+            ),
+          catch: (error) => ({ _tag: 'WorkflowCreationFailed' as const, error }),
+        });
 
         yield* Console.log('[ZERO_WORKFLOW] Processing complete');
         return 'Zero workflow completed successfully';
@@ -536,24 +539,26 @@ export class WorkflowRunner extends DurableObject<ZeroEnv> {
     }).pipe(
       Effect.tapError((error) => Console.log('[ZERO_WORKFLOW] Error in workflow:', error)),
       Effect.catchAll((error) => {
-        // Clean up processing flag on error using bulk delete
+        // Release the lock on failure (rather than leave it 'processing') so a genuine
+        // retry — queue msg.retry(), or a fresh Pub/Sub redelivery — isn't forced to
+        // wait out the stale-processing window before it can be reclaimed.
         return Effect.tryPromise({
           try: async () => {
-            const errorCleanupKey = `history_${params.connectionId}__${params.historyId}`;
+            const notificationHistoryId = params.nextHistoryId.toString();
             logger.info(
-              '[ZERO_WORKFLOW] Clearing processing flag for history after error:',
-              errorCleanupKey,
+              '[ZERO_WORKFLOW] Releasing processing lock for notification after error:',
+              notificationHistoryId,
             );
-            const result = await bulkDeleteKeys([errorCleanupKey]);
-            logger.info('[ZERO_WORKFLOW] Error cleanup result:', result);
-            return result;
+            await getConnectionRegistry(this.env, params.connectionId).releaseHistoryNotification(
+              notificationHistoryId,
+            );
           },
           catch: () => ({
             _tag: 'WorkflowCreationFailed' as const,
-            error: 'Failed to cleanup processing flag',
+            error: 'Failed to release processing lock',
           }),
         }).pipe(
-          Effect.orElse(() => Effect.succeed({ successful: 0, failed: 1 })),
+          Effect.orElse(() => Effect.succeed(undefined)),
           Effect.flatMap(() => Effect.fail(error)),
         );
       }),
@@ -713,160 +718,5 @@ export class WorkflowRunner extends DurableObject<ZeroEnv> {
       }),
       Effect.provide(loggerLayer),
     );
-  }
-
-  /** Testing workflows without Effect */
-  public runThreadWorkflowWithoutEffect(params: ThreadWorkflowParams): Promise<string> {
-    return this.runThreadWorkflowWithoutEffectImpl(params);
-  }
-
-  private async runThreadWorkflowWithoutEffectImpl(params: ThreadWorkflowParams): Promise<string> {
-    try {
-      logger.info('[THREAD_WORKFLOW] Starting workflow with payload:', params);
-      const { connectionId, threadId, providerId } = params;
-      const keysToDelete: string[] = [];
-
-      if (providerId === EProviders.google) {
-        logger.info('[THREAD_WORKFLOW] Processing Google provider workflow');
-        const { db, conn } = createDb(this.env.HYPERDRIVE.connectionString);
-
-        let foundConnection;
-        try {
-          logger.info('[THREAD_WORKFLOW] Finding connection:', connectionId);
-          const [connectionRecord] = await db
-            .select()
-            .from(connection)
-            .where(eq(connection.id, connectionId.toString()));
-
-          if (!connectionRecord) {
-            throw new Error(`Connection not found ${connectionId}`);
-          }
-          if (!connectionRecord.accessToken || !connectionRecord.refreshToken) {
-            throw new Error(`Connection is not authorized ${connectionId}`);
-          }
-          logger.info('[THREAD_WORKFLOW] Found connection:', connectionRecord.id);
-          foundConnection = connectionRecord;
-        } catch (error) {
-          logger.error('[THREAD_WORKFLOW] Database error:', error);
-          throw { _tag: 'DatabaseError' as const, error };
-        } finally {
-          try {
-            await conn.end();
-          } catch (error) {
-            logger.error('[THREAD_WORKFLOW] Failed to close connection:', error);
-          }
-        }
-
-        let thread;
-        try {
-          logger.info('[THREAD_WORKFLOW] Getting thread:', threadId);
-          const { result } = await getThread(connectionId.toString(), threadId.toString());
-          logger.info('[THREAD_WORKFLOW] Found thread with messages:', result.messages.length);
-          thread = result;
-        } catch (error) {
-          logger.error('[THREAD_WORKFLOW] Gmail API error:', error);
-          throw { _tag: 'GmailApiError' as const, error };
-        }
-
-        if (!thread.messages || thread.messages.length === 0) {
-          logger.info('[THREAD_WORKFLOW] Thread has no messages, skipping processing');
-          keysToDelete.push(threadId.toString());
-          return 'Thread has no messages';
-        }
-
-        const workflowEngine = createDefaultWorkflows();
-
-        const workflowContext: WorkflowContext = {
-          connectionId: connectionId.toString(),
-          threadId: threadId.toString(),
-          thread,
-          foundConnection,
-          results: new Map<string, unknown>(),
-          env: this.env,
-        };
-
-        let workflowResults;
-        try {
-          const allResults = new Map<string, unknown>();
-          const allErrors = new Map<string, Error>();
-
-          const workflowNames = workflowEngine.getWorkflowNames();
-
-          for (const workflowName of workflowNames) {
-            logger.info(`[THREAD_WORKFLOW] Executing workflow: ${workflowName}`);
-
-            try {
-              const { results, errors } = await workflowEngine.executeWorkflow(
-                workflowName,
-                workflowContext,
-              );
-
-              results.forEach((value, key) => allResults.set(key, value));
-              errors.forEach((value, key) => allErrors.set(key, value));
-
-              logger.info(`[THREAD_WORKFLOW] Completed workflow: ${workflowName}`);
-            } catch (error) {
-              logger.error(`[THREAD_WORKFLOW] Failed to execute workflow ${workflowName}:`, error);
-              const errorObj = error instanceof Error ? error : new Error(String(error));
-              allErrors.set(workflowName, errorObj);
-            }
-          }
-
-          workflowResults = { results: allResults, errors: allErrors };
-        } catch (error) {
-          logger.error('[THREAD_WORKFLOW] Workflow creation failed:', error);
-          throw { _tag: 'WorkflowCreationFailed' as const, error };
-        }
-
-        workflowEngine.clearContext(workflowContext);
-
-        const successfulSteps = Array.from(workflowResults.results.keys());
-        const failedSteps = Array.from(workflowResults.errors.keys());
-
-        if (successfulSteps.length > 0) {
-          logger.info('[THREAD_WORKFLOW] Successfully executed steps:', successfulSteps);
-        }
-
-        if (failedSteps.length > 0) {
-          logger.info('[THREAD_WORKFLOW] Failed steps:', failedSteps);
-          workflowResults.errors.forEach((error, stepId) => {
-            logger.info(`[THREAD_WORKFLOW] Error in step ${stepId}:`, error.message);
-          });
-        }
-
-        keysToDelete.push(threadId.toString());
-
-        if (keysToDelete.length > 0) {
-          try {
-            logger.info('[THREAD_WORKFLOW] Bulk deleting keys:', keysToDelete);
-            const result = await bulkDeleteKeys(keysToDelete);
-            logger.info('[THREAD_WORKFLOW] Bulk delete result:', result);
-          } catch (error) {
-            logger.error('[THREAD_WORKFLOW] Failed to bulk delete keys:', error);
-          }
-        }
-
-        logger.info('[THREAD_WORKFLOW] Thread processing complete');
-        return 'Thread workflow completed successfully';
-      } else {
-        logger.info('[THREAD_WORKFLOW] Unsupported provider:', providerId);
-        throw { _tag: 'UnsupportedProvider' as const, providerId };
-      }
-    } catch (error) {
-      logger.error('[THREAD_WORKFLOW] Error in workflow:', error);
-
-      try {
-        logger.info(
-          '[THREAD_WORKFLOW] Clearing processing flag for thread after error:',
-          params.threadId,
-        );
-        const result = await bulkDeleteKeys([params.threadId.toString()]);
-        logger.info('[THREAD_WORKFLOW] Error cleanup result:', result);
-      } catch (cleanupError) {
-        logger.error('[THREAD_WORKFLOW] Failed to cleanup thread processing flag:', cleanupError);
-      }
-
-      throw error;
-    }
   }
 }
