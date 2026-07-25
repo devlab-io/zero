@@ -24,8 +24,73 @@ function serializeError(err: Error): Record<string, unknown> {
   return { name: err.name, message: err.message, stack: err.stack };
 }
 
+// Central redaction (pitbull A1, axe 10). Logs on Workers go to `wrangler tail` and
+// logpush, i.e. to durable third-party storage, so a bearer token or a session cookie
+// written here is a leaked credential. Call sites are expected to log safe summaries,
+// but this net catches the ones that forget: any key whose NAME looks like a credential
+// has its value masked, whatever the depth.
+export const REDACTED = '[redacted]';
+
+const SENSITIVE_KEY =
+  /(^|[-_.])(authorization|cookie|token|secret|password|passwd|credential|bearer|jwt|signature|api[-_.]?key|private[-_.]?key)([-_.]|$)|token$|secret$|password$|credential$/i;
+
+const MAX_DEPTH = 6;
+
+function isSensitiveKey(key: string): boolean {
+  return SENSITIVE_KEY.test(key);
+}
+
+function redact(value: unknown, depth = 0): unknown {
+  if (value === null || typeof value !== 'object') return value;
+  if (depth >= MAX_DEPTH) return '[truncated]';
+
+  if (Array.isArray(value)) {
+    // `Array.from(headers.entries())` and friends serialise as [key, value] pairs; mask
+    // the value when the pair's key is a credential name.
+    if (value.length === 2 && typeof value[0] === 'string' && isSensitiveKey(value[0])) {
+      return [value[0], REDACTED];
+    }
+    return value.map((item) => redact(item, depth + 1));
+  }
+
+  if (value instanceof Error) return serializeError(value);
+  // Dates serialise to ISO strings on their own; walking their (empty) key set would
+  // flatten them to `{}`.
+  if (value instanceof Date) return value;
+
+  const source = value as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+  for (const key of Object.keys(source)) {
+    out[key] = isSensitiveKey(key) ? REDACTED : redact(source[key], depth + 1);
+  }
+  return out;
+}
+
 function normalize(rest: unknown[]): unknown[] {
-  return rest.map((r) => (r instanceof Error ? serializeError(r) : r));
+  return rest.map((r) => (r instanceof Error ? serializeError(r) : redact(r)));
+}
+
+/**
+ * Safe, loggable summary of a request. Replaces `Array.from(request.headers.entries())`
+ * on the authentication paths, which serialised the Authorization header and the whole
+ * session cookie in clear text.
+ */
+export function describeRequest(request: Request): Record<string, unknown> {
+  const authorization = request.headers.get('Authorization');
+  let path: string;
+  try {
+    path = new URL(request.url).pathname;
+  } catch {
+    path = '<unparseable>';
+  }
+  return {
+    method: request.method,
+    path,
+    userAgent: request.headers.get('User-Agent') ?? undefined,
+    hasAuthorization: Boolean(authorization),
+    authorizationLength: authorization?.length ?? 0,
+    hasCookie: Boolean(request.headers.get('Cookie')),
+  };
 }
 
 function write(level: LogLevel, message: unknown, rest: unknown[]): void {

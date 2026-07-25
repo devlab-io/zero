@@ -4,9 +4,11 @@
 // /public sub-routers + tRPC at /api/trpc) and the root `app` (CORS, OAuth
 // discovery, MCP/SSE mounts, agents websocket middleware, health, Sentry
 // tunnel and provider webhooks). Frontier rationale: docs/adr/0001-routing-hono-vs-trpc.md.
+import { authorizeAgentAccess, type AgentLobby } from '../lib/agent-authorization';
 import { oAuthDiscoveryMetadata } from 'better-auth/plugins';
 import { getZeroDB, verifyToken } from '../lib/server-utils';
 import { ThinkingMCP } from '../lib/sequential-thinking';
+import { describeRequest, logger } from '../lib/logger';
 import { contextStorage } from 'hono/context-storage';
 import { createLocalJWKSet, jwtVerify } from 'jose';
 import { trpcServer } from '@hono/trpc-server';
@@ -15,7 +17,6 @@ import { invariant } from '../lib/invariant';
 import { initTracing } from '../lib/tracing';
 import type { HonoContext } from '../ctx';
 import { createAuth } from '../lib/auth';
-import { logger } from '../lib/logger';
 import { ZeroMCP } from './agent/mcp';
 import { EProviders } from '../types';
 import { publicRouter } from './auth';
@@ -48,6 +49,22 @@ function hashIpAddress(ip: string | undefined): string | undefined {
   // Return a prefixed hex representation
   return `ip_${Math.abs(hash).toString(16).padStart(8, '0')}`;
 }
+
+// Wires the agent authorisation policy (lib/agent-authorization.ts) to the real session
+// and connection-ownership lookups. Kept out of the middleware literal so the policy
+// stays unit-testable and this file stays a routing composition.
+const authorizeAgent = (request: Request, lobby: AgentLobby) =>
+  authorizeAgentAccess(request, lobby, {
+    resolveUserId: async (headers) => {
+      const auth = await createAuth();
+      const session = await auth.api.getSession({ headers });
+      return session?.user?.id;
+    },
+    ownsConnection: async (userId, connectionId) => {
+      const db = await getZeroDB(userId);
+      return Boolean(await db.findUserConnection(connectionId));
+    },
+  });
 
 export const api = new Hono<HonoContext>()
   .use(contextStorage())
@@ -259,7 +276,7 @@ export const app = new Hono<HonoContext>()
       const auth = await createAuth();
       const session = await auth.api.getMcpSession({ headers: request.headers });
       if (!session) {
-        logger.info('Invalid auth provided', Array.from(request.headers.entries()));
+        logger.info('Invalid auth provided', describeRequest(request));
         return new Response('Unauthorized', { status: 401 });
       }
       ctx.props = {
@@ -290,7 +307,7 @@ export const app = new Hono<HonoContext>()
       const auth = await createAuth();
       const session = await auth.api.getMcpSession({ headers: request.headers });
       if (!session) {
-        logger.info('Invalid auth provided', Array.from(request.headers.entries()));
+        logger.info('Invalid auth provided', describeRequest(request));
         return new Response('Unauthorized', { status: 401 });
       }
       ctx.props = {
@@ -305,11 +322,10 @@ export const app = new Hono<HonoContext>()
     '*',
     agentsMiddleware({
       options: {
-        onBeforeConnect: (c) => {
-          if (!c.headers.get('Cookie')) {
-            return new Response('Unauthorized', { status: 401 });
-          }
-        },
+        // Both branches guarded: partyserver calls onBeforeConnect on a WebSocket
+        // upgrade and onBeforeRequest on plain HTTP. See lib/agent-authorization.ts.
+        onBeforeConnect: (request: Request, lobby: AgentLobby) => authorizeAgent(request, lobby),
+        onBeforeRequest: (request: Request, lobby: AgentLobby) => authorizeAgent(request, lobby),
       },
     }),
   )

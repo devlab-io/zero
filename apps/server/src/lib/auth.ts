@@ -82,7 +82,15 @@ const scheduleCampaign = (userInfo: { address: string; name: string }) =>
 
 const connectionHandlerHook = async (account: Account) => {
   if (!account.accessToken || !account.refreshToken) {
-    logger.error('Missing Access/Refresh Tokens', { account });
+    // Never log the account object itself: it carries the Google OAuth access/refresh
+    // tokens and the idToken (pitbull A1, axe 10).
+    logger.error('Missing Access/Refresh Tokens', {
+      accountId: account.id,
+      providerId: account.providerId,
+      userId: account.userId,
+      hasAccess: Boolean(account.accessToken),
+      hasRefresh: Boolean(account.refreshToken),
+    });
     throw new APIError('EXPECTATION_FAILED', {
       message: 'Missing Access/Refresh Tokens, contact us on Discord for support',
     });
