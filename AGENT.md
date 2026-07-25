@@ -5,6 +5,7 @@ Zero is an open-source AI email solution built with a modern TypeScript stack (R
 ## Project Structure
 
 This is a pnpm workspace monorepo with the following structure:
+
 - `apps/mail/` - React Router 7 frontend email client (deployed as a Cloudflare Worker)
 - `apps/server/` - Backend (Cloudflare Worker: Hono + tRPC + Durable Objects + Workflows)
 - `packages/cli/` - CLI tools (`nizzy` command)
@@ -16,6 +17,7 @@ This is a pnpm workspace monorepo with the following structure:
 ## Frequently Used Commands
 
 ### Development
+
 - `pnpm go` - Quick start: starts database and dev servers
 - `pnpm dev` - Start all development servers (uses Turbo)
 - `pnpm docker:db:up` - Start PostgreSQL database in Docker
@@ -23,30 +25,35 @@ This is a pnpm workspace monorepo with the following structure:
 - `pnpm docker:db:clean` - Stop and remove database with volumes
 
 ### Build & Deploy
+
 - `pnpm build` - Build all packages (uses Turbo)
 - `pnpm build:frontend` - Build only the mail frontend
 - `pnpm deploy:frontend` - Deploy frontend
 - `pnpm deploy:backend` - Deploy backend
 
 ### Code Quality
+
 - `pnpm check` - Run format check and lint
 - `pnpm lint` - Run ESLint across all packages
 - `pnpm format` - Format code with Prettier
 - `pnpm check:format` - Check code formatting
 
 ### Database
+
 - `pnpm db:push` - Push schema changes to database
 - `pnpm db:generate` - Generate migration files
 - `pnpm db:migrate` - Apply database migrations
 - `pnpm db:studio` - Open Drizzle Studio
 
 ### Testing & Evaluation
+
 - `pnpm test` - Run unit tests (turbo → server + mail vitest)
 - `pnpm test:e2e` - Run the Playwright e2e suite (`@zero/testing`)
 - `pnpm eval` - Run evaluation suite
 - `pnpm eval:dev` - Run evaluation in watch mode
 
 ### Utilities
+
 - `pnpm nizzy env` - Setup environment variables
 - `pnpm nizzy sync` - Sync environment variables and types
 - `pnpm scripts` - Run custom scripts
@@ -64,6 +71,7 @@ This is a pnpm workspace monorepo with the following structure:
 ## Code Style & Conventions
 
 ### Formatting
+
 - 2-space indentation
 - Single quotes
 - 100 character line width
@@ -71,11 +79,13 @@ This is a pnpm workspace monorepo with the following structure:
 - Uses Prettier with sort-imports and Tailwind plugins
 
 ### File Organization
+
 - TypeScript strict mode enabled
 - Workspace packages use catalog versioning for shared dependencies
 - Monorepo managed with pnpm workspaces
 
 ### Important Environment Variables
+
 - `BETTER_AUTH_SECRET` - Auth secret key
 - `GOOGLE_CLIENT_ID` & `GOOGLE_CLIENT_SECRET` - Gmail integration
 - `AUTUMN_SECRET_KEY` - Encryption service
@@ -93,7 +103,12 @@ This is a pnpm workspace monorepo with the following structure:
 
 ## Common Workflow
 
-1. Always run `pnpm check` before committing
+1. Avant de commiter, lancer les contrôles **ciblés** qui sont réellement verts et bloquants :
+   `pnpm build`, `pnpm test`, `node scripts/checks/loc-ratchet.mjs`, `node scripts/checks/type-ratchet.mjs`,
+   `node scripts/checks/console-ratchet.mjs`. Ne PAS lancer `pnpm check` à l'échelle du dépôt
+   (voir la restriction plus bas) : `pnpm lint` et `pnpm check:format` sont rouges de longue date
+   sur l'arbre entier — c'est de la dette connue et suivie, pas un signal exploitable, et les
+   reformater intégralement noierait la revue.
 2. Use `pnpm nizzy sync` after environment variable changes
 3. Run `pnpm db:push` after schema changes
 4. Use `pnpm go` for quick development startup
@@ -108,7 +123,7 @@ This is a pnpm workspace monorepo with the following structure:
 
 ## IMPORTANT RESTRICTIONS
 
-- **NEVER run project-wide lint/format commands** (`pnpm check`, `pnpm lint`, `pnpm format`, `pnpm check:format`)
+- **NEVER run project-wide lint/format commands** (`pnpm check`, `pnpm lint`, `pnpm format`, `pnpm check:format`) — cohérent avec le point 1 de « Common Workflow » : ces commandes sont rouges à l'échelle du dépôt et réécriraient des fichiers sans rapport avec la tâche
 - These commands format/lint the entire codebase and cause unnecessary changes
 - Only use targeted linting/formatting on specific files when absolutely necessary
 - Focus on the specific task at hand without touching unrelated files

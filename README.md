@@ -62,7 +62,7 @@ Watch this helpful video tutorial on how to set up Zero locally:
 
 **Required Versions:**
 
-- [Node.js](https://nodejs.org/en/download) (v18 or higher)
+- [Node.js](https://nodejs.org/en/download) **v22** — la version épinglée par `.nvmrc` et utilisée par la CI (`.github/workflows/ci.yml`). Les versions antérieures ne sont pas testées.
 - [pnpm](https://pnpm.io) (v10 or higher)
 - [Docker](https://docs.docker.com/engine/install/) (v20 or higher)
 

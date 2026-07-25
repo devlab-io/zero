@@ -1,139 +1,50 @@
 # Scripts
 
-This folder contains utility scripts for the Zero email application. These scripts are designed to help with development, testing, and maintenance tasks that are not part of the main application flow.
+Utilitaires hors flux applicatif (développement, maintenance). Le lanceur est
+[cmd-ts](https://github.com/Schniz/cmd-ts) : arguments typés, aide générée, sous-commandes.
 
-## Overview
+## Lancer un script
 
-The scripts system in Zero is built using [cmd-ts](https://github.com/Schniz/cmd-ts), a TypeScript library for building type-safe command-line applications. This provides a structured way to create, organize, and run utility scripts with proper command-line argument handling, help text, and more.
-
-## How to Run Scripts
-
-Scripts can be run using the `scripts` command from the project root:
+Depuis la racine du dépôt :
 
 ```bash
-# Run a script from the project root
-pnpm scripts <script-name> [options]
-
-# Example: Run the seed-style script
-pnpm scripts seed-style
+pnpm scripts <sous-commande> [options]
+pnpm scripts --help            # liste les sous-commandes disponibles
 ```
 
-This command is defined in the root `package.json` and executes the script runner in the mail app:
+La commande racine est définie dans le `package.json` de la racine :
 
 ```json
-"scripts": "dotenv -- pnpm run --cwd apps/mail --silent --elide-lines=0 scripts"
+"scripts": "dotenv -- pnpx tsx ./scripts/run.ts"
 ```
 
-## Available Scripts
+> Ce dossier porte son propre `package.json` (`cmd-ts`, `resend`, `@faker-js/faker`,
+> `@inquirer/prompts`). Il doit être membre du workspace pour que ces dépendances soient
+> installées — `pnpm-workspace.yaml` déclare désormais `scripts` **et** `scripts/*`. Sans la
+> première ligne, `pnpm scripts` échouait en `ERR_MODULE_NOT_FOUND` (corrigé le 2026-07-26).
 
-### seed-style
+## Sous-commandes enregistrées
 
-Seeds the writing style matrix for a given connection with sample emails of different styles. This is useful for testing and developing the writing style features of the application.
+Une seule est active, dans `scripts/run.ts` :
 
-**Usage:**
+### `send-emails`
+
+Envoie des emails de test via Resend. Requiert `RESEND_API_KEY` dans l'environnement (chargé
+par `dotenv` depuis le `.env` racine).
 
 ```bash
-# Interactive mode (will prompt for options)
-pnpm scripts seed-style
-
-# With command-line options
-pnpm scripts seed-style seed --connection-id <id> --style <style> --size <number> [--reset]
-# Or reset the style matrix
-pnpm scripts seed-style reset --connection-id <id>
+pnpm scripts send-emails --help
 ```
 
-**Options:**
+### `seed-style` — désactivée
 
-- `--connection-id, -c`: The connection ID to seed the style matrix for
-- `--style, -s`: The style to use (professional, persuasive, genz, concise, friendly)
-- `--size, -n`: Number of emails to seed (default: 10)
-- `--reset, -r`: Reset the style matrix before seeding
+La sous-commande existe sur le disque (`scripts/seed-style/`) mais elle est **commentée** dans
+`scripts/run.ts`, donc non enregistrée : `pnpm scripts seed-style` ne fonctionne pas. Ses
+fichiers de données (`scripts/seed-style/styles/*.json`) sont par ailleurs les deux fichiers qui
+font échouer `pnpm check:format`. À réactiver ou à supprimer — la décision n'est pas prise.
 
-**Subcommands:**
+## Ajouter un script
 
-- `seed`: Seeds the style matrix with sample emails
-- `reset`: Resets the style matrix for a connection
-
-## How to Add New Scripts
-
-To add a new script to the system:
-
-1. Create a new script file in the `apps/mail/scripts` directory or a subdirectory
-2. Export a command object using the cmd-ts library
-3. Register the command in `apps/mail/scripts/run.ts`
-
-### Step 1: Create a new script file
-
-Create a new TypeScript file for your script. For example, `apps/mail/scripts/my-script.ts`:
-
-```typescript
-import { command, option, string as stringType } from 'cmd-ts';
-
-export const myScriptCommand = command({
-  name: 'my-script',
-  description: 'Description of what my script does',
-  args: {
-    // Define command-line arguments
-    param1: option({
-      type: stringType,
-      long: 'param1',
-      short: 'p',
-      description: 'Description of param1',
-    }),
-  },
-  handler: async (inputs) => {
-    // Script implementation
-    console.log(`Running my script with param1: ${inputs.param1}`);
-    // Do something useful here
-  },
-});
-```
-
-### Step 2: Register the command
-
-Update `apps/mail/scripts/run.ts` to include your new command:
-
-```typescript
-import { seedStyleCommand } from '@zero/mail/scripts/seed-style/seeder';
-import { myScriptCommand } from '@zero/mail/scripts/my-script';
-import { subcommands, run } from 'cmd-ts';
-
-const app = subcommands({
-  name: 'scripts',
-  cmds: {
-    'seed-style': seedStyleCommand,
-    'my-script': myScriptCommand, // Add your new command here
-  },
-});
-
-await run(app, process.argv.slice(2));
-process.exit(0);
-```
-
-### Step 3: Run your script
-
-You can now run your script using:
-
-```bash
-pnpm scripts my-script --param1 value
-```
-
-## Best Practices
-
-When creating scripts:
-
-1. **Use cmd-ts features**: Take advantage of the cmd-ts library for argument parsing, validation, and help text
-2. **Interactive mode**: Consider supporting both interactive mode (using prompts) and command-line options
-3. **Error handling**: Implement proper error handling and provide useful error messages
-4. **Documentation**: Document your script's purpose, usage, and options in this README
-5. **Modularity**: Break complex scripts into smaller, reusable functions
-6. **Testing**: Consider adding tests for critical script functionality
-
-## Dependencies
-
-The scripts system uses several key dependencies:
-
-- [cmd-ts](https://github.com/Schniz/cmd-ts): Command-line parsing and execution
-- [@inquirer/prompts](https://github.com/SBoudrias/Inquirer.js): Interactive command-line prompts
-- [p-all](https://github.com/sindresorhus/p-all): Run promises in parallel with limited concurrency
-- [p-retry](https://github.com/sindresorhus/p-retry): Retry failed promises
+1. Créer un dossier sous `scripts/` avec un module exportant une commande `cmd-ts`.
+2. L'enregistrer dans la table `cmds` de `scripts/run.ts`.
+3. Documenter la sous-commande ici, avec ses variables d'environnement requises.

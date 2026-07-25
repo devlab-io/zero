@@ -1,6 +1,10 @@
 packages:
   - apps/*
   - packages/*
+  # `scripts` porte lui-meme un package.json (cmd-ts, resend, faker) : sans cette ligne il
+  # n'etait pas membre du workspace, ses dependances n'etaient jamais installees et
+  # `pnpm scripts` echouait en ERR_MODULE_NOT_FOUND (constat du run pitbull, axe 8).
+  - scripts
   - scripts/*
 
 catalog:
