@@ -10,6 +10,7 @@
     "types": "wrangler types",
     "deploy": "wrangler deploy",
     "lint": "eslint .",
+    "codegen": "paraglide-js compile --project ./project.inlang --outdir ./paraglide",
     "test": "vitest run",
     "machine-translate": "inlang machine translate --project project.inlang"
   },

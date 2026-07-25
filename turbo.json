@@ -18,7 +18,12 @@
     "lint": {
       "outputs": []
     },
+    "codegen": {
+      "inputs": ["project.inlang/**", "messages/**"],
+      "outputs": ["paraglide/**"]
+    },
     "test": {
+      "dependsOn": ["codegen"],
       "cache": false
     },
     "sentry:sourcemaps": {

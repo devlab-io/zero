@@ -44,7 +44,7 @@ E2E lives in `packages/testing` and is **run locally, not in CI** for this wave.
 # one-time: install Playwright browsers
 pnpm --filter=@zero/testing exec playwright install
 
-# start the app the specs drive (default baseURL http://localhost:3000)
+# start the app the specs drive (baseURL http://localhost:3001 — le port servi par vite)
 pnpm --filter=@zero/mail start           # or: pnpm dev
 
 # in another shell, run the e2e suite
