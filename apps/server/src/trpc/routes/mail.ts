@@ -9,6 +9,7 @@ import {
   reSyncThread,
 } from '../../lib/server-utils';
 import { IGetThreadResponseSchema, type IGetThreadsResponse } from '../../lib/driver/types';
+import { makeBulkLabelProcedure, makeToggleLabelProcedure } from './mail-label-procedures';
 import type { DeleteAllSpamResponse, IEmailSendBatch } from '../../types';
 import { activeDriverProcedure, router, privateProcedure } from '../trpc';
 import { processEmailHtml } from '../../lib/email-processor';
@@ -266,156 +267,11 @@ export const mailRouter = router({
       return { success: false, error: 'No label changes specified' };
     }),
 
-  toggleStar: activeDriverProcedure
-    .input(
-      z.object({
-        ids: z.string().array(),
-      }),
-    )
-    .mutation(async ({ input, ctx }) => {
-      const { activeConnection } = ctx;
-      const executionCtx = getContext<HonoContext>().executionCtx;
-      const { stub: agent } = await getZeroAgent(activeConnection.id, executionCtx);
-      const { threadIds } = await agent.normalizeIds(input.ids);
-
-      if (!threadIds.length) {
-        return { success: false, error: 'No thread IDs provided' };
-      }
-
-      const threadResults = await Promise.allSettled(
-        threadIds.map(async (id: string) => {
-          const thread = await getThread(activeConnection.id, id);
-          return thread.result;
-        }),
-      );
-
-      let anyStarred = false;
-      let processedThreads = 0;
-
-      for (const result of threadResults) {
-        if (result.status === 'fulfilled' && result.value && result.value.messages.length > 0) {
-          processedThreads++;
-          const isThreadStarred = result.value.messages.some((message) =>
-            message.tags?.some((tag) => tag.name.toLowerCase().startsWith('starred')),
-          );
-          if (isThreadStarred) {
-            anyStarred = true;
-            break;
-          }
-        }
-      }
-
-      const shouldStar = processedThreads > 0 && !anyStarred;
-
-      await Promise.all(
-        threadIds.map((threadId) =>
-          modifyThreadLabelsInDB(
-            activeConnection.id,
-            threadId,
-            shouldStar ? ['STARRED'] : [],
-            shouldStar ? [] : ['STARRED'],
-          ),
-        ),
-      );
-
-      return { success: true };
-    }),
-  toggleImportant: activeDriverProcedure
-    .input(
-      z.object({
-        ids: z.string().array(),
-      }),
-    )
-    .mutation(async ({ input, ctx }) => {
-      const { activeConnection } = ctx;
-      const executionCtx = getContext<HonoContext>().executionCtx;
-      const { stub: agent } = await getZeroAgent(activeConnection.id, executionCtx);
-      const { threadIds } = await agent.normalizeIds(input.ids);
-
-      if (!threadIds.length) {
-        return { success: false, error: 'No thread IDs provided' };
-      }
-
-      const threadResults = await Promise.allSettled(
-        threadIds.map(async (id: string) => {
-          const thread = await getThread(activeConnection.id, id);
-          return thread.result;
-        }),
-      );
-
-      let anyImportant = false;
-      let processedThreads = 0;
-
-      for (const result of threadResults) {
-        if (result.status === 'fulfilled' && result.value && result.value.messages.length > 0) {
-          processedThreads++;
-          const isThreadImportant = result.value.messages.some((message) =>
-            message.tags?.some((tag) => tag.name.toLowerCase().startsWith('important')),
-          );
-          if (isThreadImportant) {
-            anyImportant = true;
-            break;
-          }
-        }
-      }
-
-      const shouldMarkImportant = processedThreads > 0 && !anyImportant;
-
-      await Promise.all(
-        threadIds.map((threadId) =>
-          modifyThreadLabelsInDB(
-            activeConnection.id,
-            threadId,
-            shouldMarkImportant ? ['IMPORTANT'] : [],
-            shouldMarkImportant ? [] : ['IMPORTANT'],
-          ),
-        ),
-      );
-
-      return { success: true };
-    }),
-  bulkStar: activeDriverProcedure
-    .input(
-      z.object({
-        ids: z.string().array(),
-      }),
-    )
-    .mutation(async ({ input, ctx }) => {
-      const { activeConnection } = ctx;
-      return Promise.all(
-        input.ids.map((threadId) =>
-          modifyThreadLabelsInDB(activeConnection.id, threadId, ['STARRED'], []),
-        ),
-      );
-    }),
-  bulkMarkImportant: activeDriverProcedure
-    .input(
-      z.object({
-        ids: z.string().array(),
-      }),
-    )
-    .mutation(async ({ input, ctx }) => {
-      const { activeConnection } = ctx;
-      return Promise.all(
-        input.ids.map((threadId) =>
-          modifyThreadLabelsInDB(activeConnection.id, threadId, ['IMPORTANT'], []),
-        ),
-      );
-    }),
-  bulkUnstar: activeDriverProcedure
-    .input(
-      z.object({
-        ids: z.string().array(),
-      }),
-    )
-    .mutation(async ({ input, ctx }) => {
-      const { activeConnection } = ctx;
-      return Promise.all(
-        input.ids.map((threadId) =>
-          modifyThreadLabelsInDB(activeConnection.id, threadId, [], ['STARRED']),
-        ),
-      );
-    }),
+  toggleStar: makeToggleLabelProcedure('STARRED'),
+  toggleImportant: makeToggleLabelProcedure('IMPORTANT'),
+  bulkStar: makeBulkLabelProcedure('STARRED', 'add'),
+  bulkMarkImportant: makeBulkLabelProcedure('IMPORTANT', 'add'),
+  bulkUnstar: makeBulkLabelProcedure('STARRED', 'remove'),
   deleteAllSpam: activeDriverProcedure.mutation(async ({ ctx }): Promise<DeleteAllSpamResponse> => {
     const { activeConnection } = ctx;
     try {
@@ -435,20 +291,7 @@ export const mailRouter = router({
       };
     }
   }),
-  bulkUnmarkImportant: activeDriverProcedure
-    .input(
-      z.object({
-        ids: z.string().array(),
-      }),
-    )
-    .mutation(async ({ input, ctx }) => {
-      const { activeConnection } = ctx;
-      return Promise.all(
-        input.ids.map((threadId) =>
-          modifyThreadLabelsInDB(activeConnection.id, threadId, [], ['IMPORTANT']),
-        ),
-      );
-    }),
+  bulkUnmarkImportant: makeBulkLabelProcedure('IMPORTANT', 'remove'),
 
   send: activeDriverProcedure
     .input(
