@@ -169,13 +169,8 @@
       "attachments": "Attachments",
       "attachmentCount": [
         {
-          "declarations": [
-            "input count",
-            "local countPlural = count: plural"
-          ],
-          "selectors": [
-            "countPlural"
-          ],
+          "declarations": ["input count", "local countPlural = count: plural"],
+          "selectors": ["countPlural"],
           "match": {
             "countPlural=0": "attachments",
             "countPlural=one": "attachment",
@@ -185,13 +180,8 @@
       ],
       "fileCount": [
         {
-          "declarations": [
-            "input count",
-            "local countPlural = count: plural"
-          ],
-          "selectors": [
-            "countPlural"
-          ],
+          "declarations": ["input count", "local countPlural = count: plural"],
+          "selectors": ["countPlural"],
           "match": {
             "countPlural=0": "files",
             "countPlural=one": "file",
@@ -267,13 +257,8 @@
       "search": "Search notes...",
       "noteCount": [
         {
-          "declarations": [
-            "input count",
-            "local countPlural = count: plural"
-          ],
-          "selectors": [
-            "countPlural"
-          ],
+          "declarations": ["input count", "local countPlural = count: plural"],
+          "selectors": ["countPlural"],
           "match": {
             "countPlural=0": "Add notes",
             "countPlural=one": "# note",
@@ -337,13 +322,8 @@
     "mail": {
       "replies": [
         {
-          "declarations": [
-            "input count",
-            "local countPlural = count: plural"
-          ],
-          "selectors": [
-            "countPlural"
-          ],
+          "declarations": ["input count", "local countPlural = count: plural"],
+          "selectors": ["countPlural"],
           "match": {
             "countPlural=0": "replies",
             "countPlural=one": "# reply",
@@ -409,13 +389,8 @@
       "selectAllConversations": "Select all conversations",
       "conversationsSelected": [
         {
-          "declarations": [
-            "input count",
-            "local countPlural = count: plural"
-          ],
-          "selectors": [
-            "countPlural"
-          ],
+          "declarations": ["input count", "local countPlural = count: plural"],
+          "selectors": ["countPlural"],
           "match": {
             "countPlural=one": "# conversation on this page selected.",
             "countPlural=other": "# conversations on this page selected."
@@ -608,7 +583,10 @@
         "error": "Error",
         "notFoundDetails": "The requested page could not be found.",
         "somethingWentWrong": "Something went wrong!",
-        "seeConsole": "See the console for more information."
+        "seeConsole": "See the console for more information.",
+        "description": "An unexpected error occurred. You can try again, or head back to safety.",
+        "goHome": "Return to home",
+        "signOutAndRetry": "Log out and try again"
       }
     },
     "settings": {

@@ -1,11 +1,12 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 
-// utils.ts importe `../server-utils` (→ dormroom → cloudflare:workers) et
-// `hono/context-storage`. On neutralise ces DEUX feuilles lourdes pour charger le VRAI
-// module utils (fonctions pures testées en réel), sans réseau ni runtime Workers.
+// utils.ts importe `../connection-context` (→ env/Workers, module feuille extrait de
+// server-utils pour casser le cycle server-utils ↔ driver) et `hono/context-storage`.
+// On neutralise ces DEUX feuilles lourdes pour charger le VRAI module utils (fonctions
+// pures testées en réel), sans réseau ni runtime Workers.
 const getActiveConnection = vi.fn();
 const getZeroDB = vi.fn();
-vi.mock('../server-utils', () => ({ getActiveConnection, getZeroDB }));
+vi.mock('../connection-context', () => ({ getActiveConnection, getZeroDB }));
 const getContext = vi.fn(() => ({}));
 vi.mock('hono/context-storage', () => ({ getContext }));
 const loggerSpy = { info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn() };
@@ -72,7 +73,9 @@ describe('findHtmlBody — extrait le premier corps text/html', () => {
 
   it('aucun HTML → chaîne vide + log d’avertissement', () => {
     expect(findHtmlBody([{ mimeType: 'text/plain', body: { data: 'x' } }])).toBe('');
-    expect(loggerSpy.info).toHaveBeenCalledWith('⚠️ Driver: No HTML content found in message parts');
+    expect(loggerSpy.info).toHaveBeenCalledWith(
+      '⚠️ Driver: No HTML content found in message parts',
+    );
   });
 });
 

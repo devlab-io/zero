@@ -1,4 +1,4 @@
-import { getActiveConnection, getZeroDB } from '../server-utils';
+import { getActiveConnection, getZeroDB } from '../connection-context';
 import { getContext } from 'hono/context-storage';
 import type { gmail_v1 } from '@googleapis/gmail';
 import type { HonoContext } from '../../ctx';

@@ -1,10 +1,10 @@
-import { logger } from './logger';
 import { ReSummarizeThread, SummarizeMessage, SummarizeThread } from './brain.fallback.prompts';
 import { getSubscriptionFactory } from './factories/subscription-factory.registry';
 import { AiChatPrompt, StyledEmailAssistantSystemPrompt } from './prompts';
 import { resetConnection } from './server-utils';
 import { EPrompts, EProviders } from '../types';
-import { getPromptName } from '../pipelines';
+import { getPromptName } from './prompt-names';
+import { logger } from './logger';
 import { env } from '../env';
 
 export const enableBrainFunction = async (connection: { id: string; providerId: EProviders }) => {

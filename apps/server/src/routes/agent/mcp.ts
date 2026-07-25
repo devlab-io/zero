@@ -37,8 +37,8 @@ import {
 } from '../../lib/draft-outbox';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { getThread, getZeroAgent } from '../../lib/server-utils';
+import { composeEmail } from '../../services/compose-service';
 import { sanitizeMailContent } from '../../lib/mail-sanitize';
-import { composeEmail } from '../../trpc/routes/ai/compose';
 import { getCurrentDateContext } from '../../lib/prompts';
 import type { ThreadsResponse } from '@zero/types';
 import { invariant } from '../../lib/invariant';

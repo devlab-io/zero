@@ -1,10 +1,10 @@
-import { logger } from '../../lib/logger';
 import { getCurrentDateContext, GmailSearchAssistantSystemPrompt } from '../../lib/prompts';
 import { getThread, getZeroAgent } from '../../lib/server-utils';
 import type { IGetThreadResponse } from '../../lib/driver/types';
-import { composeEmail } from '../../trpc/routes/ai/compose';
+import { composeEmail } from '../../services/compose-service';
 import { perplexity } from '@ai-sdk/perplexity';
 import { colors } from '../../lib/prompts';
+import { logger } from '../../lib/logger';
 import { openai } from '@ai-sdk/openai';
 import { generateText, tool } from 'ai';
 import { Tools } from '../../types';

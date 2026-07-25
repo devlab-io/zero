@@ -1,9 +1,11 @@
 import type { IGetThreadResponse, IGetThreadsResponse } from './driver/types';
+import { getActiveConnection, getZeroDB } from './connection-context';
+// Réexport : `getActiveConnection` et `getZeroDB` vivent dans le module feuille
+// lib/connection-context.ts pour casser le cycle server-utils ↔ driver (ADR-less, cf. pitbull A4).
+export { getActiveConnection, getZeroDB };
 import { OutgoingMessageType } from '../routes/agent/types';
 import { defaultPageSize, FOLDERS } from './utils';
-import { getContext } from 'hono/context-storage';
 import { connection } from '../db/schema';
-import type { HonoContext } from '../ctx';
 import { createClient } from 'dormroom';
 import { createDriver } from './driver';
 import { TtlCache } from './ttl-cache';
@@ -41,12 +43,6 @@ const threadsListCache = new TtlCache<IGetThreadsResponse>(5_000, 200);
 // sendDoState wakes the ZeroAgent DO; broadcasting state at most once a minute
 // per connection is enough for a background refresh.
 const doStateThrottle = new TtlCache<true>(60_000, 500);
-
-export const getZeroDB = async (userId: string) => {
-  const stub = env.ZERO_DB.get(env.ZERO_DB.idFromName(userId));
-  const rpcTarget = await stub.setMetaData(userId);
-  return rpcTarget;
-};
 
 class MockExecutionContext implements ExecutionContext {
   async waitUntil(promise: Promise<unknown>) {
@@ -600,29 +596,6 @@ export const sendDoState = async (connectionId: string) => {
 export const getZeroSocketAgent = async (connectionId: string) => {
   const stub = env.ZERO_AGENT.get(env.ZERO_AGENT.idFromName(connectionId));
   return stub;
-};
-
-export const getActiveConnection = async () => {
-  const c = getContext<HonoContext>();
-  const { sessionUser, auth } = c.var;
-  if (!sessionUser) throw new Error('Session Not Found');
-
-  // Un seul RPC : la logique défaut-sinon-première vit dans le DO ZeroDB, qui
-  // mémorise le résultat en local (invalidé par ses propres écritures).
-  const stub = env.ZERO_DB.get(env.ZERO_DB.idFromName(sessionUser.id));
-  const activeConnection = await stub.getActiveConnection(sessionUser.id);
-  if (activeConnection) return activeConnection;
-
-  try {
-    if (auth) {
-      await auth.api.revokeSession({ headers: c.req.raw.headers });
-      await auth.api.signOut({ headers: c.req.raw.headers });
-    }
-  } catch (err) {
-    logger.warn(`[getActiveConnection] Session cleanup failed for user ${sessionUser.id}:`, err);
-  }
-  logger.error(`No connections found for user ${sessionUser.id}`);
-  throw new Error('No connections found for user');
 };
 
 export const connectionToDriver = (activeConnection: typeof connection.$inferSelect) => {

@@ -1,8 +1,8 @@
-import { logger } from '../lib/logger';
 import type { IGetThreadResponse } from '../lib/driver/types';
-import { composeEmail } from '../trpc/routes/ai/compose';
+import { composeEmail } from '../services/compose-service';
 import { type ParsedMessage } from '../types';
 import { connection } from '../db/schema';
+import { logger } from '../lib/logger';
 
 const dontReplyTo = new Set([
   'no-reply@gmail.com',
