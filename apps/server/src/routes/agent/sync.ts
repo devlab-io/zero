@@ -98,6 +98,10 @@ export async function syncThread(
 
       this.syncThreadsInProgress.set(threadId, true);
 
+      // Un echec d'ecriture DB ne doit plus etre avale : l'appelant (workflow, queue)
+      // comptait une synchro fantome comme reussie (pipelines.ts:401).
+      let databaseWriteFailed = false;
+
       const connection = this.connection;
       invariant(connection, 'driver connection is not set');
       const latest = yield* Effect.tryPromise(() =>
@@ -159,7 +163,12 @@ export async function syncThread(
         Effect.tap(() => Effect.sync(() => this.reloadFolder('inbox'))),
         Effect.catchAll((error) => {
           logger.error(`[syncThread] Failed to update database for ${threadId}:`, error);
-          return Effect.succeed(undefined);
+          return Effect.sync(() => {
+            databaseWriteFailed = true;
+            result.reason = `Database write failed: ${
+              error instanceof Error ? error.message : String(error)
+            }`;
+          });
         }),
       );
 
@@ -189,7 +198,7 @@ export async function syncThread(
 
       this.syncThreadsInProgress.delete(threadId);
 
-      result.success = true;
+      result.success = !databaseWriteFailed;
 
       logger.info(`[syncThread] Completed sync for thread: ${threadId}`, {
         success: result.success,

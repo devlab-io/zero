@@ -1,23 +1,23 @@
-import { logger } from './lib/logger';
 import {
   toAttachmentFiles,
   type SerializedAttachment,
   type AttachmentFile,
 } from './lib/attachments';
 import { SyncThreadsCoordinatorWorkflow } from './workflows/sync-threads-coordinator-workflow';
-import { WorkerEntrypoint } from 'cloudflare:workers';
-import { getZeroAgent } from './lib/server-utils';
+import { EProviders, type IEmailSendBatch, type IOutgoingMessage } from './types';
 import { SyncThreadsWorkflow } from './workflows/sync-threads-workflow';
 import { ShardRegistry, ZeroAgent, ZeroDriver } from './routes/agent';
 import { ThreadSyncWorker } from './routes/agent/sync-worker';
-import { EProviders, type IEmailSendBatch, type IOutgoingMessage } from './types';
 import { ThinkingMCP } from './lib/sequential-thinking';
+import { WorkerEntrypoint } from 'cloudflare:workers';
+import { captureServerException } from './lib/sentry';
+import { bootEnv, env, type ZeroEnv } from './env';
+import { getZeroAgent } from './lib/server-utils';
 import { enableBrainFunction } from './lib/brain';
 import { ZeroMCP } from './routes/agent/mcp';
 import { WorkflowRunner } from './pipelines';
 import { initTracing } from './lib/tracing';
-import { bootEnv, env, type ZeroEnv } from './env';
-import { captureServerException } from './lib/sentry';
+import { logger } from './lib/logger';
 import { createDb } from './db';
 import { app } from './routes';
 
@@ -49,7 +49,11 @@ export default class Entry extends WorkerEntrypoint<ZeroEnv> {
       case batch.queue.startsWith('subscribe-queue'): {
         logger.info('batch', batch);
         await Promise.all(
-          (batch.messages as unknown as Array<{ body: { connectionId: string; providerId: EProviders } }>).map(async (msg) => {
+          (
+            batch.messages as unknown as Array<{
+              body: { connectionId: string; providerId: EProviders };
+            }>
+          ).map(async (msg) => {
             const connectionId = msg.body.connectionId;
             const providerId = msg.body.providerId;
             try {
@@ -67,71 +71,82 @@ export default class Entry extends WorkerEntrypoint<ZeroEnv> {
       }
       case batch.queue.startsWith('send-email-queue'): {
         await Promise.all(
-          (batch.messages as Array<{ body: IEmailSendBatch }>).map(async (msg) => {
-            const { messageId, connectionId, mail } = msg.body;
+          (batch.messages as Array<{ body: IEmailSendBatch; retry?: () => void }>).map(
+            async (msg) => {
+              const { messageId, connectionId, mail } = msg.body;
 
-            const { pending_emails_status: statusKV, pending_emails_payload: payloadKV } = this
-              .env as { pending_emails_status: KVNamespace; pending_emails_payload: KVNamespace };
+              const { pending_emails_status: statusKV, pending_emails_payload: payloadKV } = this
+                .env as { pending_emails_status: KVNamespace; pending_emails_payload: KVNamespace };
 
-            const status = await statusKV.get(messageId);
-            if (status === 'cancelled') {
-              logger.info(`Email ${messageId} cancelled – skipping send.`);
-              return;
-            }
-
-            let payload = mail;
-            if (!payload) {
-              const stored = await payloadKV.get(messageId);
-              if (!stored) {
-                logger.error(`No payload found for scheduled email ${messageId}`);
+              const status = await statusKV.get(messageId);
+              if (status === 'cancelled') {
+                logger.info(`Email ${messageId} cancelled – skipping send.`);
                 return;
               }
-              payload = JSON.parse(stored);
-            }
 
-            const agent = await getZeroAgent(connectionId, this.ctx);
-            try {
-              const p = payload as Omit<IOutgoingMessage, 'attachments'> & { attachments?: (SerializedAttachment | AttachmentFile)[]; draftId?: string };
-              if (Array.isArray(p.attachments)) {
-                const attachments = p.attachments;
-
-                const processedAttachments = await Promise.all(
-                  attachments.map(
-                    async (att: SerializedAttachment | AttachmentFile, index: number) => {
-                      if ('arrayBuffer' in att && typeof att.arrayBuffer === 'function') {
-                        return { attachment: att as AttachmentFile, index };
-                      } else {
-                        const processed = toAttachmentFiles([att as SerializedAttachment]);
-                        return { attachment: processed[0], index };
-                      }
-                    },
-                  ),
-                );
-
-                const orderedAttachments = new Array<AttachmentFile>(attachments.length);
-                processedAttachments.forEach(({ attachment, index }) => {
-                  orderedAttachments[index] = attachment;
-                });
-
-                p.attachments = orderedAttachments;
+              let payload = mail;
+              if (!payload) {
+                const stored = await payloadKV.get(messageId);
+                if (!stored) {
+                  logger.error(`No payload found for scheduled email ${messageId}`);
+                  return;
+                }
+                payload = JSON.parse(stored);
               }
 
-              if (p.draftId) {
-                const { draftId, ...rest } = p;
-                await agent.stub.sendDraft(draftId, rest as IOutgoingMessage);
-              } else {
-                await agent.stub.create(p as IOutgoingMessage);
-              }
+              const agent = await getZeroAgent(connectionId, this.ctx);
+              try {
+                const p = payload as Omit<IOutgoingMessage, 'attachments'> & {
+                  attachments?: (SerializedAttachment | AttachmentFile)[];
+                  draftId?: string;
+                };
+                if (Array.isArray(p.attachments)) {
+                  const attachments = p.attachments;
 
-              await statusKV.delete(messageId);
-              await payloadKV.delete(messageId);
-              logger.info(`Email ${messageId} sent successfully`);
-            } catch (error) {
-              logger.error(`Failed to send scheduled email ${messageId}:`, error);
-              await statusKV.delete(messageId);
-              await payloadKV.delete(messageId);
-            }
-          }),
+                  const processedAttachments = await Promise.all(
+                    attachments.map(
+                      async (att: SerializedAttachment | AttachmentFile, index: number) => {
+                        if ('arrayBuffer' in att && typeof att.arrayBuffer === 'function') {
+                          return { attachment: att as AttachmentFile, index };
+                        } else {
+                          const processed = toAttachmentFiles([att as SerializedAttachment]);
+                          return { attachment: processed[0], index };
+                        }
+                      },
+                    ),
+                  );
+
+                  const orderedAttachments = Array.from({
+                    length: attachments.length,
+                  }) as AttachmentFile[];
+                  processedAttachments.forEach(({ attachment, index }) => {
+                    orderedAttachments[index] = attachment;
+                  });
+
+                  p.attachments = orderedAttachments;
+                }
+
+                if (p.draftId) {
+                  const { draftId, ...rest } = p;
+                  await agent.stub.sendDraft(draftId, rest as IOutgoingMessage);
+                } else {
+                  await agent.stub.create(p as IOutgoingMessage);
+                }
+
+                await statusKV.delete(messageId);
+                await payloadKV.delete(messageId);
+                logger.info(`Email ${messageId} sent successfully`);
+              } catch (error) {
+                // Le client a recu `queued: true` : detruire le payload ici perdait
+                // silencieusement le mail de l'utilisateur. On conserve la charge utile,
+                // on marque la tentative en echec (lisible par l'UI) et on laisse la
+                // queue redelivrer le message.
+                logger.error(`Failed to send scheduled email ${messageId}:`, error);
+                await statusKV.put(messageId, 'failed');
+                msg.retry?.();
+              }
+            },
+          ),
         );
         return;
       }
@@ -139,7 +154,12 @@ export default class Entry extends WorkerEntrypoint<ZeroEnv> {
         const tracer = initTracing();
 
         await Promise.all(
-          (batch.messages as unknown as Array<{ body: { providerId: string; historyId: string; subscriptionName: string } }>).map(async (msg) => {
+          (
+            batch.messages as unknown as Array<{
+              body: { providerId: string; historyId: string; subscriptionName: string };
+              retry?: () => void;
+            }>
+          ).map(async (msg) => {
             const span = tracer.startSpan('thread_queue_processing', {
               attributes: {
                 'provider.id': msg.body.providerId,
@@ -166,9 +186,12 @@ export default class Entry extends WorkerEntrypoint<ZeroEnv> {
                 'workflow.success': true,
               });
             } catch (error) {
+              // Sans retry explicite, l'exception etait avalee et le message ACKe :
+              // la notification Gmail etait perdue definitivement.
               logger.error('Error running workflow', error);
               span.recordException(error as Error);
               span.setStatus({ code: 2, message: (error as Error).message });
+              msg.retry?.();
             } finally {
               span.end();
             }

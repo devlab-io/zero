@@ -421,6 +421,10 @@ export const app = new Hono<HonoContext>()
           });
           span.recordException(error as Error);
           span.setStatus({ code: 2, message: (error as Error).message });
+          // Un 200 acquittait la notification Google alors que rien n'avait ete mis en
+          // queue : le fil n'etait jamais synchronise et la notification etait perdue.
+          // Un 5xx fait redelivrer Pub/Sub.
+          return c.json({ message: 'Failed to enqueue notification' }, { status: 503 });
         }
         return c.json({ message: 'OK' }, { status: 200 });
       }
