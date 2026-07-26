@@ -13,8 +13,10 @@
     "codegen": "paraglide-js compile --project ./project.inlang --outdir ./paraglide",
     "test": "vitest run",
     "machine-translate": "inlang machine translate --project project.inlang",
-    "deploy:staging": "wrangler deploy --env staging",
-    "deploy:production": "wrangler deploy --env production"
+    "deploy:staging": "node scripts/build-env.mjs staging && wrangler deploy --env staging",
+    "deploy:production": "node scripts/build-env.mjs production && wrangler deploy --env production",
+    "build:staging": "node scripts/build-env.mjs staging",
+    "build:production": "node scripts/build-env.mjs production"
   },
   "dependencies": {
     "@ai-sdk/perplexity": "1.1.9",

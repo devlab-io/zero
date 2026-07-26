@@ -115,15 +115,27 @@ jobs:
           dir /repo --config /repo/scripts/checks/gitleaks.toml
           --no-banner --redact --exit-code 1
 
-      - name: Build mail frontend
-        run: pnpm --filter @zero/mail build
+      # Construit avec les VITE_PUBLIC_* de staging LUES dans wrangler.jsonc, puis verifie
+      # que l'artefact porte bien l'URL attendue et aucune valeur de l'env local. Un
+      # `react-router build` nu lit apps/mail/.env (gitignore, localhost) et embarque
+      # localhost:8787 dans le bundle client — invisible jusqu'au navigateur.
+      - name: Build mail frontend (env staging, garde anti-URL locale)
+        run: pnpm --filter @zero/mail build:staging
 
-      - name: Bundle Worker without deploying (server)
+      - name: Bundle Worker without deploying (server, env local)
         run: >-
           pnpm --filter @zero/server exec wrangler deploy --dry-run --env local
           --outdir /tmp/zero-server-dry-run
 
-      - name: Bundle Worker without deploying (mail)
+      # La configuration de production doit etre bundlable a chaque commit, sinon la casse
+      # n'apparait qu'au moment de deployer. `deploy` sans --env echouait ainsi depuis
+      # longtemps sans que rien ne le signale (run pitbull, axe 10).
+      - name: Bundle Worker without deploying (server, env production)
         run: >-
-          pnpm --filter @zero/mail exec wrangler deploy --dry-run
+          pnpm --filter @zero/server exec wrangler deploy --dry-run --env production
+          --outdir /tmp/zero-server-dry-run-prod
+
+      - name: Bundle Worker without deploying (mail, env staging)
+        run: >-
+          pnpm --filter @zero/mail exec wrangler deploy --dry-run --env staging
           --outdir /tmp/zero-mail-dry-run
