@@ -58,12 +58,14 @@ export class GmailDrafts {
     return this.t.withErrorHandler(
       'getDraft',
       async () => {
-        const res = await this.t.execute((gmail) =>
-          gmail.users.drafts.get({
-            userId: 'me',
-            id: draftId,
-            format: 'full',
-          }),
+        const res = await this.t.execute(
+          (gmail) =>
+            gmail.users.drafts.get({
+              userId: 'me',
+              id: draftId,
+              format: 'full',
+            }),
+          { retry: true },
         );
 
         if (!res.data) {
@@ -87,13 +89,15 @@ export class GmailDrafts {
       'listDrafts',
       async () => {
         const { q: normalizedQ } = normalizeSearch('draft', q ?? '');
-        const res = await this.t.execute((gmail) =>
-          gmail.users.drafts.list({
-            userId: 'me',
-            q: normalizedQ ? normalizedQ : undefined,
-            maxResults,
-            pageToken: pageToken ? pageToken : undefined,
-          }),
+        const res = await this.t.execute(
+          (gmail) =>
+            gmail.users.drafts.list({
+              userId: 'me',
+              q: normalizedQ ? normalizedQ : undefined,
+              maxResults,
+              pageToken: pageToken ? pageToken : undefined,
+            }),
+          { retry: true },
         );
 
         const drafts = await Promise.all(
@@ -101,12 +105,14 @@ export class GmailDrafts {
             if (!draft.id) return null;
             const draftId = draft.id;
             try {
-              const msg = await this.t.execute((gmail) =>
-                gmail.users.drafts.get({
-                  userId: 'me',
-                  id: draftId,
-                  format: 'full',
-                }),
+              const msg = await this.t.execute(
+                (gmail) =>
+                  gmail.users.drafts.get({
+                    userId: 'me',
+                    id: draftId,
+                    format: 'full',
+                  }),
+                { retry: true },
               );
               const message = msg.data.message;
               if (!message) return null;

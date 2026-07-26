@@ -10,6 +10,7 @@ import {
   THINKING_MCP_PURPOSE,
 } from '../lib/internal-service-auth';
 import { authorizeAgentAccess, type AgentLobby } from '../lib/agent-authorization';
+import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import { oAuthDiscoveryMetadata } from 'better-auth/plugins';
 import { getZeroDB, verifyToken } from '../lib/server-utils';
 import { ThinkingMCP } from '../lib/sequential-thinking';
@@ -17,6 +18,7 @@ import { describeRequest, logger } from '../lib/logger';
 import { contextStorage } from 'hono/context-storage';
 import { createLocalJWKSet, jwtVerify } from 'jose';
 import { trpcServer } from '@hono/trpc-server';
+import { toHonoResponse } from '../lib/errors';
 import { agentsMiddleware } from 'hono-agents';
 import { invariant } from '../lib/invariant';
 import { initTracing } from '../lib/tracing';
@@ -263,13 +265,12 @@ export const api = new Hono<HonoContext>()
   .onError(async (err, c) => {
     if (err instanceof Response) return err;
     logger.error('Error in Hono handler:', err);
-    return c.json(
-      {
-        error: 'Internal Server Error',
-        message: err instanceof Error ? err.message : 'Unknown error',
-      },
-      500,
-    );
+    // Reponse normalisee par la taxonomie (lib/errors.ts) : code stable pour une erreur
+    // metier connue, 500 generique sinon. Le handler precedent reversait `err.message`
+    // dans le corps de CHAQUE 500 — une chaine de connexion ou un detail interne partait
+    // ainsi au client.
+    const { status, body } = toHonoResponse(err);
+    return c.json(body, status as ContentfulStatusCode);
   });
 
 export const app = new Hono<HonoContext>()
@@ -501,7 +502,9 @@ export const app = new Hono<HonoContext>()
         });
 
         if (!subHeader) {
-          logger.info('[GOOGLE] no subscription header', body);
+          // Le corps entier de la notification Pub/Sub partait en `info` : il porte
+          // l'adresse de la boite concernee. Retrograde en `debug`, borne a l'historyId.
+          logger.debug('[GOOGLE] no subscription header', { historyId: body.historyId });
           span.setAttributes({ 'error.type': 'missing_subscription_header' });
           return c.json({}, { status: 200 });
         }
@@ -512,7 +515,7 @@ export const app = new Hono<HonoContext>()
           // 403 et non 200 : un 200 acquittait la notification ET masquait le refus. Pub/Sub
           // ne redélivre pas sur 403 — c'est voulu, un jeton refusé ne devient pas valide en
           // le rejouant, et le refus reste visible dans les métriques de l'abonnement.
-          logger.info('[GOOGLE] invalid request', body);
+          logger.debug('[GOOGLE] invalid request', { historyId: body.historyId });
           span.setAttributes({ 'auth.status': 'invalid' });
           return c.json({ error: 'Forbidden' }, { status: 403 });
         }

@@ -2,7 +2,9 @@ import {
   requireSessionUser,
   rejectWithoutActiveConnection,
   classifyDriverFailure,
+  isAuthorizationFailure,
 } from './trpc-guards';
+import { AppError, resolveErrorCode } from './errors';
 import { describe, expect, it, vi } from 'vitest';
 import { TRPCError } from '@trpc/server';
 
@@ -39,23 +41,34 @@ describe('requireSessionUser', () => {
   });
 });
 
-describe('rejectWithoutActiveConnection', () => {
+/**
+ * P4 — cette fonction déclenchait un `signOut` sur TOUTE erreur remontée par
+ * `getActiveConnection()`, y compris un échec RPC transitoire du Durable Object ZeroDB.
+ * Une secousse d'infrastructure d'une seconde déconnectait donc tous les utilisateurs qui
+ * appelaient à cet instant, et détruisait réellement leur cookie : la panne devenait
+ * permanente jusqu'à une reconnexion manuelle. Le contrat est désormais : `signOut`
+ * UNIQUEMENT sur une cause d'autorisation avérée, 503 rejouable sur une panne d'infra.
+ */
+describe('rejectWithoutActiveConnection — cause d’autorisation', () => {
   it('signs the caller out and rejects with the cause message', async () => {
     const signOut = vi.fn(async () => {});
-    const error = await rejectWithoutActiveConnection(new Error('no connection row'), signOut);
+    const error = await rejectWithoutActiveConnection(
+      AppError.unauthorized('no connection row'),
+      signOut,
+    );
 
     expect(signOut).toHaveBeenCalledTimes(1);
     expect(error).toBeInstanceOf(TRPCError);
-    expect(error.code).toBe('BAD_REQUEST');
+    expect(error.code).toBe('UNAUTHORIZED');
     expect(error.message).toBe('no connection row');
   });
 
-  it('signs the caller out even when the cause is not an Error, with a generic message', async () => {
-    const signOut = vi.fn(async () => {});
-    const error = await rejectWithoutActiveConnection('weird throw', signOut);
-
-    expect(signOut).toHaveBeenCalledTimes(1);
-    expect(error.message).toBe('Failed to get active connection');
+  it('porte un code applicatif stable, lisible par le client sans relire le message', async () => {
+    const error = await rejectWithoutActiveConnection(
+      AppError.unauthorized('No connections found for user'),
+      vi.fn(async () => {}),
+    );
+    expect(resolveErrorCode(error)).toBe('UNAUTHORIZED');
   });
 
   it('awaits sign-out before resolving (caller cannot race ahead of it)', async () => {
@@ -65,10 +78,64 @@ describe('rejectWithoutActiveConnection', () => {
       order.push('signed-out');
     });
 
-    await rejectWithoutActiveConnection(new Error('x'), signOut);
+    await rejectWithoutActiveConnection(AppError.unauthorized('x'), signOut);
     order.push('rejected');
 
     expect(order).toEqual(['signed-out', 'rejected']);
+  });
+
+  it('reconnaît les deux causes réellement levées par getActiveConnection', () => {
+    expect(isAuthorizationFailure(AppError.unauthorized('Session Not Found'))).toBe(true);
+    expect(isAuthorizationFailure(AppError.unauthorized('No connections found for user'))).toBe(
+      true,
+    );
+    expect(isAuthorizationFailure(AppError.connectionExpired())).toBe(true);
+  });
+});
+
+describe('rejectWithoutActiveConnection — panne d’infrastructure (P4)', () => {
+  it('un échec RPC de Durable Object NE déconnecte PAS', async () => {
+    const signOut = vi.fn(async () => {});
+    const error = await rejectWithoutActiveConnection(
+      new Error('Network connection lost.'),
+      signOut,
+    );
+
+    expect(signOut).not.toHaveBeenCalled();
+    expect(error).toBeInstanceOf(TRPCError);
+  });
+
+  it('renvoie un 503 rejouable, pas un 4xx définitif', async () => {
+    const error = await rejectWithoutActiveConnection(
+      new Error('Durable Object reset because its code was updated.'),
+      vi.fn(async () => {}),
+    );
+
+    expect(error.code).toBe('SERVICE_UNAVAILABLE');
+    expect(resolveErrorCode(error)).toBe('UNAVAILABLE');
+  });
+
+  it('une valeur levée non-Error est traitée comme une panne, pas comme une preuve d’autorisation', async () => {
+    const signOut = vi.fn(async () => {});
+    const error = await rejectWithoutActiveConnection('weird throw', signOut);
+
+    expect(signOut).not.toHaveBeenCalled();
+    expect(error.code).toBe('SERVICE_UNAVAILABLE');
+  });
+
+  it('ne fuite pas le détail interne de la panne dans le message client', async () => {
+    const error = await rejectWithoutActiveConnection(
+      new Error('postgres://user:pw@internal-host/db unreachable'),
+      vi.fn(async () => {}),
+    );
+    expect(error.message).not.toContain('pw@internal-host');
+  });
+
+  it('isAuthorizationFailure refuse tout ce qui n’est pas une AppError d’autorisation', () => {
+    expect(isAuthorizationFailure(new Error('Session Not Found'))).toBe(false);
+    expect(isAuthorizationFailure(AppError.unavailable('rpc down'))).toBe(false);
+    expect(isAuthorizationFailure(AppError.internal('boom'))).toBe(false);
+    expect(isAuthorizationFailure(undefined)).toBe(false);
   });
 });
 
@@ -87,6 +154,9 @@ describe('classifyDriverFailure', () => {
       expect(failure).toBeInstanceOf(TRPCError);
       expect(failure?.code).toBe('BAD_REQUEST');
       expect(failure?.message).toBe('Required scopes missing');
+      // P7 — le client discriminait sur ce message exact, à travers le réseau. Le code
+      // stable le remplace ; le message reste inchangé pour l'affichage.
+      expect(resolveErrorCode(failure)).toBe('MISSING_SCOPES');
       expect(d.clearTokens).not.toHaveBeenCalled();
       expect(d.setReconnectHeader).not.toHaveBeenCalled();
     },
@@ -105,6 +175,7 @@ describe('classifyDriverFailure', () => {
     expect(failure).toBeInstanceOf(TRPCError);
     expect(failure?.code).toBe('UNAUTHORIZED');
     expect(failure?.message).toBe('Connection expired. Please reconnect.');
+    expect(resolveErrorCode(failure)).toBe('CONNECTION_EXPIRED');
     expect(d.clearTokens).toHaveBeenCalledTimes(1);
     expect(d.setReconnectHeader).toHaveBeenCalledWith('c1');
   });

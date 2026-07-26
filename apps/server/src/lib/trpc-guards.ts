@@ -11,6 +11,7 @@
 // exact same inputs/outputs the original inline code used. trpc.ts calls them and its
 // behavior is unchanged; only these functions are directly unit-tested.
 
+import { AppError, toTRPCError } from './errors';
 import { TRPCError } from '@trpc/server';
 
 export type SessionUser = { id: string; name: string; email: string };
@@ -28,20 +29,51 @@ export function requireSessionUser(sessionUser: SessionUser | undefined): Sessio
 }
 
 /**
- * Guard body of `activeConnectionProcedure`'s catch branch: a session with no resolvable
- * active mailbox connection is treated as invalid, not merely absent — the caller is
- * signed out (their cookie can no longer be trusted to imply a working connection) before
- * the request is rejected with BAD_REQUEST carrying the original error's message.
+ * `true` seulement si la cause PROUVE que la session ne peut plus porter de boîte valide.
+ * `lib/connection-context.ts` lève des `AppError` typées pour ces deux cas (pas de
+ * session, aucune connexion rattachée à l'utilisateur) ; tout le reste — un RPC de
+ * Durable Object qui échoue, un timeout, un isolate recyclé — est une panne
+ * d'infrastructure et ne dit RIEN de l'autorisation du porteur.
+ */
+export function isAuthorizationFailure(cause: unknown): boolean {
+  return (
+    cause instanceof AppError &&
+    (cause.code === 'UNAUTHORIZED' ||
+      cause.code === 'FORBIDDEN' ||
+      cause.code === 'CONNECTION_EXPIRED' ||
+      cause.code === 'NOT_FOUND')
+  );
+}
+
+/**
+ * Guard body of `activeConnectionProcedure`'s catch branch.
+ *
+ * Cette fonction déconnectait sur TOUTE erreur remontée par `getActiveConnection()` — y
+ * compris un échec RPC transitoire du Durable Object ZeroDB. Une secousse d'infrastructure
+ * d'une seconde éjectait donc de leur boîte tous les utilisateurs qui faisaient un appel à
+ * cet instant, et leur cookie était réellement détruit : la panne devenait permanente
+ * jusqu'à une reconnexion manuelle.
+ *
+ * Le `signOut` n'est désormais déclenché que sur une cause d'AUTORISATION avérée. Une
+ * panne d'infrastructure renvoie un 503 rejouable, session intacte.
  */
 export async function rejectWithoutActiveConnection(
   cause: unknown,
   signOut: () => Promise<unknown>,
 ): Promise<TRPCError> {
+  if (!isAuthorizationFailure(cause)) {
+    return toTRPCError(
+      AppError.unavailable('Mailbox connection temporarily unavailable', { cause }),
+    );
+  }
+
   await signOut();
-  return new TRPCError({
-    code: 'BAD_REQUEST',
-    message: cause instanceof Error ? cause.message : 'Failed to get active connection',
-  });
+  return toTRPCError(
+    AppError.unauthorized(
+      cause instanceof Error ? cause.message : 'Failed to get active connection',
+      { cause },
+    ),
+  );
 }
 
 const PERMISSION_ERROR_MARKERS = [
@@ -72,22 +104,20 @@ export async function classifyDriverFailure(
 ): Promise<TRPCError | undefined> {
   const message = error.message.toLowerCase();
 
+  // Ces deux comparaisons restent des tests de chaîne parce que la chaîne vient de
+  // GOOGLEAPIS, pas de nous : c'est le point de TRADUCTION d'un message tiers vers un code
+  // stable. À partir d'ici, et jusqu'au client, plus personne ne relit un message —
+  // `errorFormatter` publie `MISSING_SCOPES` / `CONNECTION_EXPIRED` sur le fil.
   if (PERMISSION_ERROR_MARKERS.some((marker) => message.includes(marker))) {
-    return new TRPCError({
-      code: 'BAD_REQUEST',
-      message: 'Required scopes missing',
-      cause: error,
-    });
+    return toTRPCError(AppError.missingScopes('Required scopes missing', { cause: error }));
   }
 
   if (message.includes('invalid_grant')) {
     await deps.clearTokens();
     deps.setReconnectHeader(connectionId);
-    return new TRPCError({
-      code: 'UNAUTHORIZED',
-      message: 'Connection expired. Please reconnect.',
-      cause: error,
-    });
+    return toTRPCError(
+      AppError.connectionExpired('Connection expired. Please reconnect.', { cause: error }),
+    );
   }
 
   return undefined;

@@ -12,6 +12,66 @@
 /** Codes de statut serveur transitoires côté Gmail (retry autorisé). */
 const TRANSIENT_5XX = new Set([500, 502, 503, 504]);
 
+/**
+ * 408 Request Timeout : la requête n'a jamais été traitée, la rejouer est sûr et c'est le
+ * seul 4xx dans ce cas. Il était classé NON rejouable, comme tous les 4xx.
+ */
+const TRANSIENT_4XX = new Set([408]);
+
+/**
+ * Codes d'erreur de TRANSPORT. Sur Workers, `fetch` échoue en `TypeError('fetch failed')`
+ * portant la cause réelle dans `err.cause` — jamais un statut HTTP. Le classifieur ne
+ * regardait QUE le statut : la panne la plus fréquente du chemin chaud (socket coupée,
+ * connexion réinitialisée, DNS momentané) sortait donc du backoff à la première tentative.
+ */
+const RETRYABLE_NETWORK_CODES = new Set([
+  'ECONNRESET',
+  'ECONNREFUSED',
+  'ECONNABORTED',
+  'EPIPE',
+  'ETIMEDOUT',
+  'ESOCKETTIMEDOUT',
+  'EAI_AGAIN',
+  'ENETUNREACH',
+  'ENETRESET',
+  'EHOSTUNREACH',
+  'UND_ERR_SOCKET',
+  'UND_ERR_CONNECT_TIMEOUT',
+  'UND_ERR_HEADERS_TIMEOUT',
+  'UND_ERR_BODY_TIMEOUT',
+]);
+
+/** Formulations de panne de transport, quand aucun code machine n'est porté. */
+const NETWORK_MESSAGE_PATTERNS: RegExp[] = [
+  /fetch failed/i,
+  /network connection lost/i,
+  /connection (?:was )?(?:reset|closed|refused|aborted)/i,
+  /socket hang ?up/i,
+  /request timed? out/i,
+  /terminated/i,
+];
+
+/** Profondeur maximale parcourue dans la chaîne `cause` (undici imbrique la vraie cause). */
+const MAX_CAUSE_DEPTH = 5;
+
+function hasNetworkSignature(err: unknown, depth = 0): boolean {
+  if (err === null || typeof err !== 'object' || depth > MAX_CAUSE_DEPTH) return false;
+  const e = err as { code?: unknown; message?: unknown; cause?: unknown };
+  if (typeof e.code === 'string' && RETRYABLE_NETWORK_CODES.has(e.code)) return true;
+  if (
+    typeof e.message === 'string' &&
+    NETWORK_MESSAGE_PATTERNS.some((p) => p.test(e.message as string))
+  ) {
+    return true;
+  }
+  return hasNetworkSignature(e.cause, depth + 1);
+}
+
+/** `true` si l'échec vient du transport, pas d'une réponse Gmail. */
+export function isNetworkError(err: unknown): boolean {
+  return hasNetworkSignature(err);
+}
+
 /** Raisons 403 signalant un dépassement de quota utilisateur (retryable). */
 const RATE_LIMIT_REASONS = new Set([
   'userRateLimitExceeded',
@@ -42,19 +102,27 @@ export function extractStatus(err: unknown): number | undefined {
 }
 
 /**
- * `true` si l'erreur est un rate-limit (429 ou 403 avec raison quota) ou un 5xx transitoire.
- * Miroir fidèle du classifieur historique `isRateLimit`, étendu aux 5xx.
+ * `true` si l'erreur est un rate-limit (429 ou 403 avec raison quota), un 5xx transitoire,
+ * un 408, ou une panne de TRANSPORT (`fetch failed`, ECONNRESET, socket coupée).
+ *
+ * Mesuré avant correction : `TypeError('fetch failed')`, `ECONNRESET` et le statut 408
+ * renvoyaient tous `false` — c'est-à-dire que le transitoire le plus fréquent sur Workers
+ * n'était jamais rejoué. Le classifieur ne lisait qu'un statut HTTP ; une panne de
+ * transport n'en porte aucun.
  */
 export function isRetryableGmailError(err: unknown): boolean {
   const status = extractStatus(err);
   if (status === 429) return true;
-  if (status !== undefined && TRANSIENT_5XX.has(status)) return true;
+  if (status !== undefined && (TRANSIENT_5XX.has(status) || TRANSIENT_4XX.has(status))) return true;
   if (status === 403) {
     const e = (err ?? {}) as GmailErrorShape;
     const errors = e.errors ?? e.response?.data?.error?.errors ?? [];
-    return errors.some((x) => RATE_LIMIT_REASONS.has(x.reason ?? ''));
+    if (errors.some((x) => RATE_LIMIT_REASONS.has(x.reason ?? ''))) return true;
   }
-  return false;
+  // Un 4xx déterministe (400/401/404…) ne doit jamais être requalifié en panne réseau à
+  // cause d'un mot de son libellé : le transport n'est consulté que sans statut serveur.
+  if (status !== undefined) return false;
+  return isNetworkError(err);
 }
 
 /**
@@ -160,7 +228,7 @@ export async function mapWithConcurrency<T, R>(
   limit: number,
   fn: (item: T, index: number) => Promise<R>,
 ): Promise<R[]> {
-  const results = new Array<R>(items.length);
+  const results = Array.from({ length: items.length }) as R[];
   const bound = Math.max(1, Math.min(limit, items.length || 1));
   let cursor = 0;
   const workers = Array.from({ length: bound }, async () => {

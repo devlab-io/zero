@@ -1,13 +1,14 @@
 import {
-  toAttachmentFiles,
-  type SerializedAttachment,
-  type AttachmentFile,
-} from './lib/attachments';
+  deliverScheduledEmail,
+  type ScheduledSendStore,
+  type StoredOutgoingMessage,
+} from './lib/scheduled-send';
 import { SyncThreadsCoordinatorWorkflow } from './workflows/sync-threads-coordinator-workflow';
-import { EProviders, type IEmailSendBatch, type IOutgoingMessage } from './types';
 import { SyncThreadsWorkflow } from './workflows/sync-threads-workflow';
 import { ShardRegistry, ZeroAgent, ZeroDriver } from './routes/agent';
+import { renewWatchSubscription } from './lib/subscribe-queue';
 import { ThreadSyncWorker } from './routes/agent/sync-worker';
+import { EProviders, type IEmailSendBatch } from './types';
 import { ThinkingMCP } from './lib/sequential-thinking';
 import { WorkerEntrypoint } from 'cloudflare:workers';
 import { captureServerException } from './lib/sentry';
@@ -45,108 +46,77 @@ export default class Entry extends WorkerEntrypoint<ZeroEnv> {
     batch: MessageBatch<unknown> | { queue: string; messages: Array<{ body: IEmailSendBatch }> },
   ) {
     bootEnv(this.env as unknown as Record<string, unknown>);
+    try {
+      await this.dispatchQueueBatch(batch);
+    } catch (err) {
+      // `queue()` n'etait couvert par aucune capture : une exception ici ne produisait
+      // qu'une ligne de log, jamais un evenement Sentry ni une alerte.
+      this.ctx.waitUntil(
+        captureServerException(err, this.env, { transaction: `queue ${batch.queue}` }),
+      );
+      throw err;
+    }
+  }
+
+  private async dispatchQueueBatch(
+    batch: MessageBatch<unknown> | { queue: string; messages: Array<{ body: IEmailSendBatch }> },
+  ) {
     switch (true) {
       case batch.queue.startsWith('subscribe-queue'): {
-        logger.info('batch', batch);
+        // Le lot entier etait journalise en `info` : il porte les identifiants de
+        // connexion de chaque destinataire. Retrograde en `debug`, borne au denombrement.
+        logger.debug('[SUBSCRIBE_QUEUE] batch received', { size: batch.messages.length });
         await Promise.all(
           (
             batch.messages as unknown as Array<{
               body: { connectionId: string; providerId: EProviders };
+              retry?: () => void;
             }>
-          ).map(async (msg) => {
-            const connectionId = msg.body.connectionId;
-            const providerId = msg.body.providerId;
-            try {
-              await enableBrainFunction({ id: connectionId, providerId });
-            } catch (error) {
-              logger.error(
-                `Failed to enable brain function for connection ${connectionId}:`,
-                error,
-              );
-            }
-          }),
+          ).map((msg) =>
+            renewWatchSubscription(
+              { connectionId: msg.body.connectionId, providerId: msg.body.providerId },
+              {
+                enable: ({ id, providerId }) =>
+                  enableBrainFunction({ id, providerId: providerId as EProviders }),
+                retry: () => msg.retry?.(),
+                logger,
+              },
+            ),
+          ),
         );
         logger.info('[SUBSCRIBE_QUEUE] batch done');
         return;
       }
       case batch.queue.startsWith('send-email-queue'): {
+        const { pending_emails_status: statusKV, pending_emails_payload: payloadKV } = this.env as {
+          pending_emails_status: ScheduledSendStore;
+          pending_emails_payload: ScheduledSendStore;
+        };
         await Promise.all(
-          (batch.messages as Array<{ body: IEmailSendBatch; retry?: () => void }>).map(
-            async (msg) => {
-              const { messageId, connectionId, mail } = msg.body;
-
-              const { pending_emails_status: statusKV, pending_emails_payload: payloadKV } = this
-                .env as { pending_emails_status: KVNamespace; pending_emails_payload: KVNamespace };
-
-              const status = await statusKV.get(messageId);
-              if (status === 'cancelled') {
-                logger.info(`Email ${messageId} cancelled – skipping send.`);
-                return;
-              }
-
-              let payload = mail;
-              if (!payload) {
-                const stored = await payloadKV.get(messageId);
-                if (!stored) {
-                  logger.error(`No payload found for scheduled email ${messageId}`);
-                  return;
-                }
-                payload = JSON.parse(stored);
-              }
-
-              const agent = await getZeroAgent(connectionId, this.ctx);
-              try {
-                const p = payload as Omit<IOutgoingMessage, 'attachments'> & {
-                  attachments?: (SerializedAttachment | AttachmentFile)[];
-                  draftId?: string;
-                };
-                if (Array.isArray(p.attachments)) {
-                  const attachments = p.attachments;
-
-                  const processedAttachments = await Promise.all(
-                    attachments.map(
-                      async (att: SerializedAttachment | AttachmentFile, index: number) => {
-                        if ('arrayBuffer' in att && typeof att.arrayBuffer === 'function') {
-                          return { attachment: att as AttachmentFile, index };
-                        } else {
-                          const processed = toAttachmentFiles([att as SerializedAttachment]);
-                          return { attachment: processed[0], index };
-                        }
-                      },
-                    ),
-                  );
-
-                  const orderedAttachments = Array.from({
-                    length: attachments.length,
-                  }) as AttachmentFile[];
-                  processedAttachments.forEach(({ attachment, index }) => {
-                    orderedAttachments[index] = attachment;
-                  });
-
-                  p.attachments = orderedAttachments;
-                }
-
-                if (p.draftId) {
-                  const { draftId, ...rest } = p;
-                  await agent.stub.sendDraft(draftId, rest as IOutgoingMessage);
-                } else {
-                  await agent.stub.create(p as IOutgoingMessage);
-                }
-
-                await statusKV.delete(messageId);
-                await payloadKV.delete(messageId);
-                logger.info(`Email ${messageId} sent successfully`);
-              } catch (error) {
-                // Le client a recu `queued: true` : detruire le payload ici perdait
-                // silencieusement le mail de l'utilisateur. On conserve la charge utile,
-                // on marque la tentative en echec (lisible par l'UI) et on laisse la
-                // queue redelivrer le message.
-                logger.error(`Failed to send scheduled email ${messageId}:`, error);
-                await statusKV.put(messageId, 'failed');
-                msg.retry?.();
-              }
-            },
-          ),
+          (batch.messages as Array<{ body: IEmailSendBatch; retry?: () => void }>).map((msg) => {
+            const { messageId, connectionId, mail } = msg.body;
+            return deliverScheduledEmail(
+              { messageId, connectionId, mail: mail as StoredOutgoingMessage | undefined },
+              {
+                statusKV,
+                payloadKV,
+                send: async (targetConnectionId, payload) => {
+                  const agent = await getZeroAgent(targetConnectionId, this.ctx);
+                  if (payload.draftId) {
+                    const { draftId, ...rest } = payload;
+                    await agent.stub.sendDraft(
+                      draftId,
+                      rest as Parameters<typeof agent.stub.sendDraft>[1],
+                    );
+                  } else {
+                    await agent.stub.create(payload as Parameters<typeof agent.stub.create>[0]);
+                  }
+                },
+                retry: () => msg.retry?.(),
+                logger,
+              },
+            );
+          }),
         );
         return;
       }
@@ -180,7 +150,8 @@ export default class Entry extends WorkerEntrypoint<ZeroEnv> {
                 historyId,
                 subscriptionName,
               });
-              logger.info('[THREAD_QUEUE] result', result);
+              // Sortie complete du workflow (compteurs + identifiants de fil) : `debug`.
+              logger.debug('[THREAD_QUEUE] result', result);
               span.setAttributes({
                 'workflow.result': typeof result === 'string' ? result : JSON.stringify(result),
                 'workflow.success': true,
@@ -205,9 +176,14 @@ export default class Entry extends WorkerEntrypoint<ZeroEnv> {
     bootEnv(this.env as unknown as Record<string, unknown>);
     logger.info('Running scheduled tasks...');
 
-    await this.processScheduledEmails();
-
-    await this.processExpiredSubscriptions();
+    try {
+      await this.processScheduledEmails();
+      await this.processExpiredSubscriptions();
+    } catch (err) {
+      // Meme angle mort que `queue()` : les deux crons s'executaient hors de toute capture.
+      this.ctx.waitUntil(captureServerException(err, this.env, { transaction: 'scheduled' }));
+      throw err;
+    }
   }
 
   private async processScheduledEmails() {
@@ -272,7 +248,7 @@ export default class Entry extends WorkerEntrypoint<ZeroEnv> {
         and(isNotNull(fields.accessToken), isNotNull(fields.refreshToken)),
     });
     await conn.end();
-    logger.info('[SCHEDULED] allAccounts', allAccounts.length);
+    logger.debug('[SCHEDULED] allAccounts', allAccounts.length);
     const now = new Date();
     const fiveDaysAgo = new Date(now.getTime() - 5 * 24 * 60 * 60 * 1000);
 
@@ -350,8 +326,10 @@ export default class Entry extends WorkerEntrypoint<ZeroEnv> {
       );
     }
 
+    // `allAccounts.keys` est la METHODE Array.prototype.keys : `.length` y vaut son arite,
+    // soit 0. Le cron journalisait donc invariablement « Processed 0 accounts ».
     logger.info(
-      `[SCHEDULED] Processed ${allAccounts.keys.length} accounts, found ${expiredSubscriptions.length} expired subscriptions`,
+      `[SCHEDULED] Processed ${allAccounts.length} accounts, found ${expiredSubscriptions.length} expired subscriptions`,
     );
   }
 }

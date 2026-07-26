@@ -10,6 +10,7 @@ import { connection } from '../db/schema';
 import { createClient } from 'dormroom';
 import { createDriver } from './driver';
 import { TtlCache } from './ttl-cache';
+import { AppError } from './errors';
 import { logger } from './logger';
 import { eq } from 'drizzle-orm';
 import { createDb } from '../db';
@@ -601,7 +602,10 @@ export const getZeroSocketAgent = async (connectionId: string) => {
 
 export const connectionToDriver = (activeConnection: typeof connection.$inferSelect) => {
   if (!activeConnection.accessToken || !activeConnection.refreshToken) {
-    throw new Error(`Invalid connection ${JSON.stringify(activeConnection?.id)}`);
+    // Une connexion sans jeton n'est pas récupérable par un rejeu : c'est un octroi à
+    // refaire. Le code stable remplace le `err.message.includes('Invalid connection')`
+    // que le client comparait à travers le réseau.
+    throw AppError.connectionExpired(`Invalid connection ${JSON.stringify(activeConnection?.id)}`);
   }
 
   return createDriver(activeConnection.providerId, {

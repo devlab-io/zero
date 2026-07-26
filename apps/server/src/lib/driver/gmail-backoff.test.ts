@@ -1,14 +1,15 @@
-import { describe, expect, it } from 'vitest';
 import {
   computeBackoffDelayMs,
   DEFAULT_BACKOFF,
   extractStatus,
+  isNetworkError,
   isRetryableGmailError,
   mapWithConcurrency,
   parseRetryAfterMs,
   withGmailBackoff,
   type BackoffDeps,
 } from './gmail-backoff';
+import { describe, expect, it } from 'vitest';
 
 // Deps déterministes : aucun timer réel, random figé → schedule testable.
 const fixedDeps = (random = 0.5): { deps: BackoffDeps; delays: number[] } => {
@@ -30,9 +31,9 @@ describe('isRetryableGmailError', () => {
   });
 
   it('retries on 403 only with a rate-limit reason', () => {
-    expect(isRetryableGmailError({ code: 403, errors: [{ reason: 'userRateLimitExceeded' }] })).toBe(
-      true,
-    );
+    expect(
+      isRetryableGmailError({ code: 403, errors: [{ reason: 'userRateLimitExceeded' }] }),
+    ).toBe(true);
     expect(isRetryableGmailError({ code: 403, errors: [{ reason: 'forbidden' }] })).toBe(false);
     expect(isRetryableGmailError({ code: 403 })).toBe(false);
   });
@@ -200,5 +201,85 @@ describe('mapWithConcurrency', () => {
 
   it('handles an empty list', async () => {
     expect(await mapWithConcurrency([], 4, async () => 1)).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// P9 — le backoff ne couvrait pas les erreurs RÉSEAU, le transitoire le plus fréquent
+// sur Workers. Mesuré avant correction : `TypeError('fetch failed')`, `ECONNRESET` et
+// le statut 408 renvoyaient tous `false`.
+// ---------------------------------------------------------------------------
+
+describe('isRetryableGmailError — pannes de transport (P9)', () => {
+  it("classe `TypeError('fetch failed')` comme rejouable", () => {
+    expect(isRetryableGmailError(new TypeError('fetch failed'))).toBe(true);
+  });
+
+  it('classe ECONNRESET comme rejouable, y compris via la chaîne `cause` d’undici', () => {
+    expect(
+      isRetryableGmailError(Object.assign(new Error('read ECONNRESET'), { code: 'ECONNRESET' })),
+    ).toBe(true);
+    expect(
+      isRetryableGmailError(
+        Object.assign(new TypeError('fetch failed'), {
+          cause: Object.assign(new Error('boom'), { code: 'ECONNRESET' }),
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it('classe le 408 comme rejouable (la requête n’a jamais été traitée)', () => {
+    expect(isRetryableGmailError({ code: 408 })).toBe(true);
+    expect(isRetryableGmailError({ response: { status: 408 } })).toBe(true);
+  });
+
+  it('couvre les autres codes de transport courants', () => {
+    for (const code of ['ETIMEDOUT', 'ECONNREFUSED', 'EPIPE', 'EAI_AGAIN', 'UND_ERR_SOCKET']) {
+      expect(isRetryableGmailError(Object.assign(new Error('x'), { code }))).toBe(true);
+    }
+    expect(isRetryableGmailError(new Error('Network connection lost.'))).toBe(true);
+    expect(isRetryableGmailError(new Error('socket hang up'))).toBe(true);
+  });
+
+  it('ne requalifie PAS un 4xx déterministe en panne réseau à cause de son libellé', () => {
+    expect(isRetryableGmailError({ code: 400, message: 'fetch failed' })).toBe(false);
+    expect(isRetryableGmailError({ code: 404, message: 'connection reset' })).toBe(false);
+    expect(isRetryableGmailError({ code: 401 })).toBe(false);
+    expect(isRetryableGmailError({ code: 403 })).toBe(false);
+  });
+
+  it('laisse intacte la classification historique', () => {
+    expect(isRetryableGmailError({ code: 429 })).toBe(true);
+    expect(isRetryableGmailError({ code: 503 })).toBe(true);
+    expect(
+      isRetryableGmailError({ code: 403, errors: [{ reason: 'userRateLimitExceeded' }] }),
+    ).toBe(true);
+    expect(isRetryableGmailError({ code: 403, errors: [{ reason: 'forbidden' }] })).toBe(false);
+    expect(isRetryableGmailError(new Error('malformed request'))).toBe(false);
+    expect(isRetryableGmailError(undefined)).toBe(false);
+  });
+
+  it('isNetworkError ne remonte pas une chaîne `cause` infinie', () => {
+    const loop: { cause?: unknown; message: string } = { message: 'x' };
+    loop.cause = loop;
+    expect(() => isNetworkError(loop)).not.toThrow();
+    expect(isNetworkError(loop)).toBe(false);
+  });
+
+  it('une panne réseau est effectivement REJOUÉE par withGmailBackoff', async () => {
+    const { deps, delays } = fixedDeps();
+    let calls = 0;
+    const value = await withGmailBackoff(
+      async () => {
+        calls += 1;
+        if (calls < 3) throw new TypeError('fetch failed');
+        return 'ok';
+      },
+      DEFAULT_BACKOFF,
+      deps,
+    );
+    expect(value).toBe('ok');
+    expect(calls).toBe(3);
+    expect(delays).toHaveLength(2);
   });
 });

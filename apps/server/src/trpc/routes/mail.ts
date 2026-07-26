@@ -8,6 +8,11 @@ import {
   deleteAllSpam,
   reSyncThread,
 } from '../../lib/server-utils';
+import {
+  cancelTtlSeconds,
+  MAX_QUEUE_DELAY_SECONDS,
+  scheduleTtlSeconds,
+} from '../../lib/scheduled-send';
 import { IGetThreadResponseSchema, type IGetThreadsResponse } from '../../lib/driver/types';
 import { makeBulkLabelProcedure, makeToggleLabelProcedure } from './mail-label-procedures';
 import type { DeleteAllSpamResponse, IEmailSendBatch } from '../../types';
@@ -361,8 +366,13 @@ export const mailRouter = router({
         }
 
         const rawDelaySeconds = Math.floor((targetTime - Date.now()) / 1000);
-        const maxQueueDelay = 43200; // 12 hours
-        const isLongTerm = rawDelaySeconds > maxQueueDelay;
+        const isLongTerm = rawDelaySeconds > MAX_QUEUE_DELAY_SECONDS;
+
+        // UNE seule duree de vie pour les trois clefs. Le corps etait ecrit avec 24 h fixes
+        // alors que la planification pouvait courir jusqu'a un an : tout mail programme
+        // au-dela de ~24 h perdait son contenu AVANT son echeance, et le cron ne remet en
+        // file que `{messageId, connectionId, sendAt}` — jamais le corps.
+        const ttlSeconds = scheduleTtlSeconds(rawDelaySeconds);
 
         const {
           pending_emails_status: statusKV,
@@ -373,7 +383,7 @@ export const mailRouter = router({
 
         try {
           await statusKV.put(messageId, 'pending', {
-            expirationTtl: 60 * 60 * 24,
+            expirationTtl: ttlSeconds,
           });
         } catch (error) {
           logger.error(`Failed to write pending status to KV for message ${messageId}`, error);
@@ -389,7 +399,7 @@ export const mailRouter = router({
 
         try {
           await payloadKV.put(messageId, JSON.stringify(mailPayload), {
-            expirationTtl: 60 * 60 * 24,
+            expirationTtl: ttlSeconds,
           });
         } catch (error) {
           logger.error(`Failed to write email payload to KV for message ${messageId}`, error);
@@ -405,7 +415,7 @@ export const mailRouter = router({
                 connectionId: activeConnection.id,
                 sendAt: targetTime,
               }),
-              { expirationTtl: Math.min(Math.ceil(rawDelaySeconds + 3600), 31556952) },
+              { expirationTtl: ttlSeconds },
             );
           } catch (error) {
             logger.error(
@@ -471,16 +481,18 @@ export const mailRouter = router({
         scheduled_emails: scheduledKV,
       } = env;
 
+      let scheduledSendAt: number | undefined;
       const scheduledData = await scheduledKV.get(messageId);
       if (scheduledData) {
         try {
-          const { connectionId } = JSON.parse(scheduledData);
+          const { connectionId, sendAt } = JSON.parse(scheduledData);
           if (connectionId !== activeConnection.id) {
             return {
               success: false,
               error: "Unauthorized: Cannot cancel another user's scheduled email",
             } as const;
           }
+          scheduledSendAt = typeof sendAt === 'number' ? sendAt : undefined;
         } catch (error) {
           logger.error('Failed to parse scheduled data for ownership verification:', error);
           return { success: false, error: 'Invalid scheduled email data' } as const;
@@ -503,8 +515,11 @@ export const mailRouter = router({
         }
       }
 
+      // La marque d'annulation vivait 1 h. Au-dela, elle expirait AVANT l'echeance et le
+      // consommateur, ne voyant plus `cancelled`, envoyait un mail que l'utilisateur avait
+      // annule. Elle couvre desormais l'echeance connue (ou le delai de file maximal).
       await statusKV.put(messageId, 'cancelled', {
-        expirationTtl: 60 * 60,
+        expirationTtl: cancelTtlSeconds(scheduledSendAt, Date.now()),
       });
 
       await payloadKV.delete(messageId);

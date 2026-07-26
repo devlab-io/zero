@@ -25,7 +25,9 @@ function makeKV() {
   return {
     map,
     get: vi.fn(async (k: string) => map.get(k) ?? null),
-    put: vi.fn(async (k: string, v: string) => void map.set(k, v)),
+    put: vi.fn(
+      async (k: string, v: string, _options?: { expirationTtl?: number }) => void map.set(k, v),
+    ),
     delete: vi.fn(async (k: string) => void map.delete(k)),
   };
 }
@@ -387,6 +389,29 @@ describe('mail router — send (immédiat / planifié / erreurs)', () => {
     expect(r).toMatchObject({ success: true, scheduled: true });
   });
 
+  // P1 — perte de donnees garantie. Le corps etait ecrit avec `expirationTtl: 60*60*24`
+  // alors que la planification courait jusqu'a un an : tout mail programme au-dela de
+  // ~24 h perdait son contenu AVANT son echeance, et le cron ne remet en file que
+  // `{messageId, connectionId, sendAt}`. Les trois clefs partagent desormais UNE duree
+  // de vie, calee sur l'echeance.
+  it('planification a 7 jours → statut, corps et planification portent le MEME TTL, > 24 h', async () => {
+    const sevenDays = 7 * 24 * 3600;
+    const far = new Date(Date.now() + sevenDays * 1000).toISOString();
+    await call('send', { ...base, scheduleAt: far });
+
+    const ttlOf = (kv: ReturnType<typeof makeKV>) =>
+      (kv.put.mock.calls.at(-1)?.[2] as { expirationTtl?: number } | undefined)?.expirationTtl;
+
+    const statusTtl = ttlOf(KV.pending_emails_status);
+    const payloadTtl = ttlOf(KV.pending_emails_payload);
+    const scheduleTtl = ttlOf(KV.scheduled_emails);
+
+    expect(payloadTtl).toBe(statusTtl);
+    expect(payloadTtl).toBe(scheduleTtl);
+    expect(payloadTtl).toBeGreaterThan(sevenDays);
+    expect(payloadTtl).toBeGreaterThan(60 * 60 * 24);
+  });
+
   // `headers` était un `z.record(z.string())` nu : le client posait n'importe quel en-tête,
   // avec n'importe quelle valeur, et lib/driver/google-parse.ts le reversait dans
   // `msg.setHeader` — que mimetext n'échappe pas. La frontière REFUSE désormais l'appel.
@@ -440,6 +465,31 @@ describe('mail router — unsend (ownership)', () => {
     );
     expect(KV.pending_emails_payload.delete).toHaveBeenCalledWith('mid');
     expect(KV.scheduled_emails.delete).toHaveBeenCalledWith('mid');
+  });
+
+  // Miroir du meme defaut de TTL : la marque `cancelled` vivait 1 h. Sur un mail planifie
+  // a plusieurs jours elle expirait avant l'echeance, le consommateur ne la voyait plus,
+  // et un mail annule par l'utilisateur partait quand meme.
+  it('la marque `cancelled` survit a l’echeance planifiee', async () => {
+    const sendAt = Date.now() + 5 * 24 * 3600 * 1000;
+    KV.scheduled_emails.map.set('mid-far', JSON.stringify({ connectionId: 'conn-1', sendAt }));
+    await call('unsend', { messageId: 'mid-far' });
+
+    const ttl = (
+      KV.pending_emails_status.put.mock.calls.at(-1)?.[2] as { expirationTtl?: number } | undefined
+    )?.expirationTtl;
+    expect(ttl).toBeGreaterThan(5 * 24 * 3600);
+    expect(ttl).toBeGreaterThan(60 * 60);
+  });
+
+  it('sans planification connue, la marque couvre le delai de file maximal (12 h)', async () => {
+    KV.pending_emails_payload.map.set('mid-q', JSON.stringify({ connectionId: 'conn-1' }));
+    await call('unsend', { messageId: 'mid-q' });
+
+    const ttl = (
+      KV.pending_emails_status.put.mock.calls.at(-1)?.[2] as { expirationTtl?: number } | undefined
+    )?.expirationTtl;
+    expect(ttl).toBeGreaterThan(12 * 3600);
   });
 });
 

@@ -8,6 +8,7 @@ import { Ratelimit, type RatelimitConfig } from '@upstash/ratelimit';
 import { createLoggingMiddleware } from '../lib/trpc-logging';
 import { getConnInfo } from 'hono/cloudflare-workers';
 import { initTRPC, TRPCError } from '@trpc/server';
+import { resolveErrorCode } from '../lib/errors';
 import { env } from 'cloudflare:workers';
 import { logger } from '../lib/logger';
 import type { ZeroEnv } from '../env';
@@ -52,7 +53,17 @@ type TrpcContext = {
   sessionUser?: BoundarySessionUser;
 };
 
-const t = initTRPC.context<TrpcContext>().create({ transformer: superjson });
+// `errorFormatter` publie un CODE STABLE sur chaque erreur tRPC (lib/errors.ts). Sans lui,
+// le client n'avait d'autre choix que de comparer des messages à travers le réseau
+// (`err.message === 'Required scopes missing'`), ce qui liait le comportement d'auth de
+// l'UI au libellé exact d'une chaîne côté serveur. `data.appCode` est désormais la seule
+// chose que le client relit — cf. apps/mail/providers/query-provider.tsx.
+const t = initTRPC.context<TrpcContext>().create({
+  transformer: superjson,
+  errorFormatter({ shape, error }) {
+    return { ...shape, data: { ...shape.data, appCode: resolveErrorCode(error) } };
+  },
+});
 
 const loggingMiddleware = createLoggingMiddleware();
 

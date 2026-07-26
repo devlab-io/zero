@@ -33,18 +33,21 @@ export class GmailLabels {
         type LabelCount = { label: string; count: number };
 
         const getUserLabelsEffect = Effect.tryPromise({
-          try: () => this.t.execute((gmail) => gmail.users.labels.list({ userId: 'me' })),
+          try: () =>
+            this.t.execute((gmail) => gmail.users.labels.list({ userId: 'me' }), { retry: true }),
           catch: (error) => ({ _tag: 'LabelListFailed' as const, error }),
         });
 
         const getArchiveCountEffect = Effect.tryPromise({
           try: () =>
-            this.t.execute((gmail) =>
-              gmail.users.threads.list({
-                userId: 'me',
-                q: 'in:archive',
-                maxResults: 1,
-              }),
+            this.t.execute(
+              (gmail) =>
+                gmail.users.threads.list({
+                  userId: 'me',
+                  q: 'in:archive',
+                  maxResults: 1,
+                }),
+              { retry: true },
             ),
           catch: (error) => ({ _tag: 'ArchiveFetchFailed' as const, error }),
         });
@@ -52,11 +55,13 @@ export class GmailLabels {
         const processLabelEffect = (label: gmail_v1.Schema$Label) =>
           Effect.tryPromise({
             try: () =>
-              this.t.execute((gmail) =>
-                gmail.users.labels.get({
-                  userId: 'me',
-                  id: label.id ?? undefined,
-                }),
+              this.t.execute(
+                (gmail) =>
+                  gmail.users.labels.get({
+                    userId: 'me',
+                    id: label.id ?? undefined,
+                  }),
+                { retry: true },
               ),
             catch: (error) => ({ _tag: 'LabelFetchFailed' as const, error, labelId: label.id }),
           }).pipe(
@@ -146,10 +151,12 @@ export class GmailLabels {
   }
 
   public async getUserLabels() {
-    const res = await this.t.execute((gmail) =>
-      gmail.users.labels.list({
-        userId: 'me',
-      }),
+    const res = await this.t.execute(
+      (gmail) =>
+        gmail.users.labels.list({
+          userId: 'me',
+        }),
+      { retry: true },
     );
     // wtf google, null values for EVERYTHING?
     return (
@@ -166,11 +173,13 @@ export class GmailLabels {
   }
 
   public async getLabel(labelId: string): Promise<Label> {
-    const res = await this.t.execute((gmail) =>
-      gmail.users.labels.get({
-        userId: 'me',
-        id: labelId,
-      }),
+    const res = await this.t.execute(
+      (gmail) =>
+        gmail.users.labels.get({
+          userId: 'me',
+          id: labelId,
+        }),
+      { retry: true },
     );
     return {
       id: labelId,

@@ -9,6 +9,7 @@ import { readRetryDelay, shouldRetryRead } from '@/lib/query-retry';
 import { useEffect, useMemo, type PropsWithChildren } from 'react';
 import { createTRPCContext } from '@trpc/tanstack-react-query';
 import { createTRPCClient, httpBatchLink } from '@trpc/client';
+import { requiresReauthorization } from '@/lib/error-codes';
 import { signOut, useSession } from '@/lib/auth-client';
 import type { AppRouter } from '@zero/server/trpc';
 import { CACHE_BURST_KEY } from '@/lib/constants';
@@ -66,10 +67,10 @@ export const makeQueryClient = (cacheOwner: string) =>
       onError: (err, { meta }) => {
         if (meta && meta.noGlobalError === true) return;
         if (meta && typeof meta.customError === 'string') log.error(meta.customError);
-        else if (
-          err.message === 'Required scopes missing' ||
-          err.message.includes('Invalid connection')
-        ) {
+        // Discrimination sur le CODE stable publié par le serveur, plus sur le texte du
+        // message : un libellé reformulé cassait la reconnexion, et une erreur non liée
+        // portant la même sous-chaîne déconnectait à tort. Cf. @/lib/error-codes.
+        else if (requiresReauthorization(err)) {
           signOut({
             fetchOptions: {
               onSuccess: () => {

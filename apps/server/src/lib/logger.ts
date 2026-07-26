@@ -12,6 +12,50 @@
 
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
+// --- Seuil de niveau (A5) ---------------------------------------------------------
+// Le logger n'avait AUCUN filtre côté serveur : 239 `logger.info` + 27 `logger.debug`
+// partaient en production, à chaque requête, vers `wrangler tail` et logpush — un stockage
+// tiers durable et facturé. Le seuil ci-dessous coupe à la source. Il est CONFIGURÉ par
+// `env.ts` (`bootEnv`) plutôt que lu ici : ce module reste sans dépendance, donc testable
+// en Node et importable par n'importe quelle feuille, sans tirer `cloudflare:workers`.
+
+const LEVEL_ORDER: Record<LogLevel, number> = { debug: 10, info: 20, warn: 30, error: 40 };
+
+/** Défaut prudent avant configuration : on ne perd rien tant que l'env n'a pas parlé. */
+let threshold: LogLevel = 'debug';
+
+export function isLogLevel(value: unknown): value is LogLevel {
+  return typeof value === 'string' && value in LEVEL_ORDER;
+}
+
+/**
+ * Résout le seuil : `LOG_LEVEL` explicite s'il est valide, sinon `info` en production et
+ * `debug` partout ailleurs (local, staging — où l'on veut encore voir le détail).
+ */
+export function resolveLogLevel(raw: Record<string, unknown>): LogLevel {
+  const explicit = typeof raw.LOG_LEVEL === 'string' ? raw.LOG_LEVEL.trim().toLowerCase() : '';
+  if (isLogLevel(explicit)) return explicit;
+  return raw.NODE_ENV === 'production' ? 'info' : 'debug';
+}
+
+/** Appelé une fois par isolate depuis `bootEnv`. */
+export function configureLoggerFromEnv(raw: Record<string, unknown>): void {
+  threshold = resolveLogLevel(raw);
+}
+
+/** Exposé pour les tests ; le runtime passe par `configureLoggerFromEnv`. */
+export function setLogLevel(level: LogLevel): void {
+  threshold = level;
+}
+
+export function getLogLevel(): LogLevel {
+  return threshold;
+}
+
+export function isLevelEnabled(level: LogLevel): boolean {
+  return LEVEL_ORDER[level] >= LEVEL_ORDER[threshold];
+}
+
 function safeString(value: unknown): string {
   try {
     return typeof value === 'string' ? value : JSON.stringify(value);
@@ -124,6 +168,8 @@ export function describeRequest(request: Request): Record<string, unknown> {
 }
 
 function write(level: LogLevel, message: unknown, rest: unknown[]): void {
+  // Coupe avant toute sérialisation : une entrée filtrée ne coûte ni redaction ni JSON.
+  if (!isLevelEnabled(level)) return;
   const entry: Record<string, unknown> = {
     level,
     // Le message aussi : `logger.error(someSecretString)` passait entièrement à travers,

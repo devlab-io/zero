@@ -44,7 +44,17 @@ export declare const appRouter: import('@trpc/server').TRPCBuiltRouter<
       };
     };
     meta: object;
-    errorShape: import('@trpc/server').TRPCDefaultErrorShape;
+    errorShape: {
+      data: {
+        appCode: import('../lib/errors').ErrorCode;
+        code: import('@trpc/server').TRPC_ERROR_CODE_KEY;
+        httpStatus: number;
+        path?: string;
+        stack?: string;
+      };
+      message: string;
+      code: import('@trpc/server').TRPC_ERROR_CODE_NUMBER;
+    };
     transformer: true;
   },
   import('@trpc/server').TRPCDecorateCreateRouterOptions<{
@@ -85,7 +95,17 @@ export declare const appRouter: import('@trpc/server').TRPCBuiltRouter<
           };
         };
         meta: object;
-        errorShape: import('@trpc/server').TRPCDefaultErrorShape;
+        errorShape: {
+          data: {
+            appCode: import('../lib/errors').ErrorCode;
+            code: import('@trpc/server').TRPC_ERROR_CODE_KEY;
+            httpStatus: number;
+            path?: string;
+            stack?: string;
+          };
+          message: string;
+          code: import('@trpc/server').TRPC_ERROR_CODE_NUMBER;
+        };
         transformer: true;
       },
       import('@trpc/server').TRPCDecorateCreateRouterOptions<{
@@ -174,7 +194,17 @@ export declare const appRouter: import('@trpc/server').TRPCBuiltRouter<
           };
         };
         meta: object;
-        errorShape: import('@trpc/server').TRPCDefaultErrorShape;
+        errorShape: {
+          data: {
+            appCode: import('../lib/errors').ErrorCode;
+            code: import('@trpc/server').TRPC_ERROR_CODE_KEY;
+            httpStatus: number;
+            path?: string;
+            stack?: string;
+          };
+          message: string;
+          code: import('@trpc/server').TRPC_ERROR_CODE_NUMBER;
+        };
         transformer: true;
       },
       import('@trpc/server').TRPCDecorateCreateRouterOptions<{
@@ -253,7 +283,17 @@ export declare const appRouter: import('@trpc/server').TRPCBuiltRouter<
           };
         };
         meta: object;
-        errorShape: import('@trpc/server').TRPCDefaultErrorShape;
+        errorShape: {
+          data: {
+            appCode: import('../lib/errors').ErrorCode;
+            code: import('@trpc/server').TRPC_ERROR_CODE_KEY;
+            httpStatus: number;
+            path?: string;
+            stack?: string;
+          };
+          message: string;
+          code: import('@trpc/server').TRPC_ERROR_CODE_NUMBER;
+        };
         transformer: true;
       },
       import('@trpc/server').TRPCDecorateCreateRouterOptions<{
@@ -359,7 +399,17 @@ export declare const appRouter: import('@trpc/server').TRPCBuiltRouter<
           };
         };
         meta: object;
-        errorShape: import('@trpc/server').TRPCDefaultErrorShape;
+        errorShape: {
+          data: {
+            appCode: import('../lib/errors').ErrorCode;
+            code: import('@trpc/server').TRPC_ERROR_CODE_KEY;
+            httpStatus: number;
+            path?: string;
+            stack?: string;
+          };
+          message: string;
+          code: import('@trpc/server').TRPC_ERROR_CODE_NUMBER;
+        };
         transformer: true;
       },
       import('@trpc/server').TRPCDecorateCreateRouterOptions<{
@@ -414,7 +464,17 @@ export declare const appRouter: import('@trpc/server').TRPCBuiltRouter<
           };
         };
         meta: object;
-        errorShape: import('@trpc/server').TRPCDefaultErrorShape;
+        errorShape: {
+          data: {
+            appCode: import('../lib/errors').ErrorCode;
+            code: import('@trpc/server').TRPC_ERROR_CODE_KEY;
+            httpStatus: number;
+            path?: string;
+            stack?: string;
+          };
+          message: string;
+          code: import('@trpc/server').TRPC_ERROR_CODE_NUMBER;
+        };
         transformer: true;
       },
       import('@trpc/server').TRPCDecorateCreateRouterOptions<{
@@ -498,7 +558,17 @@ export declare const appRouter: import('@trpc/server').TRPCBuiltRouter<
           };
         };
         meta: object;
-        errorShape: import('@trpc/server').TRPCDefaultErrorShape;
+        errorShape: {
+          data: {
+            appCode: import('../lib/errors').ErrorCode;
+            code: import('@trpc/server').TRPC_ERROR_CODE_KEY;
+            httpStatus: number;
+            path?: string;
+            stack?: string;
+          };
+          message: string;
+          code: import('@trpc/server').TRPC_ERROR_CODE_NUMBER;
+        };
         transformer: true;
       },
       import('@trpc/server').TRPCDecorateCreateRouterOptions<{
@@ -554,7 +624,17 @@ export declare const appRouter: import('@trpc/server').TRPCBuiltRouter<
           };
         };
         meta: object;
-        errorShape: import('@trpc/server').TRPCDefaultErrorShape;
+        errorShape: {
+          data: {
+            appCode: import('../lib/errors').ErrorCode;
+            code: import('@trpc/server').TRPC_ERROR_CODE_KEY;
+            httpStatus: number;
+            path?: string;
+            stack?: string;
+          };
+          message: string;
+          code: import('@trpc/server').TRPC_ERROR_CODE_NUMBER;
+        };
         transformer: true;
       },
       import('@trpc/server').TRPCDecorateCreateRouterOptions<{
@@ -594,9 +674,9 @@ export declare const appRouter: import('@trpc/server').TRPCBuiltRouter<
         }>;
         list: import('@trpc/server').TRPCQueryProcedure<{
           input: {
+            pageToken?: string | undefined;
             q?: string | undefined;
             maxResults?: number | undefined;
-            pageToken?: string | undefined;
           };
           output: {
             threads: {
@@ -654,7 +734,17 @@ export declare const appRouter: import('@trpc/server').TRPCBuiltRouter<
           };
         };
         meta: object;
-        errorShape: import('@trpc/server').TRPCDefaultErrorShape;
+        errorShape: {
+          data: {
+            appCode: import('../lib/errors').ErrorCode;
+            code: import('@trpc/server').TRPC_ERROR_CODE_KEY;
+            httpStatus: number;
+            path?: string;
+            stack?: string;
+          };
+          message: string;
+          code: import('@trpc/server').TRPC_ERROR_CODE_NUMBER;
+        };
         transformer: true;
       },
       import('@trpc/server').TRPCDecorateCreateRouterOptions<{
@@ -747,7 +837,17 @@ export declare const appRouter: import('@trpc/server').TRPCBuiltRouter<
           };
         };
         meta: object;
-        errorShape: import('@trpc/server').TRPCDefaultErrorShape;
+        errorShape: {
+          data: {
+            appCode: import('../lib/errors').ErrorCode;
+            code: import('@trpc/server').TRPC_ERROR_CODE_KEY;
+            httpStatus: number;
+            path?: string;
+            stack?: string;
+          };
+          message: string;
+          code: import('@trpc/server').TRPC_ERROR_CODE_NUMBER;
+        };
         transformer: true;
       },
       import('@trpc/server').TRPCDecorateCreateRouterOptions<{
@@ -1214,9 +1314,9 @@ export declare const appRouter: import('@trpc/server').TRPCBuiltRouter<
                 }[]
               | undefined;
             fromEmail?: string | undefined;
+            isForward?: boolean | undefined;
             originalMessage?: string | undefined;
             draftId?: string | undefined;
-            isForward?: boolean | undefined;
             scheduleAt?: string | undefined;
           };
           output:
@@ -1475,7 +1575,17 @@ export declare const appRouter: import('@trpc/server').TRPCBuiltRouter<
           };
         };
         meta: object;
-        errorShape: import('@trpc/server').TRPCDefaultErrorShape;
+        errorShape: {
+          data: {
+            appCode: import('../lib/errors').ErrorCode;
+            code: import('@trpc/server').TRPC_ERROR_CODE_KEY;
+            httpStatus: number;
+            path?: string;
+            stack?: string;
+          };
+          message: string;
+          code: import('@trpc/server').TRPC_ERROR_CODE_NUMBER;
+        };
         transformer: true;
       },
       import('@trpc/server').TRPCDecorateCreateRouterOptions<{
@@ -1606,7 +1716,17 @@ export declare const appRouter: import('@trpc/server').TRPCBuiltRouter<
           };
         };
         meta: object;
-        errorShape: import('@trpc/server').TRPCDefaultErrorShape;
+        errorShape: {
+          data: {
+            appCode: import('../lib/errors').ErrorCode;
+            code: import('@trpc/server').TRPC_ERROR_CODE_KEY;
+            httpStatus: number;
+            path?: string;
+            stack?: string;
+          };
+          message: string;
+          code: import('@trpc/server').TRPC_ERROR_CODE_NUMBER;
+        };
         transformer: true;
       },
       import('@trpc/server').TRPCDecorateCreateRouterOptions<{
@@ -1616,12 +1736,12 @@ export declare const appRouter: import('@trpc/server').TRPCBuiltRouter<
                 status?:
                   | 'sent'
                   | 'queued'
-                  | 'generating'
-                  | 'draft_ready'
-                  | 'approved'
                   | 'sending'
                   | 'cancelled'
                   | 'failed'
+                  | 'generating'
+                  | 'draft_ready'
+                  | 'approved'
                   | undefined;
               }
             | undefined;
@@ -1708,7 +1828,17 @@ export declare const appRouter: import('@trpc/server').TRPCBuiltRouter<
           };
         };
         meta: object;
-        errorShape: import('@trpc/server').TRPCDefaultErrorShape;
+        errorShape: {
+          data: {
+            appCode: import('../lib/errors').ErrorCode;
+            code: import('@trpc/server').TRPC_ERROR_CODE_KEY;
+            httpStatus: number;
+            path?: string;
+            stack?: string;
+          };
+          message: string;
+          code: import('@trpc/server').TRPC_ERROR_CODE_NUMBER;
+        };
         transformer: true;
       },
       import('@trpc/server').TRPCDecorateCreateRouterOptions<{
@@ -1765,7 +1895,17 @@ export declare const appRouter: import('@trpc/server').TRPCBuiltRouter<
           };
         };
         meta: object;
-        errorShape: import('@trpc/server').TRPCDefaultErrorShape;
+        errorShape: {
+          data: {
+            appCode: import('../lib/errors').ErrorCode;
+            code: import('@trpc/server').TRPC_ERROR_CODE_KEY;
+            httpStatus: number;
+            path?: string;
+            stack?: string;
+          };
+          message: string;
+          code: import('@trpc/server').TRPC_ERROR_CODE_NUMBER;
+        };
         transformer: true;
       },
       import('@trpc/server').TRPCDecorateCreateRouterOptions<{
@@ -1872,7 +2012,17 @@ export declare const appRouter: import('@trpc/server').TRPCBuiltRouter<
           };
         };
         meta: object;
-        errorShape: import('@trpc/server').TRPCDefaultErrorShape;
+        errorShape: {
+          data: {
+            appCode: import('../lib/errors').ErrorCode;
+            code: import('@trpc/server').TRPC_ERROR_CODE_KEY;
+            httpStatus: number;
+            path?: string;
+            stack?: string;
+          };
+          message: string;
+          code: import('@trpc/server').TRPC_ERROR_CODE_NUMBER;
+        };
         transformer: true;
       },
       import('@trpc/server').TRPCDecorateCreateRouterOptions<{
@@ -1928,7 +2078,17 @@ export declare const appRouter: import('@trpc/server').TRPCBuiltRouter<
           };
         };
         meta: object;
-        errorShape: import('@trpc/server').TRPCDefaultErrorShape;
+        errorShape: {
+          data: {
+            appCode: import('../lib/errors').ErrorCode;
+            code: import('@trpc/server').TRPC_ERROR_CODE_KEY;
+            httpStatus: number;
+            path?: string;
+            stack?: string;
+          };
+          message: string;
+          code: import('@trpc/server').TRPC_ERROR_CODE_NUMBER;
+        };
         transformer: true;
       },
       import('@trpc/server').TRPCDecorateCreateRouterOptions<{
@@ -2012,7 +2172,17 @@ export declare const appRouter: import('@trpc/server').TRPCBuiltRouter<
           };
         };
         meta: object;
-        errorShape: import('@trpc/server').TRPCDefaultErrorShape;
+        errorShape: {
+          data: {
+            appCode: import('../lib/errors').ErrorCode;
+            code: import('@trpc/server').TRPC_ERROR_CODE_KEY;
+            httpStatus: number;
+            path?: string;
+            stack?: string;
+          };
+          message: string;
+          code: import('@trpc/server').TRPC_ERROR_CODE_NUMBER;
+        };
         transformer: true;
       },
       import('@trpc/server').TRPCDecorateCreateRouterOptions<{
@@ -2075,7 +2245,17 @@ export declare const appRouter: import('@trpc/server').TRPCBuiltRouter<
           };
         };
         meta: object;
-        errorShape: import('@trpc/server').TRPCDefaultErrorShape;
+        errorShape: {
+          data: {
+            appCode: import('../lib/errors').ErrorCode;
+            code: import('@trpc/server').TRPC_ERROR_CODE_KEY;
+            httpStatus: number;
+            path?: string;
+            stack?: string;
+          };
+          message: string;
+          code: import('@trpc/server').TRPC_ERROR_CODE_NUMBER;
+        };
         transformer: true;
       },
       import('@trpc/server').TRPCDecorateCreateRouterOptions<{

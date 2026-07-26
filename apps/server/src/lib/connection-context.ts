@@ -11,6 +11,7 @@
 
 import { getContext } from 'hono/context-storage';
 import type { HonoContext } from '../ctx';
+import { AppError } from './errors';
 import { logger } from './logger';
 import { env } from '../env';
 
@@ -20,10 +21,15 @@ export const getZeroDB = async (userId: string) => {
   return rpcTarget;
 };
 
+// Les deux échecs ci-dessous sont des causes d'AUTORISATION : ils prouvent que la session
+// ne peut plus porter de boîte valide. Toute AUTRE erreur sortant de cette fonction vient
+// du RPC vers le Durable Object ZeroDB — donc de l'infrastructure. Les typer permet à
+// `lib/trpc-guards.ts` de ne déconnecter que sur les premiers : sans cette distinction,
+// une secousse d'infrastructure détruisait le cookie de tous les appelants du moment.
 export const getActiveConnection = async () => {
   const c = getContext<HonoContext>();
   const { sessionUser, auth } = c.var;
-  if (!sessionUser) throw new Error('Session Not Found');
+  if (!sessionUser) throw AppError.unauthorized('Session Not Found');
 
   // Un seul RPC : la logique défaut-sinon-première vit dans le DO ZeroDB, qui
   // mémorise le résultat en local (invalidé par ses propres écritures).
@@ -40,5 +46,5 @@ export const getActiveConnection = async () => {
     logger.warn(`[getActiveConnection] Session cleanup failed for user ${sessionUser.id}:`, err);
   }
   logger.error(`No connections found for user ${sessionUser.id}`);
-  throw new Error('No connections found for user');
+  throw AppError.unauthorized('No connections found for user');
 };

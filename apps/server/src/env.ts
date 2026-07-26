@@ -1,6 +1,7 @@
 import type { ThinkingMCP, ThreadSyncWorker, WorkflowRunner, ZeroDB, ZeroMCP } from './main';
 import type { ShardRegistry, ZeroAgent, ZeroDriver } from './routes/agent';
 
+import { configureLoggerFromEnv } from './lib/logger';
 import { env as _env } from 'cloudflare:workers';
 import type { QueryableHandler } from 'dormroom';
 import { assertServerEnv } from './env-schema';
@@ -34,6 +35,8 @@ export type ZeroEnv = {
   connection_labels: KVNamespace;
   prompts_storage: KVNamespace;
   NODE_ENV: 'local' | 'development' | 'production';
+  /** Seuil du logger serveur (lib/logger.ts). Non defini => `info` en prod, `debug` ailleurs. */
+  LOG_LEVEL?: 'debug' | 'info' | 'warn' | 'error';
   JWT_SECRET: 'secret';
   ELEVENLABS_API_KEY: '1234567890';
   DISABLE_CALLS: 'true' | '';
@@ -156,6 +159,8 @@ export function bootEnv(
   raw: Record<string, unknown> = env as unknown as Record<string, unknown>,
 ): void {
   if (booted) return;
+  // Avant `assertServerEnv` : un echec de boot doit deja etre journalise au bon niveau.
+  configureLoggerFromEnv(raw);
   assertServerEnv(raw);
   booted = true;
 }

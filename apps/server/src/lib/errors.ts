@@ -7,6 +7,17 @@
 // Contract: a known business error keeps a STABLE code across the boundary; an unknown
 // error is coerced to a generic 500 that NEVER leaks the underlying message or stack to
 // the client. Tested in lib/errors.test.ts.
+//
+// Ce module a longtemps existé SANS AUCUN importateur de production (constat pitbull :
+// 151 lignes, 6 tests verts, zéro appelant hors de son propre test). Pendant ce temps les
+// décisions d'authentification se prenaient par COMPARAISON DE CHAÎNES à travers la
+// frontière réseau — `message.includes('invalid_grant')` côté serveur,
+// `err.message === 'Required scopes missing'` côté client. Il est désormais branché aux
+// deux extrémités :
+//   - `trpc/trpc.ts` : `errorFormatter` publie `data.appCode` sur CHAQUE erreur tRPC ;
+//   - `routes/index.ts` : `api.onError` répond via `toHonoResponse` ;
+//   - `lib/connection-context.ts` et `lib/trpc-guards.ts` lèvent des `AppError` typées ;
+//   - `apps/mail/providers/query-provider.tsx` discrimine sur `appCode`, plus sur le texte.
 
 import { TRPCError } from '@trpc/server';
 
@@ -18,6 +29,12 @@ export const ErrorCode = {
   CONFLICT: 'CONFLICT',
   RATE_LIMITED: 'RATE_LIMITED',
   UPSTREAM: 'UPSTREAM', // failure of an external provider (Gmail, Resend, …)
+  /** Panne transitoire d'infrastructure (RPC Durable Object, réseau) : rejouable. */
+  UNAVAILABLE: 'UNAVAILABLE',
+  /** L'octroi OAuth ne porte pas les scopes requis : réautorisation nécessaire. */
+  MISSING_SCOPES: 'MISSING_SCOPES',
+  /** L'octroi OAuth est révoqué ou expiré : reconnexion du compte nécessaire. */
+  CONNECTION_EXPIRED: 'CONNECTION_EXPIRED',
   INTERNAL: 'INTERNAL',
 } as const;
 
@@ -33,6 +50,11 @@ const HTTP_STATUS: Record<ErrorCode, number> = {
   CONFLICT: 409,
   RATE_LIMITED: 429,
   UPSTREAM: 502,
+  UNAVAILABLE: 503,
+  // Statuts conservés à l'identique de l'existant : seul le CODE devient stable, la
+  // sémantique HTTP du fil ne bouge pas (aucune rupture pour un client déjà déployé).
+  MISSING_SCOPES: 400,
+  CONNECTION_EXPIRED: 401,
   INTERNAL: 500,
 };
 
@@ -44,6 +66,9 @@ const TRPC_CODE: Record<ErrorCode, TrpcCode> = {
   CONFLICT: 'CONFLICT',
   RATE_LIMITED: 'TOO_MANY_REQUESTS',
   UPSTREAM: 'BAD_GATEWAY',
+  UNAVAILABLE: 'SERVICE_UNAVAILABLE',
+  MISSING_SCOPES: 'BAD_REQUEST',
+  CONNECTION_EXPIRED: 'UNAUTHORIZED',
   INTERNAL: 'INTERNAL_SERVER_ERROR',
 };
 
@@ -57,7 +82,7 @@ const TRPC_TO_APP: Partial<Record<string, ErrorCode>> = {
   CONFLICT: 'CONFLICT',
   TOO_MANY_REQUESTS: 'RATE_LIMITED',
   BAD_GATEWAY: 'UPSTREAM',
-  SERVICE_UNAVAILABLE: 'UPSTREAM',
+  SERVICE_UNAVAILABLE: 'UNAVAILABLE',
   GATEWAY_TIMEOUT: 'UPSTREAM',
 };
 
@@ -105,9 +130,37 @@ export class AppError extends Error {
   static upstream(message: string, opts?: AppErrorOptions): AppError {
     return new AppError('UPSTREAM', message, opts);
   }
+  static unavailable(message = 'Temporarily unavailable', opts?: AppErrorOptions): AppError {
+    return new AppError('UNAVAILABLE', message, opts);
+  }
+  static missingScopes(message = 'Required scopes missing', opts?: AppErrorOptions): AppError {
+    return new AppError('MISSING_SCOPES', message, opts);
+  }
+  static connectionExpired(
+    message = 'Connection expired. Please reconnect.',
+    opts?: AppErrorOptions,
+  ): AppError {
+    return new AppError('CONNECTION_EXPIRED', message, opts);
+  }
   static internal(message = GENERIC_MESSAGE, opts?: AppErrorOptions): AppError {
     return new AppError('INTERNAL', message, { ...opts, expose: false });
   }
+}
+
+/**
+ * Code stable pour n'importe quelle valeur levée, quelle que soit la couche qui l'a
+ * produite. C'est le seul point d'où sort le `appCode` publié sur le fil : un client n'a
+ * donc plus besoin de comparer des messages pour savoir ce qui s'est passé.
+ * Un `TRPCError` construit à partir d'une `AppError` conserve le code de sa cause.
+ */
+export function resolveErrorCode(err: unknown): ErrorCode {
+  if (err instanceof AppError) return err.code;
+  if (err instanceof TRPCError) {
+    const cause = (err as { cause?: unknown }).cause;
+    if (cause instanceof AppError) return cause.code;
+    return TRPC_TO_APP[err.code] ?? 'INTERNAL';
+  }
+  return 'INTERNAL';
 }
 
 /** Maps any thrown value to a TRPCError with a stable code; unknown → generic 500. */
