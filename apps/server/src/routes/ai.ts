@@ -10,6 +10,23 @@ import { z } from 'zod';
 
 type ToolsReturnType = Awaited<ReturnType<typeof tools>>;
 
+/** Résultat minimal d'un `safeParse`, sans dépendre de l'instance de zod de l'appelant. */
+type ParseResult =
+  | { success: true; data: unknown }
+  | { success: false; error: { message: string } };
+
+type ParseableSchema = { safeParse: (value: unknown) => ParseResult };
+
+/**
+ * Reconnaissance par FORME plutôt que par `instanceof` : `ai` embarque sa propre copie de
+ * zod selon la résolution de dépendances, et un `instanceof` faux ferait retomber
+ * silencieusement dans l'absence de validation — précisément le défaut qu'on ferme.
+ */
+const isParseable = (value: unknown): value is ParseableSchema =>
+  typeof value === 'object' &&
+  value !== null &&
+  typeof (value as { safeParse?: unknown }).safeParse === 'function';
+
 // Résolution de la connexion de l'appelant vocal : la première branche du `or` d'origine
 // (`connection.id === user.defaultConnectionId`) n'était PAS cadrée par `userId`. Rien ne
 // vérifie à l'écriture qu'un `defaultConnectionId` appartient bien à son porteur ; une valeur
@@ -66,7 +83,27 @@ aiRouter.post('/do/:action', async (c) => {
       return c.json({ success: false, error: `Tool '${action}' not found` }, 404);
     }
 
-    const result = await tool.execute?.(body || {}, {
+    // Le corps JSON était passé TEL QUEL à `execute`, ce qui court-circuitait le schéma zod
+    // que l'outil déclare : les outils de l'agent recevaient des entrées non validées, alors
+    // que le même outil appelé par le modèle est toujours parsé par le SDK. On repasse par
+    // le schéma de l'outil, à la main.
+    const schema = (tool as { parameters?: unknown }).parameters;
+    if (!isParseable(schema)) {
+      return c.json({ success: false, error: `Tool '${action}' declares no input schema` }, 500);
+    }
+
+    const parsed = schema.safeParse(body ?? {});
+    if (!parsed.success) {
+      return c.json(
+        { success: false, error: `Invalid input for tool '${action}': ${parsed.error.message}` },
+        400,
+      );
+    }
+
+    const execute = tool.execute as
+      | ((input: unknown, options: { toolCallId: string; messages: [] }) => Promise<unknown>)
+      | undefined;
+    const result = await execute?.(parsed.data, {
       toolCallId: crypto.randomUUID(),
       messages: [],
     });

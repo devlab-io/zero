@@ -108,9 +108,11 @@ export type ZeroEnv = {
   DD_APP_KEY: string;
   DD_SITE: string;
   /**
-   * Audience exigée dans le jeton OIDC des notifications push Pub/Sub. Absente = ce contrôle
-   * seul est désactivé (le reste de la politique reste fail-closed, cf. lib/pubsub-auth.ts).
-   * Valeur attendue : `${VITE_PUBLIC_BACKEND_URL}/a8n/notify/google`.
+   * Audience exigée dans le jeton OIDC des notifications push Pub/Sub. Absente, elle est
+   * DÉDUITE de `DEV_PROXY ?? VITE_PUBLIC_BACKEND_URL` suivi de `/a8n/notify/google` — la même
+   * expression que le endpoint push écrit par l'abonnement, dont Pub/Sub fait l'audience.
+   * Le contrôle est donc actif partout ; cette variable ne sert qu'à le surcharger quand
+   * l'abonnement a été créé avec une autre URL. Cf. lib/pubsub-auth.ts.
    */
   PUBSUB_AUDIENCE?: string;
   /**

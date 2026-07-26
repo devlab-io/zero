@@ -9,10 +9,10 @@
 // (ai, @ai-sdk/*) hors du graphe statique de l'isolate — décision de perf du commit d689e507,
 // indépendante de ce déplacement.
 
+import { sanitizeMailContent, sanitizeMailField } from '../lib/mail-sanitize';
 import { escapeXml } from '../thread-workflow-utils/workflow-utils';
 import { type WritingStyleMatrix } from './writing-style-service';
 import { StyledEmailAssistantSystemPrompt } from '../lib/prompts';
-import { sanitizeMailContent } from '../lib/mail-sanitize';
 import { getPrompt } from '../lib/brain';
 import { EPrompts } from '../types';
 import { env } from '../env';
@@ -142,13 +142,19 @@ const MessagePrompt = ({
   body: string;
   subject: string;
 }) => {
+  // Le corps est sanitisé par l'appelant, mais `from`, `to`, `cc` et `subject` étaient
+  // recopiés BRUTS. Ce rendu est une suite de LIGNES `Clé: valeur` remise en `role: 'user'` :
+  // un saut de ligne dans un sujet ou un nom d'expéditeur y fabrique une ligne de son choix,
+  // à la position même où le modèle attend des instructions.
+  const field = (value: string, fallback: string) => sanitizeMailField(value, fallback);
+
   const parts: string[] = [];
-  parts.push(`From: ${from}`);
-  parts.push(`To: ${to.join(', ')}`);
+  parts.push(`From: ${field(from, '(unknown sender)')}`);
+  parts.push(`To: ${to.map((recipient) => field(recipient, '(unknown)')).join(', ')}`);
   if (cc && cc.length > 0) {
-    parts.push(`CC: ${cc.join(', ')}`);
+    parts.push(`CC: ${cc.map((recipient) => field(recipient, '(unknown)')).join(', ')}`);
   }
-  parts.push(`Subject: ${subject}`);
+  parts.push(`Subject: ${field(subject, '(no subject)')}`);
   parts.push('');
   parts.push(`Body: ${body}`);
 

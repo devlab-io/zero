@@ -1,13 +1,15 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import type { gmail_v1 } from '@googleapis/gmail';
 import type { IOutgoingMessage } from '../../types';
+import type { gmail_v1 } from '@googleapis/gmail';
 
 // google-parse importe `./utils` (→ server-utils → cloudflare:workers) et
 // `../sanitize-tip-tap-html` (react-email, lourd). On neutralise ces feuilles ; le reste
 // (email-utils, mimetext, he) tourne en RÉEL — c'est le cœur du parsing produit.
 vi.mock('../server-utils', () => ({ getActiveConnection: vi.fn(), getZeroDB: vi.fn() }));
 vi.mock('hono/context-storage', () => ({ getContext: vi.fn(() => ({})) }));
-vi.mock('../logger', () => ({ logger: { info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
+vi.mock('../logger', () => ({
+  logger: { info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn() },
+}));
 const sanitizeTipTapHtml = vi.fn(async (html: string) => ({ html, inlineImages: [] as unknown[] }));
 vi.mock('../sanitize-tip-tap-html', () => ({ sanitizeTipTapHtml }));
 
@@ -113,7 +115,12 @@ describe('parseMessage — extraction des en-têtes (cas réel complet)', () => 
   it('TLS détecté via en-tête TLS-Report même sans Received TLS', () => {
     const r = parseMessage({
       ...full,
-      payload: { headers: [{ name: 'From', value: 'a@b.c' }, { name: 'TLS-Report', value: '1' }] },
+      payload: {
+        headers: [
+          { name: 'From', value: 'a@b.c' },
+          { name: 'TLS-Report', value: '1' },
+        ],
+      },
     });
     expect(r.tls).toBe(true);
   });
@@ -138,7 +145,12 @@ describe('parseMessage — extraction des en-têtes (cas réel complet)', () => 
   it('Cc présent mais uniquement des espaces → liste vide (filtrée), pas null', () => {
     // ccHeaders.length > 0 (donc pas null), mais le filtre trim vide la liste → [].
     const r = parseMessage({
-      payload: { headers: [{ name: 'From', value: 'a@b.c' }, { name: 'Cc', value: '   ' }] },
+      payload: {
+        headers: [
+          { name: 'From', value: 'a@b.c' },
+          { name: 'Cc', value: '   ' },
+        ],
+      },
     });
     expect(r.cc).toEqual([]);
   });
@@ -146,6 +158,27 @@ describe('parseMessage — extraction des en-têtes (cas réel complet)', () => 
   it('aucun en-tête Cc → null (distinction vide vs absent)', () => {
     const r = parseMessage({ payload: { headers: [{ name: 'From', value: 'a@b.c' }] } });
     expect(r.cc).toBeNull();
+  });
+
+  it('neutralise CR/LF dans messageId, references et inReplyTo dès l’extraction', () => {
+    // Ces trois valeurs sont recopiées telles quelles dans les en-têtes d'une RÉPONSE par
+    // components/mail/reply-composer.tsx : une rupture de ligne conservée ici devient une
+    // injection d'en-tête MIME chez le destinataire suivant.
+    const r = parseMessage({
+      payload: {
+        headers: [
+          { name: 'From', value: 'a@b.c' },
+          { name: 'Message-ID', value: '<m@x>\r\nBcc: attacker@evil.example' },
+          { name: 'References', value: '<r1@x>\r\nBcc: attacker@evil.example' },
+          { name: 'In-Reply-To', value: '<p@x>\nX-Injected: yes' },
+        ],
+      },
+    });
+
+    for (const value of [r.messageId, r.references, r.inReplyTo]) {
+      expect(value).not.toMatch(/[\r\n]/);
+    }
+    expect(r.messageId).toBe('<m@x> Bcc: attacker@evil.example');
   });
 });
 
@@ -270,21 +303,62 @@ describe('parseOutgoing — construction MIME (encodage réel)', () => {
       base({
         cc: [{ email: 'cc@example.com' }, { email: 'me@devlab.io' }],
         bcc: [{ email: 'bcc@example.com' }],
-        headers: { References: 'ref1@x ref2@x', 'X-Custom': 'v' },
+        headers: { References: 'ref1@x ref2@x', 'In-Reply-To': '<parent@x>' },
       }),
       config,
     );
     const mime = decodeRaw(raw);
     expect(mime).toContain('cc@example.com');
     expect(mime).toContain('<ref1@x> <ref2@x>'); // chevrons ajoutés
-    expect(mime).toContain('X-Custom: v');
+    expect(mime).toContain('In-Reply-To: <parent@x>');
+  });
+
+  it('n’écrit AUCUN en-tête hors allowlist (X-Custom passait auparavant)', async () => {
+    const { raw } = await parseOutgoing(base({ headers: { 'X-Custom': 'v' } }), config);
+
+    expect(decodeRaw(raw)).not.toContain('X-Custom');
+  });
+
+  it('ne laisse pas une valeur porteuse de CRLF créer une ligne d’en-tête', async () => {
+    // mimetext 3.0.27 n'échappe rien : `setHeader('X', 'a\r\nBcc: ...')` place bien `Bcc:`
+    // en tête de ligne dans le RAW (sonde). Le puits doit donc écarter la valeur entière.
+    const { raw } = await parseOutgoing(
+      base({
+        headers: {
+          'In-Reply-To': '<parent@x>\r\nBcc: attacker@evil.example\r\nX-Injected: yes',
+        },
+      }),
+      config,
+    );
+    const mime = decodeRaw(raw);
+
+    expect(mime).not.toContain('attacker@evil.example');
+    expect(mime).not.toMatch(/^Bcc:/m);
+    expect(mime).not.toContain('X-Injected');
+  });
+
+  it('ne laisse pas un NOM porteur de CRLF créer une ligne d’en-tête', async () => {
+    const { raw } = await parseOutgoing(
+      base({ headers: { 'In-Reply-To\r\nBcc: attacker@evil.example\r\nX-B': 'v' } }),
+      config,
+    );
+    const mime = decodeRaw(raw);
+
+    expect(mime).not.toContain('attacker@evil.example');
+    expect(mime).not.toMatch(/^Bcc:/m);
   });
 
   it('joint les pièces jointes (base64 direct et via arrayBuffer)', async () => {
     const { raw } = await parseOutgoing(
       base({
         attachments: [
-          { name: 'a.txt', type: 'text/plain', size: 3, lastModified: 0, base64: Buffer.from('AAA').toString('base64') },
+          {
+            name: 'a.txt',
+            type: 'text/plain',
+            size: 3,
+            lastModified: 0,
+            base64: Buffer.from('AAA').toString('base64'),
+          },
           {
             name: 'b.bin',
             type: 'application/octet-stream',

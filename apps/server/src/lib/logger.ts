@@ -36,11 +36,41 @@ const SENSITIVE_KEY =
 
 const MAX_DEPTH = 6;
 
+// Deuxième filet, sur la VALEUR. Le filet ci-dessus est indexé sur les NOMS de clés : une
+// chaîne nue lui échappe entièrement — c'est exactement ce qui laissait passer le JSON du
+// compte de service Google (`private_key` incluse) journalisé en argument positionnel par
+// lib/factories/google-subscription.factory.ts. Ces motifs reconnaissent le secret lui-même,
+// où qu'il se trouve : message, chaîne imbriquée, fragment au milieu d'une phrase.
+const SECRET_VALUE_PATTERNS: [RegExp, string][] = [
+  // Clé privée PEM (compte de service, certificat). Le corps est multiligne.
+  [/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g, REDACTED],
+  // En-tête d'autorisation porté dans une chaîne libre.
+  [/\bBearer\s+[A-Za-z0-9\-._~+/]{8,}={0,2}/gi, `Bearer ${REDACTED}`],
+  // Jeton d'accès Google OAuth.
+  [/\bya29\.[A-Za-z0-9\-._~+/]{8,}={0,2}/g, REDACTED],
+  // Jeton de rafraîchissement Google.
+  [/\b1\/\/[A-Za-z0-9\-._~+/]{16,}={0,2}/g, REDACTED],
+  // JWT / objet JSON encodé en base64url : commence toujours par `eyJ`.
+  [/\beyJ[A-Za-z0-9_=-]{8,}(?:\.[A-Za-z0-9_=-]+){0,2}/g, REDACTED],
+  // URL de connexion portant des identifiants (`postgres://user:pass@host`).
+  [/\b([a-z][a-z0-9+.-]*):\/\/[^\s/@:]+:[^\s/@]+@/gi, `$1://${REDACTED}@`],
+];
+
+/** Masque les secrets reconnaissables À LEUR FORME dans une chaîne, sans la jeter entière. */
+export function maskSecretValues(value: string): string {
+  let out = value;
+  for (const [pattern, replacement] of SECRET_VALUE_PATTERNS) {
+    out = out.replace(pattern, replacement);
+  }
+  return out;
+}
+
 function isSensitiveKey(key: string): boolean {
   return SENSITIVE_KEY.test(key);
 }
 
 function redact(value: unknown, depth = 0): unknown {
+  if (typeof value === 'string') return maskSecretValues(value);
   if (value === null || typeof value !== 'object') return value;
   if (depth >= MAX_DEPTH) return '[truncated]';
 
@@ -67,7 +97,7 @@ function redact(value: unknown, depth = 0): unknown {
 }
 
 function normalize(rest: unknown[]): unknown[] {
-  return rest.map((r) => (r instanceof Error ? serializeError(r) : redact(r)));
+  return rest.map((r) => (r instanceof Error ? redact(serializeError(r)) : redact(r)));
 }
 
 /**
@@ -96,7 +126,9 @@ export function describeRequest(request: Request): Record<string, unknown> {
 function write(level: LogLevel, message: unknown, rest: unknown[]): void {
   const entry: Record<string, unknown> = {
     level,
-    msg: typeof message === 'string' ? message : safeString(message),
+    // Le message aussi : `logger.error(someSecretString)` passait entièrement à travers,
+    // puisque seul `rest` traversait la redaction.
+    msg: maskSecretValues(typeof message === 'string' ? message : safeString(message)),
     time: new Date().toISOString(),
   };
   if (rest.length) entry.data = normalize(rest);

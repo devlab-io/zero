@@ -1,4 +1,5 @@
 import { parseAddressList, parseFrom, wasSentWithTLS } from '../email-utils';
+import { normalizeHeaderValue, safeOutgoingHeaders } from '../mime-headers';
 import type { IOutgoingMessage, ParsedMessage } from '../../types';
 import { sanitizeTipTapHtml } from '../sanitize-tip-tap-html';
 import { type gmail_v1 } from '@googleapis/gmail';
@@ -27,12 +28,19 @@ export function parseMessage({
     payload?.headers?.find((h) => h.name?.toLowerCase() === 'from')?.value ||
     'Failed';
   const subject = payload?.headers?.find((h) => h.name?.toLowerCase() === 'subject')?.value || '';
-  const references =
-    payload?.headers?.find((h) => h.name?.toLowerCase() === 'references')?.value || '';
-  const inReplyTo =
-    payload?.headers?.find((h) => h.name?.toLowerCase() === 'in-reply-to')?.value || '';
-  const messageId =
-    payload?.headers?.find((h) => h.name?.toLowerCase() === 'message-id')?.value || '';
+  // Ces trois valeurs repartent telles quelles dans les en-têtes d'une RÉPONSE
+  // (components/mail/reply-composer.tsx -> mail.send -> setHeader). Une rupture de ligne
+  // laissée ici est une injection d'en-tête MIME chez le destinataire suivant : on la
+  // neutralise à l'extraction, avant même qu'elle n'entre dans le produit.
+  const references = normalizeHeaderValue(
+    payload?.headers?.find((h) => h.name?.toLowerCase() === 'references')?.value || '',
+  );
+  const inReplyTo = normalizeHeaderValue(
+    payload?.headers?.find((h) => h.name?.toLowerCase() === 'in-reply-to')?.value || '',
+  );
+  const messageId = normalizeHeaderValue(
+    payload?.headers?.find((h) => h.name?.toLowerCase() === 'message-id')?.value || '',
+  );
   const listUnsubscribe =
     payload?.headers?.find((h) => h.name?.toLowerCase() === 'list-unsubscribe')?.value || undefined;
   const listUnsubscribePost =
@@ -226,24 +234,23 @@ export async function parseOutgoing(
     }
   }
 
-  if (headers) {
-    Object.entries(headers).forEach(([key, value]) => {
-      if (value) {
-        if (key.toLowerCase() === 'references' && value) {
-          const refs = value
-            .split(' ')
-            .filter(Boolean)
-            .map((ref) => {
-              if (!ref.startsWith('<')) ref = `<${ref}`;
-              if (!ref.endsWith('>')) ref = `${ref}>`;
-              return ref;
-            });
-          msg.setHeader(key, refs.join(' '));
-        } else {
-          msg.setHeader(key, value);
-        }
-      }
-    });
+  // Dernier verrou avant `setHeader` : mimetext n'échappe NI le nom NI la valeur, et la file
+  // de messages (main.ts) reconstruit un IOutgoingMessage sans repasser par le schéma tRPC.
+  // Voir lib/mime-headers.ts.
+  for (const [key, value] of safeOutgoingHeaders(headers)) {
+    if (key.toLowerCase() === 'references') {
+      const refs = value
+        .split(' ')
+        .filter(Boolean)
+        .map((ref) => {
+          if (!ref.startsWith('<')) ref = `<${ref}`;
+          if (!ref.endsWith('>')) ref = `${ref}>`;
+          return ref;
+        });
+      msg.setHeader(key, refs.join(' '));
+    } else {
+      msg.setHeader(key, value);
+    }
   }
 
   if (attachments?.length > 0) {

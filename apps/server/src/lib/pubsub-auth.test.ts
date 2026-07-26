@@ -7,6 +7,7 @@ vi.mock('./logger', () => ({ logger: { info: vi.fn(), warn, error: vi.fn(), debu
 import {
   __resetPubSubPolicyWarning,
   checkPubSubClaims,
+  deducePubSubAudience,
   resolvePubSubTokenPolicy,
   verifyPubSubToken,
   type JwtDecoder,
@@ -138,10 +139,12 @@ describe('checkPubSubClaims — revendications conditionnelles', () => {
       { ...basePayload, aud: 'https://someone-else.example/hook' },
       { audience: AUDIENCE },
     );
-    expect(result).toEqual({
-      ok: false,
-      reason: 'aud claim does not match the expected audience',
-    });
+    expect(result.ok).toBe(false);
+    // Le motif nomme l'attendu ET le reçu : un refus d'audience se diagnostique en une
+    // lecture de log au lieu de ressembler à une synchronisation qui s'arrête sans raison.
+    expect(result.ok === false && result.reason).toBe(
+      `aud claim does not match the expected audience (expected ${AUDIENCE}, got https://someone-else.example/hook)`,
+    );
   });
 
   it('accepte une audience listée parmi plusieurs', () => {
@@ -214,7 +217,75 @@ describe('resolvePubSubTokenPolicy', () => {
     expect(warn.mock.calls[0]?.[1]).toMatchObject({
       audienceChecked: false,
       serviceAccountChecked: false,
-      missing: ['PUBSUB_AUDIENCE', 'PUBSUB_SERVICE_ACCOUNT_EMAIL'],
+      missing: ['PUBSUB_AUDIENCE (or VITE_PUBLIC_BACKEND_URL)', 'PUBSUB_SERVICE_ACCOUNT_EMAIL'],
     });
+  });
+});
+
+describe('audience déduite — le contrôle est actif sans variable à poser', () => {
+  beforeEach(() => {
+    warn.mockClear();
+    __resetPubSubPolicyWarning();
+  });
+
+  it('déduit l’audience de VITE_PUBLIC_BACKEND_URL', () => {
+    expect(
+      resolvePubSubTokenPolicy({
+        VITE_PUBLIC_BACKEND_URL: 'https://server.example.test',
+        PUBSUB_SERVICE_ACCOUNT_EMAIL: SERVICE_ACCOUNT,
+      }).audience,
+    ).toBe(AUDIENCE);
+  });
+
+  it('laisse PUBSUB_AUDIENCE primer sur la déduction', () => {
+    expect(
+      resolvePubSubTokenPolicy({
+        PUBSUB_AUDIENCE: 'https://explicite.test/hook',
+        VITE_PUBLIC_BACKEND_URL: 'https://server.example.test',
+      }).audience,
+    ).toBe('https://explicite.test/hook');
+  });
+
+  it('suit DEV_PROXY quand il est posé, comme le fait le endpoint push', () => {
+    expect(
+      deducePubSubAudience({
+        DEV_PROXY: 'https://tunnel.test',
+        VITE_PUBLIC_BACKEND_URL: 'http://localhost:8787',
+      }),
+    ).toBe('https://tunnel.test/a8n/notify/google');
+  });
+
+  it('construit EXACTEMENT la même URL que le endpoint push de l’abonnement', () => {
+    // `getNotificationsUrl` (lib/utils.ts) écrit `pushConfig.pushEndpoint` ; faute
+    // d'`oidcToken.audience`, Pub/Sub en fait l'audience du jeton. Les deux constructions
+    // doivent donc rester identiques — c'est ce que ce test empêche de dériver.
+    const source = { DEV_PROXY: '', VITE_PUBLIC_BACKEND_URL: 'https://server.example.test' };
+    const asBuiltByGetNotificationsUrl = source.DEV_PROXY
+      ? `${source.DEV_PROXY}/a8n/notify/google`
+      : source.VITE_PUBLIC_BACKEND_URL + '/a8n/notify/' + 'google';
+
+    expect(deducePubSubAudience(source)).toBe(asBuiltByGetNotificationsUrl);
+  });
+
+  it('un jeton Google légitime émis pour une AUTRE application est refusé', () => {
+    const policy = resolvePubSubTokenPolicy({
+      VITE_PUBLIC_BACKEND_URL: 'https://server.example.test',
+      PUBSUB_SERVICE_ACCOUNT_EMAIL: SERVICE_ACCOUNT,
+    });
+    const check = checkPubSubClaims(
+      { ...basePayload, aud: 'https://autre-application.test/hook' },
+      policy,
+    );
+
+    expect(check.ok).toBe(false);
+    expect(check.ok === false && check.reason).toContain('aud claim does not match');
+  });
+
+  it('n’avertit plus quand la politique est complète par déduction', () => {
+    resolvePubSubTokenPolicy({
+      VITE_PUBLIC_BACKEND_URL: 'https://server.example.test',
+      GOOGLE_S_ACCOUNT: JSON.stringify({ client_email: SERVICE_ACCOUNT }),
+    });
+    expect(warn).not.toHaveBeenCalled();
   });
 });

@@ -156,6 +156,31 @@ describe('blocs <style> — filtre maison (la dépendance ne sait pas restreindr
     expect(out.processedHtml).toContain('text-align');
   });
 
+  it('n’émet jamais un sélecteur porteur de < ou > (le bloc est reconstruit tel quel)', () => {
+    // `filterStyleBlockCss` réémet le sélecteur sans échappement : un `</style>` glissé
+    // dedans refermait la balise et faisait repartir la suite en balisage.
+    const out = processEmailHtml({
+      html: '<style>a{color:red}</style~x</style><style>b</style><img src=x onerror=alert(1)>{color:red}</style><p>corps</p>',
+      shouldLoadImages: false,
+      theme: 'light',
+    });
+
+    expect(out.processedHtml).not.toContain('onerror');
+    expect(out.processedHtml).toContain('corps');
+  });
+
+  it('retire < et > d’un sélecteur avant réémission', () => {
+    const out = processEmailHtml({
+      html: '<style>.a</style><script>alert(1)</script>{color:red}</style><p>corps</p>',
+      shouldLoadImages: false,
+      theme: 'light',
+    });
+
+    expect(out.processedHtml).not.toContain('alert(1)');
+    expect(out.processedHtml).not.toMatch(/<\/style>[\s\S]*<script/i);
+    expect(out.processedHtml).toContain('corps');
+  });
+
   it('refuse url() dans une propriété non-background au sein d’un bloc', () => {
     const out = processEmailHtml({
       html: '<style>.z{color:red;list-style-image:url(https://evil.test/p.gif)}</style><ul class="z"><li>x</li></ul>',
@@ -242,6 +267,24 @@ describe('processEmailHtml — totale : bornes d’entrée au lieu d’une Range
     const out = processEmailHtml({ html: huge, shouldLoadImages: false, theme: 'light' });
 
     expect(out.processedHtml).toContain('size limit');
+  });
+
+  it('dégrade au-delà de la borne de NOMBRE D’ÉLÉMENTS, plat et sous la borne de taille', () => {
+    // 40 000 frères à la racine tiennent en 850 kB, sous les 2 Mo, et à profondeur 1 :
+    // ni la borne de taille ni celle d'imbrication ne les arrêtaient.
+    const flat = `${'<div>x</div>'.repeat(40_000)}<p>charge</p>`;
+    const out = processEmailHtml({ html: flat, shouldLoadImages: false, theme: 'light' });
+
+    expect(out.processedHtml).toContain('element-count limit');
+    expect(out.processedHtml).toContain('charge');
+  });
+
+  it('laisse passer un mail légitime lourd : 150 produits, 2 254 éléments', () => {
+    const catalogue = `<table>${'<tr><td><img src="https://cdn.test/i.jpg"><h3>Article</h3><p>texte</p></td></tr>'.repeat(300)}</table>`;
+    const out = processEmailHtml({ html: catalogue, shouldLoadImages: true, theme: 'light' });
+
+    expect(out.processedHtml).not.toContain('element-count limit');
+    expect(out.processedHtml).toContain('Article');
   });
 
   it('le repli n’exécute rien : le balisage résiduel ressort échappé', () => {

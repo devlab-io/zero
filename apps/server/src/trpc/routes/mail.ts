@@ -12,6 +12,7 @@ import { IGetThreadResponseSchema, type IGetThreadsResponse } from '../../lib/dr
 import { makeBulkLabelProcedure, makeToggleLabelProcedure } from './mail-label-procedures';
 import type { DeleteAllSpamResponse, IEmailSendBatch } from '../../types';
 import { activeDriverProcedure, router, privateProcedure } from '../trpc';
+import { outgoingHeadersSchema } from '../../lib/mime-headers';
 import { processEmailHtml } from '../../lib/email-processor';
 import { defaultPageSize, FOLDERS } from '../../lib/utils';
 import { toAttachmentFiles } from '../../lib/attachments';
@@ -300,7 +301,7 @@ export const mailRouter = router({
         subject: z.string(),
         message: z.string(),
         attachments: z.array(serializedFileSchema).optional().default([]),
-        headers: z.record(z.string()).optional().default({}),
+        headers: outgoingHeadersSchema.optional().default({}),
         cc: z.array(senderSchema).optional(),
         bcc: z.array(senderSchema).optional(),
         threadId: z.string().optional(),

@@ -129,7 +129,11 @@ export const filterStyleBlockCss = (css: string): string => {
   while ((match = rulePattern.exec(withoutAtRules))) {
     if (rules.length >= MAX_STYLE_BLOCK_RULES) break;
 
-    const selector = (match[1] ?? '').trim();
+    // Le sélecteur est RÉÉMIS tel quel dans le bloc <style> reconstruit : un `<` ou un `>`
+    // qu'il porterait fermerait la balise et ferait repartir la suite en balisage. Les deux
+    // caractères sont retirés — `>` (combinateur enfant) inclus : le filtre perd un
+    // sélecteur descendant direct, jamais la sécurité de la réémission.
+    const selector = (match[1] ?? '').replace(/[<>]/g, '').trim();
     if (!selector) continue;
 
     const declarations = (match[2] ?? '')

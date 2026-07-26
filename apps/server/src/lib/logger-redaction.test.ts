@@ -87,3 +87,60 @@ describe('describeRequest', () => {
     });
   });
 });
+
+describe('logger redaction — masquage par MOTIF DE VALEUR', () => {
+  // Le filet par NOM DE CLÉ ne voyait rien d'une chaîne nue. Constat mesuré :
+  // lib/factories/google-subscription.factory.ts journalisait `GOOGLE_S_ACCOUNT` entier
+  // — `private_key` RSA comprise — en argument positionnel, vers wrangler tail et logpush.
+  const cases: [string, string, string][] = [
+    [
+      'clé privée PEM',
+      '{"private_key":"-----BEGIN PRIVATE KEY-----\\nMIIEvQIBADANBg\\n-----END PRIVATE KEY-----"}',
+      'MIIEvQIBADANBg',
+    ],
+    [
+      'en-tête Bearer dans une phrase',
+      'called with Bearer abcdef0123456789 header',
+      'abcdef0123456789',
+    ],
+    ['jeton d’accès Google', 'token=ya29.a0AfH6SMB-secret-value', 'ya29.a0AfH6SMB-secret-value'],
+    [
+      'jeton de rafraîchissement Google',
+      'refresh 1//0gLongRefreshTokenValue00',
+      '1//0gLongRefreshTokenValue00',
+    ],
+    ['JWT', 'jwt eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiIxIn0.sig', 'eyJhbGciOiJSUzI1NiJ9'],
+    [
+      'URL de connexion avec identifiants',
+      'postgres://admin:hunter2@db.internal:5432/app',
+      'hunter2',
+    ],
+  ];
+
+  it.each(cases)('masque %s dans une chaîne imbriquée', (_label, payload, secret) => {
+    const c = captured();
+    logger.info('boot', { detail: payload });
+    expect(JSON.stringify(c.last())).not.toContain(secret);
+  });
+
+  it.each(cases)('masque %s passé comme MESSAGE', (_label, payload, secret) => {
+    const c = captured();
+    logger.info(payload);
+    expect(JSON.stringify(c.last())).not.toContain(secret);
+  });
+
+  it('masque le secret sans jeter le reste de la ligne', () => {
+    const c = captured();
+    logger.info('appel', { detail: 'GET /x with Bearer abcdef0123456789 done' });
+    const line = JSON.stringify(c.last());
+    expect(line).toContain('GET /x with');
+    expect(line).toContain('done');
+    expect(line).toContain(REDACTED);
+  });
+
+  it('laisse intacte une chaîne ordinaire', () => {
+    const c = captured();
+    logger.info('sync', { detail: 'thread th-42 synchronised in 120ms' });
+    expect(JSON.stringify(c.last())).toContain('thread th-42 synchronised in 120ms');
+  });
+});

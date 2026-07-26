@@ -386,6 +386,38 @@ describe('mail router — send (immédiat / planifié / erreurs)', () => {
     expect(KV.scheduled_emails.put).toHaveBeenCalled();
     expect(r).toMatchObject({ success: true, scheduled: true });
   });
+
+  // `headers` était un `z.record(z.string())` nu : le client posait n'importe quel en-tête,
+  // avec n'importe quelle valeur, et lib/driver/google-parse.ts le reversait dans
+  // `msg.setHeader` — que mimetext n'échappe pas. La frontière REFUSE désormais l'appel.
+  it('refuse une valeur d’en-tête porteuse de CRLF (injection MIME)', async () => {
+    await expect(
+      call('send', {
+        ...base,
+        headers: { 'In-Reply-To': '<p@x>\r\nBcc: attacker@evil.example' },
+      }),
+    ).rejects.toThrow();
+  });
+
+  it('refuse un nom d’en-tête porteur de CRLF', async () => {
+    await expect(
+      call('send', { ...base, headers: { 'X\r\nBcc: attacker@evil.example': 'v' } }),
+    ).rejects.toThrow();
+  });
+
+  it('refuse un en-tête hors allowlist', async () => {
+    await expect(
+      call('send', { ...base, headers: { Bcc: 'attacker@evil.example' } }),
+    ).rejects.toThrow();
+  });
+
+  it('accepte les trois en-têtes réellement produits par le composeur de réponse', async () => {
+    const r = await call('send', {
+      ...base,
+      headers: { 'In-Reply-To': '<p@x>', References: '<r1@x> <r2@x>', 'Thread-Id': 'th-9' },
+    });
+    expect(r).toEqual({ success: true });
+  });
 });
 
 describe('mail router — unsend (ownership)', () => {

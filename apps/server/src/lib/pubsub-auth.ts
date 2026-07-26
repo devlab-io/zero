@@ -20,12 +20,25 @@
 //     valeur que ce même code écrit dans `pushConfig.oidcToken.serviceAccountEmail` quand il
 //     crée l'abonnement (lib/factories/google-subscription.factory.ts). Une divergence n'est
 //     donc possible que si l'abonnement a été créé par un autre compte de service.
-//   - `aud` == `PUBSUB_AUDIENCE`. Pub/Sub, quand `oidcToken.audience` n'est pas renseigné
-//     (c'est le cas ici), utilise l'URL du endpoint push comme audience — soit
-//     `${VITE_PUBLIC_BACKEND_URL}/a8n/notify/google`. Cette valeur n'est PAS déduite
-//     automatiquement : elle n'a pas pu être confrontée à la production, et une déduction
-//     fausse couperait la synchronisation en silence. Renseigner `PUBSUB_AUDIENCE` ferme la
-//     dernière marge ; tant qu'elle est absente, un avertissement est journalisé.
+// Ce qui est désormais TOUJOURS exigé aussi :
+//   - `aud` == l'audience attendue. Pub/Sub, quand `oidcToken.audience` n'est pas renseigné,
+//     utilise l'URL DU ENDPOINT PUSH comme audience. Or c'est ce même code qui écrit ce
+//     endpoint, via `getNotificationsUrl(EProviders.google)` (lib/factories/
+//     google-subscription.factory.ts:275) : l'audience attendue est donc DÉDUITE de la même
+//     expression, `DEV_PROXY ?? VITE_PUBLIC_BACKEND_URL` suivi de `/a8n/notify/google`.
+//     `pubsub-auth.test.ts` épingle l'égalité des deux constructions, de sorte qu'une
+//     divergence casse la suite au lieu de couper la synchronisation en silence.
+//
+//     `PUBSUB_AUDIENCE` prime toujours si elle est renseignée. Sans elle, le contrôle est
+//     maintenant ACTIF partout, sans intervention de déploiement — alors qu'auparavant il
+//     était conditionné à une variable que ni wrangler.jsonc ni env-schema.ts ne posaient,
+//     c'est-à-dire désactivé dans les trois environnements : un jeton Google légitime émis
+//     pour une AUTRE application passait.
+//
+//     Marge résiduelle assumée : un abonnement créé avec une ANCIENNE URL de endpoint, encore
+//     routée vers ce worker, porterait l'ancienne audience et serait refusé. Le refus est
+//     journalisé avec l'audience attendue ET l'audience reçue ; la remise en état est un
+//     ré-abonnement, qui réécrit le endpoint (PUT idempotent).
 
 import { createRemoteJWKSet, jwtVerify, type JWTPayload } from 'jose';
 import { logger } from './logger';
@@ -80,7 +93,12 @@ export function checkPubSubClaims(
 
   const expectedAudience = policy.audience?.trim();
   if (expectedAudience && !asAudienceList(payload.aud).includes(expectedAudience)) {
-    return { ok: false, reason: 'aud claim does not match the expected audience' };
+    // Le motif est nommé : un refus d'audience se diagnostique en une lecture de log, au
+    // lieu de ressembler à une synchronisation qui s'arrête sans raison.
+    return {
+      ok: false,
+      reason: `aud claim does not match the expected audience (expected ${expectedAudience}, got ${asAudienceList(payload.aud).join(', ') || '(none)'})`,
+    };
   }
 
   return { ok: true, email };
@@ -140,15 +158,32 @@ const serviceAccountEmailFromEnv = (raw: string | undefined): string | undefined
 
 let warnedAboutPolicy = false;
 
+/**
+ * Audience attendue quand `PUBSUB_AUDIENCE` n'est pas renseignée : l'URL du endpoint push,
+ * que Pub/Sub utilise comme audience faute d'`oidcToken.audience` explicite. Construite
+ * exactement comme `lib/utils.ts#getNotificationsUrl`, dont l'abonnement se sert — l'égalité
+ * des deux est épinglée par un test, pas seulement par ce commentaire.
+ */
+export const deducePubSubAudience = (source: {
+  DEV_PROXY?: string;
+  VITE_PUBLIC_BACKEND_URL?: string;
+}): string | undefined => {
+  const base = source.DEV_PROXY?.trim() || source.VITE_PUBLIC_BACKEND_URL?.trim();
+  return base ? `${base}/a8n/notify/google` : undefined;
+};
+
 /** Construit la politique à partir de l'environnement, et prévient une fois si elle est partielle. */
 export function resolvePubSubTokenPolicy(
   source: {
     PUBSUB_AUDIENCE?: string;
     PUBSUB_SERVICE_ACCOUNT_EMAIL?: string;
     GOOGLE_S_ACCOUNT?: string;
+    DEV_PROXY?: string;
+    VITE_PUBLIC_BACKEND_URL?: string;
   } = env,
 ): PubSubTokenPolicy {
-  const audience = source.PUBSUB_AUDIENCE?.trim() || undefined;
+  const configuredAudience = source.PUBSUB_AUDIENCE?.trim() || undefined;
+  const audience = configuredAudience ?? deducePubSubAudience(source);
   const serviceAccountEmail =
     source.PUBSUB_SERVICE_ACCOUNT_EMAIL?.trim() ||
     serviceAccountEmailFromEnv(source.GOOGLE_S_ACCOUNT);
@@ -159,7 +194,7 @@ export function resolvePubSubTokenPolicy(
       audienceChecked: Boolean(audience),
       serviceAccountChecked: Boolean(serviceAccountEmail),
       missing: [
-        audience ? null : 'PUBSUB_AUDIENCE',
+        audience ? null : 'PUBSUB_AUDIENCE (or VITE_PUBLIC_BACKEND_URL)',
         serviceAccountEmail ? null : 'PUBSUB_SERVICE_ACCOUNT_EMAIL',
       ].filter(Boolean),
     });

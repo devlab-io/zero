@@ -2,7 +2,9 @@ import { getCurrentDateContext, GmailSearchAssistantSystemPrompt } from '../../l
 import { getThread, getZeroAgent } from '../../lib/server-utils';
 import type { IGetThreadResponse } from '../../lib/driver/types';
 import { composeEmail } from '../../services/compose-service';
+import { sanitizeMailField } from '../../lib/mail-sanitize';
 import { colors } from '../../lib/prompts';
+import { formatSender } from './mcp-tools';
 import { logger } from '../../lib/logger';
 import { openai } from '@ai-sdk/openai';
 import { generateText, tool } from 'ai';
@@ -151,14 +153,17 @@ const getThreadSummary = (connectionId: string) =>
         });
         return {
           short: shortResponse.summary,
-          subject: thread.latest?.subject,
-          sender: thread.latest?.sender,
+          // Sujet et expéditeur sont choisis par l'ATTAQUANT et repartent vers l'agent
+          // principal, qui conserve `webSearch` : le canal de sortie existe. Neutralisés
+          // ici (aplatissement, retrait de l'invisible, borne) ; l'UI n'est pas touchée.
+          subject: sanitizeMailField(thread.latest?.subject, '(no subject)'),
+          sender: formatSender(thread.latest?.sender),
           date: thread.latest?.receivedOn,
         };
       }
       return {
-        subject: thread.latest?.subject,
-        sender: thread.latest?.sender,
+        subject: sanitizeMailField(thread.latest?.subject, '(no subject)'),
+        sender: formatSender(thread.latest?.sender),
         date: thread.latest?.receivedOn,
       };
     },

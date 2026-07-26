@@ -67,6 +67,9 @@ const CONTENT_SECURITY_POLICY = [
   "base-uri 'self'",
   "object-src 'none'",
   "frame-ancestors 'none'",
+  // Un formulaire injecté ne peut plus poster ailleurs que sur cette origine : la
+  // directive manquait, et `default-src` ne couvre PAS `form-action`.
+  "form-action 'self'",
   "script-src 'self' 'unsafe-inline'",
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob: https:",
@@ -91,6 +94,12 @@ function withSecurityHeaders(response: Response): Response {
   headers.set('X-Content-Type-Options', 'nosniff');
   headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
   headers.set('Permissions-Policy', 'geolocation=(), microphone=(), camera=()');
+  // HSTS sur TOUTES les réponses, documents comme assets : le navigateur mémorise la
+  // contrainte au niveau de l'hôte, et une première requête en clair sur un asset suffirait
+  // à ouvrir la fenêtre que cet en-tête ferme. `includeSubDomains` couvre les sous-domaines
+  // du même hôte ; pas de `preload`, qui engage la liste HSTS des navigateurs et ne se
+  // retire pas en une révocation.
+  headers.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
   if (isHtmlResponse(response)) {
     headers.set('Content-Security-Policy', CONTENT_SECURITY_POLICY);
     headers.set('X-Frame-Options', 'DENY');

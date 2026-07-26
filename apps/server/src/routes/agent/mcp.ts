@@ -35,10 +35,10 @@ import {
   listDraftOutboxItems,
   retryDraftOutboxJob,
 } from '../../lib/draft-outbox';
+import { sanitizeMailContent, sanitizeMailField } from '../../lib/mail-sanitize';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { getThread, getZeroAgent } from '../../lib/server-utils';
 import { composeEmail } from '../../services/compose-service';
-import { sanitizeMailContent } from '../../lib/mail-sanitize';
 import { getCurrentDateContext } from '../../lib/prompts';
 import type { ThreadsResponse } from '@zero/types';
 import { invariant } from '../../lib/invariant';
@@ -206,7 +206,10 @@ export class ZeroMCP extends McpAgent<typeof env, Record<string, unknown>, { use
         const { result: thread } = await getThread(connectionId, s.threadId);
         return {
           content: [
-            { type: 'text' as const, text: `Subject: ${thread.latest?.subject ?? '(no subject)'}` },
+            {
+              type: 'text' as const,
+              text: `Subject: ${sanitizeMailField(thread.latest?.subject, '(no subject)')}`,
+            },
             {
               type: 'text' as const,
               text: `Latest Message Received: ${thread.latest?.receivedOn ?? 'unknown'}`,
@@ -247,7 +250,10 @@ export class ZeroMCP extends McpAgent<typeof env, Record<string, unknown>, { use
           return {
             content: [
               { type: 'text' as const, text: shortResponse.summary as string },
-              { type: 'text' as const, text: `Subject: ${thread.latest?.subject}` },
+              {
+                type: 'text' as const,
+                text: `Subject: ${sanitizeMailField(thread.latest?.subject, '(no subject)')}`,
+              },
               { type: 'text' as const, text: `Sender: ${formatSender(thread.latest?.sender)}` },
               { type: 'text' as const, text: `Date: ${thread.latest?.receivedOn}` },
             ],

@@ -130,6 +130,26 @@ describe('spa-fallback worker — security headers', () => {
     expect(res.status).toBe(500);
     expect(res.headers.get('X-Content-Type-Options')).toBe('nosniff');
   });
+
+  it("le CSP porte form-action 'self' — default-src ne couvre pas cette directive", async () => {
+    const res = await worker.fetch(navRequest(), makeEnv(200) as never);
+    expect(res.headers.get('Content-Security-Policy')).toContain("form-action 'self'");
+  });
+
+  it('HSTS est posé sur le document ET sur les assets', async () => {
+    const expected = 'max-age=31536000; includeSubDomains';
+
+    const document = await worker.fetch(navRequest(), makeEnv(200) as never);
+    expect(document.headers.get('Strict-Transport-Security')).toBe(expected);
+
+    const asset = await worker.fetch(
+      new Request('http://app.local/assets/entry.client-Hao9yJWR.js', {
+        headers: { accept: '*/*' },
+      }),
+      makeEnvWithDirectHit(200, 'application/javascript; charset=utf-8') as never,
+    );
+    expect(asset.headers.get('Strict-Transport-Security')).toBe(expected);
+  });
 });
 
 // A6 — boot-time env validation. The worker's fetch handler calls `bootEnv(env)` → `assertMailEnv`

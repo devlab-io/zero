@@ -30,7 +30,15 @@ export const getServiceAccount = (): GoogleServiceAccount => {
   try {
     return JSON.parse(serviceAccountJson) as GoogleServiceAccount;
   } catch (error) {
-    logger.error('Invalid GOOGLE_S_ACCOUNT JSON format', serviceAccountJson, error);
+    // Ne JAMAIS journaliser `serviceAccountJson` : il porte `private_key`, la clé privée
+    // RSA du compte de service. Un JSON malformé n'est pas forcément un JSON illisible — un
+    // fragment valide suffit à faire échouer `JSON.parse` tout en gardant la clé entière
+    // dans la chaîne, qui partait alors vers `wrangler tail` et logpush. La redaction de
+    // lib/logger.ts est indexée sur les NOMS de clés : une chaîne nue lui échappe.
+    logger.error('Invalid GOOGLE_S_ACCOUNT JSON format', {
+      length: serviceAccountJson.length,
+      error,
+    });
     throw new Error('Invalid GOOGLE_S_ACCOUNT JSON format');
   }
 };

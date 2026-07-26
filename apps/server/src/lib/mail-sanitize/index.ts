@@ -1,5 +1,5 @@
-import { estimateNestingDepth, MAX_HTML_LENGTH, MAX_HTML_NESTING_DEPTH } from '../html-bounds';
 import { load, contains, type Cheerio, type CheerioAPI } from 'cheerio/slim';
+import { checkHtmlBounds, MAX_HTML_LENGTH } from '../html-bounds';
 
 // cheerio does not re-export domhandler's node types, and domhandler is a transitive
 // (non-hoisted) dependency this package can't import by name. Recover them from cheerio's
@@ -20,6 +20,61 @@ export type SanitizedMailContent = {
   removedHiddenSegments: number;
 };
 
+/**
+ * Caractères qui ne se voient pas mais que le modèle lit : contrôles C0/C1, séparateurs de
+ * ligne Unicode (U+2028/2029 — de vraies fins de ligne pour beaucoup de rendus), largeur nulle
+ * et surcharges bidirectionnelles (U+202E renverse l'affichage). Un sujet peut en porter :
+ * l'humain voit un libellé anodin, le modèle lit autre chose.
+ */
+const isInvisibleCode = (code: number) =>
+  code < 0x20 ||
+  (code >= 0x7f && code <= 0x9f) ||
+  (code >= 0x200b && code <= 0x200f) ||
+  code === 0x2028 ||
+  code === 0x2029 ||
+  (code >= 0x202a && code <= 0x202e) ||
+  (code >= 0x2066 && code <= 0x2069) ||
+  code === 0xfeff;
+
+/** Aplatit sur une seule ligne : tabulation et fins de ligne deviennent une espace,
+ * l’invisible disparaît. Un balayage par point de code, sans classe de contrôles en regex. */
+const flattenField = (value: string): string => {
+  let out = '';
+  for (const char of value) {
+    const code = char.codePointAt(0) ?? 0;
+    if (code === 0x09 || code === 0x0a || code === 0x0d) out += ' ';
+    else if (!isInvisibleCode(code)) out += char;
+  }
+  return out;
+};
+
+/** Au-delà, un sujet ou un nom d'expéditeur n'est plus un libellé : c'est une charge utile. */
+const MAX_FIELD_LENGTH = 500;
+
+/**
+ * Neutralise un champ COURT contrôlé par l'expéditeur — sujet, nom d'expéditeur — avant de
+ * l'injecter dans un prompt.
+ *
+ * La sanitisation ne couvrait que le CORPS. Sujet et nom d'expéditeur traversaient bruts
+ * `formatCompactThread`, `getThreadSummary` et `MessagePrompt`, c'est-à-dire jusqu'à un modèle
+ * PORTEUR D'OUTILS (routes/agent/tools.ts conserve `webSearch` : le canal de sortie existe).
+ * Ces rendus sont des LIGNES (`ID: … | Subject: … | From: …`, jointes par des sauts de ligne) :
+ * un saut de ligne dans un sujet fabrique une fausse ligne, donc un faux tour de conversation.
+ *
+ * On aplatit sur une seule ligne, on retire l'invisible et on borne la longueur. Ce qui est
+ * rendu à l'UTILISATEUR n'est pas touché : cette fonction ne sert que les chemins de prompt.
+ */
+export const sanitizeMailField = (value: string | null | undefined, fallback: string): string => {
+  const flattened = flattenField(value ?? '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+
+  if (!flattened) return fallback;
+  return flattened.length > MAX_FIELD_LENGTH
+    ? `${flattened.slice(0, MAX_FIELD_LENGTH)} […truncated]`
+    : flattened;
+};
+
 const SPOTLIGHT_HEADER = '[UNTRUSTED EMAIL CONTENT - SANITIZED]';
 /** Remplace un segment caché retiré. Exporté : les appelants qui MESURENT le corps doivent
  * pouvoir le retrancher — un message intégralement caché ne doit pas paraître substantiel. */
@@ -36,9 +91,38 @@ const DROPPED_ELEMENTS =
 // déni de service sur `getThread` déclenchable par un simple mail entrant. Elles vivent
 // maintenant dans lib/html-bounds.ts, partagées avec le chemin de rendu (lib/email-processor).
 const MAX_CONTENT_LENGTH = MAX_HTML_LENGTH;
-const MAX_NESTING_DEPTH = MAX_HTML_NESTING_DEPTH;
 const MAX_STYLE_RULES = 500;
 const MAX_STYLE_LENGTH = 200_000;
+
+/**
+ * Enveloppe technique posée autour du corps parsé. Nom délibérément hors de tout sélecteur
+ * de ce module (ni dans DROPPED_ELEMENTS, ni dans la liste des balises de coupure) : elle
+ * doit être inerte. Voir `normalizeRoot` pour la raison de son existence.
+ */
+const SANITIZER_ROOT_TAG = 'zero-sanitizer-root';
+
+/**
+ * Ramène le document à UN SEUL enfant élément à la racine, et rend cet enfant.
+ *
+ * Sans cela, le chemin coûte du quadratique. `cheerio/slim` parse avec htmlparser2, qui ne
+ * synthétise PAS de `<html>` : un mail dont le corps est une longue suite de frères laisse
+ * N enfants éléments directement sous la racine. Or `Cheerio._findBySelector` passe ces
+ * enfants comme contexte à css-select, dont `prepareContext` appelle `domutils.removeSubsets`
+ * — qui fait un `lastIndexOf` PUIS un `includes` sur tout le tableau, pour CHAQUE nœud.
+ * Le coût est donc en O(n²) sur le nombre de frères racine, et il est payé À CHAQUE requête
+ * racine `$('sel')` : les quatre requêtes fixes de ce module, plus une par sélecteur masquant
+ * extrait des `<style>` (jusqu'à MAX_STYLE_RULES).
+ *
+ * Mesuré (bench) : une seule requête `$('div')` coûte 942 ms sur 40 000 frères racine, contre
+ * 5,7 ms si la racine n'a qu'un enfant. `sanitizeMailContent` complet : 3 950 ms à plat contre
+ * 98 ms sous un `<div>`, pour exactement les mêmes 40 000 éléments. L'enveloppe coûte ~1 ms et
+ * ramène toutes les requêtes suivantes au linéaire. Le chemin de rendu (lib/email-processor)
+ * n'est pas touché : il parse avec cheerio complet (parse5), qui produit un `<html>` unique.
+ */
+const normalizeRoot = ($: CheerioAPI): Element | undefined => {
+  $.root().wrapInner(`<${SANITIZER_ROOT_TAG}></${SANITIZER_ROOT_TAG}>`);
+  return ($.root().children().toArray() as Element[])[0];
+};
 
 type InlineStyle = Record<string, string>;
 
@@ -74,19 +158,119 @@ const isWhite = (value: string | undefined) => {
   );
 };
 
-const isZeroFontSize = (value: string | undefined) => {
-  if (!value) return false;
-  return /^0(?:\.0+)?(?:px|pt|em|rem|%)?$/.test(value.replace(/\s+/g, '').toLowerCase());
+/**
+ * Longueur CSS ramenée en pixels, approximativement. `undefined` quand la valeur n'est pas
+ * une longueur (`auto`, `inherit`, `medium`…). L'approximation suffit : on ne compare qu'à
+ * zéro, à « minuscule » et à « très loin hors écran ».
+ */
+const lengthInPixels = (value: string | undefined): number | undefined => {
+  if (!value) return undefined;
+  const match = /^(-?\d*\.?\d+)(px|pt|em|rem|%|)$/.exec(value.replace(/\s+/g, '').toLowerCase());
+  if (!match) return undefined;
+
+  const size = Number(match[1]);
+  if (!Number.isFinite(size)) return undefined;
+  if (match[2] === 'pt') return size * (4 / 3);
+  if (match[2] === 'em' || match[2] === 'rem') return size * 16;
+  return size;
 };
 
-/** Un jeu de déclarations rend-il sa cible invisible, quelle qu'en soit la provenance ? */
+const atMost = (value: string | undefined, ceiling: number) => {
+  const px = lengthInPixels(value);
+  return px !== undefined && px <= ceiling;
+};
+
+/**
+ * Sous 4 px, le texte n'est plus lisible : c'est du contenu caché, pas de la mention légale.
+ * La borne laisse passer les 8-10 px des mentions de bas de mail, réellement lues.
+ */
+const isTinyFontSize = (value: string | undefined) => atMost(value, 3.99);
+
+/** Opacité nulle ou quasi nulle. `0`, `0.0`, `.0`, `0%` et les valeurs résiduelles. */
+const isZeroOpacity = (value: string | undefined) => {
+  if (!value) return false;
+  const compact = value.replace(/\s+/g, '');
+  if (/^0*(?:\.0+)?%$/.test(compact)) return true;
+  const opacity = Number(compact);
+  return Number.isFinite(opacity) && opacity <= 0.05;
+};
+
+/** Couleur de texte invisible : `transparent`, alpha nul, `#rrggbb00`. */
+const isTransparent = (value: string | undefined) => {
+  if (!value) return false;
+  const compact = value.replace(/\s+/g, '').toLowerCase();
+
+  return (
+    compact === 'transparent' ||
+    /^(?:rgba|hsla)\([^)]*,0*(?:\.0+)?%?\)$/.test(compact) ||
+    /^#[0-9a-f]{6}00$/.test(compact) ||
+    /^#[0-9a-f]{3}0$/.test(compact)
+  );
+};
+
+/**
+ * Élément poussé hors de l'écran. `-9999px` est la forme canonique ; la borne est fixée à
+ * -1 000 px, très au-delà de tout décalage de mise en page légitime dans un mail.
+ */
+const isPushedOffscreen = (styles: InlineStyle) =>
+  ['text-indent', 'left', 'top', 'right', 'bottom', 'margin-left', 'margin-top'].some((property) =>
+    atMost(styles[property], -1000),
+  );
+
+/** Boîte réduite à rien, contenu rogné : `height:0;overflow:hidden` et ses variantes. */
+const isCollapsedBox = (styles: InlineStyle) => {
+  const clipped = ['overflow', 'overflow-x', 'overflow-y'].some(
+    (property) => styles[property] === 'hidden',
+  );
+  if (!clipped) return false;
+
+  return ['height', 'max-height', 'width', 'max-width'].some(
+    (property) => lengthInPixels(styles[property]) === 0,
+  );
+};
+
+/** `clip: rect(0,0,0,0)` et sa variante `rect(1px,1px,1px,1px)` — le sr-only historique. */
+const isClipHidden = (value: string | undefined) => {
+  if (!value) return false;
+  const inner = /^rect\((.*)\)$/.exec(value.replace(/\s+/g, ' ').trim());
+  if (!inner) return false;
+
+  const parts = (inner[1] ?? '').split(/[\s,]+/).filter(Boolean);
+  return parts.length === 4 && parts.every((part) => atMost(part, 1));
+};
+
+/** `clip-path: inset(50%)` / `inset(100%)` / `circle(0)` — le sr-only moderne. */
+const isClipPathHidden = (value: string | undefined) => {
+  if (!value) return false;
+  const compact = value.replace(/\s+/g, '').toLowerCase();
+  if (/^circle\(0(?:\.0+)?(?:px|%)?[,)]/.test(compact)) return true;
+
+  const inset = /^inset\((\d+(?:\.\d+)?)%/.exec(compact);
+  return !!inset && Number(inset[1]) >= 50;
+};
+
+/**
+ * Un jeu de déclarations rend-il sa cible invisible, quelle qu'en soit la provenance ?
+ *
+ * Sept techniques ont été ajoutées après sonde : `display:none`, la classe masquante, le
+ * blanc-sur-blanc et `@media` étaient neutralisés, mais `position:absolute;left:-9999px`,
+ * `text-indent:-9999px`, `height:0;overflow:hidden`, `clip:rect(0,0,0,0)`,
+ * `color:transparent`, `color:rgba(0,0,0,0)` et `font-size:1px` ressortaient EN CLAIR vers
+ * le modèle. Toutes portent du texte que l'humain ne voit pas — c'est exactement le
+ * véhicule de la prompt-injection que ce module existe pour couper.
+ */
 const declarationsHide = (styles: InlineStyle) =>
   styles.display === 'none' ||
   styles.visibility === 'hidden' ||
   styles.visibility === 'collapse' ||
-  styles.opacity === '0' ||
-  isZeroFontSize(styles['font-size']) ||
-  /\b0(?:\.0+)?(?:px|pt|em|rem)\b/.test(styles.font ?? '');
+  isZeroOpacity(styles.opacity) ||
+  isTinyFontSize(styles['font-size']) ||
+  /\b0(?:\.0+)?(?:px|pt|em|rem)\b/.test(styles.font ?? '') ||
+  isTransparent(styles.color) ||
+  isPushedOffscreen(styles) ||
+  isCollapsedBox(styles) ||
+  isClipHidden(styles.clip) ||
+  isClipPathHidden(styles['clip-path']);
 
 /**
  * Sélecteurs des règles CSS qui masquent leur cible, extraits des balises `<style>`.
@@ -156,6 +340,41 @@ const compose = (
   return { text: lines.join('\n'), body: plainText, removedHiddenSegments };
 };
 
+/**
+ * Marque les éléments ciblés par des sélecteurs masquants, en UNE requête.
+ *
+ * Chaque requête racine `$('sel')` balaie tout le document : une par sélecteur, c'est le
+ * nombre de règles d'une `<style>` hostile (jusqu'à MAX_STYLE_RULES) qui multiplie le coût.
+ * Mesuré : 500 sélecteurs sur 19 000 éléments = 624 ms, contre 46 ms sans feuille de style.
+ * css-select accepte une LISTE de sélecteurs — le lot coûte un seul balayage. Un sélecteur
+ * illisible fait toutefois échouer le lot entier : on retombe alors sur l'unitaire, qui isole
+ * le fautif sans faire échouer la sanitisation.
+ */
+const collectCssHidden = ($: CheerioAPI, selectors: string[], sink: Set<Element>) => {
+  if (!selectors.length) return;
+
+  const mark = (selector: string) => {
+    $(selector).each((_, element) => {
+      sink.add(element as Element);
+    });
+  };
+
+  try {
+    mark(selectors.join(', '));
+    return;
+  } catch {
+    // Lot rejeté : au moins un sélecteur est hors de ce que css-select sait interpréter.
+  }
+
+  for (const selector of selectors) {
+    try {
+      mark(selector);
+    } catch {
+      // Sélecteur illisible : ignoré plutôt que de faire échouer toute la sanitisation.
+    }
+  }
+};
+
 /** Repli linéaire, sans DOM, pour les entrées que l'on refuse de parser. */
 const degradeToPlainText = (content: string, reason: string): SanitizedMailContent =>
   compose(normalizePlainText(content.replace(/<[^>]*>/g, ' ')), 0, [
@@ -173,31 +392,22 @@ export const sanitizeMailContent = (content: string | null | undefined): Sanitiz
   const raw = content ?? '';
 
   try {
-    if (raw.length > MAX_CONTENT_LENGTH) {
-      return degradeToPlainText(
-        raw.slice(0, MAX_CONTENT_LENGTH),
-        'content exceeded the size limit',
-      );
-    }
-    if (estimateNestingDepth(raw) > MAX_NESTING_DEPTH) {
-      return degradeToPlainText(raw, 'content exceeded the nesting-depth limit');
+    const bounds = checkHtmlBounds(raw);
+    if (!bounds.withinBounds) {
+      return degradeToPlainText(raw.slice(0, MAX_CONTENT_LENGTH), bounds.reason);
     }
 
     const $ = load(raw, null, false);
+    const sanitizerRoot = normalizeRoot($);
 
     // Les feuilles de style sont lues AVANT d'être retirées : leurs règles décident de la
     // visibilité des éléments qui les référencent par classe ou par identifiant.
     const cssHidden = new Set<Element>();
-    for (const selector of hidingSelectorsFromStyleSheets($)) {
-      try {
-        $(selector).each((_, element) => {
-          cssHidden.add(element as Element);
-        });
-      } catch {
-        // Sélecteur que css-select ne sait pas interpréter : on l'ignore plutôt que de
-        // faire échouer toute la sanitisation.
-      }
-    }
+    collectCssHidden($, hidingSelectorsFromStyleSheets($), cssHidden);
+    // L'enveloppe technique n'est jamais masquable : sans cela, un `* { display:none }`
+    // hostile la marquerait et ferait disparaître le message en UN segment au lieu de N,
+    // c'est-à-dire changerait la sortie du seul fait de l'enveloppe.
+    if (sanitizerRoot) cssHidden.delete(sanitizerRoot);
 
     $(DROPPED_ELEMENTS).remove();
 
