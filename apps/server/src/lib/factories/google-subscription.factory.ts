@@ -1,4 +1,8 @@
-import { BaseSubscriptionFactory, type SubscriptionData } from './base-subscription.factory';
+import {
+  BaseSubscriptionFactory,
+  type SubscriptionData,
+  type SubscriptionResult,
+} from './base-subscription.factory';
 import { resolvePubSubTokenPolicy, verifyPubSubToken } from '../pubsub-auth';
 import { c, getNotificationsUrl } from '../../lib/utils';
 import { resetConnection } from '../server-utils';
@@ -256,11 +260,11 @@ class GoogleSubscriptionFactory extends BaseSubscriptionFactory {
     }
   }
 
-  public async subscribe(data: { body: SubscriptionData }): Promise<Response> {
+  public async subscribe(data: { body: SubscriptionData }): Promise<SubscriptionResult> {
     const { connectionId } = data.body;
 
     if (!connectionId) {
-      return c.json({ error: 'connectionId is required' }, { status: 400 });
+      return { ok: false, status: 400, reason: 'connectionId is required' };
     }
 
     try {
@@ -268,7 +272,7 @@ class GoogleSubscriptionFactory extends BaseSubscriptionFactory {
       const connectionData = await this.getConnectionFromDb(connectionId);
       if (!connectionData) {
         logger.info(`[SUBSCRIPTION] Connection not found: ${connectionId}`);
-        return c.json({ error: 'connection not found' }, { status: 400 });
+        return { ok: false, status: 400, reason: 'connection not found' };
       }
 
       const pubSubName = `notifications__${connectionData.id}`;
@@ -301,7 +305,7 @@ class GoogleSubscriptionFactory extends BaseSubscriptionFactory {
         await this.initializeConnectionLabels(connectionId);
 
         logger.info(`[SUBSCRIPTION] Setup completed successfully for connection: ${connectionId}`);
-        return c.json({});
+        return { ok: true };
       } catch (error) {
         logger.error('[SUBSCRIPTION] Setup failed:', error);
 
@@ -310,7 +314,7 @@ class GoogleSubscriptionFactory extends BaseSubscriptionFactory {
 
         if (error instanceof Error && error.message.includes('Already Exists')) {
           logger.info('Resource already exists, continuing...');
-          return c.json({});
+          return { ok: true };
         }
 
         throw error;
@@ -321,7 +325,16 @@ class GoogleSubscriptionFactory extends BaseSubscriptionFactory {
       // Clean up on error using base class method
       //   await this.cleanupOnFailure(connectionId, env);
 
-      return c.json({ error: 'Internal server error' }, { status: 500 });
+      // Cette branche retournait `c.json({error:'Internal server error'}, {status:500})`.
+      // Aucun handler HTTP n'appelle `subscribe` : la seule conséquence était que
+      // `enableBrainFunction` recevait un objet et le jetait, donc qu'un watch Gmail non
+      // reposé se présentait comme un succès. L'échec est désormais porté par la valeur.
+      return {
+        ok: false,
+        status: 500,
+        reason: error instanceof Error ? error.message : String(error),
+        cause: error,
+      };
     }
   }
 

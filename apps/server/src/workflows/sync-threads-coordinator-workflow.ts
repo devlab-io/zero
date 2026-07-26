@@ -22,6 +22,7 @@ import {
 import { WorkflowEntrypoint, WorkflowStep } from 'cloudflare:workers';
 import { connectionToDriver } from '../lib/server-utils';
 import type { WorkflowEvent } from 'cloudflare:workers';
+import { captureServerException } from '../lib/sentry';
 import { connection } from '../db/schema';
 import { logger } from '../lib/logger';
 import type { ZeroEnv } from '../env';
@@ -63,7 +64,28 @@ export class SyncThreadsCoordinatorWorkflow extends WorkflowEntrypoint<
   ZeroEnv,
   SyncThreadsCoordinatorParams
 > {
+  /**
+   * Point d'entrée du Workflow. `captureServerException` n'existait qu'en main.ts (fetch,
+   * queue, scheduled) : un Workflow qui casse n'émettait AUCUN événement, alors même que
+   * Cloudflare Workflows retente le step puis abandonne l'instance en silence. La
+   * synchronisation d'une boîte pouvait donc mourir sans laisser d'alerte.
+   */
   async run(
+    event: WorkflowEvent<SyncThreadsCoordinatorParams>,
+    step: WorkflowStep,
+  ): Promise<SyncThreadsCoordinatorResult> {
+    try {
+      return await this.execute(event, step);
+    } catch (error) {
+      await captureServerException(error, this.env, {
+        transaction: 'SyncThreadsCoordinatorWorkflow.run',
+        extra: { connectionId: event.payload.connectionId, folder: event.payload.folder },
+      });
+      throw error;
+    }
+  }
+
+  private async execute(
     event: WorkflowEvent<SyncThreadsCoordinatorParams>,
     step: WorkflowStep,
   ): Promise<SyncThreadsCoordinatorResult> {

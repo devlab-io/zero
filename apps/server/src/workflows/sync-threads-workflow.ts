@@ -13,14 +13,15 @@
  *
  * Reuse or distribution of this file requires a license from Zero Email Inc.
  */
-import { logger } from '../lib/logger';
+import { persistSyncedThread } from '../lib/driver/gmail-sync-persist';
 import { getZeroAgent, connectionToDriver } from '../lib/server-utils';
 import { WorkflowEntrypoint, WorkflowStep } from 'cloudflare:workers';
-import type { WorkflowEvent } from 'cloudflare:workers';
 import { GoogleMailManager } from '../lib/driver/google';
-import { persistSyncedThread } from '../lib/driver/gmail-sync-persist';
+import type { WorkflowEvent } from 'cloudflare:workers';
+import { captureServerException } from '../lib/sentry';
 import type { ParsedMessage } from '../types';
 import { connection } from '../db/schema';
+import { logger } from '../lib/logger';
 import type { ZeroEnv } from '../env';
 import { eq } from 'drizzle-orm';
 import { createDb } from '../db';
@@ -55,7 +56,28 @@ interface PageProcessingResult {
 }
 
 export class SyncThreadsWorkflow extends WorkflowEntrypoint<ZeroEnv, SyncThreadsParams> {
+  /**
+   * Point d'entrée du Workflow. `captureServerException` n'existait qu'en main.ts (fetch,
+   * queue, scheduled) : un Workflow qui casse n'émettait AUCUN événement, alors même que
+   * Cloudflare Workflows retente le step puis abandonne l'instance en silence. La
+   * synchronisation d'une boîte pouvait donc mourir sans laisser d'alerte.
+   */
   async run(
+    event: WorkflowEvent<SyncThreadsParams>,
+    step: WorkflowStep,
+  ): Promise<SyncThreadsResult> {
+    try {
+      return await this.execute(event, step);
+    } catch (error) {
+      await captureServerException(error, this.env, {
+        transaction: 'SyncThreadsWorkflow.run',
+        extra: { connectionId: event.payload.connectionId, folder: event.payload.folder },
+      });
+      throw error;
+    }
+  }
+
+  private async execute(
     event: WorkflowEvent<SyncThreadsParams>,
     step: WorkflowStep,
   ): Promise<SyncThreadsResult> {

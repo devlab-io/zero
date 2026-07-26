@@ -11,12 +11,14 @@ import {
 import {
   cancelTtlSeconds,
   MAX_QUEUE_DELAY_SECONDS,
+  MAX_SCHEDULE_AHEAD_SECONDS,
   scheduleTtlSeconds,
 } from '../../lib/scheduled-send';
 import { IGetThreadResponseSchema, type IGetThreadsResponse } from '../../lib/driver/types';
 import { makeBulkLabelProcedure, makeToggleLabelProcedure } from './mail-label-procedures';
 import type { DeleteAllSpamResponse, IEmailSendBatch } from '../../types';
 import { activeDriverProcedure, router, privateProcedure } from '../trpc';
+import { getConnectionRegistry } from '../../lib/connection-registry';
 import { outgoingHeadersSchema } from '../../lib/mime-headers';
 import { processEmailHtml } from '../../lib/email-processor';
 import { defaultPageSize, FOLDERS } from '../../lib/utils';
@@ -360,6 +362,23 @@ export const mailRouter = router({
             return { success: false, error: 'Schedule time must be in the future' } as const;
           }
 
+          // Borne HAUTE. Elle manquait : au-delà d'un an, `scheduleTtlSeconds` plafonne à
+          // `MAX_KV_TTL_SECONDS` et le CORPS du message expire AVANT son échéance. Le cron
+          // ne remet en file que `{messageId, connectionId, sendAt}` — jamais le corps — et
+          // le mail disparaît sans que le client, qui a reçu `{success:true}`, l'apprenne.
+          // C'est la perte silencieuse que l'alignement des TTL croyait avoir fermée : elle
+          // subsistait dans ce cas limite, faute de refuser l'échéance en amont.
+          if ((parsedTime - now) / 1000 > MAX_SCHEDULE_AHEAD_SECONDS) {
+            // Littérale, comme les autres motifs de refus : le client conserve un type
+            // d'erreur exploitable. La valeur « 365 » est verrouillée par un test
+            // (scheduled-send.test.ts) qui casse si `MAX_SCHEDULE_AHEAD_SECONDS` bouge.
+            return {
+              success: false,
+              error:
+                'Schedule time must be at most 365 days ahead: beyond that the message body cannot be stored until its due date',
+            } as const;
+          }
+
           targetTime = parsedTime;
         } else {
           targetTime = Date.now() + 15_000;
@@ -526,6 +545,44 @@ export const mailRouter = router({
       await scheduledKV.delete(messageId); // Clean up long-term schedule if it exists
 
       return { success: true };
+    }),
+  /**
+   * Issue d'un envoi différé. `pending_emails_status` était ÉCRIT et jamais lu : ni une
+   * procédure tRPC ni l'interface n'y touchaient. Le client recevait
+   * `{success:true, scheduled:true}` et n'apprenait jamais qu'un mail avait échoué, ni
+   * qu'il était resté bloqué sur une issue ambiguë. Cette procédure est le lecteur qui
+   * manquait.
+   *
+   * `reservation` est la source de vérité (SQL transactionnel du DO de la connexion) ;
+   * `status` n'est que la surface KV, qui peut avoir expiré ou n'avoir pas pu être écrite.
+   * L'autorisation est structurelle : on n'interroge que le registre de SA propre
+   * connexion, il n'existe pas de chemin vers celui d'une autre.
+   */
+  scheduledSendStatus: activeDriverProcedure
+    .input(z.object({ messageId: z.string().min(1) }))
+    .query(async ({ ctx, input }) => {
+      const { activeConnection } = ctx;
+      const status = await env.pending_emails_status.get(input.messageId);
+      const registry = getConnectionRegistry(env, activeConnection.id);
+      const reservation = await registry.getScheduledSendReservation(input.messageId);
+
+      return {
+        messageId: input.messageId,
+        status: status ?? null,
+        reservation: reservation
+          ? {
+              status: reservation.status,
+              outcome: reservation.outcome,
+              reservedAt: reservation.reservedAt,
+              settledAt: reservation.settledAt,
+              detail: reservation.detail,
+            }
+          : null,
+        // `sending` sans règlement = tentative dont l'issue n'est jamais revenue. C'est le
+        // coût assumé du « jamais de doublon » : ce mail ne repartira pas seul, et il doit
+        // être visible plutôt que silencieux.
+        stuck: reservation?.status === 'sending',
+      };
     }),
   delete: activeDriverProcedure
     .input(

@@ -7,6 +7,15 @@
 // acquitté, le watch n'était jamais renouvelé, et la boîte cessait silencieusement de
 // recevoir les notifications push — panne invisible côté serveur comme côté utilisateur.
 //
+// Ce rejeu a ensuite été RÉFUTÉ comme du code mort, et il l'était : `deps.enable` reçoit
+// `lib/brain.ts` `enableBrainFunction`, qui enveloppait tout dans son propre try/catch —
+// log, `resetConnection`, puis résolution normale, jamais de rethrow —, et en amont
+// `GoogleSubscriptionFactory.subscribe()` RETOURNAIT `c.json({error:'Internal server
+// error'}, {status:500})` au lieu de lever. La branche `catch` ci-dessous ne pouvait donc
+// jamais être atteinte. Les deux maillons sont réparés (résultat typé côté factory,
+// propagation côté brain) ; le chemin complet est exercé par lib/brain.test.ts, qui appelle
+// le VRAI `enableBrainFunction` au lieu de fabriquer un `enable` qui jette.
+//
 // Extrait ici avec ses dépendances injectées pour que le rejeu soit testable sans isolate.
 
 export interface RenewSubscriptionInput {

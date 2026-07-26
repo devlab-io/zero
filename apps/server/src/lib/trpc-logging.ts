@@ -62,6 +62,75 @@ export const createLoggingMiddleware = () => {
     let output: any;
     let error: string | undefined;
 
+    /**
+     * Journalisation d'un appel EN ÉCHEC. Elle aussi est protégée : la procédure a déjà
+     * échoué, l'erreur qui compte est la sienne. Une exception de la télémétrie
+     * remplacerait la cause réelle par un bruit non diagnosticable.
+     */
+    const reportFailedCall = async () => {
+      try {
+        if (!loggingService) return;
+        const callData: TRPCCallLog = {
+          id: crypto.randomUUID(),
+          timestamp: startTime,
+          userId: userId || 'anonymous',
+          sessionId,
+          procedure: opts.path,
+          input: opts.input,
+          error,
+          duration: Date.now() - startTime,
+          metadata: {
+            method: opts.type,
+            userAgent: c.req.header('User-Agent'),
+            ip: hashIpAddress(c.req.header('CF-Connecting-IP') || c.req.header('X-Forwarded-For')),
+            referer: c.req.header('Referer'),
+            origin: c.req.header('Origin'),
+            acceptLanguage: c.req.header('Accept-Language'),
+            acceptEncoding: c.req.header('Accept-Encoding'),
+            requestId: c.req.header('X-Request-Id') || crypto.randomUUID(),
+            timestamp: new Date().toISOString(),
+            startTime,
+            endTime: Date.now(),
+          },
+        };
+
+        const { getRequestTrace } = await import('./trace-context');
+        const trace = getRequestTrace(c);
+        if (trace) {
+          callData.trace = {
+            traceId: trace.traceId,
+            requestStartTime: trace.startTime,
+            requestEndTime: trace.endTime,
+            requestDuration: trace.duration,
+            spans: trace.spans,
+            totalSpans: trace.spans.length,
+            completedSpans: trace.spans.filter((s) => s.status === 'completed').length,
+            errorSpans: trace.spans.filter((s) => s.status === 'error').length,
+          };
+          callData.metadata.traceId = trace.traceId;
+          callData.metadata.requestDuration = trace.duration;
+        }
+
+        logger.info('trpc.call', {
+          procedure: opts.path,
+          method: opts.type,
+          durationMs: callData.duration,
+          error: true,
+        });
+
+        loggingService.logCall(callData).catch((logErr) => {
+          logger.error('Failed to log TRPC error:', logErr);
+        });
+
+        if (trace) {
+          const { TraceContext } = await import('./trace-context');
+          TraceContext.completeTrace(trace.traceId);
+        }
+      } catch (loggingError) {
+        logger.error('Failed to log failed TRPC call:', loggingError);
+      }
+    };
+
     // Start TRPC procedure execution span
     const { addRequestSpan, completeRequestSpan } = await import('./trace-context');
     const procedureSpan = addRequestSpan(
@@ -82,7 +151,35 @@ export const createLoggingMiddleware = () => {
     try {
       // Execute the TRPC call
       output = await opts.next();
+    } catch (err) {
+      error = err instanceof Error ? err.message : 'Unknown error';
 
+      // Complete procedure span with error
+      if (procedureSpan) {
+        completeRequestSpan(
+          c,
+          procedureSpan.id,
+          {
+            success: false,
+            errorType: err instanceof Error ? err.constructor.name : 'UnknownError',
+          },
+          error,
+        );
+      }
+
+      await reportFailedCall();
+      throw err;
+    }
+
+    // JOURNALISATION DU SUCCÈS — dans son PROPRE try/catch, silencieux.
+    //
+    // Ce bloc vivait dans le try dont le catch relance. Or il fait
+    // `JSON.stringify(output)` (mesure de `outputSize`) : une seule structure circulaire
+    // ou un BigInt dans une sortie de procédure suffisait à faire lever la mesure, à
+    // tomber dans le catch, et à transformer une MUTATION RÉUSSIE en échec côté client —
+    // l'effet de bord était déjà appliqué, seule la réponse mentait. Un incident
+    // d'observabilité ne doit jamais devenir un incident fonctionnel.
+    try {
       // Complete procedure span
       if (procedureSpan) {
         completeRequestSpan(c, procedureSpan.id, {
@@ -184,90 +281,11 @@ export const createLoggingMiddleware = () => {
           TraceContext.completeTrace(trace.traceId);
         }
       }
-    } catch (err) {
-      error = err instanceof Error ? err.message : 'Unknown error';
-
-      // Complete procedure span with error
-      if (procedureSpan) {
-        completeRequestSpan(
-          c,
-          procedureSpan.id,
-          {
-            success: false,
-            errorType: err instanceof Error ? err.constructor.name : 'UnknownError',
-          },
-          error,
-        );
-      }
-
-      // Log error using the new logging service
-      if (loggingService) {
-        // Log failed call
-        const callData: TRPCCallLog = {
-          id: crypto.randomUUID(),
-          timestamp: startTime,
-          userId: userId || 'anonymous',
-          sessionId,
-          procedure: opts.path,
-          input: opts.input,
-          error,
-          duration: Date.now() - startTime,
-          metadata: {
-            method: opts.type,
-            userAgent: c.req.header('User-Agent'),
-            ip: hashIpAddress(c.req.header('CF-Connecting-IP') || c.req.header('X-Forwarded-For')),
-            referer: c.req.header('Referer'),
-            origin: c.req.header('Origin'),
-            acceptLanguage: c.req.header('Accept-Language'),
-            acceptEncoding: c.req.header('Accept-Encoding'),
-            requestId: c.req.header('X-Request-Id') || crypto.randomUUID(),
-            timestamp: new Date().toISOString(),
-            startTime,
-            endTime: Date.now(),
-          },
-        };
-
-        const { getRequestTrace } = await import('./trace-context');
-
-        // Get the complete trace for this request
-        const trace = getRequestTrace(c);
-
-        // Add trace to call data
-        if (trace) {
-          callData.trace = {
-            traceId: trace.traceId,
-            requestStartTime: trace.startTime,
-            requestEndTime: trace.endTime,
-            requestDuration: trace.duration,
-            spans: trace.spans,
-            totalSpans: trace.spans.length,
-            completedSpans: trace.spans.filter((s) => s.status === 'completed').length,
-            errorSpans: trace.spans.filter((s) => s.status === 'error').length,
-          };
-          callData.metadata.traceId = trace.traceId;
-          callData.metadata.requestDuration = trace.duration;
-        }
-
-        logger.info('trpc.call', {
-          procedure: opts.path,
-          method: opts.type,
-          durationMs: callData.duration,
-          error: true,
-        });
-
-        // Log using the new service which will immediately log to Datadog
-        loggingService.logCall(callData).catch((logErr) => {
-          logger.error('Failed to log TRPC error:', logErr);
-        });
-
-        // Complete the trace after logging error
-        if (trace) {
-          const { TraceContext } = await import('./trace-context');
-          TraceContext.completeTrace(trace.traceId);
-        }
-      }
-
-      throw err;
+    } catch (loggingError) {
+      // Silencieux PAR CONCEPTION : la procédure a réussi et son effet est appliqué.
+      // Perdre une ligne de télémétrie est sans conséquence ; renvoyer une erreur au
+      // client pour un `JSON.stringify` qui a buté sur une structure circulaire en a une.
+      logger.error('Failed to log successful TRPC call:', loggingError);
     }
 
     return output;

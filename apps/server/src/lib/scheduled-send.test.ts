@@ -4,14 +4,18 @@ import {
   isNonSendableStatus,
   MAX_KV_TTL_SECONDS,
   MAX_QUEUE_DELAY_SECONDS,
+  MAX_SCHEDULE_AHEAD_SECONDS,
   MIN_KV_TTL_SECONDS,
   normalizeStoredAttachments,
+  parseStoredPayload,
   scheduleTtlSeconds,
   SEND_TTL_GRACE_SECONDS,
   TERMINAL_MARKER_TTL_SECONDS,
   type ScheduledSendStore,
+  type SendReservationGate,
   type StoredOutgoingMessage,
 } from './scheduled-send';
+import { ScheduledSendPayloadError, type SettledSendOutcome } from './send-reservation';
 import { describe, expect, it, vi } from 'vitest';
 
 function makeStore(seed: Record<string, string> = {}) {
@@ -34,6 +38,24 @@ function makeStore(seed: Record<string, string> = {}) {
     delete: vi.fn(async (k: string) => void map.delete(k)),
   };
   return store;
+}
+
+/**
+ * Verrou toujours ouvert. Il ne SIMULE PAS l'exclusion mutuelle : ces tests-ci portent sur
+ * les autres branches de `deliverScheduledEmail`. L'exclusion elle-même est prouvée dans
+ * routes/agent/shard-registry.test.ts, contre le vrai Durable Object et un vrai SQLite.
+ */
+function openGate(): SendReservationGate & {
+  settled: Array<{ messageId: string; outcome: SettledSendOutcome; detail?: string }>;
+} {
+  const settled: Array<{ messageId: string; outcome: SettledSendOutcome; detail?: string }> = [];
+  return {
+    settled,
+    reserve: async () => ({ action: 'reserve' as const, reason: 'first-arrival' as const }),
+    settle: async (messageId, outcome, _now, detail) => {
+      settled.push({ messageId, outcome, detail });
+    },
+  };
 }
 
 const silentLogger = { info: vi.fn(), error: vi.fn() };
@@ -92,11 +114,149 @@ describe('cancelTtlSeconds — une annulation ne doit pas expirer avant l’eche
   });
 });
 
+describe('MAX_SCHEDULE_AHEAD_SECONDS — la borne haute de planification', () => {
+  it('laisse la marge sous le plafond KV, sans quoi le corps expire avant l’echeance', () => {
+    expect(MAX_SCHEDULE_AHEAD_SECONDS).toBe(MAX_KV_TTL_SECONDS - SEND_TTL_GRACE_SECONDS);
+    // Le cas limite que la borne ferme : a l'echeance maximale acceptee, le TTL calcule
+    // est encore EGAL a l'echeance + marge, donc il n'est pas rabote par le plafond.
+    expect(scheduleTtlSeconds(MAX_SCHEDULE_AHEAD_SECONDS)).toBe(MAX_KV_TTL_SECONDS);
+    // Un cran au-dela, il l'est : le corps disparait avant que le cron ne remette en file.
+    expect(scheduleTtlSeconds(MAX_SCHEDULE_AHEAD_SECONDS + 1)).toBe(MAX_KV_TTL_SECONDS);
+    expect(MAX_SCHEDULE_AHEAD_SECONDS + 1 + SEND_TTL_GRACE_SECONDS).toBeGreaterThan(
+      MAX_KV_TTL_SECONDS,
+    );
+  });
+
+  it('verrouille le « 365 jours » annonce par le message d’erreur de mail.send', () => {
+    // Le motif de refus est une chaine litterale (le client garde un type exploitable) ;
+    // ce test est ce qui empeche la borne et son libelle de diverger en silence.
+    expect(Math.floor(MAX_SCHEDULE_AHEAD_SECONDS / 86_400)).toBe(365);
+  });
+});
+
 // ---------------------------------------------------------------------------
-// P1 — payload absent : echec explicite, plus d'acquittement muet.
+// Corps illisible : echec DEFINITIF, jamais rejoue (point 5).
 // ---------------------------------------------------------------------------
 
-describe('deliverScheduledEmail — payload absent (P1)', () => {
+describe('parseStoredPayload — une donnee irrecuperable ne doit pas boucler', () => {
+  it('un JSON corrompu devient une ScheduledSendPayloadError', () => {
+    expect(() => parseStoredPayload('{not json')).toThrow(ScheduledSendPayloadError);
+  });
+
+  it('un JSON valide mais non-objet est rejete', () => {
+    expect(() => parseStoredPayload('"chaine"')).toThrow(ScheduledSendPayloadError);
+    expect(() => parseStoredPayload('null')).toThrow(ScheduledSendPayloadError);
+    expect(() => parseStoredPayload('[1,2]')).toThrow(ScheduledSendPayloadError);
+  });
+
+  it('`attachments:[null]` et `attachments:[{}]` sont captures, pas propages bruts', () => {
+    // Meme famille que le JSON corrompu : `normalizeStoredAttachments` levait, hors de
+    // tout try, et faisait rejouer le LOT entier de send-email-queue.
+    expect(() => parseStoredPayload(JSON.stringify({ ...BODY, attachments: [null] }))).toThrow(
+      ScheduledSendPayloadError,
+    );
+    expect(() => parseStoredPayload(JSON.stringify({ ...BODY, attachments: [{}] }))).toThrow(
+      ScheduledSendPayloadError,
+    );
+  });
+
+  it('un corps sain traverse et rehydrate ses pieces jointes', () => {
+    const parsed = parseStoredPayload(
+      JSON.stringify({
+        ...BODY,
+        attachments: [{ name: 'a.txt', type: 'text/plain', base64: 'aGk=' }],
+      }),
+    );
+    const rehydrated = parsed.attachments ?? [];
+    expect(rehydrated).toHaveLength(1);
+    expect('arrayBuffer' in (rehydrated[0] as object)).toBe(true);
+  });
+});
+
+describe('deliverScheduledEmail — corps illisible (point 5)', () => {
+  it('un payload KV corrompu est un echec DEFINITIF : pas de rejeu', async () => {
+    const statusKV = makeStore({ 'bad-1': 'pending' });
+    const payloadKV = makeStore({ 'bad-1': '{ this is not json' });
+    const send = vi.fn(async () => {});
+    const retry = vi.fn();
+
+    const out = await deliverScheduledEmail(
+      { messageId: 'bad-1', connectionId: 'c' },
+      { statusKV, payloadKV, reservation: openGate(), send, retry, logger: silentLogger },
+    );
+
+    expect(out).toMatchObject({ outcome: 'invalid-payload' });
+    expect(send).not.toHaveBeenCalled();
+    // La regression exacte : sans dead-letter queue, rejouer produisait cinq tentatives
+    // identiques, et avec Promise.all cela relancait tout le lot a chaque fois.
+    expect(retry).not.toHaveBeenCalled();
+    expect(statusKV.map.get('bad-1')).toBe('failed');
+  });
+
+  it('`attachments:[null]` ne rejoue pas non plus', async () => {
+    const retry = vi.fn();
+    const out = await deliverScheduledEmail(
+      { messageId: 'bad-2', connectionId: 'c' },
+      {
+        statusKV: makeStore(),
+        payloadKV: makeStore({ 'bad-2': JSON.stringify({ ...BODY, attachments: [null] }) }),
+        reservation: openGate(),
+        send: vi.fn(async () => {}),
+        retry,
+        logger: silentLogger,
+      },
+    );
+    expect(out).toMatchObject({ outcome: 'invalid-payload' });
+    expect(retry).not.toHaveBeenCalled();
+  });
+
+  it('un corps illisible PORTE PAR LA QUEUE est traite pareil, sans lever', async () => {
+    const retry = vi.fn();
+    const out = await deliverScheduledEmail(
+      {
+        messageId: 'bad-3',
+        connectionId: 'c',
+        mail: { ...BODY, attachments: [null] } as unknown as StoredOutgoingMessage,
+      },
+      {
+        statusKV: makeStore(),
+        payloadKV: makeStore(),
+        reservation: openGate(),
+        send: vi.fn(async () => {}),
+        retry,
+        logger: silentLogger,
+      },
+    );
+    expect(out).toMatchObject({ outcome: 'invalid-payload' });
+    expect(retry).not.toHaveBeenCalled();
+  });
+
+  it('un corps illisible est CAPTURE, pas seulement journalise', async () => {
+    const capture = vi.fn();
+    await deliverScheduledEmail(
+      { messageId: 'bad-4', connectionId: 'conn-x' },
+      {
+        statusKV: makeStore(),
+        payloadKV: makeStore({ 'bad-4': 'nope' }),
+        reservation: openGate(),
+        send: vi.fn(async () => {}),
+        capture,
+        logger: silentLogger,
+      },
+    );
+    expect(capture).toHaveBeenCalledTimes(1);
+    expect(capture.mock.calls[0][1]).toMatchObject({
+      transaction: 'scheduled-send',
+      extra: expect.objectContaining({ messageId: 'bad-4', connectionId: 'conn-x' }),
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Payload absent : echec explicite, plus d'acquittement muet.
+// ---------------------------------------------------------------------------
+
+describe('deliverScheduledEmail — payload absent', () => {
   it('ecrit `failed` et rejoue au lieu d’acquitter en silence', async () => {
     const statusKV = makeStore({ 'msg-1': 'pending' });
     const payloadKV = makeStore();
@@ -105,12 +265,14 @@ describe('deliverScheduledEmail — payload absent (P1)', () => {
 
     const out = await deliverScheduledEmail(
       { messageId: 'msg-1', connectionId: 'conn-1' },
-      { statusKV, payloadKV, send, retry, logger: silentLogger },
+      { statusKV, payloadKV, reservation: openGate(), send, retry, logger: silentLogger },
     );
 
     expect(out).toEqual({ outcome: 'missing-payload' });
     expect(send).not.toHaveBeenCalled();
     expect(statusKV.map.get('msg-1')).toBe('failed');
+    // Rejoue : KV est eventuellement coherent, le corps peut apparaitre a la tentative
+    // suivante. C'est la seule branche « absence » ou le rejeu a un sens.
     expect(retry).toHaveBeenCalledTimes(1);
   });
 
@@ -121,96 +283,335 @@ describe('deliverScheduledEmail — payload absent (P1)', () => {
       {
         statusKV,
         payloadKV: makeStore(),
+        reservation: openGate(),
         send: vi.fn(async () => {}),
         logger: silentLogger,
       },
     );
     expect(statusKV.puts.at(-1)?.ttl).toBe(TERMINAL_MARKER_TTL_SECONDS);
   });
-});
 
-// ---------------------------------------------------------------------------
-// P2 — double envoi.
-// ---------------------------------------------------------------------------
-
-describe('deliverScheduledEmail — idempotence (P2)', () => {
-  it('reserve `sending` AVANT l’appel au driver', async () => {
-    const statusKV = makeStore({ 'msg-2': 'pending' });
-    const seen: string[] = [];
-    const send = vi.fn(async () => {
-      seen.push(statusKV.map.get('msg-2') as string);
-    });
-
+  it('un payload absent est CAPTURE', async () => {
+    const capture = vi.fn();
     await deliverScheduledEmail(
-      { messageId: 'msg-2', connectionId: 'c', mail: BODY },
-      { statusKV, payloadKV: makeStore(), send, logger: silentLogger },
-    );
-
-    expect(seen).toEqual(['sending']);
-  });
-
-  it('une redelivrance apres un envoi reussi n’envoie pas une seconde fois', async () => {
-    const statusKV = makeStore({ 'msg-3': 'pending' });
-    const payloadKV = makeStore({ 'msg-3': JSON.stringify(BODY) });
-    const send = vi.fn(async () => {});
-    const deps = { statusKV, payloadKV, send, logger: silentLogger };
-
-    const first = await deliverScheduledEmail({ messageId: 'msg-3', connectionId: 'c' }, deps);
-    expect(first).toEqual({ outcome: 'sent' });
-    expect(statusKV.map.get('msg-3')).toBe('sent');
-
-    // La queue redelivre le meme message (livraison au-moins-une-fois).
-    const second = await deliverScheduledEmail({ messageId: 'msg-3', connectionId: 'c' }, deps);
-    expect(second).toEqual({ outcome: 'skipped', status: 'sent' });
-    expect(send).toHaveBeenCalledTimes(1);
-  });
-
-  it('un isolate mort entre l’envoi et l’ecriture `sent` ne provoque pas de doublon', async () => {
-    const statusKV = makeStore({ 'msg-4': 'pending' });
-    const payloadKV = makeStore({ 'msg-4': JSON.stringify(BODY) });
-    const send = vi.fn(async () => {});
-    const retry = vi.fn();
-
-    // Simulation : l'envoi reussit, puis la suite du handler ne s'execute jamais.
-    // On rejoue simplement le handler avec l'etat KV laisse par la reservation.
-    await deliverScheduledEmail(
-      { messageId: 'msg-4', connectionId: 'c' },
+      { messageId: 'msg-1b', connectionId: 'conn-1' },
       {
-        statusKV,
-        payloadKV,
-        send: async () => {
-          await send();
-          throw new Error('isolate killed');
-        },
-        retry,
+        statusKV: makeStore(),
+        payloadKV: makeStore(),
+        reservation: openGate(),
+        send: vi.fn(async () => {}),
+        capture,
         logger: silentLogger,
       },
     );
-    // Sur un echec franc on repasse en `failed` : le message est rejouable.
-    expect(statusKV.map.get('msg-4')).toBe('failed');
-
-    // Mais si l'ecriture de `failed` n'avait pas eu lieu (isolate tue), l'etat reste
-    // `sending` et la redelivrance est bloquee.
-    const stuck = makeStore({ 'msg-5': 'sending' });
-    const resend = vi.fn(async () => {});
-    const out = await deliverScheduledEmail(
-      { messageId: 'msg-5', connectionId: 'c', mail: BODY },
-      { statusKV: stuck, payloadKV: makeStore(), send: resend, logger: silentLogger },
-    );
-    expect(out).toEqual({ outcome: 'skipped', status: 'sending' });
-    expect(resend).not.toHaveBeenCalled();
+    expect(capture).toHaveBeenCalledTimes(1);
   });
+});
 
-  it('l’etat `sent` est ECRIT, pas supprime — une clef absente redeviendrait envoyable', async () => {
-    const statusKV = makeStore({ 'msg-6': 'pending' });
+// ---------------------------------------------------------------------------
+// Reservation : le verrou est celui du Durable Object, pas KV.
+// ---------------------------------------------------------------------------
+
+describe('deliverScheduledEmail — la reservation commande l’envoi', () => {
+  it('reserve AVANT d’appeler le driver', async () => {
+    const order: string[] = [];
+    const reservation: SendReservationGate = {
+      reserve: async () => {
+        order.push('reserve');
+        return { action: 'reserve', reason: 'first-arrival' };
+      },
+      settle: async () => void order.push('settle'),
+    };
     await deliverScheduledEmail(
-      { messageId: 'msg-6', connectionId: 'c', mail: BODY },
-      { statusKV, payloadKV: makeStore(), send: vi.fn(async () => {}), logger: silentLogger },
+      { messageId: 'msg-2', connectionId: 'c', mail: BODY },
+      {
+        statusKV: makeStore({ 'msg-2': 'pending' }),
+        payloadKV: makeStore(),
+        reservation,
+        send: vi.fn(async () => void order.push('send')),
+        logger: silentLogger,
+      },
     );
-    expect(statusKV.delete).not.toHaveBeenCalled();
-    expect(statusKV.map.get('msg-6')).toBe('sent');
+    expect(order).toEqual(['reserve', 'send', 'settle']);
   });
 
+  it('un refus de reservation n’envoie RIEN et rapporte le motif', async () => {
+    const send = vi.fn(async () => {});
+    const out = await deliverScheduledEmail(
+      { messageId: 'msg-2b', connectionId: 'c', mail: BODY },
+      {
+        statusKV: makeStore(),
+        payloadKV: makeStore(),
+        reservation: {
+          reserve: async () => ({ action: 'skip', reason: 'in-flight' }),
+          settle: async () => {},
+        },
+        send,
+        logger: silentLogger,
+      },
+    );
+    expect(out).toEqual({ outcome: 'skipped', status: 'in-flight' });
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it('la reservation est consultee meme quand KV ne dit rien', async () => {
+    const reserve = vi.fn(async () => ({
+      action: 'skip' as const,
+      reason: 'already-sent' as const,
+    }));
+    const send = vi.fn(async () => {});
+    const out = await deliverScheduledEmail(
+      { messageId: 'msg-2c', connectionId: 'c', mail: BODY },
+      {
+        statusKV: makeStore(),
+        payloadKV: makeStore(),
+        reservation: { reserve, settle: async () => {} },
+        send,
+        logger: silentLogger,
+      },
+    );
+    expect(reserve).toHaveBeenCalledTimes(1);
+    expect(out).toEqual({ outcome: 'skipped', status: 'already-sent' });
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it('l’issue est reglee dans la reservation AVANT la surface KV', async () => {
+    const gate = openGate();
+    const statusKV = makeStore();
+    await deliverScheduledEmail(
+      { messageId: 'msg-2d', connectionId: 'c', mail: BODY },
+      {
+        statusKV,
+        payloadKV: makeStore(),
+        reservation: gate,
+        send: vi.fn(async () => {}),
+        logger: silentLogger,
+      },
+    );
+    expect(gate.settled).toEqual([{ messageId: 'msg-2d', outcome: 'sent', detail: 'ok' }]);
+    expect(statusKV.map.get('msg-2d')).toBe('sent');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Rejeu : uniquement sur une non-acceptation PROUVEE (refutation c).
+// ---------------------------------------------------------------------------
+
+describe('deliverScheduledEmail — rejeu apres echec', () => {
+  const failWith = async (error: unknown, messageId: string) => {
+    const statusKV = makeStore({ [messageId]: 'pending' });
+    const payloadKV = makeStore({ [messageId]: JSON.stringify(BODY) });
+    const retry = vi.fn();
+    const capture = vi.fn();
+    const gate = openGate();
+    const out = await deliverScheduledEmail(
+      { messageId, connectionId: 'c' },
+      {
+        statusKV,
+        payloadKV,
+        reservation: gate,
+        send: vi.fn(async () => {
+          throw error;
+        }),
+        retry,
+        capture,
+        logger: silentLogger,
+      },
+    );
+    return { out, retry, capture, statusKV, payloadKV, gate };
+  };
+
+  it('une panne de TRANSPORT ne rejoue PAS : le mail a pu partir', async () => {
+    const { out, retry, statusKV, gate } = await failWith(new TypeError('fetch failed'), 'amb-1');
+    // La regression exacte, refutation (c) : `fetch failed` etait classe transitoire par
+    // gmail-backoff, donc `scheduled-send` remettait `failed` et rejouait — et le mail
+    // partait deux fois quand Gmail avait accepte la requete avant la coupure.
+    expect(out).toMatchObject({ outcome: 'unresolved' });
+    expect(retry).not.toHaveBeenCalled();
+    expect(statusKV.map.get('amb-1')).toBe('unresolved');
+    expect(gate.settled).toEqual([
+      { messageId: 'amb-1', outcome: 'unresolved', detail: 'transport-failure' },
+    ]);
+  });
+
+  it('un timeout ne rejoue pas', async () => {
+    const { out, retry } = await failWith(new Error('request timed out'), 'amb-2');
+    expect(out).toMatchObject({ outcome: 'unresolved' });
+    expect(retry).not.toHaveBeenCalled();
+  });
+
+  it('un 5xx ne rejoue pas : Gmail a recu la requete', async () => {
+    const { out, retry, gate } = await failWith(
+      Object.assign(new Error('backend'), { code: 503 }),
+      'amb-3',
+    );
+    expect(out).toMatchObject({ outcome: 'unresolved' });
+    expect(retry).not.toHaveBeenCalled();
+    expect(gate.settled[0]).toMatchObject({ outcome: 'unresolved', detail: 'http-503' });
+  });
+
+  it('une issue ambigue est CAPTUREE et conserve le corps', async () => {
+    const { capture, payloadKV } = await failWith(new TypeError('fetch failed'), 'amb-4');
+    expect(capture).toHaveBeenCalledTimes(1);
+    expect(payloadKV.map.has('amb-4')).toBe(true);
+  });
+
+  it('un 429 (refus PROUVE, transitoire) rejoue', async () => {
+    const { out, retry, statusKV } = await failWith(
+      Object.assign(new Error('rate'), { code: 429 }),
+      'ret-1',
+    );
+    expect(out).toMatchObject({ outcome: 'failed', retried: true });
+    expect(retry).toHaveBeenCalledTimes(1);
+    expect(statusKV.map.get('ret-1')).toBe('failed');
+  });
+
+  it('un 400 (refus PROUVE, definitif) ne rejoue pas mais reste `failed`', async () => {
+    const { out, retry, statusKV, payloadKV } = await failWith({ code: 400 }, 'perm-1');
+    expect(out).toMatchObject({ outcome: 'failed', retried: false });
+    expect(retry).not.toHaveBeenCalled();
+    expect(statusKV.map.get('perm-1')).toBe('failed');
+    // Le corps est conserve : c'est le mail de l'utilisateur.
+    expect(payloadKV.map.has('perm-1')).toBe(true);
+  });
+
+  it('tout echec d’envoi est CAPTURE', async () => {
+    const { capture } = await failWith({ code: 400 }, 'perm-2');
+    expect(capture).toHaveBeenCalledTimes(1);
+    expect(capture.mock.calls[0][1]).toMatchObject({
+      extra: expect.objectContaining({ failureClass: 'not-accepted-permanent' }),
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Une ecriture KV en echec ne doit plus faire disparaitre le mail (point 3).
+// ---------------------------------------------------------------------------
+
+describe('deliverScheduledEmail — une ecriture KV en echec ne perd plus le mail', () => {
+  function brokenPut(seed: Record<string, string> = {}): ScheduledSendStore & {
+    map: Map<string, string>;
+  } {
+    const map = new Map<string, string>(Object.entries(seed));
+    return {
+      map,
+      get: async (k) => map.get(k) ?? null,
+      put: async () => {
+        throw new Error('KV unavailable');
+      },
+      delete: async (k) => void map.delete(k),
+    };
+  }
+
+  it('un `put(failed)` en echec ne fait plus SORTIR l’exception', async () => {
+    const gate = openGate();
+    const capture = vi.fn();
+    // La regression exacte : l'exception sortait de la fonction, l'etat restait `sending`,
+    // et toute redelivrance repondait `skipped` — le mail disparaissait sans trace.
+    const out = await deliverScheduledEmail(
+      { messageId: 'kv-1', connectionId: 'c', mail: BODY },
+      {
+        statusKV: brokenPut(),
+        payloadKV: makeStore(),
+        reservation: gate,
+        send: vi.fn(async () => {
+          throw Object.assign(new Error('rate'), { code: 429 });
+        }),
+        capture,
+        logger: silentLogger,
+      },
+    );
+    expect(out).toMatchObject({ outcome: 'failed' });
+    // L'issue authentique est dans la reservation, pas dans KV.
+    expect(gate.settled).toEqual([{ messageId: 'kv-1', outcome: 'failed', detail: 'http-429' }]);
+    // Et l'echec d'ecriture est signale au lieu d'etre subi.
+    expect(capture.mock.calls.some(([, ctx]) => ctx.extra?.phase === 'status-write')).toBe(true);
+  });
+
+  it('un `put(sent)` en echec ne fait pas echouer un envoi reussi', async () => {
+    const gate = openGate();
+    const out = await deliverScheduledEmail(
+      { messageId: 'kv-2', connectionId: 'c', mail: BODY },
+      {
+        statusKV: brokenPut(),
+        payloadKV: makeStore(),
+        reservation: gate,
+        send: vi.fn(async () => {}),
+        logger: silentLogger,
+      },
+    );
+    expect(out).toEqual({ outcome: 'sent' });
+    expect(gate.settled).toEqual([{ messageId: 'kv-2', outcome: 'sent', detail: 'ok' }]);
+  });
+
+  it('un `settle` en echec est capture, et la reservation reste fermee (jamais de doublon)', async () => {
+    const capture = vi.fn();
+    const out = await deliverScheduledEmail(
+      { messageId: 'kv-3', connectionId: 'c', mail: BODY },
+      {
+        statusKV: makeStore(),
+        payloadKV: makeStore(),
+        reservation: {
+          reserve: async () => ({ action: 'reserve', reason: 'first-arrival' }),
+          settle: async () => {
+            throw new Error('DO unreachable');
+          },
+        },
+        send: vi.fn(async () => {}),
+        capture,
+        logger: silentLogger,
+      },
+    );
+    expect(out).toEqual({ outcome: 'sent' });
+    expect(capture.mock.calls.some(([, ctx]) => ctx.extra?.phase === 'reservation-settle')).toBe(
+      true,
+    );
+  });
+
+  it('une suppression de corps en echec ne fait pas echouer l’envoi', async () => {
+    const payloadKV: ScheduledSendStore = {
+      get: async () => JSON.stringify(BODY),
+      put: async () => {},
+      delete: async () => {
+        throw new Error('KV delete failed');
+      },
+    };
+    const out = await deliverScheduledEmail(
+      { messageId: 'kv-4', connectionId: 'c' },
+      {
+        statusKV: makeStore(),
+        payloadKV,
+        reservation: openGate(),
+        send: vi.fn(async () => {}),
+        logger: silentLogger,
+      },
+    );
+    expect(out).toEqual({ outcome: 'sent' });
+  });
+
+  it('un `capture` qui leve ne casse pas le handler', async () => {
+    const out = await deliverScheduledEmail(
+      { messageId: 'kv-5', connectionId: 'c' },
+      {
+        statusKV: makeStore(),
+        payloadKV: makeStore(),
+        reservation: openGate(),
+        send: vi.fn(async () => {}),
+        capture: () => {
+          throw new Error('sentry down');
+        },
+        logger: silentLogger,
+      },
+    );
+    expect(out).toEqual({ outcome: 'missing-payload' });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Pre-filtre KV et statuts.
+// ---------------------------------------------------------------------------
+
+describe('deliverScheduledEmail — pre-filtre des statuts', () => {
   it('conserve le rejet de `cancelled` deja en place', async () => {
     const send = vi.fn(async () => {});
     const out = await deliverScheduledEmail(
@@ -218,6 +619,7 @@ describe('deliverScheduledEmail — idempotence (P2)', () => {
       {
         statusKV: makeStore({ 'msg-7': 'cancelled' }),
         payloadKV: makeStore(),
+        reservation: openGate(),
         send,
         logger: silentLogger,
       },
@@ -226,43 +628,52 @@ describe('deliverScheduledEmail — idempotence (P2)', () => {
     expect(send).not.toHaveBeenCalled();
   });
 
-  it('un echec franc garde le corps et rejoue', async () => {
-    const statusKV = makeStore({ 'msg-8': 'pending' });
-    const payloadKV = makeStore({ 'msg-8': JSON.stringify(BODY) });
-    const retry = vi.fn();
-
+  it('`unresolved` bloque toute nouvelle tentative', async () => {
+    const send = vi.fn(async () => {});
     const out = await deliverScheduledEmail(
-      { messageId: 'msg-8', connectionId: 'c' },
+      { messageId: 'msg-7b', connectionId: 'c', mail: BODY },
       {
-        statusKV,
-        payloadKV,
-        send: vi.fn(async () => {
-          throw new Error('gmail 500');
-        }),
-        retry,
+        statusKV: makeStore({ 'msg-7b': 'unresolved' }),
+        payloadKV: makeStore(),
+        reservation: openGate(),
+        send,
         logger: silentLogger,
       },
     );
-
-    expect(out).toMatchObject({ outcome: 'failed' });
-    expect(payloadKV.map.has('msg-8')).toBe(true);
-    expect(statusKV.map.get('msg-8')).toBe('failed');
-    expect(retry).toHaveBeenCalledTimes(1);
+    expect(out).toEqual({ outcome: 'skipped', status: 'unresolved' });
+    expect(send).not.toHaveBeenCalled();
   });
 
-  it('apres un echec, le message redevient envoyable', async () => {
+  it('apres un echec PROUVE, le message redevient envoyable', async () => {
     const send = vi.fn(async () => {});
     const out = await deliverScheduledEmail(
       { messageId: 'msg-9', connectionId: 'c', mail: BODY },
       {
         statusKV: makeStore({ 'msg-9': 'failed' }),
         payloadKV: makeStore(),
+        reservation: openGate(),
         send,
         logger: silentLogger,
       },
     );
     expect(out).toEqual({ outcome: 'sent' });
     expect(send).toHaveBeenCalledTimes(1);
+  });
+
+  it('l’etat `sent` est ECRIT, pas supprime — une clef absente redeviendrait envoyable', async () => {
+    const statusKV = makeStore({ 'msg-6': 'pending' });
+    await deliverScheduledEmail(
+      { messageId: 'msg-6', connectionId: 'c', mail: BODY },
+      {
+        statusKV,
+        payloadKV: makeStore(),
+        reservation: openGate(),
+        send: vi.fn(async () => {}),
+        logger: silentLogger,
+      },
+    );
+    expect(statusKV.delete).not.toHaveBeenCalled();
+    expect(statusKV.map.get('msg-6')).toBe('sent');
   });
 
   it('libere le corps une fois parti', async () => {
@@ -272,6 +683,7 @@ describe('deliverScheduledEmail — idempotence (P2)', () => {
       {
         statusKV: makeStore(),
         payloadKV,
+        reservation: openGate(),
         send: vi.fn(async () => {}),
         logger: silentLogger,
       },
@@ -286,6 +698,7 @@ describe('deliverScheduledEmail — idempotence (P2)', () => {
     expect(isNonSendableStatus('sent')).toBe(true);
     expect(isNonSendableStatus('sending')).toBe(true);
     expect(isNonSendableStatus('cancelled')).toBe(true);
+    expect(isNonSendableStatus('unresolved')).toBe(true);
   });
 });
 
@@ -301,6 +714,7 @@ describe('deliverScheduledEmail — routage draft / creation', () => {
       {
         statusKV: makeStore(),
         payloadKV: makeStore({ 'msg-11': JSON.stringify(stored) }),
+        reservation: openGate(),
         send,
         logger: silentLogger,
       },

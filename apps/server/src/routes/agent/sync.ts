@@ -41,7 +41,14 @@ export async function syncFolders(self: ZeroDriverInternal) {
     logger.info(
       `[syncFolders] Starting folder sync for ${self.name} (threadCount: ${threadCount})`,
     );
-    await triggerSyncWorkflow(self, 'inbox');
+    const triggered = await triggerSyncWorkflow(self, 'inbox');
+    if (!triggered.ok) {
+      // L'echec remonte a l'appelant au lieu d'etre avale : sans cela, la synchronisation
+      // initiale ne demarrait pas et personne ne pouvait l'apprendre.
+      throw triggered.error instanceof Error
+        ? triggered.error
+        : new Error(`Failed to trigger sync coordinator workflow for ${self.name}/inbox`);
+    }
   } else {
     logger.info(
       `[syncFolders] Skipping sync for ${self.name} - threadCount (${threadCount}) >= maxCount (${maxCount})`,
@@ -255,7 +262,19 @@ export async function storeThreadInDB(
   }
 }
 
-export async function triggerSyncWorkflow(self: ZeroDriverInternal, folder: string): Promise<void> {
+/**
+ * Issue du déclenchement du workflow coordinateur de synchronisation. La fonction
+ * retournait `void` : l'échec de `create()` était journalisé PUIS AVALÉ, le repli était en
+ * commentaire, et aucun appelant ne pouvait savoir que la synchronisation initiale n'avait
+ * pas démarré. Une boîte pouvait donc rester vide indéfiniment sans qu'aucun code ne
+ * puisse réagir. Le résultat est désormais exploitable — `syncFolders` s'en sert.
+ */
+export type TriggerSyncOutcome = { ok: true; instanceId: string } | { ok: false; error: unknown };
+
+export async function triggerSyncWorkflow(
+  self: ZeroDriverInternal,
+  folder: string,
+): Promise<TriggerSyncOutcome> {
   try {
     logger.info(`[ZeroDriver] Triggering sync coordinator workflow for ${self.name}/${folder}`);
 
@@ -269,22 +288,12 @@ export async function triggerSyncWorkflow(self: ZeroDriverInternal, folder: stri
     logger.info(
       `[ZeroDriver] Sync coordinator workflow triggered for ${self.name}/${folder}, instance: ${instance.id}`,
     );
+    return { ok: true, instanceId: instance.id };
   } catch (error) {
     logger.error(
       `[ZeroDriver] Failed to trigger sync coordinator workflow for ${self.name}/${folder}:`,
       error,
     );
-    //   try {
-    //     const fallbackInstance = await this.env.SYNC_THREADS_WORKFLOW.create({
-    //       id: `${this.name}-${folder}`,
-    //       params: {
-    //         connectionId: this.name,
-    //         folder: folder,
-    //       },
-    //     });
-    //     console.log(`[ZeroDriver] Fallback to original workflow: ${fallbackInstance.id}`);
-    //   } catch (fallbackError) {
-    //     console.error(`[ZeroDriver] Fallback workflow also failed:`, fallbackError);
-    //   }
+    return { ok: false, error };
   }
 }

@@ -21,6 +21,7 @@ import type { IOutgoingMessage, ISnoozeBatch, Sender } from '../../types';
 import { OutgoingMessageType, type OutgoingMessage } from './types';
 import type { UserTopic } from '../../lib/analyze/interests';
 import { Migratable, Queryable, Transfer } from 'dormroom';
+import { captureServerException } from '../../lib/sentry';
 import type { CreateDraftData } from '../../lib/schemas';
 import { drizzle } from 'drizzle-orm/durable-sqlite';
 import type { ZeroDriverInternal } from './internal';
@@ -198,8 +199,24 @@ export class ZeroDriver extends DurableObject<ZeroEnv> {
     return outbox.armDraftOutboxAlarm(internal(this), scheduledSendAt);
   }
 
+  /**
+   * Point d'entrée d'alarme du Durable Object : appelé par le RUNTIME, jamais par une
+   * requête. Il ne traversait donc aucun des trois seuls emplacements où
+   * `captureServerException` existait (fetch / queue / scheduled de main.ts). Une alarme
+   * de boîte d'envoi qui échoue est réessayée par le runtime puis abandonnée, en silence
+   * — c'est-à-dire un brouillon programmé perdu sans le moindre événement.
+   */
   async alarm() {
-    await outbox.processDraftOutboxAlarm(internal(this));
+    try {
+      await outbox.processDraftOutboxAlarm(internal(this));
+    } catch (error) {
+      logger.error('[ZeroDriver] draft outbox alarm failed', error);
+      await captureServerException(error, this.env, {
+        transaction: 'ZeroDriver.alarm',
+        extra: { connectionId: this.name },
+      });
+      throw error;
+    }
   }
 
   async syncFolders() {

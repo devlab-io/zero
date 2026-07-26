@@ -63,8 +63,25 @@ export async function createOrAttachPageWorkflow<P, T = unknown>(
 ): Promise<PageWorkflowHandle<T>> {
   try {
     return await binding.create({ id, params });
-  } catch {
-    return await binding.get(id);
+  } catch (createError) {
+    try {
+      return await binding.get(id);
+    } catch (attachError) {
+      // Le `catch {}` sans liaison jetait la cause d'origine. `create` échoue aussi pour
+      // des raisons qui n'ont RIEN à voir avec « l'identifiant existe déjà » — quota
+      // d'instances Workflows dépassé, binding absent —, et le `get` qui suivait échouait
+      // alors avec « instance not found ». L'exploitation partait chercher une instance
+      // manquante là où le vrai motif était un quota. Les deux causes sont désormais
+      // portées par l'erreur remontée.
+      throw new Error(
+        `Failed to create or attach page workflow ${id}: ${
+          attachError instanceof Error ? attachError.message : String(attachError)
+        } (create failed with: ${
+          createError instanceof Error ? createError.message : String(createError)
+        })`,
+        { cause: createError },
+      );
+    }
   }
 }
 

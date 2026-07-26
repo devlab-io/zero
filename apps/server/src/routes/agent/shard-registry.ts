@@ -15,6 +15,12 @@
  */
 
 import {
+  decideSendReservation,
+  type SendReservationRecord,
+  type SendReservationRpcResult,
+  type SettledSendOutcome,
+} from '../../lib/send-reservation';
+import {
   decideHistoryLockAction,
   DONE_MARK_TTL_MS,
   type HistoryLockRecord,
@@ -52,6 +58,27 @@ import { type ZeroEnv } from '../../env';
       `CREATE TABLE IF NOT EXISTS gmail_sync_cursor (
       id INTEGER PRIMARY KEY CHECK (id = 1),
       last_processed_history_id TEXT
+    )`,
+    ],
+    // pitbull (réfutation b) — « la réservation d'envoi posée sur KV n'est PAS
+    // atomique ». `lib/scheduled-send.ts` faisait `statusKV.get` puis
+    // `statusKV.put('sending')` : KV n'a pas de compare-and-set et est éventuellement
+    // cohérent, donc deux livraisons concurrentes du même messageId envoyaient deux
+    // fois. Le porteur retenu est CE DO, pour trois raisons : il est indexé 1:1 par
+    // connexion (`connection:{connectionId}:registry`) et un envoi différé porte
+    // toujours son `connectionId` ; il ne shard/roule JAMAIS, contrairement à
+    // ZeroDriver, donc la réservation ne peut pas être perdue par un changement de
+    // shard ; et son binding SQLite existe déjà dans les trois environnements
+    // (wrangler.jsonc), donc fermer ce défaut ne demande AUCUNE ressource Cloudflare
+    // nouvelle. Voir lib/send-reservation.ts pour la décision pure réserver/refuser.
+    3: [
+      `CREATE TABLE IF NOT EXISTS scheduled_send_reservations (
+      message_id TEXT PRIMARY KEY,
+      status TEXT NOT NULL,
+      outcome TEXT,
+      reserved_at INTEGER,
+      settled_at INTEGER,
+      detail TEXT
     )`,
     ],
   },
@@ -92,7 +119,10 @@ export class ShardRegistry extends DurableObject<ZeroEnv> {
         status: string;
         claimed_at: number | null;
         completed_at: number | null;
-      }>(`SELECT status, claimed_at, completed_at FROM history_notification_locks WHERE notification_history_id = ?`, notificationHistoryId)
+      }>(
+        `SELECT status, claimed_at, completed_at FROM history_notification_locks WHERE notification_history_id = ?`,
+        notificationHistoryId,
+      )
       .toArray()[0];
 
     const existing: HistoryLockRecord | undefined = !row
@@ -168,5 +198,122 @@ export class ShardRegistry extends DurableObject<ZeroEnv> {
       }>(`SELECT last_processed_history_id FROM gmail_sync_cursor WHERE id = 1`)
       .toArray()[0];
     return row?.last_processed_history_id ?? null;
+  }
+
+  private readReservation(messageId: string): SendReservationRecord | undefined {
+    const row = this.sql
+      .exec<{
+        status: string;
+        outcome: string | null;
+        reserved_at: number | null;
+        settled_at: number | null;
+      }>(
+        `SELECT status, outcome, reserved_at, settled_at FROM scheduled_send_reservations WHERE message_id = ?`,
+        messageId,
+      )
+      .toArray()[0];
+    if (!row) return undefined;
+    if (row.status === 'sending') return { status: 'sending', reservedAt: row.reserved_at ?? 0 };
+    return {
+      status: 'settled',
+      outcome: (row.outcome ?? 'unresolved') as SettledSendOutcome,
+      settledAt: row.settled_at ?? 0,
+    };
+  }
+
+  /**
+   * Réserve l'envoi de `messageId`, ou dit pourquoi il ne doit pas partir.
+   *
+   * Lecture puis écriture sur le stockage SQL de CETTE instance, sans aucun await
+   * intercalé : aucune autre invocation du même DO ne peut s'insérer entre le contrôle et
+   * l'écriture. C'est l'atomicité que la paire `get`/`put` de KV — éventuellement
+   * cohérente, sans compare-and-set — ne pouvait pas fournir.
+   *
+   * L'écriture est en outre un compare-and-set réel : la clause `WHERE` de
+   * `ON CONFLICT DO UPDATE` n'autorise la reprise que d'une réservation réglée en `failed`
+   * (non-acceptation PROUVÉE). `rowsWritten` est vérifié, de sorte que la garantie ne
+   * repose pas sur la seule sérialisation du runtime : un perdant de course repart en
+   * `in-flight` au lieu d'envoyer.
+   */
+  async reserveScheduledSend(messageId: string, now: number): Promise<SendReservationRpcResult> {
+    const decision = decideSendReservation(this.readReservation(messageId));
+    if (decision.action === 'skip') return { action: decision.action, reason: decision.reason };
+
+    const cursor = this.sql.exec(
+      `INSERT INTO scheduled_send_reservations (message_id, status, outcome, reserved_at, settled_at, detail)
+       VALUES (?, 'sending', NULL, ?, NULL, NULL)
+       ON CONFLICT(message_id) DO UPDATE SET
+         status = 'sending', outcome = NULL, reserved_at = excluded.reserved_at,
+         settled_at = NULL, detail = NULL
+       WHERE scheduled_send_reservations.status = 'settled'
+         AND scheduled_send_reservations.outcome = 'failed'`,
+      messageId,
+      now,
+    );
+    cursor.toArray();
+    if (cursor.rowsWritten < 1) {
+      return { action: 'skip', reason: 'in-flight' };
+    }
+
+    return { action: decision.action, reason: decision.reason };
+  }
+
+  /**
+   * Inscrit l'issue définitive d'un envoi. `failed` (non-acceptation prouvée) rend le
+   * message rejouable ; `sent` et `unresolved` le ferment pour de bon — voir
+   * `decideSendReservation`. `detail` porte le motif court (`http-503`,
+   * `transport-failure`…) : c'est ce qui rend un mail bloqué diagnosticable.
+   */
+  async settleScheduledSend(
+    messageId: string,
+    outcome: SettledSendOutcome,
+    now: number,
+    detail?: string,
+  ): Promise<void> {
+    this.sql.exec(
+      `INSERT INTO scheduled_send_reservations (message_id, status, outcome, reserved_at, settled_at, detail)
+       VALUES (?, 'settled', ?, NULL, ?, ?)
+       ON CONFLICT(message_id) DO UPDATE SET
+         status = 'settled', outcome = excluded.outcome, reserved_at = NULL,
+         settled_at = excluded.settled_at, detail = excluded.detail`,
+      messageId,
+      outcome,
+      now,
+      detail ?? null,
+    );
+  }
+
+  /**
+   * État de la réservation, pour la procédure de lecture `mail.scheduledSendStatus`.
+   * L'autorisation est portée par le DO lui-même : on ne peut interroger que le registre
+   * de SA propre connexion.
+   */
+  async getScheduledSendReservation(messageId: string): Promise<{
+    status: string;
+    outcome: string | null;
+    reservedAt: number | null;
+    settledAt: number | null;
+    detail: string | null;
+  } | null> {
+    const row = this.sql
+      .exec<{
+        status: string;
+        outcome: string | null;
+        reserved_at: number | null;
+        settled_at: number | null;
+        detail: string | null;
+      }>(
+        `SELECT status, outcome, reserved_at, settled_at, detail FROM scheduled_send_reservations WHERE message_id = ?`,
+        messageId,
+      )
+      .toArray()[0];
+    if (!row) return null;
+    return {
+      status: row.status,
+      outcome: row.outcome,
+      reservedAt: row.reserved_at,
+      settledAt: row.settled_at,
+      detail: row.detail,
+    };
   }
 }

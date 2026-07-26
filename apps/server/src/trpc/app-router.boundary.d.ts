@@ -1338,6 +1338,14 @@ export declare const appRouter: import('@trpc/server').TRPCBuiltRouter<
               }
             | {
                 readonly success: false;
+                readonly error: 'Schedule time must be at most 365 days ahead: beyond that the message body cannot be stored until its due date';
+                scheduled?: undefined;
+                messageId?: undefined;
+                sendAt?: undefined;
+                queued?: undefined;
+              }
+            | {
+                readonly success: false;
                 readonly error: 'Failed to schedule email status';
                 scheduled?: undefined;
                 messageId?: undefined;
@@ -1419,6 +1427,24 @@ export declare const appRouter: import('@trpc/server').TRPCBuiltRouter<
                 success: boolean;
                 error?: undefined;
               };
+          meta: object;
+        }>;
+        scheduledSendStatus: import('@trpc/server').TRPCQueryProcedure<{
+          input: {
+            messageId: string;
+          };
+          output: {
+            messageId: string;
+            status: string | null;
+            reservation: {
+              status: string;
+              outcome: string | null;
+              reservedAt: number | null;
+              settledAt: number | null;
+              detail: string | null;
+            } | null;
+            stuck: boolean;
+          };
           meta: object;
         }>;
         delete: import('@trpc/server').TRPCMutationProcedure<{
@@ -1736,9 +1762,9 @@ export declare const appRouter: import('@trpc/server').TRPCBuiltRouter<
                 status?:
                   | 'sent'
                   | 'queued'
+                  | 'failed'
                   | 'sending'
                   | 'cancelled'
-                  | 'failed'
                   | 'generating'
                   | 'draft_ready'
                   | 'approved'
@@ -1847,9 +1873,9 @@ export declare const appRouter: import('@trpc/server').TRPCBuiltRouter<
             shortcuts: {
               keys: string[];
               type: 'single' | 'combination';
+              action: string;
               scope: string;
               description: string;
-              action: string;
               preventDefault?: boolean | undefined;
             }[];
           };
