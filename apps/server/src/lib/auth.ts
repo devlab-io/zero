@@ -4,6 +4,7 @@ import { getBrowserTimezone, isValidTimezone } from './timezones';
 import { APIError, createAuthMiddleware } from 'better-auth/api';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import { getZeroDB, resetConnection } from './server-utils';
+import { resolveTrustedOrigins } from './trusted-origins';
 import { getSocialProviders } from './auth-providers';
 import { redis, resend, twilio } from './services';
 import { defaultUserSettings } from './schemas';
@@ -384,16 +385,14 @@ const createAuthConfig = () => {
       },
     },
     baseURL: env.VITE_PUBLIC_BACKEND_URL,
-    trustedOrigins: [
-      'https://app.0.email',
-      'https://sapi.0.email',
-      'https://staging.0.email',
-      'https://0.email',
-      'http://localhost:3000',
-      // Devlab: front served on 3001 locally + trust the configured app URL
-      'http://localhost:3001',
-      env.VITE_PUBLIC_APP_URL,
-    ],
+    // Origines de confiance : celles de CE déploiement, et rien d'autre. La liste d'origine
+    // portait quatre domaines de l'AMONT (0.email, app./sapi./staging.0.email) et les deux
+    // ports locaux, appliqués jusqu'en production — soit quatre tiers autorisés à porter des
+    // requêtes authentifiées contre nos utilisateurs, sur une infrastructure que nous ne
+    // contrôlons pas. Les origines locales ne survivent qu'en développement local ;
+    // `BETTER_AUTH_TRUSTED_ORIGINS` (liste séparée par des virgules) reste le point
+    // d'extension explicite pour un déploiement qui en a besoin.
+    trustedOrigins: resolveTrustedOrigins(env as unknown as Record<string, string | undefined>),
     session: {
       cookieCache: {
         enabled: true,

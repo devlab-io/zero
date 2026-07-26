@@ -1,6 +1,7 @@
 import { emailContentQueryKey, resolveEmailContentTheme } from '@/lib/email-content-query';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
+import { resolveEmailLinkClick } from '@/lib/email-link-guard';
 import { defaultUserSettings } from '@zero/server/schemas';
 import { useTRPC } from '@/providers/query-provider';
 import { getBrowserTimezone } from '@/lib/timezones';
@@ -132,15 +133,17 @@ export function MailContent({ id, html, senderEmail }: MailContentProps) {
     root.addEventListener('error', handleImageError, true);
 
     const handleClick = (e: Event) => {
-      const target = e.target as HTMLElement;
-      if (target.tagName === 'A') {
-        e.preventDefault();
-        const href = target.getAttribute('href');
-        if (href && (href.startsWith('http://') || href.startsWith('https://'))) {
-          window.open(href, '_blank', 'noopener,noreferrer');
-        } else if (href && href.startsWith('mailto:')) {
-          window.location.href = href;
-        }
+      // `closest('a')` et non `tagName === 'A'` : un clic sur un ENFANT du lien (<b>, <span>,
+      // <img> — la forme habituelle dans un mail) échappait à l'interception et le navigateur
+      // suivait le href par défaut. Voir lib/email-link-guard.ts.
+      const action = resolveEmailLinkClick(e.target);
+      if (!action) return;
+
+      e.preventDefault();
+      if (action.kind === 'external') {
+        window.open(action.href, '_blank', 'noopener,noreferrer');
+      } else if (action.kind === 'mailto') {
+        window.location.href = action.href;
       }
     };
 

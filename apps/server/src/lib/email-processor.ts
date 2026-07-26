@@ -3,6 +3,11 @@ import { CssSanitizer } from '@barkleapp/css-sanitizer';
 import sanitizeHtml from 'sanitize-html';
 import * as cheerio from 'cheerio';
 
+// Import isolé du bloc ci-dessus : le tri d'imports de prettier réordonne les lignes d'un
+// même bloc, ce qui détacherait la directive de suppression de type de l'import qu'elle
+// couvre (première ligne du fichier) et ferait échouer le typecheck.
+import { checkHtmlBounds, MAX_HTML_LENGTH } from './html-bounds';
+
 const sanitizer = new CssSanitizer();
 
 interface ProcessEmailOptions {
@@ -190,8 +195,13 @@ export function preprocessEmailHtml(html: string): string {
       img: ['src', 'alt', 'width', 'height', 'class', 'style'],
     },
 
-    // Allow only safe schemes - no blob for security
-    allowedSchemes: ['http', 'https', 'mailto', 'tel', 'data', 'cid'],
+    // Schémas globaux : `data` en a été RETIRÉ. Il y était autorisé pour toutes les balises,
+    // si bien qu'un `<a href="data:text/html;base64,...">` traversait le sanitiseur intact
+    // (vérifié par sonde DOM) : un clic ouvrait un document contrôlé par l'expéditeur. Le
+    // besoin légitime — images inline encodées — est couvert par `allowedSchemesByTag.img`
+    // juste en dessous, qui SURCHARGE cette liste pour les `<img>` et continue donc
+    // d'accepter `data:` et `cid:`.
+    allowedSchemes: ['http', 'https', 'mailto', 'tel', 'cid'],
     allowedSchemesByTag: {
       img: ['http', 'https', 'data', 'cid'],
     },
@@ -339,8 +349,18 @@ export function applyEmailPreferences(
 
   const html = $.html();
 
-  // Apply theme-specific styles
-  const themeStyles = `
+  const finalHtml = `${emailThemeStyles(isDarkTheme)}${html}`;
+
+  return {
+    processedHtml: finalHtml,
+    hasBlockedImages,
+  };
+}
+
+// Feuille de style du conteneur, extraite d'`applyEmailPreferences` pour que le repli en
+// texte brut (`degradeToPlainText`) rende exactement le même cadre visuel.
+function emailThemeStyles(isDarkTheme: boolean): string {
+  return `
     <style type="text/css">
       :host {
         display: block;
@@ -394,22 +414,80 @@ export function applyEmailPreferences(
       [data-theme-color="muted"] {
         color: ${isDarkTheme ? '#9CA3AF' : '#6B7280'};
       }
+
+      pre.zero-degraded-body {
+        white-space: pre-wrap;
+        word-break: break-word;
+        font-family: inherit;
+        margin: 0;
+      }
     </style>
   `;
-
-  const finalHtml = `${themeStyles}${html}`;
-
-  return {
-    processedHtml: finalHtml,
-    hasBlockedImages,
-  };
 }
 
-// Original function for backward compatibility
+const escapeHtml = (text: string): string =>
+  text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+
+/**
+ * Repli LINÉAIRE, sans parseur : les balises sont retirées par balayage, le reste est échappé
+ * puis rendu comme du texte. C'est ce qui rend `processEmailHtml` totale — un message qu'on
+ * refuse de parser s'affiche dégradé au lieu de disparaître du fil (open-thread.ts avalait
+ * l'exception) ou de rendre un 500 (mail.ts).
+ */
+function degradeToPlainText(
+  html: string,
+  theme: 'light' | 'dark',
+  reason: string,
+): { processedHtml: string; hasBlockedImages: boolean } {
+  const text = html
+    .slice(0, MAX_HTML_LENGTH)
+    .replace(/<(script|style|head|title)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, ' ')
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  const body = `
+    <div class="zero-degraded-email" data-degraded-reason="${escapeHtml(reason)}">
+      <p data-theme-color="muted">This message could not be rendered safely (${escapeHtml(
+        reason,
+      )}); it is shown as plain text.</p>
+      <pre class="zero-degraded-body">${escapeHtml(text)}</pre>
+    </div>
+  `;
+
+  return { processedHtml: `${emailThemeStyles(theme === 'dark')}${body}`, hasBlockedImages: false };
+}
+
+/**
+ * Point d'entrée du chemin de RENDU. Totale : elle ne lève jamais.
+ *
+ * Les bornes (taille, profondeur d'imbrication) sont évaluées AVANT tout parsing par un scan
+ * linéaire — c'est le parseur récursif lui-même qui débordait la pile, une `RangeError` mesurée
+ * dès ~2 000-3 000 niveaux d'imbrication. Le `catch` couvre le reste : toute défaillance interne
+ * du sanitiseur dégrade en texte au lieu de remonter à l'appelant.
+ */
 export function processEmailHtml({ html, shouldLoadImages, theme }: ProcessEmailOptions): {
   processedHtml: string;
   hasBlockedImages: boolean;
 } {
-  const preprocessed = preprocessEmailHtml(html);
-  return applyEmailPreferences(preprocessed, theme, shouldLoadImages);
+  const raw = html ?? '';
+
+  const bounds = checkHtmlBounds(raw);
+  if (!bounds.withinBounds) return degradeToPlainText(raw, theme, bounds.reason);
+
+  try {
+    const preprocessed = preprocessEmailHtml(raw);
+    return applyEmailPreferences(preprocessed, theme, shouldLoadImages);
+  } catch (error) {
+    return degradeToPlainText(
+      raw,
+      theme,
+      `renderer error: ${error instanceof Error ? error.name : 'unknown'}`,
+    );
+  }
 }

@@ -4,6 +4,11 @@
 // /public sub-routers + tRPC at /api/trpc) and the root `app` (CORS, OAuth
 // discovery, MCP/SSE mounts, agents websocket middleware, health, Sentry
 // tunnel and provider webhooks). Frontier rationale: docs/adr/0001-routing-hono-vs-trpc.md.
+import {
+  INTERNAL_SERVICE_HEADER,
+  isInternalServiceCaller,
+  THINKING_MCP_PURPOSE,
+} from '../lib/internal-service-auth';
 import { authorizeAgentAccess, type AgentLobby } from '../lib/agent-authorization';
 import { oAuthDiscoveryMetadata } from 'better-auth/plugins';
 import { getZeroDB, verifyToken } from '../lib/server-utils';
@@ -15,6 +20,7 @@ import { trpcServer } from '@hono/trpc-server';
 import { agentsMiddleware } from 'hono-agents';
 import { invariant } from '../lib/invariant';
 import { initTracing } from '../lib/tracing';
+import { env, type ZeroEnv } from '../env';
 import type { HonoContext } from '../ctx';
 import { createAuth } from '../lib/auth';
 import { ZeroMCP } from './agent/mcp';
@@ -26,11 +32,39 @@ import { sql } from 'drizzle-orm';
 import { cors } from 'hono/cors';
 import { createDb } from '../db';
 import { aiRouter } from './ai';
-import { env } from '../env';
 import { Hono } from 'hono';
 
-const SENTRY_HOST = 'o4509328786915328.ingest.us.sentry.io';
-const SENTRY_PROJECT_IDS = new Set(['4509328795303936']);
+// Tunnel Sentry : l'hôte d'ingestion et les identifiants de projet étaient ceux du projet de
+// l'AMONT, codés en dur. Deux conséquences : le tunnel refusait les enveloppes d'un projet
+// Sentry qui nous appartiendrait, et acceptait de relayer vers le leur. Ils sont désormais
+// déclarés par environnement ; NON configurés, le tunnel refuse (fail-closed) au lieu de
+// pousser les erreurs de nos utilisateurs chez un tiers.
+const sentryTunnelHost = () => env.SENTRY_TUNNEL_HOST?.trim() || null;
+const sentryTunnelProjectIds = () =>
+  new Set(
+    (env.SENTRY_TUNNEL_PROJECT_IDS ?? '')
+      .split(',')
+      .map((id) => id.trim())
+      .filter(Boolean),
+  );
+
+// Sel de hachage des IP. Il était en dur — avec, dans le code lui-même, un commentaire
+// demandant de le sortir en variable d'environnement. Un sel public rend le hachage
+// réversible par simple table de correspondance sur l'espace IPv4, donc ne protège plus rien.
+// Le repli n'existe qu'en développement local, et il est explicite.
+const DEV_IP_HASH_SALT = 'local-development-ip-salt';
+let warnedAboutIpSalt = false;
+const ipHashSalt = () => {
+  const configured = env.IP_HASH_SALT?.trim();
+  if (configured) return configured;
+
+  if (env.NODE_ENV !== 'local' && !warnedAboutIpSalt) {
+    // Une fois par isolate : ce chemin est traversé à chaque requête.
+    warnedAboutIpSalt = true;
+    logger.warn('[tracing] IP_HASH_SALT is not configured — IP hashes are not deidentified');
+  }
+  return DEV_IP_HASH_SALT;
+};
 
 // Utility function to hash IP addresses for PII protection
 function hashIpAddress(ip: string | undefined): string | undefined {
@@ -38,7 +72,7 @@ function hashIpAddress(ip: string | undefined): string | undefined {
 
   // Simple but effective hash for IP addresses
   // This preserves uniqueness while protecting PII
-  const salt = 'zero-mail-ip-salt-2024'; // Consider using env variable for production
+  const salt = ipHashSalt();
   let hash = 0;
   const str = ip + salt;
 
@@ -290,10 +324,34 @@ export const app = new Hono<HonoContext>()
   )
   .mount(
     '/mcp/thinking/sse',
-    async (request, env, ctx) => {
+    async (request, mountEnv, ctx) => {
+      // Ce mount n'exerçait AUCUN contrôle, contrairement à /sse et /mcp juste au-dessus.
+      // Deux appelants légitimes, donc deux clés d'entrée : le ZeroAgent, qui se connecte en
+      // boucle locale sur l'URL publique et présente un jeton de service dérivé
+      // (lib/internal-service-auth.ts), et un client MCP d'utilisateur, qui présente une
+      // session MCP comme sur /sse. Tout le reste est refusé.
+      const isInternal = await isInternalServiceCaller(
+        (mountEnv as ZeroEnv).JWT_SECRET,
+        THINKING_MCP_PURPOSE,
+        request.headers.get(INTERNAL_SERVICE_HEADER),
+      );
+
+      if (!isInternal) {
+        if (!request.headers.get('Authorization')) {
+          return new Response('Unauthorized', { status: 401 });
+        }
+        const auth = await createAuth();
+        const session = await auth.api.getMcpSession({ headers: request.headers });
+        if (!session) {
+          logger.info('Invalid auth provided', describeRequest(request));
+          return new Response('Unauthorized', { status: 401 });
+        }
+        ctx.props = { userId: session.userId };
+      }
+
       return ThinkingMCP.serveSSE('/mcp/thinking/sse', { binding: 'THINKING_MCP' }).fetch(
         request,
-        env,
+        mountEnv,
         ctx,
       );
     },
@@ -387,15 +445,20 @@ export const app = new Hono<HonoContext>()
       const dsn = new URL(header['dsn']);
       const project_id = dsn.pathname?.replace('/', '');
 
-      if (dsn.hostname !== SENTRY_HOST) {
+      const host = sentryTunnelHost();
+      if (!host) {
+        throw new Error('Sentry tunnel is not configured (SENTRY_TUNNEL_HOST)');
+      }
+
+      if (dsn.hostname !== host) {
         throw new Error(`Invalid sentry hostname: ${dsn.hostname}`);
       }
 
-      if (!project_id || !SENTRY_PROJECT_IDS.has(project_id)) {
+      if (!project_id || !sentryTunnelProjectIds().has(project_id)) {
         throw new Error(`Invalid sentry project id: ${project_id}`);
       }
 
-      const upstream_sentry_url = `https://${SENTRY_HOST}/api/${project_id}/envelope/`;
+      const upstream_sentry_url = `https://${host}/api/${project_id}/envelope/`;
       await fetch(upstream_sentry_url, {
         method: 'POST',
         body: envelopeBytes,
@@ -446,9 +509,12 @@ export const app = new Hono<HonoContext>()
         invariant(authHeader, 'missing Authorization header');
         const isValid = await verifyToken(authHeader.split(' ')[1]);
         if (!isValid) {
+          // 403 et non 200 : un 200 acquittait la notification ET masquait le refus. Pub/Sub
+          // ne redélivre pas sur 403 — c'est voulu, un jeton refusé ne devient pas valide en
+          // le rejouant, et le refus reste visible dans les métriques de l'abonnement.
           logger.info('[GOOGLE] invalid request', body);
           span.setAttributes({ 'auth.status': 'invalid' });
-          return c.json({}, { status: 200 });
+          return c.json({ error: 'Forbidden' }, { status: 403 });
         }
 
         span.setAttributes({ 'auth.status': 'valid' });

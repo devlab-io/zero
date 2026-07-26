@@ -3,6 +3,7 @@ import { getActiveConnection, getZeroDB } from './connection-context';
 // Réexport : `getActiveConnection` et `getZeroDB` vivent dans le module feuille
 // lib/connection-context.ts pour casser le cycle server-utils ↔ driver (ADR-less, cf. pitbull A4).
 export { getActiveConnection, getZeroDB };
+import { resolvePubSubTokenPolicy, verifyPubSubToken } from './pubsub-auth';
 import { OutgoingMessageType } from '../routes/agent/types';
 import { defaultPageSize, FOLDERS } from './utils';
 import { connection } from '../db/schema';
@@ -613,20 +614,17 @@ export const connectionToDriver = (activeConnection: typeof connection.$inferSel
   });
 };
 
-export const verifyToken = async (token: string) => {
-  const response = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${token}`, {
-    method: 'GET',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-  });
-
-  if (!response.ok) {
-    throw new Error(`Failed to verify token: ${await response.text()}`);
+/**
+ * Autorise une notification push Pub/Sub. La vérification réelle (signature JWKS Google +
+ * revendications iss/email_verified/email/aud) vit dans lib/pubsub-auth.ts ; ici on ne fait
+ * que résoudre la politique depuis l'environnement et journaliser un refus.
+ */
+export const verifyToken = async (token: string | undefined) => {
+  const result = await verifyPubSubToken(token, resolvePubSubTokenPolicy());
+  if (!result.ok) {
+    logger.warn('[PUBSUB_AUTH] rejected push notification token', { reason: result.reason });
   }
-
-  const data = await response.json();
-  return !!data;
+  return result.ok;
 };
 
 export const resetConnection = async (connectionId: string) => {

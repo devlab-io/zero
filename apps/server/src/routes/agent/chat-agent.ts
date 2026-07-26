@@ -22,6 +22,11 @@ import {
   type StreamTextOnFinishCallback,
 } from 'ai';
 import {
+  INTERNAL_SERVICE_HEADER,
+  internalServiceToken,
+  THINKING_MCP_PURPOSE,
+} from '../../lib/internal-service-auth';
+import {
   IncomingMessageType,
   OutgoingMessageType,
   type IncomingMessage,
@@ -63,8 +68,18 @@ export class ZeroAgent extends AIChatAgent<ZeroEnv> {
   }
 
   async registerThinkingMCP() {
+    // `/mcp/thinking/sse` n'est plus ouvert (cf. routes/index.ts). Cet appel est une boucle
+    // locale — même worker, même environnement — donc il s'authentifie avec le jeton de
+    // service dérivé de JWT_SECRET plutôt qu'avec un flux OAuth interactif, impossible à
+    // conduire depuis `onStart`. L'en-tête est porté par `requestInit`, que le transport SSE
+    // des `agents` fusionne dans le GET du flux ET dans les POST de messages.
+    const internalToken = await internalServiceToken(this.env.JWT_SECRET, THINKING_MCP_PURPOSE);
+
     await this.mcp.connect(this.env.VITE_PUBLIC_BACKEND_URL + '/mcp/thinking/sse', {
       transport: {
+        requestInit: internalToken
+          ? { headers: { [INTERNAL_SERVICE_HEADER]: internalToken } }
+          : undefined,
         authProvider: new DurableObjectOAuthClientProvider(
           this.ctx.storage,
           'thinking-mcp',

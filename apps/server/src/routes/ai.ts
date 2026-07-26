@@ -10,6 +10,11 @@ import { z } from 'zod';
 
 type ToolsReturnType = Awaited<ReturnType<typeof tools>>;
 
+// Résolution de la connexion de l'appelant vocal : la première branche du `or` d'origine
+// (`connection.id === user.defaultConnectionId`) n'était PAS cadrée par `userId`. Rien ne
+// vérifie à l'écriture qu'un `defaultConnectionId` appartient bien à son porteur ; une valeur
+// pointant sur la connexion d'autrui donnait donc à l'appelant les outils de l'agent sur la
+// boîte mail d'un autre utilisateur. Les deux branches sont désormais cadrées.
 export const aiRouter = new Hono();
 
 aiRouter.get('/', (c) => c.text('Twilio + ElevenLabs + AI Phone System Ready'));
@@ -37,8 +42,12 @@ aiRouter.post('/do/:action', async (c) => {
   if (!user) return c.json({ success: false, error: 'Unauthorized' }, 401);
 
   const connection = await db.query.connection.findFirst({
-    where: (connection, { eq, or }) =>
-      or(eq(connection.id, user.defaultConnectionId ?? ''), eq(connection.userId, user.id)),
+    // Les DEUX branches sont cadrées par `userId` (cf. en-tête du fichier).
+    where: (connection, { and, eq, or }) =>
+      or(
+        and(eq(connection.id, user.defaultConnectionId ?? ''), eq(connection.userId, user.id)),
+        eq(connection.userId, user.id),
+      ),
   });
   await conn.end();
   if (!connection) return c.json({ success: false, error: 'Unauthorized' }, 401);
@@ -118,8 +127,12 @@ aiRouter.post('/call', async (c) => {
 
   logger.info('[DEBUG] Finding connection for user:', user.id);
   const connection = await db.query.connection.findFirst({
-    where: (connection, { eq, or }) =>
-      or(eq(connection.id, user.defaultConnectionId ?? ''), eq(connection.userId, user.id)),
+    // Les DEUX branches sont cadrées par `userId` (cf. en-tête du fichier).
+    where: (connection, { and, eq, or }) =>
+      or(
+        and(eq(connection.id, user.defaultConnectionId ?? ''), eq(connection.userId, user.id)),
+        eq(connection.userId, user.id),
+      ),
   });
 
   await conn.end();

@@ -39,19 +39,19 @@ cron) plus Durable-Object re-exports.
 Full paths as resolved by `scripts/checks/route-inventory.mjs`
 (`docs/adr/route-inventory-after.json`).
 
-| Route | Category | Why it stays Hono |
-|---|---|---|
-| mount `/sse`, `/mcp`, `/mcp/thinking/sse` | streaming | MCP Server-Sent-Events transports (`ZeroMCP`/`ThinkingMCP` Durable Objects); long-lived streams, not request/response. |
-| `agentsMiddleware('*')` (websocket `/agents/*`) | websocket | `hono-agents` upgrades to the `ZeroAgent` Durable Object over websockets. tRPC has no websocket transport here. |
-| `GET /api/auth/*`, `POST /api/auth/*`, `OPTIONS /api/auth/*` | auth | `better-auth` owns its own handler and cookie/OAuth flows. |
-| `GET /.well-known/oauth-authorization-server` | auth | OAuth discovery document consumed by external MCP clients. |
-| `POST /api/ai/call`, `POST /api/ai/do/:action`, `GET /api/ai` | webhook | Telephony (Twilio/ElevenLabs) pipeline authenticated by a shared `X-Voice-Secret` + `X-Caller` header — an **external, non-session** caller returning `text/plain`. Not a browser/tRPC client. |
-| `POST /api/autumn/*`, `GET/DELETE /api/autumn/*` | webhook/billing | Autumn/Stripe billing integration with its own customer-auth middleware and provider callbacks. |
-| `GET /api/public/providers` | public | Unauthenticated bootstrap read served before a session exists. |
-| `POST /a8n/notify/:providerId` | webhook | Google Pub/Sub push notification (bearer-token verified) → thread queue. |
-| `POST /monitoring/sentry` | webhook | Sentry envelope tunnel (validates DSN host/project, forwards upstream). |
-| `GET /health`, `GET /` | infra | Liveness probe and root redirect. |
-| `/api/trpc/*` (via `trpcServer`) | tRPC host | Hono only *hosts* the tRPC handler; the procedures are the tRPC layer. |
+| Route                                                         | Category        | Why it stays Hono                                                                                                                                                                                                                                                                                                                                                                                    |
+| ------------------------------------------------------------- | --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| mount `/sse`, `/mcp`, `/mcp/thinking/sse`                     | streaming       | MCP Server-Sent-Events transports (`ZeroMCP`/`ThinkingMCP` Durable Objects); long-lived streams, not request/response. Les trois sont authentifiés : session MCP (`getMcpSession`) pour `/sse` et `/mcp` ; session MCP **ou** jeton de service dérivé (`X-Zero-Internal-Service`, cf. `lib/internal-service-auth.ts`) pour `/mcp/thinking/sse`, dont l'appelant est le `ZeroAgent` en boucle locale. |
+| `agentsMiddleware('*')` (websocket `/agents/*`)               | websocket       | `hono-agents` upgrades to the `ZeroAgent` Durable Object over websockets. tRPC has no websocket transport here.                                                                                                                                                                                                                                                                                      |
+| `GET /api/auth/*`, `POST /api/auth/*`, `OPTIONS /api/auth/*`  | auth            | `better-auth` owns its own handler and cookie/OAuth flows.                                                                                                                                                                                                                                                                                                                                           |
+| `GET /.well-known/oauth-authorization-server`                 | auth            | OAuth discovery document consumed by external MCP clients.                                                                                                                                                                                                                                                                                                                                           |
+| `POST /api/ai/call`, `POST /api/ai/do/:action`, `GET /api/ai` | webhook         | Telephony (Twilio/ElevenLabs) pipeline authenticated by a shared `X-Voice-Secret` + `X-Caller` header — an **external, non-session** caller returning `text/plain`. Not a browser/tRPC client.                                                                                                                                                                                                       |
+| `POST /api/autumn/*`, `GET/DELETE /api/autumn/*`              | webhook/billing | Autumn/Stripe billing integration with its own customer-auth middleware and provider callbacks.                                                                                                                                                                                                                                                                                                      |
+| `GET /api/public/providers`                                   | public          | Unauthenticated bootstrap read served before a session exists.                                                                                                                                                                                                                                                                                                                                       |
+| `POST /a8n/notify/:providerId`                                | webhook         | Google Pub/Sub push notification. Le jeton OIDC est vérifié LOCALEMENT contre les JWKS Google (`lib/pubsub-auth.ts`) : signature, `iss`, `email_verified`, `email`, et `aud`/compte de service quand ils sont configurés. Refus = 403. → thread queue.                                                                                                                                               |
+| `POST /monitoring/sentry`                                     | webhook         | Sentry envelope tunnel : hôte et projets acceptés viennent de `SENTRY_TUNNEL_HOST` / `SENTRY_TUNNEL_PROJECT_IDS` ; non configurés, le tunnel refuse.                                                                                                                                                                                                                                                 |
+| `GET /health`, `GET /`                                        | infra           | Liveness probe and root redirect.                                                                                                                                                                                                                                                                                                                                                                    |
+| `/api/trpc/*` (via `trpcServer`)                              | tRPC host       | Hono only _hosts_ the tRPC handler; the procedures are the tRPC layer.                                                                                                                                                                                                                                                                                                                               |
 
 Every entry above falls under streaming, websocket, webhook, auth, or bare
 infra. **No remaining Hono route duplicates a tRPC procedure.**
@@ -61,12 +61,12 @@ infra. **No remaining Hono route duplicates a tRPC procedure.**
 They share the `ai` name only. Their operations are disjoint and their auth
 models differ:
 
-| | Hono `routes/ai.ts` (`/api/ai/*`) | tRPC `ai.*` (`/api/trpc`) |
-|---|---|---|
-| Auth | `X-Voice-Secret` + verified caller phone | session / active connection |
-| Caller | Twilio/ElevenLabs telephony webhook | browser front-end |
-| Operations | `call`, `do/:action` (tool exec) | `compose`, `generateEmailSubject`, `generateSearchQuery`, `webSearch` |
-| Response | `text/plain` for the voice pipeline | typed JSON |
+|            | Hono `routes/ai.ts` (`/api/ai/*`)        | tRPC `ai.*` (`/api/trpc`)                                             |
+| ---------- | ---------------------------------------- | --------------------------------------------------------------------- |
+| Auth       | `X-Voice-Secret` + verified caller phone | session / active connection                                           |
+| Caller     | Twilio/ElevenLabs telephony webhook      | browser front-end                                                     |
+| Operations | `call`, `do/:action` (tool exec)         | `compose`, `generateEmailSubject`, `generateSearchQuery`, `webSearch` |
+| Response   | `text/plain` for the voice pipeline      | typed JSON                                                            |
 
 The route inventory records this as `crossLayerNamespaceOverlap: ["ai"]` and the
 duplication gate does **not** count it, because the operation sets do not

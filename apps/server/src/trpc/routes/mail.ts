@@ -656,7 +656,11 @@ export const mailRouter = router({
   processEmailContent: privateProcedure
     .input(
       z.object({
-        html: z.string(),
+        // Borne d'entrée : `processEmailHtml` parse deux fois le HTML (sanitize-html puis
+        // cheerio). Non bornée, la procédure acceptait des mégaoctets — 3,2 Mo mesurés à
+        // 3,1 s de CPU — sur un worker dont le rate limiting n'est pas actif. 2 Mo est la
+        // même borne que celle du sanitiseur destiné au LLM (lib/mail-sanitize).
+        html: z.string().max(2_000_000),
         shouldLoadImages: z.boolean(),
         theme: z.enum(['light', 'dark']),
       }),

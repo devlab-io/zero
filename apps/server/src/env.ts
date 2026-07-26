@@ -107,6 +107,30 @@ export type ZeroEnv = {
   DD_API_KEY: string;
   DD_APP_KEY: string;
   DD_SITE: string;
+  /**
+   * Audience exigée dans le jeton OIDC des notifications push Pub/Sub. Absente = ce contrôle
+   * seul est désactivé (le reste de la politique reste fail-closed, cf. lib/pubsub-auth.ts).
+   * Valeur attendue : `${VITE_PUBLIC_BACKEND_URL}/a8n/notify/google`.
+   */
+  PUBSUB_AUDIENCE?: string;
+  /**
+   * Compte de service émetteur exigé pour les notifications push Pub/Sub. Absent = repli sur
+   * le `client_email` de GOOGLE_S_ACCOUNT ; absent des deux = ce contrôle seul est désactivé.
+   */
+  PUBSUB_SERVICE_ACCOUNT_EMAIL?: string;
+  /**
+   * Hôte d'ingestion Sentry accepté par le tunnel `/monitoring/sentry`. Absent = tunnel refusé
+   * (fail-closed) : mieux vaut perdre des événements que les relayer chez un tiers.
+   */
+  SENTRY_TUNNEL_HOST?: string;
+  /** Identifiants de projet Sentry acceptés par le tunnel, séparés par des virgules. */
+  SENTRY_TUNNEL_PROJECT_IDS?: string;
+  /**
+   * Sel du hachage d'IP dans les traces. Secret : un sel connu rend le hachage réversible par
+   * table de correspondance sur l'espace IPv4. Absent hors local = avertissement au premier
+   * hachage, repli de développement utilisé.
+   */
+  IP_HASH_SALT?: string;
   /** Devlab: server-side Sentry — absent = Sentry disabled (clean no-op). */
   SENTRY_DSN?: string;
   /** Devlab: build/release tag attached to captured Sentry events. */
@@ -126,7 +150,9 @@ export { env };
 let booted = false;
 
 /** Boot guard: validates the required env exactly once per isolate. Call at first request. */
-export function bootEnv(raw: Record<string, unknown> = env as unknown as Record<string, unknown>): void {
+export function bootEnv(
+  raw: Record<string, unknown> = env as unknown as Record<string, unknown>,
+): void {
   if (booted) return;
   assertServerEnv(raw);
   booted = true;

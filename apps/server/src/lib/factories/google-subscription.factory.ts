@@ -1,11 +1,12 @@
-import { logger } from '../logger';
 import { BaseSubscriptionFactory, type SubscriptionData } from './base-subscription.factory';
+import { resolvePubSubTokenPolicy, verifyPubSubToken } from '../pubsub-auth';
 import { c, getNotificationsUrl } from '../../lib/utils';
 import { resetConnection } from '../server-utils';
 import jwt from '@tsndr/cloudflare-worker-jwt';
-import { env } from '../../env';
 import { connection } from '../../db/schema';
 import { EProviders } from '../../types';
+import { logger } from '../logger';
+import { env } from '../../env';
 
 interface GoogleServiceAccount {
   type: string;
@@ -336,20 +337,18 @@ class GoogleSubscriptionFactory extends BaseSubscriptionFactory {
     return c.json({});
   }
 
+  /**
+   * Seconde implémentation du même contrôle que server-utils `verifyToken` — sans appelant
+   * aujourd'hui, mais imposée par `BaseSubscriptionFactory`. Elle portait exactement le même
+   * défaut : `tokeninfo` puis `!!data`, donc n'importe quel jeton ID Google accepté. Elle est
+   * ramenée sur la vérification locale commune plutôt que laissée en embuscade.
+   */
   public async verifyToken(token: string): Promise<boolean> {
-    try {
-      const response = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${token}`);
-
-      if (!response.ok) {
-        return false;
-      }
-
-      const data = await response.json();
-      return !!data;
-    } catch {
-      logger.debug('Google id_token verification failed');
-      return false;
+    const result = await verifyPubSubToken(token, resolvePubSubTokenPolicy());
+    if (!result.ok) {
+      logger.debug('Google id_token verification failed', { reason: result.reason });
     }
+    return result.ok;
   }
 }
 

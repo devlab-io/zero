@@ -1,3 +1,4 @@
+import { estimateNestingDepth, MAX_HTML_LENGTH, MAX_HTML_NESTING_DEPTH } from '../html-bounds';
 import { load, contains, type Cheerio, type CheerioAPI } from 'cheerio/slim';
 
 // cheerio does not re-export domhandler's node types, and domhandler is a transitive
@@ -8,12 +9,21 @@ type AnyNode = Parameters<typeof contains>[0];
 type Element = ReturnType<Cheerio<AnyNode>['find']> extends Cheerio<infer E> ? E : never;
 
 export type SanitizedMailContent = {
+  /** Rendu complet destiné au LLM : en-tête de mise en garde + corps + notes. */
   text: string;
+  /**
+   * Corps neutralisé SEUL, sans en-tête ni notes. Sert aux appelants qui doivent décider sur
+   * le contenu réel (ex. `messageToXML` ignore un message trop court) : mesurer `text`
+   * mesurerait l'en-tête, jamais le mail.
+   */
+  body: string;
   removedHiddenSegments: number;
 };
 
 const SPOTLIGHT_HEADER = '[UNTRUSTED EMAIL CONTENT - SANITIZED]';
-const HIDDEN_CONTENT_MARKER = '[hidden content removed]';
+/** Remplace un segment caché retiré. Exporté : les appelants qui MESURENT le corps doivent
+ * pouvoir le retrancher — un message intégralement caché ne doit pas paraître substantiel. */
+export const HIDDEN_CONTENT_MARKER = '[hidden content removed]';
 
 // Éléments dont le CONTENU ne doit jamais ressortir. iframe/frame/object/embed ont été
 // ajoutés en A5 : leur texte de repli fuitait tel quel, ce qui en faisait un véhicule de
@@ -23,28 +33,12 @@ const DROPPED_ELEMENTS =
 
 // Bornes d'entrée (A5). Sans elles, un mail hostile profondément imbriqué faisait lever une
 // RangeError non catchée jusque dans l'appelant MCP (routes/agent/mcp.ts), c'est-à-dire un
-// déni de service sur `getThread` déclenchable par un simple mail entrant.
-const MAX_CONTENT_LENGTH = 2_000_000;
-const MAX_NESTING_DEPTH = 300;
+// déni de service sur `getThread` déclenchable par un simple mail entrant. Elles vivent
+// maintenant dans lib/html-bounds.ts, partagées avec le chemin de rendu (lib/email-processor).
+const MAX_CONTENT_LENGTH = MAX_HTML_LENGTH;
+const MAX_NESTING_DEPTH = MAX_HTML_NESTING_DEPTH;
 const MAX_STYLE_RULES = 500;
 const MAX_STYLE_LENGTH = 200_000;
-
-const VOID_ELEMENTS = new Set([
-  'area',
-  'base',
-  'br',
-  'col',
-  'embed',
-  'hr',
-  'img',
-  'input',
-  'link',
-  'meta',
-  'param',
-  'source',
-  'track',
-  'wbr',
-]);
 
 type InlineStyle = Record<string, string>;
 
@@ -93,42 +87,6 @@ const declarationsHide = (styles: InlineStyle) =>
   styles.opacity === '0' ||
   isZeroFontSize(styles['font-size']) ||
   /\b0(?:\.0+)?(?:px|pt|em|rem)\b/.test(styles.font ?? '');
-
-/**
- * Profondeur d'imbrication estimée, en une passe linéaire et sans allocation de DOM.
- * Sert de garde AVANT le parsing : c'est le parseur lui-même qui débordait la pile.
- */
-const estimateNestingDepth = (content: string): number => {
-  let depth = 0;
-  let max = 0;
-
-  for (let i = 0; i < content.length; i++) {
-    if (content[i] !== '<') continue;
-
-    const closing = content[i + 1] === '/';
-    const start = i + (closing ? 2 : 1);
-    let end = start;
-    while (end < content.length && /[a-zA-Z0-9]/.test(content[end] as string)) end++;
-    if (end === start) continue;
-
-    const tag = content.slice(start, end).toLowerCase();
-    if (VOID_ELEMENTS.has(tag)) continue;
-
-    if (closing) {
-      depth = Math.max(0, depth - 1);
-    } else {
-      const close = content.indexOf('>', end);
-      const selfClosing = close > 0 && content[close - 1] === '/';
-      if (!selfClosing) {
-        depth++;
-        if (depth > max) max = depth;
-        if (max > MAX_NESTING_DEPTH) return max;
-      }
-    }
-  }
-
-  return max;
-};
 
 /**
  * Sélecteurs des règles CSS qui masquent leur cible, extraits des balises `<style>`.
@@ -195,7 +153,7 @@ const compose = (
     lines.push(`Sanitizer note: removed ${removedHiddenSegments} hidden segment(s).`);
   }
   lines.push(...notes.map((note) => `Sanitizer note: ${note}`));
-  return { text: lines.join('\n'), removedHiddenSegments };
+  return { text: lines.join('\n'), body: plainText, removedHiddenSegments };
 };
 
 /** Repli linéaire, sans DOM, pour les entrées que l'on refuse de parser. */

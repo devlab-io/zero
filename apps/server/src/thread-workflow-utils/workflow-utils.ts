@@ -1,25 +1,13 @@
-import { logger } from '../lib/logger';
+import { HIDDEN_CONTENT_MARKER, sanitizeMailContent } from '../lib/mail-sanitize';
 import type { ParsedMessage } from '../types';
-import * as cheerio from 'cheerio';
+import { logger } from '../lib/logger';
 
-export async function htmlToText(decodedBody: string): Promise<string> {
-  try {
-    if (!decodedBody || typeof decodedBody !== 'string') {
-      return '';
-    }
-    const $ = cheerio.load(decodedBody);
-    $('script').remove();
-    $('style').remove();
-    return $('body')
-      .text()
-      .replace(/\r?\n|\r/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim();
-  } catch (error) {
-    logger.error('Error extracting text from HTML:', error);
-    return '';
-  }
-}
+// `htmlToText` vivait ici : un `cheerio.load` suivi d'un `.text()`, sans la moindre notion de
+// contenu CACHÉ. Une charge en `display:none`, en blanc sur blanc ou masquée par une classe CSS
+// en ressortait EN CLAIR (trois payloads vérifiés), puis partait dans le prompt de résumé, donc
+// dans le résumé, donc dans le prompt de labellisation qui consomme ce résumé. La neutralisation
+// passe désormais par `sanitizeMailContent` — le point d'entrée unique du courrier entrant vers
+// un LLM — qui retire l'invisible et marque le contenu comme non fiable.
 
 export const escapeXml = (text: string): string => {
   if (!text) return '';
@@ -34,10 +22,17 @@ export const escapeXml = (text: string): string => {
 export const messageToXML = async (message: ParsedMessage) => {
   try {
     if (!message.decodedBody) return null;
-    const body = await htmlToText(message.decodedBody || '');
-    if (!body || body.length < 10) {
+
+    const sanitized = sanitizeMailContent(message.decodedBody);
+    // Le seuil porte sur le CORPS neutralisé, marqueurs de retrait déduits — et non sur
+    // `text`, qui porte l'en-tête de mise en garde. Sans cela, un message dont TOUT le
+    // contenu est caché paraîtrait substantiel par la seule longueur de ces marqueurs et
+    // partirait au modèle alors qu'il ne reste rien à résumer.
+    const visible = sanitized.body.split(HIDDEN_CONTENT_MARKER).join('').trim();
+    if (visible.length < 10) {
       return null;
     }
+    const body = sanitized.text;
 
     const safeSenderName = escapeXml(message.sender?.name || 'Unknown');
     const safeSubject = escapeXml(message.subject || '');

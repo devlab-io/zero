@@ -166,3 +166,103 @@ describe('blocs <style> — filtre maison (la dépendance ne sait pas restreindr
     expect(out.processedHtml).not.toContain('evil.test');
   });
 });
+
+// --- Audit MAJEUR (chemin de rendu) : schéma `data:` global, et RangeError sur imbrication ---
+
+describe('preprocessEmailHtml — schéma data: hors des images', () => {
+  it('retire un href data:text/html, qui ouvrait un document contrôlé par l’expéditeur', () => {
+    const hostile =
+      '<a href="data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==">Facture</a>';
+    const out = preprocessEmailHtml(hostile);
+
+    expect(out).not.toContain('data:text/html');
+    expect(out).not.toContain('PHNjcmlwdD');
+    // Le libellé du lien reste visible : on retire la cible, pas le contenu.
+    expect(out).toContain('Facture');
+  });
+
+  it('retire un href data: quel qu’en soit le type MIME', () => {
+    for (const href of [
+      'data:text/html,<script>alert(1)</script>',
+      'data:application/xhtml+xml;base64,AAAA',
+      'DATA:text/html;base64,AAAA',
+    ]) {
+      const out = preprocessEmailHtml(`<a id="l" href="${href}">x</a>`);
+      expect(out.toLowerCase()).not.toContain('href="data:');
+    }
+  });
+
+  it('laisse intacte une image inline data: — le besoin légitime', () => {
+    const inline =
+      '<img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAAAAAA6fptVAAAACklEQVR4nGP4DwABAQEANl9ngAAAAABJRU5ErkJggg==" width="20" height="20">';
+    const out = preprocessEmailHtml(inline);
+
+    expect(out).toContain('data:image/png;base64');
+  });
+
+  it('laisse intacte une image inline cid: (pièce jointe)', () => {
+    const out = preprocessEmailHtml('<img src="cid:logo@zero" width="20" height="20">');
+    expect(out).toContain('cid:logo@zero');
+  });
+
+  it('laisse intacts les schémas légitimes des liens', () => {
+    const out = preprocessEmailHtml(
+      '<a href="https://ok.test/a">a</a><a href="mailto:x@ok.test">b</a><a href="tel:+689123456">c</a>',
+    );
+    expect(out).toContain('https://ok.test/a');
+    expect(out).toContain('mailto:x@ok.test');
+    expect(out).toContain('tel:+689123456');
+  });
+});
+
+describe('processEmailHtml — totale : bornes d’entrée au lieu d’une RangeError', () => {
+  const nested = (depth: number) => '<div>'.repeat(depth) + 'charge' + '</div>'.repeat(depth);
+
+  it('ne lève plus sur 20 000 niveaux d’imbrication (ancienne RangeError dès ~2 000)', () => {
+    expect(() =>
+      processEmailHtml({ html: nested(20_000), shouldLoadImages: false, theme: 'light' }),
+    ).not.toThrow();
+  });
+
+  it('dégrade en texte brut, avec une note et le contenu conservé', () => {
+    const out = processEmailHtml({
+      html: nested(20_000),
+      shouldLoadImages: false,
+      theme: 'light',
+    });
+
+    expect(out.processedHtml).toContain('nesting-depth limit');
+    expect(out.processedHtml).toContain('shown as plain text');
+    expect(out.processedHtml).toContain('charge');
+    expect(out.hasBlockedImages).toBe(false);
+  });
+
+  it('dégrade au-delà de la borne de taille', () => {
+    const huge = `<p>${'a'.repeat(2_000_001)}</p>`;
+    const out = processEmailHtml({ html: huge, shouldLoadImages: false, theme: 'light' });
+
+    expect(out.processedHtml).toContain('size limit');
+  });
+
+  it('le repli n’exécute rien : le balisage résiduel ressort échappé', () => {
+    const hostile = `${nested(20_000)}<img src=x onerror="alert(1)"><script>alert(2)</script>`;
+    const out = processEmailHtml({ html: hostile, shouldLoadImages: false, theme: 'light' });
+
+    expect(out.processedHtml).not.toContain('<script>');
+    expect(out.processedHtml).not.toContain('onerror=');
+    expect(out.processedHtml).not.toContain('<img');
+  });
+
+  it('reste dans le chemin normal juste sous la borne de profondeur', () => {
+    const out = processEmailHtml({ html: nested(250), shouldLoadImages: false, theme: 'light' });
+
+    expect(out.processedHtml).not.toContain('shown as plain text');
+    expect(out.processedHtml).toContain('charge');
+  });
+
+  it('accepte une entrée vide sans lever', () => {
+    expect(() =>
+      processEmailHtml({ html: '', shouldLoadImages: true, theme: 'dark' }),
+    ).not.toThrow();
+  });
+});

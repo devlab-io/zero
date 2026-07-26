@@ -6,12 +6,13 @@
 // désormais ici ; la procédure tRPC n'est plus qu'un adaptateur d'entrée.
 //
 // Les imports dynamiques du corps sont conservés à dessein : ils gardent la pile IA
-// (ai, @ai-sdk/*, string-strip-html) hors du graphe statique de l'isolate — décision de perf
-// du commit d689e507, indépendante de ce déplacement.
+// (ai, @ai-sdk/*) hors du graphe statique de l'isolate — décision de perf du commit d689e507,
+// indépendante de ce déplacement.
 
 import { escapeXml } from '../thread-workflow-utils/workflow-utils';
 import { type WritingStyleMatrix } from './writing-style-service';
 import { StyledEmailAssistantSystemPrompt } from '../lib/prompts';
+import { sanitizeMailContent } from '../lib/mail-sanitize';
 import { getPrompt } from '../lib/brain';
 import { EPrompts } from '../types';
 import { env } from '../env';
@@ -35,21 +36,10 @@ type ComposeEmailInput = {
 export async function composeEmail(input: ComposeEmailInput) {
   const { prompt, threadMessages = [], cc, emailSubject, to, username, connectionId } = input;
 
-  // The AI SDK stack (and the agent toolset) is only exercised on this cold path —
-  // keep it out of the isolate's static import graph.
-  const [
-    { getWritingStyleMatrixForConnectionId },
-    { stripHtml },
-    { generateText },
-    { openai },
-    { webSearch },
-  ] = await Promise.all([
-    import('./writing-style-service'),
-    import('string-strip-html'),
-    import('ai'),
-    import('@ai-sdk/openai'),
-    import('./web-search-tool'),
-  ]);
+  // The AI SDK stack is only exercised on this cold path — keep it out of the isolate's
+  // static import graph.
+  const [{ getWritingStyleMatrixForConnectionId }, { generateText }, { openai }] =
+    await Promise.all([import('./writing-style-service'), import('ai'), import('@ai-sdk/openai')]);
 
   const writingStyleMatrix = await getWritingStyleMatrixForConnectionId({
     connectionId,
@@ -67,11 +57,18 @@ export async function composeEmail(input: ComposeEmailInput) {
     styleProfile: writingStyleMatrix?.style as WritingStyleMatrix,
   });
 
+  // Point d'entrée UNIQUE du courrier entrant vers le modèle. Le `stripHtml` d'origine ne
+  // retirait que le balisage : une consigne cachée en `display:none`, en blanc sur blanc ou
+  // masquée par une classe CSS arrivait en clair dans un message `role: 'user'` — la position
+  // même où le modèle attend des instructions. La sanitisation vit ICI, dans le service, et
+  // non chez les appelants : composeEmail est appelée depuis le workflow de brouillon
+  // automatique, la route tRPC, les outils de l'agent et le serveur MCP, et aucun d'eux ne
+  // doit pouvoir l'oublier.
   const threadUserMessages = threadMessages.map((message) => ({
     role: 'user' as const,
     content: MessagePrompt({
       ...message,
-      body: stripHtml(message.body).result,
+      body: sanitizeMailContent(message.body).text,
     }),
   }));
 
@@ -122,9 +119,11 @@ export async function composeEmail(input: ComposeEmailInput) {
     frequencyPenalty: 0.2,
     presencePenalty: 0.1,
     maxRetries: 1,
-    tools: {
-      webSearch: webSearch(),
-    },
+    // Aucun outil. `webSearch` était câblé ici : rédiger une réponse n'en a aucun besoin, et
+    // il constituait un CANAL DE SORTIE — une consigne dissimulée dans le mail entrant pouvait
+    // faire émettre une requête portant le contenu de la boîte vers un tiers. Il reste
+    // disponible là où un utilisateur le demande explicitement (routes/agent/tools.ts,
+    // trpc/routes/ai/webSearch.ts).
   });
 
   return text;
