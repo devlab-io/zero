@@ -1,7 +1,37 @@
-import { logger } from '../../lib/logger';
 import { router, privateProcedure } from '../trpc';
+import { TtlCache } from '../../lib/ttl-cache';
+import { logger } from '../../lib/logger';
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
+
+// Resolution BIMI mise en cache PAR DOMAINE (pitbull A13, axe 6).
+//
+// Avant : chaque ligne de la liste d'inbox appelait `getByEmail`, qui refaisait une
+// resolution DNS sortante (dns.google) PUIS un telechargement du logo — par ADRESSE, sans
+// aucun cache serveur. Cinquante lignes de la meme entreprise = cinquante resolutions
+// identiques. Le cout est paye sur le chemin de rendu de la liste, a chaque montage.
+//
+// Deux etages, aucun binding nouveau a provisionner :
+//  - un cache d'isolate borne (TtlCache), qui absorbe la rafale d'une meme page ;
+//  - le Cache API du colo (`caches.default`), qui survit au recyclage de l'isolate et se
+//    partage entre requetes, avec un TTL de 24 h — un enregistrement BIMI ne bouge pas dans
+//    la journee.
+// `getByEmail` reduit desormais l'adresse a son domaine et emprunte le meme cache que
+// `getByDomain` : les deux procedures ne peuvent plus diverger.
+
+type ResolvedBimi = {
+  domain: string;
+  bimiRecord: { version?: string; logoUrl?: string; authorityUrl?: string } | null;
+  logo: { url: string; svgContent: string } | null;
+};
+
+const ISOLATE_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+const COLO_CACHE_TTL_SECONDS = 24 * 60 * 60;
+const isolateCache = new TtlCache<ResolvedBimi>(ISOLATE_CACHE_TTL_MS, 500);
+
+/** Clé d'URL synthétique : le Cache API indexe par requête, pas par chaîne libre. */
+const cacheKeyFor = (domain: string) =>
+  `https://bimi-cache.zero.internal/${encodeURIComponent(domain)}`;
 
 const parseBimiRecord = (record: string) => {
   const parts = record.split(';').map((part) => part.trim());
@@ -87,6 +117,56 @@ const fetchLogoContent = async (logoUrl: string): Promise<string | null> => {
   }
 };
 
+const resolveBimiForDomain = async (domain: string): Promise<ResolvedBimi> => {
+  const cached = isolateCache.get(domain);
+  if (cached) return cached;
+
+  const cache = caches.default;
+  const request = new Request(cacheKeyFor(domain));
+
+  try {
+    const hit = await cache.match(request);
+    if (hit) {
+      const stored = (await hit.json()) as ResolvedBimi;
+      isolateCache.set(domain, stored);
+      return stored;
+    }
+  } catch (error) {
+    // Un cache illisible ne doit jamais empêcher la résolution.
+    logger.warn(`[bimi] cache read failed for ${domain}`, error);
+  }
+
+  const bimiRecordText = await fetchDnsRecord(domain);
+  let resolved: ResolvedBimi = { domain, bimiRecord: null, logo: null };
+
+  if (bimiRecordText) {
+    const bimiRecord = parseBimiRecord(bimiRecordText);
+    let logo: ResolvedBimi['logo'] = null;
+    if (bimiRecord.logoUrl) {
+      const svgContent = await fetchLogoContent(bimiRecord.logoUrl);
+      if (svgContent) logo = { url: bimiRecord.logoUrl, svgContent };
+    }
+    resolved = { domain, bimiRecord, logo };
+  }
+
+  isolateCache.set(domain, resolved);
+  try {
+    await cache.put(
+      request,
+      new Response(JSON.stringify(resolved), {
+        headers: {
+          'Content-Type': 'application/json',
+          'Cache-Control': `public, max-age=${COLO_CACHE_TTL_SECONDS}`,
+        },
+      }),
+    );
+  } catch (error) {
+    logger.warn(`[bimi] cache write failed for ${domain}`, error);
+  }
+
+  return resolved;
+};
+
 export const bimiRouter = router({
   getByEmail: privateProcedure
     .input(
@@ -122,34 +202,7 @@ export const bimiRouter = router({
         });
       }
 
-      const bimiRecordText = await fetchDnsRecord(domain);
-
-      if (!bimiRecordText) {
-        return {
-          domain,
-          bimiRecord: null,
-          logo: null,
-        };
-      }
-
-      const bimiRecord = parseBimiRecord(bimiRecordText);
-
-      let logo = null;
-      if (bimiRecord.logoUrl) {
-        const svgContent = await fetchLogoContent(bimiRecord.logoUrl);
-        if (svgContent) {
-          logo = {
-            url: bimiRecord.logoUrl,
-            svgContent,
-          };
-        }
-      }
-
-      return {
-        domain,
-        bimiRecord,
-        logo,
-      };
+      return resolveBimiForDomain(domain);
     }),
 
   getByDomain: privateProcedure
@@ -177,33 +230,6 @@ export const bimiRouter = router({
       }),
     )
     .query(async ({ input }) => {
-      const bimiRecordText = await fetchDnsRecord(input.domain);
-
-      if (!bimiRecordText) {
-        return {
-          domain: input.domain,
-          bimiRecord: null,
-          logo: null,
-        };
-      }
-
-      const bimiRecord = parseBimiRecord(bimiRecordText);
-
-      let logo = null;
-      if (bimiRecord.logoUrl) {
-        const svgContent = await fetchLogoContent(bimiRecord.logoUrl);
-        if (svgContent) {
-          logo = {
-            url: bimiRecord.logoUrl,
-            svgContent,
-          };
-        }
-      }
-
-      return {
-        domain: input.domain,
-        bimiRecord,
-        logo,
-      };
+      return resolveBimiForDomain(input.domain);
     }),
 });
