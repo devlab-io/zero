@@ -17,6 +17,8 @@
 // Dependencies are injected so the policy is unit-testable without better-auth or a DO
 // binding; routes/index.ts supplies the real `createAuth()` / `getZeroDB()` lookups.
 
+import { personalAgentName } from '@zero/types';
+
 import { logger } from './logger';
 
 /** Lobby shape handed to the partyserver hooks; only the DO name matters here. */
@@ -28,13 +30,6 @@ export type AgentAuthorizationDeps = {
   /** True when `connectionId` belongs to `userId`. */
   ownsConnection: (userId: string, connectionId: string) => Promise<boolean>;
 };
-
-/**
- * The connection-less agent every signed-in user shares (apps/mail falls back to this
- * name when no connection is active). It holds no mailbox scope — chat is a no-op on it
- * (routes/agent/chat-agent.ts) — so a valid session is sufficient and no owner exists.
- */
-export const SHARED_AGENT_NAME = 'general';
 
 const deny = (status: 401 | 403 | 503, body: string) => new Response(body, { status });
 
@@ -56,7 +51,19 @@ export async function authorizeAgentAccess(
   }
 
   if (!userId) return deny(401, 'Unauthorized');
-  if (lobby.name === SHARED_AGENT_NAME) return undefined;
+
+  // Instance PERSONNELLE de l'appelant : accordée sur l'égalité EXACTE avec le nom dérivé
+  // de SA session, jamais sur un préfixe. Proposer `user-<autre-utilisateur>` retombe donc
+  // sur la vérification de propriété ci-dessous, qui ne trouve aucune connexion de ce nom
+  // et refuse (403).
+  //
+  // Il n'y a plus d'exemption pour un nom PARTAGÉ. `general` exemptait autrefois tout
+  // porteur de session sans regarder ni propriétaire ni locataire, et `partyserver` fait
+  // du nom l'identité du stockage : tous les utilisateurs se retrouvaient dans la même
+  // instance de Durable Object, donc dans la même table de messages. Ce nom est désormais
+  // traité comme n'importe quel autre — aucun utilisateur ne possède de connexion qui
+  // s'appelle ainsi, il est donc refusé.
+  if (lobby.name === personalAgentName(userId)) return undefined;
 
   let owned: boolean;
   try {

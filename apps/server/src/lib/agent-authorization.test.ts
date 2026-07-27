@@ -1,4 +1,6 @@
-import { authorizeAgentAccess, SHARED_AGENT_NAME } from './agent-authorization';
+import { LEGACY_SHARED_AGENT_NAME, personalAgentName } from '@zero/types';
+
+import { authorizeAgentAccess } from './agent-authorization';
 import { describe, it, expect, vi } from 'vitest';
 
 /**
@@ -46,12 +48,35 @@ describe('authorizeAgentAccess', () => {
     expect(res?.status).toBe(403);
   });
 
-  it('allows the shared connection-less agent without an ownership lookup', async () => {
+  it("refuse désormais l'ancien nom PARTAGÉ `general`", async () => {
+    // Il était exempté du contrôle de propriété sans regarder ni propriétaire ni locataire,
+    // et `partyserver` fait du nom l'identité du stockage : tous les utilisateurs
+    // partageaient la même instance de Durable Object. Il est traité comme n'importe quel
+    // autre nom — personne ne possède de connexion qui s'appelle ainsi.
+    const d = deps({ ownsConnection: vi.fn(async () => false) });
+    const res = await authorizeAgentAccess(request(), { name: LEGACY_SHARED_AGENT_NAME }, d);
+    expect(res?.status).toBe(403);
+    expect(d.ownsConnection).toHaveBeenCalledWith('user-1', LEGACY_SHARED_AGENT_NAME);
+  });
+
+  it('accorde son PROPRE nom personnel, sans recherche de propriété', async () => {
     const d = deps();
     await expect(
-      authorizeAgentAccess(request(), { name: SHARED_AGENT_NAME }, d),
+      authorizeAgentAccess(request(), { name: personalAgentName('user-1') }, d),
     ).resolves.toBeUndefined();
     expect(d.ownsConnection).not.toHaveBeenCalled();
+  });
+
+  it("refuse le nom personnel d'un AUTRE utilisateur avec 403", async () => {
+    const d = deps({ ownsConnection: vi.fn(async () => false) });
+    const res = await authorizeAgentAccess(request(), { name: personalAgentName('victime') }, d);
+    expect(res?.status).toBe(403);
+  });
+
+  it("porter le PRÉFIXE personnel n'accorde rien : l'égalité doit être exacte", async () => {
+    const d = deps({ ownsConnection: vi.fn(async () => false) });
+    const res = await authorizeAgentAccess(request(), { name: 'user-autre-chose' }, d);
+    expect(res?.status).toBe(403);
   });
 
   it('fails closed when the session lookup throws', async () => {

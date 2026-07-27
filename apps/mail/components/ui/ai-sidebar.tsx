@@ -1,6 +1,5 @@
-import { log } from '@/lib/log';
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip';
-import { m } from '@/paraglide/messages';
+import { Tools, PERSONAL_AGENT_PREFIX, personalAgentName } from '@zero/types';
 import { ArrowsPointingIn, PanelLeftOpen, Phone } from '../icons/icons';
 import { useActiveConnection } from '@/hooks/use-connections';
 import { ResizablePanel } from '@/components/ui/resizable';
@@ -10,22 +9,24 @@ import useSearchLabels from '@/hooks/use-labels-search';
 import { useQueryClient } from '@tanstack/react-query';
 import { AIChat } from '@/components/create/ai-chat';
 import { useTRPC } from '@/providers/query-provider';
-import { Tools } from '@zero/types';
 import { useDoState } from '../mail/use-do-state';
 import { useBilling } from '@/hooks/use-billing';
 import { PromptsDialog } from './prompts-dialog';
 import { Button } from '@/components/ui/button';
 import { useHotkeys } from 'react-hotkeys-hook';
 import { useLabels } from '@/hooks/use-labels';
+import { useSession } from '@/lib/auth-client';
 import { useAgentChat } from 'agents/ai-react';
 import { X, Expand, Plus } from 'lucide-react';
 import { IncomingMessageType } from '../party';
 import { Gauge } from '@/components/ui/gauge';
+import { m } from '@/paraglide/messages';
 import { useParams } from 'react-router';
 import { useAgent } from 'agents/react';
 import { useQueryState } from 'nuqs';
 import { cn } from '@/lib/utils';
 import posthog from 'posthog-js';
+import { log } from '@/lib/log';
 import { toast } from 'sonner';
 
 interface ChatHeaderProps {
@@ -194,6 +195,7 @@ function AISidebar({ className }: AISidebarProps) {
   const { refetch: refetchLabels } = useLabels();
   const [searchValue] = useSearchValue();
   const { data: activeConnection } = useActiveConnection();
+  const { data: session } = useSession();
   const [, setDoState] = useDoState();
   const { labels } = useSearchLabels();
 
@@ -231,9 +233,32 @@ function AISidebar({ className }: AISidebarProps) {
     [queryClient, trpc, labels, searchValue.value, setDoState],
   );
 
+  // Nom de l'instance d'agent. Le repli n'est plus le nom PARTAGÉ `general` : tout
+  // utilisateur authentifié y atteignait la même instance de Durable Object, donc les
+  // conversations des autres locataires (cf. packages/types/src/agent-names.ts). Le repli
+  // est désormais l'instance PERSONNELLE de la session courante, que le serveur n'accorde
+  // que sur égalité exacte avec l'identifiant de l'appelant.
+  //
+  // Le repli reste, en pratique, hors du chemin réel : `mail.tsx` ne monte cette barre
+  // latérale que lorsque `activeConnection?.id` existe. Il n'en est pas moins corrigé —
+  // c'est le composant, pas son site d'appel, qui doit être sûr.
+  //
+  // Sans session résolue, aucun nom légitime ne peut être formé. On propose alors le
+  // préfixe SEUL : il ne peut être égal à `personalAgentName(userId)` pour aucun
+  // identifiant non vide, et personne ne possède de connexion qui s'appelle ainsi — le
+  // serveur le refuse donc (403). Surtout, `routePartykitRequest` n'appelle `stub.fetch`
+  // qu'APRÈS le hook d'autorisation : un nom refusé n'instancie jamais le Durable Object,
+  // aucun état n'est créé. Ne PAS mettre la chaîne vide ici : `useAgent` la remplace par
+  // `'default'`, c'est-à-dire un nom partagé de plus.
+  const agentName = activeConnection?.id
+    ? String(activeConnection.id)
+    : session?.user?.id
+      ? personalAgentName(String(session.user.id))
+      : PERSONAL_AGENT_PREFIX;
+
   const agent = useAgent({
     agent: 'ZeroAgent',
-    name: activeConnection?.id ? String(activeConnection.id) : 'general',
+    name: agentName,
     host: `${import.meta.env.VITE_PUBLIC_BACKEND_URL}`,
     onError: (e) => log.error(e),
     onMessage,

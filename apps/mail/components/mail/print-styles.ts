@@ -5,6 +5,23 @@
 // blank line). Sharing this constant removes ~190 LOC of duplicated CSS
 // between the two derived modules with no effect on the printed document.
 
+/**
+ * Permission minimale de l'iframe d'impression, vérifiée dans Chromium (sonde /tmp de la
+ * mission «XSS chemin d'impression») :
+ *   - PAS de `allow-scripts` : c'est ce qui neutralise tout script résiduel, inline comme
+ *     gestionnaire d'événement (`onerror`), que la CSP `script-src 'unsafe-inline'` de
+ *     l'application (workers/spa-fallback.ts) laisserait sinon passer. Défense en
+ *     profondeur DERRIÈRE l'échappement, pas à sa place.
+ *   - `allow-same-origin` est INDISPENSABLE : sans lui le document reçoit une origine
+ *     opaque et `printFrame.contentDocument` devient inaccessible depuis la page parente —
+ *     `iframeDoc.write` et `contentWindow.print()` cassent, l'impression ne marche plus.
+ *     Il ne réactive PAS les scripts : sans `allow-scripts`, rien ne s'exécute.
+ *   - `allow-modals` est INDISPENSABLE : `window.print()` ouvre une boîte de dialogue
+ *     modale, que Chromium refuse dans un document bac à sable sans ce mot-clé
+ *     («Ignored call to 'print()'. The document is sandboxed…»).
+ */
+export const PRINT_IFRAME_SANDBOX = 'allow-same-origin allow-modals';
+
 export const PRINT_STYLES = `
             * {
               margin: 0;

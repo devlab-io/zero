@@ -41,6 +41,7 @@ import { ToolOrchestrator } from './orchestrator';
 import { AiChatPrompt } from '../../lib/prompts';
 import { invariant } from '../../lib/invariant';
 import { anthropic } from '@ai-sdk/anthropic';
+import { hasMailboxScope } from '@zero/types';
 import type { WSMessage } from 'partyserver';
 import { tools as authTools } from './tools';
 import { processToolCalls } from './utils';
@@ -114,7 +115,9 @@ export class ZeroAgent extends AIChatAgent<ZeroEnv> {
   ) {
     const dataStreamResponse = createDataStreamResponse({
       execute: async (dataStream) => {
-        if (this.name === 'general') return;
+        // Le nom de l'instance EST l'identifiant de connexion sur lequel les outils
+        // agissent. Sans portée de boîte aux lettres, aucun outil ne doit s'exécuter.
+        if (!hasMailboxScope(this.name)) return;
         const connectionId = this.name;
         const orchestrator = new ToolOrchestrator(dataStream, connectionId);
 
@@ -211,6 +214,19 @@ export class ZeroAgent extends AIChatAgent<ZeroEnv> {
         logger.warn(error);
         // silently ignore invalid messages for now
         // TODO: log errors with log levels
+        return;
+      }
+      // Une instance SANS portée de boîte aux lettres (instance personnelle d'un
+      // utilisateur qui n'a pas de connexion active, ou l'ancien nom partagé `general`) ne
+      // peut rien faire d'utile : `getDataStreamResponse` y rend la main immédiatement.
+      // Le garde est remonté ICI, AVANT toute écriture — l'ordre était l'inverse : on
+      // diffusait puis on persistait (`persistMessages` efface la table puis réinsère et
+      // rediffuse) et seulement ensuite on constatait l'absence de portée. Rien n'est plus
+      // écrit ni diffusé sur une instance qui ne peut pas répondre.
+      if (!hasMailboxScope(this.name)) {
+        logger.warn('[ZeroAgent] message ignoré sur une instance sans portée de boîte', {
+          type: data.type,
+        });
         return;
       }
       switch (data.type) {

@@ -126,20 +126,50 @@ const normalizeRoot = ($: CheerioAPI): Element | undefined => {
 
 type InlineStyle = Record<string, string>;
 
+/**
+ * Retire les commentaires CSS.
+ *
+ * CONSTAT (11 charges sur 27 passaient) : un commentaire est un séparateur de jetons LÉGAL
+ * partout dans une déclaration. `style="display:/*x*&#47;none"` vaut `display:none` pour le
+ * navigateur — donc invisible pour l'humain — mais la comparaison littérale
+ * `styles.display === 'none'` échouait et le texte caché repartait EN CLAIR vers le modèle.
+ * Le retrait se fait sur la chaîne ENTIÈRE avant tout découpage, car un commentaire peut
+ * contenir `;`, `:`, `{` ou `}` et fausserait sinon le découpage lui-même.
+ *
+ * Un commentaire non fermé mange le reste de l'entrée, exactement comme dans un navigateur.
+ * Le remplacement par une ESPACE (et non par la chaîne vide) préserve la séparation des
+ * jetons : `10/**&#47;px` ne doit pas devenir `10px`.
+ */
+const stripCssComments = (css: string): string => css.replace(/\/\*[\s\S]*?(?:\*\/|$)/g, ' ');
+
+/**
+ * Normalisation d'une valeur de déclaration AVANT toute comparaison : `!important` retiré,
+ * espaces internes (y compris sauts de ligne et tabulations) réduits à une espace simple,
+ * casse abaissée. Sans elle, `display:\n  NONE` ou `visibility:  hidden` — deux formes
+ * parfaitement légales — échappaient à la détection.
+ */
+const normalizeDeclarationValue = (value: string): string =>
+  value
+    .replace(/!\s*important/gi, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+
 const parseInlineStyle = (style: string | undefined): InlineStyle =>
   Object.fromEntries(
-    (style ?? '')
+    stripCssComments(style ?? '')
       .split(';')
       .map((rule) => {
         const separator = rule.indexOf(':');
         if (separator === -1) return null;
 
+        // Le nom de propriété est seulement RECADRÉ, pas compacté : un identifiant CSS ne
+        // peut pas contenir d'espace, et `dis/*x*/play` reste donc invalide APRÈS retrait du
+        // commentaire — comme dans un navigateur, qui rejette la déclaration et laisse le
+        // contenu VISIBLE. Le compacter fabriquerait un faux positif qui retrancherait du
+        // texte réellement lu par l'humain.
         const property = rule.slice(0, separator).trim().toLowerCase();
-        const value = rule
-          .slice(separator + 1)
-          .replace(/!important/gi, '')
-          .trim()
-          .toLowerCase();
+        const value = normalizeDeclarationValue(rule.slice(separator + 1));
 
         return property && value ? [property, value] : null;
       })
@@ -159,20 +189,46 @@ const isWhite = (value: string | undefined) => {
 };
 
 /**
+ * Facteurs de conversion vers le pixel CSS. Seules `px|pt|em|rem` étaient reconnues : une
+ * taille de police en `in`, `cm`, `mm`, `q`, `pc`, `ex` ou `ch` — toutes légales, toutes
+ * rendues par les clients de messagerie — rendait `lengthInPixels` indécis, donc le texte
+ * minuscule ressortait en clair. `%` conserve sa valeur numérique (l'usage n'en compare que
+ * le zéro et les grandes valeurs négatives).
+ */
+const CSS_UNIT_TO_PIXELS: Record<string, number> = {
+  '': 1,
+  '%': 1,
+  px: 1,
+  pt: 4 / 3,
+  pc: 16,
+  in: 96,
+  cm: 96 / 2.54,
+  mm: 96 / 25.4,
+  q: 96 / 101.6,
+  em: 16,
+  rem: 16,
+  ex: 8,
+  ch: 8,
+};
+
+/**
  * Longueur CSS ramenée en pixels, approximativement. `undefined` quand la valeur n'est pas
  * une longueur (`auto`, `inherit`, `medium`…). L'approximation suffit : on ne compare qu'à
  * zéro, à « minuscule » et à « très loin hors écran ».
  */
 const lengthInPixels = (value: string | undefined): number | undefined => {
   if (!value) return undefined;
-  const match = /^(-?\d*\.?\d+)(px|pt|em|rem|%|)$/.exec(value.replace(/\s+/g, '').toLowerCase());
+  const match = /^(-?\d*\.?\d+)([a-z%]*)$/.exec(value.replace(/\s+/g, '').toLowerCase());
   if (!match) return undefined;
 
   const size = Number(match[1]);
   if (!Number.isFinite(size)) return undefined;
-  if (match[2] === 'pt') return size * (4 / 3);
-  if (match[2] === 'em' || match[2] === 'rem') return size * 16;
-  return size;
+  // Zéro est zéro dans TOUTE unité, y compris celles qui dépendent du contexte (`vw`, `vh`)
+  // et qu'on ne saurait pas convertir autrement.
+  if (size === 0) return 0;
+
+  const factor = CSS_UNIT_TO_PIXELS[match[2] ?? ''];
+  return factor === undefined ? undefined : size * factor;
 };
 
 const atMost = (value: string | undefined, ceiling: number) => {
@@ -186,6 +242,26 @@ const atMost = (value: string | undefined, ceiling: number) => {
  */
 const isTinyFontSize = (value: string | undefined) => atMost(value, 3.99);
 
+/**
+ * Raccourci `font` portant une taille invisible.
+ *
+ * Deux formes, et deux seulement, pour ne pas fabriquer de faux positif :
+ *   - `font: 0/0 a`, la ruse classique : taille nulle SANS unité, suivie de la hauteur de
+ *     ligne ;
+ *   - un jeton porteur d'une UNITÉ explicite et minuscule (`font: 1px Arial`).
+ * Les jetons sans unité sont autrement ignorés : dans `font: bold 12px/1.5 Arial`, `1.5` est
+ * une hauteur de ligne, pas une taille, et la traiter comme telle retrancherait un mail
+ * parfaitement lisible.
+ */
+const isTinyFontShorthand = (value: string | undefined) => {
+  if (!value) return false;
+  if (/(?:^|\s)0(?:\.0+)?\s*\/\s*\d/.test(value)) return true;
+
+  return value
+    .split(/[\s/]+/)
+    .some((token) => /^-?\d*\.?\d+[a-z]+$/.test(token) && isTinyFontSize(token));
+};
+
 /** Opacité nulle ou quasi nulle. `0`, `0.0`, `.0`, `0%` et les valeurs résiduelles. */
 const isZeroOpacity = (value: string | undefined) => {
   if (!value) return false;
@@ -195,17 +271,35 @@ const isZeroOpacity = (value: string | undefined) => {
   return Number.isFinite(opacity) && opacity <= 0.05;
 };
 
-/** Couleur de texte invisible : `transparent`, alpha nul, `#rrggbb00`. */
+/** Une composante alpha écrite `0`, `0.0`, `.0`, `00` ou `0%`. */
+const isZeroAlpha = (alpha: string) => alpha.length > 0 && /^0*(?:\.0+)?%?$/.test(alpha);
+
+/**
+ * Couleur de texte invisible : `transparent`, alpha nul, `#rrggbb00`.
+ *
+ * L'alpha n'est plus cherché par un motif figé sur `rgba(…,0)` mais LU comme composante :
+ * la syntaxe moderne `rgb(0 0 0 / 0)` (CSS Color 4, séparateur `/`, acceptée par tous les
+ * moteurs) échappait entièrement à l'ancienne expression. Le nombre de composantes est
+ * compté pour ne pas prendre le TROISIÈME argument de `rgb(0,0,0)` — du noir parfaitement
+ * visible — pour un alpha nul.
+ */
 const isTransparent = (value: string | undefined) => {
   if (!value) return false;
   const compact = value.replace(/\s+/g, '').toLowerCase();
 
-  return (
-    compact === 'transparent' ||
-    /^(?:rgba|hsla)\([^)]*,0*(?:\.0+)?%?\)$/.test(compact) ||
-    /^#[0-9a-f]{6}00$/.test(compact) ||
-    /^#[0-9a-f]{3}0$/.test(compact)
-  );
+  if (compact === 'transparent') return true;
+  if (/^#[0-9a-f]{6}00$/.test(compact)) return true;
+  if (/^#[0-9a-f]{3}0$/.test(compact)) return true;
+
+  const call = /^(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch|color)\((.*)\)$/.exec(compact);
+  if (!call) return false;
+  const inner = call[1] ?? '';
+
+  const slash = inner.lastIndexOf('/');
+  if (slash !== -1) return isZeroAlpha(inner.slice(slash + 1));
+
+  const parts = inner.split(',');
+  return parts.length === 4 && isZeroAlpha(parts[3] ?? '');
 };
 
 /**
@@ -265,7 +359,7 @@ const declarationsHide = (styles: InlineStyle) =>
   styles.visibility === 'collapse' ||
   isZeroOpacity(styles.opacity) ||
   isTinyFontSize(styles['font-size']) ||
-  /\b0(?:\.0+)?(?:px|pt|em|rem)\b/.test(styles.font ?? '') ||
+  isTinyFontShorthand(styles.font) ||
   isTransparent(styles.color) ||
   isPushedOffscreen(styles) ||
   isCollapsedBox(styles) ||
@@ -290,7 +384,9 @@ const hidingSelectorsFromStyleSheets = ($: CheerioAPI): string[] => {
   // ignorées : leur corps contient des accolades imbriquées que ce parseur volontairement
   // minimal ne prétend pas comprendre.
   const rulePattern = /([^{}@]+)\{([^{}]*)\}/g;
-  const source = css.slice(0, MAX_STYLE_LENGTH);
+  // Commentaires retirés AVANT le découpage en règles : un `/* } */` suffisait sinon à
+  // désaligner ce découpage et à faire disparaître la règle masquante du lot.
+  const source = stripCssComments(css).slice(0, MAX_STYLE_LENGTH);
   let match: RegExpExecArray | null;
 
   while ((match = rulePattern.exec(source))) {
