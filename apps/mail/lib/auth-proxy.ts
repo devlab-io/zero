@@ -1,3 +1,4 @@
+import { sessionCacheState, invalidateSessionCache } from '@/lib/session-invalidation';
 import { authClient } from '@/lib/auth-client';
 import { log } from '@/lib/log';
 
@@ -10,6 +11,8 @@ type SessionData = Awaited<ReturnType<typeof authClient.getSession>>['data'];
  * le second sérialisé derrière le premier. On partage désormais le client
  * singleton, on déduplique les appels en vol et on garde le résultat quelques
  * secondes : une navigation racine → /mail/inbox ne paie plus qu'un aller-retour.
+ * L'état du cache vit dans session-invalidation.ts (module neutre) pour
+ * pouvoir être vidé depuis auth-client.ts sans créer de cycle d'import.
  *
  * Sûr côté fuite de données : tous les appelants sont des `clientLoader`
  * (navigateur uniquement), ce cache est donc par onglet, jamais partagé entre
@@ -17,32 +20,30 @@ type SessionData = Awaited<ReturnType<typeof authClient.getSession>>['data'];
  */
 const SESSION_TTL_MS = 10_000;
 
-let inflight: Promise<SessionData> | null = null;
-let cached: { at: number; value: SessionData } | null = null;
-
 const requestSession = (headers: Headers): Promise<SessionData> => {
-  if (inflight) return inflight;
+  if (sessionCacheState.inflight) return sessionCacheState.inflight;
 
-  inflight = authClient
+  sessionCacheState.inflight = authClient
     .getSession({ fetchOptions: { headers, credentials: 'include' } })
     .then((session) => {
       if (session.error) {
         log.error(`Failed to get session: ${session.error}`, session);
         return null;
       }
-      cached = { at: Date.now(), value: session.data };
+      sessionCacheState.cached = { at: Date.now(), value: session.data };
       return session.data;
     })
     .finally(() => {
-      inflight = null;
+      sessionCacheState.inflight = null;
     });
 
-  return inflight;
+  return sessionCacheState.inflight;
 };
 
 export const authProxy = {
   api: {
     getSession: async ({ headers }: { headers: Headers }): Promise<SessionData> => {
+      const cached = sessionCacheState.cached;
       if (cached && Date.now() - cached.at < SESSION_TTL_MS) return cached.value;
       return requestSession(headers);
     },
@@ -50,7 +51,4 @@ export const authProxy = {
 };
 
 /** À appeler après une déconnexion ou un changement de compte. */
-export const invalidateSessionCache = () => {
-  cached = null;
-  inflight = null;
-};
+export { invalidateSessionCache };
