@@ -167,9 +167,10 @@ export function QueryProvider({
   // cache IndexedDB d'une autre connexion.
   const currentConnectionSuffix = `-${connectionId ?? 'default'}`;
   const cacheOwnerHint = isSessionPending ? readCacheOwnerHint() : null;
-  const hintMatchesConnection =
-    !!cacheOwnerHint && cacheOwnerHint.endsWith(currentConnectionSuffix);
-  const cacheOwner = hintMatchesConnection ? cacheOwnerHint! : resolvedCacheOwner;
+  const cacheOwner =
+    cacheOwnerHint && cacheOwnerHint.endsWith(currentConnectionSuffix)
+      ? cacheOwnerHint
+      : resolvedCacheOwner;
 
   const persister = useMemo(
     () => createIDBPersister(`zero-query-cache-${cacheOwner}`),
