@@ -352,17 +352,17 @@
           {
             "queue": "subscribe-queue-staging",
             "max_retries": 5,
-            // "dead_letter_queue": "subscribe-queue-staging-dlq",
+            "dead_letter_queue": "subscribe-queue-staging-dlq",
           },
           {
             "queue": "thread-queue-staging",
             "max_retries": 5,
-            // "dead_letter_queue": "thread-queue-staging-dlq",
+            "dead_letter_queue": "thread-queue-staging-dlq",
           },
           {
             "queue": "send-email-queue-staging",
             "max_retries": 5,
-            // "dead_letter_queue": "send-email-queue-staging-dlq",
+            "dead_letter_queue": "send-email-queue-staging-dlq",
           },
         ],
       },
@@ -568,17 +568,17 @@
           {
             "queue": "subscribe-queue-prod",
             "max_retries": 5,
-            // "dead_letter_queue": "subscribe-queue-prod-dlq",
+            "dead_letter_queue": "subscribe-queue-prod-dlq",
           },
           {
             "queue": "thread-queue-prod",
             "max_retries": 5,
-            // "dead_letter_queue": "thread-queue-prod-dlq",
+            "dead_letter_queue": "thread-queue-prod-dlq",
           },
           {
             "queue": "send-email-queue-prod",
             "max_retries": 5,
-            // "dead_letter_queue": "send-email-queue-prod-dlq",
+            "dead_letter_queue": "send-email-queue-prod-dlq",
           },
         ],
       },
