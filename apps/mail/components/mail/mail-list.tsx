@@ -43,6 +43,7 @@ export const MailList = memo(
       hasNextPage,
       loadMore,
       refetch,
+      isForceSyncHold,
     } = useMailListData();
 
     const isOffline = useIsOffline();
@@ -261,7 +262,15 @@ export const MailList = memo(
               </div>
             ) : (
               <div className="flex flex-1 flex-col" id="mail-list-scroll">
-                {viewState === 'stale' ? (
+                {isForceSyncHold ? (
+                  // Devlab (UX) : verrou perf forceSync (~40-45s de repeuplement DO
+                  // mesuré, wrangler tail 25/07/2026) — bandeau discret pendant le
+                  // hold, tant que la resynchro n'a pas repeuplé cette vue.
+                  <div className="flex items-center gap-2 border-b border-blue-200/60 bg-blue-50 px-3 py-1.5 text-xs text-blue-800 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-300">
+                    <RefreshCcw className="h-3 w-3 animate-spin" />
+                    <span>{m['states.mailList.forceSyncNotice']()}</span>
+                  </div>
+                ) : viewState === 'stale' ? (
                   <div className="flex items-center justify-between gap-2 border-b border-amber-200/60 bg-amber-50 px-3 py-1.5 text-xs text-amber-800 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-300">
                     <span>
                       {isOffline

@@ -1,14 +1,30 @@
-import { queryOptions, useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query';
+import {
+  findForceSyncSnapshot,
+  nextForceSyncHoldPhase,
+  selectForceSyncHoldItems,
+} from '@/lib/force-sync-hold-selector';
+import {
+  deactivateForceSyncHoldAtom,
+  forceSyncHoldAtom,
+  observeForceSyncPurgeAtom,
+} from '@/store/force-sync-hold';
+import {
+  hashKey,
+  queryOptions,
+  useInfiniteQuery,
+  useQuery,
+  useQueryClient,
+} from '@tanstack/react-query';
 import { backgroundQueueAtom, isThreadInBackgroundQueueAtom } from '@/store/backgroundQueue';
 import { emailContentQueryKey, resolveEmailContentTheme } from '@/lib/email-content-query';
 import { useTRPC, useTRPCClient } from '@/providers/query-provider';
 import { useSearchValue } from '@/hooks/use-search-value';
+import { useAtom, useAtomValue, useSetAtom } from 'jotai';
+import { useCallback, useEffect, useMemo } from 'react';
 import type { IGetThreadResponse } from '@zero/types';
 import useSearchLabels from './use-labels-search';
 import { useSession } from '@/lib/auth-client';
-import { useAtom, useAtomValue } from 'jotai';
 import { useSettings } from './use-settings';
-import { useCallback, useMemo } from 'react';
 import { useParams } from 'react-router';
 import { useTheme } from 'next-themes';
 import { useQueryState } from 'nuqs';
@@ -74,26 +90,25 @@ export const useThreads = () => {
   const trpc = useTRPC();
   const { labels } = useSearchLabels();
 
-  const threadsQuery = useInfiniteQuery(
-    trpc.mail.listThreads.infiniteQueryOptions(
-      {
-        q: searchValue.value,
-        folder,
-        labelIds: labels,
-      },
-      {
-        initialCursor: '',
-        getNextPageParam: (lastPage) => lastPage?.nextPageToken ?? null,
-        staleTime: 60 * 1000 * 1, // 1 minute
-        refetchOnMount: true,
-        refetchIntervalInBackground: true,
-      },
-    ),
+  const listThreadsQueryOptions = trpc.mail.listThreads.infiniteQueryOptions(
+    {
+      q: searchValue.value,
+      folder,
+      labelIds: labels,
+    },
+    {
+      initialCursor: '',
+      getNextPageParam: (lastPage) => lastPage?.nextPageToken ?? null,
+      staleTime: 60 * 1000 * 1, // 1 minute
+      refetchOnMount: true,
+      refetchIntervalInBackground: true,
+    },
   );
+  const threadsQuery = useInfiniteQuery(listThreadsQueryOptions);
 
   // Flatten threads from all pages and sort by receivedOn date (newest first)
 
-  const threads = useMemo(() => {
+  const freshThreads = useMemo(() => {
     return threadsQuery.data
       ? threadsQuery.data.pages
           .flatMap((e) => e.threads)
@@ -101,6 +116,58 @@ export const useThreads = () => {
           .filter((e) => !isInQueue(`thread:${e.id}`))
       : [];
   }, [threadsQuery.data, threadsQuery.dataUpdatedAt, isInQueue, backgroundQueue]);
+
+  // Devlab (UX) : verrou perf forceSync (~40-45s de repeuplement DO mesuré,
+  // wrangler tail 25/07/2026) — `mail.forceSync` purge puis repeuple de façon
+  // asynchrone ; pendant la fenêtre, cette vue reçoit des pages vides. Tant que
+  // le hold est armé (nav-user.tsx, déclenché à onMutate) ET que la réponse
+  // fraîche est vide, on retombe sur l'instantané capturé pour CETTE vue exacte
+  // (folder/recherche/labels) plutôt que de rendre une boîte vide.
+  const forceSyncHold = useAtomValue(forceSyncHoldAtom);
+  const observeForceSyncPurge = useSetAtom(observeForceSyncPurgeAtom);
+  const deactivateForceSyncHold = useSetAtom(deactivateForceSyncHoldAtom);
+
+  const forceSyncSnapshotItems = useMemo(() => {
+    if (!forceSyncHold.active) return undefined;
+    const currentHash = hashKey(listThreadsQueryOptions.queryKey);
+    // Le cast porte sur un type erasé à la compilation (`typeof freshThreads`
+    // n'est pas une lecture runtime de la valeur) : `freshThreads` n'a donc pas
+    // sa place dans les dépendances de ce memo.
+    return findForceSyncSnapshot(forceSyncHold.snapshots, currentHash) as
+      | typeof freshThreads
+      | undefined;
+  }, [forceSyncHold, listThreadsQueryOptions.queryKey]);
+
+  // Le serveur purge AVANT de repeupler, mais la purge n'atteint le client
+  // qu'au fetch suivant : à l'instant du clic, le cache tient encore l'ancienne
+  // liste non vide. `nextForceSyncHoldPhase` n'autorise le désarmement que sur
+  // un non-vide qui SUIT un vide observé (repeuplement réel, pas un résidu
+  // pré-purge) — voir le commentaire de la fonction dans force-sync-hold-selector.ts.
+  useEffect(() => {
+    const phase = nextForceSyncHoldPhase({
+      active: forceSyncHold.active,
+      purgeObserved: forceSyncHold.purgeObserved,
+      freshItemsLength: freshThreads.length,
+    });
+    if (phase === 'observe-purge') observeForceSyncPurge();
+    else if (phase === 'deactivate') deactivateForceSyncHold();
+  }, [
+    forceSyncHold.active,
+    forceSyncHold.purgeObserved,
+    freshThreads.length,
+    observeForceSyncPurge,
+    deactivateForceSyncHold,
+  ]);
+
+  const threads = useMemo(
+    () =>
+      selectForceSyncHoldItems({
+        active: forceSyncHold.active,
+        freshItems: freshThreads,
+        snapshotItems: forceSyncSnapshotItems,
+      }),
+    [forceSyncHold.active, freshThreads, forceSyncSnapshotItems],
+  );
 
   const isEmpty = useMemo(() => threads.length === 0, [threads]);
   const isReachingEnd =
@@ -113,7 +180,11 @@ export const useThreads = () => {
     await threadsQuery.fetchNextPage();
   };
 
-  return [threadsQuery, threads, isReachingEnd, loadMore] as const;
+  // 5th element: whether a forceSync hold is currently armed for this view — the
+  // presentation layer (mail-list.tsx, via useMailListData) uses this to show the
+  // "resync in progress" banner, independently of whether a snapshot is currently
+  // substituted (it may not be, on a view with nothing cached yet).
+  return [threadsQuery, threads, isReachingEnd, loadMore, forceSyncHold.active] as const;
 };
 
 export const useThread = (threadId: string | null, options?: { enabled?: boolean }) => {
