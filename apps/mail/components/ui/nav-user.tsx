@@ -20,9 +20,12 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useActiveConnection, useConnections } from '@/hooks/use-connections';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { hashKey, useMutation, useQueryClient } from '@tanstack/react-query';
+import type { ForceSyncSnapshot } from '@/lib/force-sync-hold-selector';
+import { activateForceSyncHoldAtom } from '@/store/force-sync-hold';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useDoState } from '@/components/mail/use-do-state';
+import type { InfiniteData } from '@tanstack/react-query';
 import { useLoading } from '../context/loading-context';
 import { signOut, useSession } from '@/lib/auth-client';
 import { AddConnectionDialog } from '../connection/add';
@@ -36,10 +39,17 @@ import { useLocation } from 'react-router';
 import { m } from '@/paraglide/messages';
 import { useTheme } from 'next-themes';
 import { useQueryState } from 'nuqs';
+import { useSetAtom } from 'jotai';
 import { Button } from './button';
 import { cn } from '@/lib/utils';
 import { log } from '@/lib/log';
 import { toast } from 'sonner';
+
+// Devlab (UX) : même astuce de typage que providers/query-provider.tsx (le
+// hook générique `useTRPC()` n'expose pas directement le type de sortie d'une
+// procédure) — évite de dupliquer/exporter un alias juste pour ce fichier.
+type TrpcHook = ReturnType<typeof useTRPC>;
+type ListThreadsPage = TrpcHook['mail']['listThreads']['~types']['output'];
 
 const bytesToMB = (bytes: number) => (bytes / 1024 / 1024).toFixed(2);
 
@@ -99,10 +109,35 @@ export function NavUser() {
   const { mutateAsync: setDefaultConnection } = useMutation(
     trpc.connections.setDefault.mutationOptions(),
   );
-  const { mutateAsync: handleForceSync } = useMutation(trpc.mail.forceSync.mutationOptions());
+  const queryClient = useQueryClient();
+  const activateForceSyncHold = useSetAtom(activateForceSyncHoldAtom);
+  const { mutateAsync: handleForceSync } = useMutation(
+    trpc.mail.forceSync.mutationOptions({
+      // Devlab (UX) : onMutate, PAS onSuccess — la mutation revient en ~4-5s mais
+      // le workflow de repeuplement du DO qu'elle déclenche continue ~40-45s
+      // derrière (wrangler tail mesuré le 25/07/2026). Le hold doit être armé dès
+      // le clic, avant que listThreads ne recommence à répondre vide.
+      onMutate: () => {
+        const activeListViews = queryClient.getQueriesData<InfiniteData<ListThreadsPage>>({
+          queryKey: trpc.mail.listThreads.infiniteQueryKey(),
+        });
+        const snapshots: ForceSyncSnapshot<unknown>[] = activeListViews.flatMap(
+          ([queryKey, data]) =>
+            data
+              ? [
+                  {
+                    hash: hashKey(queryKey),
+                    items: data.pages.flatMap((page) => page.threads).filter(Boolean),
+                  },
+                ]
+              : [],
+        );
+        activateForceSyncHold(snapshots);
+      },
+    }),
+  );
   const { openBillingPortal, customer: billingCustomer, isPro } = useBilling();
   const pathname = useLocation().pathname;
-  const queryClient = useQueryClient();
   const { data: activeConnection, refetch: refetchActiveConnection } = useActiveConnection();
   const [, setPricingDialog] = useQueryState('pricingDialog');
   const [category] = useQueryState('category', { defaultValue: 'All Mail' });

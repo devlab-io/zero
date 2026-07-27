@@ -41,6 +41,13 @@ export interface MailListData {
   loadMore: () => Promise<void>;
   /** Force a list refetch. */
   refetch: () => Promise<unknown>;
+  /**
+   * A `mail.forceSync` hold is armed for this view (issue: forceSync purges then
+   * asynchronously repopulates over ~40-45s — see `store/force-sync-hold.ts`).
+   * `items` may already be the held snapshot; this flag is for the "resync in
+   * progress" banner, which should show for the whole hold window regardless.
+   */
+  isForceSyncHold: boolean;
 }
 
 /**
@@ -50,7 +57,7 @@ export interface MailListData {
  * seam so #30/#34 have one place to plug in.
  */
 export function useMailListData(): MailListData {
-  const [threadsQuery, items, isReachingEnd, loadMore] = useThreads();
+  const [threadsQuery, items, isReachingEnd, loadMore, isForceSyncHold] = useThreads();
   const trpc = useTRPC();
   const isFetchingThreadBodies = useIsFetching({ queryKey: trpc.mail.get.queryKey() }) > 0;
 
@@ -67,5 +74,6 @@ export function useMailListData(): MailListData {
     isReachingEnd,
     loadMore,
     refetch: threadsQuery.refetch,
+    isForceSyncHold,
   };
 }

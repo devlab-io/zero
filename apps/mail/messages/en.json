@@ -169,13 +169,8 @@
       "attachments": "Attachments",
       "attachmentCount": [
         {
-          "declarations": [
-            "input count",
-            "local countPlural = count: plural"
-          ],
-          "selectors": [
-            "countPlural"
-          ],
+          "declarations": ["input count", "local countPlural = count: plural"],
+          "selectors": ["countPlural"],
           "match": {
             "countPlural=0": "attachments",
             "countPlural=one": "attachment",
@@ -185,13 +180,8 @@
       ],
       "fileCount": [
         {
-          "declarations": [
-            "input count",
-            "local countPlural = count: plural"
-          ],
-          "selectors": [
-            "countPlural"
-          ],
+          "declarations": ["input count", "local countPlural = count: plural"],
+          "selectors": ["countPlural"],
           "match": {
             "countPlural=0": "files",
             "countPlural=one": "file",
@@ -267,13 +257,8 @@
       "search": "Search notes...",
       "noteCount": [
         {
-          "declarations": [
-            "input count",
-            "local countPlural = count: plural"
-          ],
-          "selectors": [
-            "countPlural"
-          ],
+          "declarations": ["input count", "local countPlural = count: plural"],
+          "selectors": ["countPlural"],
           "match": {
             "countPlural=0": "Add notes",
             "countPlural=one": "# note",
@@ -337,13 +322,8 @@
     "mail": {
       "replies": [
         {
-          "declarations": [
-            "input count",
-            "local countPlural = count: plural"
-          ],
-          "selectors": [
-            "countPlural"
-          ],
+          "declarations": ["input count", "local countPlural = count: plural"],
+          "selectors": ["countPlural"],
           "match": {
             "countPlural=0": "replies",
             "countPlural=one": "# reply",
@@ -409,13 +389,8 @@
       "selectAllConversations": "Select all conversations",
       "conversationsSelected": [
         {
-          "declarations": [
-            "input count",
-            "local countPlural = count: plural"
-          ],
-          "selectors": [
-            "countPlural"
-          ],
+          "declarations": ["input count", "local countPlural = count: plural"],
+          "selectors": ["countPlural"],
           "match": {
             "countPlural=one": "# conversation on this page selected.",
             "countPlural=other": "# conversations on this page selected."
@@ -857,6 +832,7 @@
       "errorDescription": "We couldn't reach the server. Check your connection and try again.",
       "offlineNotice": "You're offline — showing your saved emails.",
       "staleNotice": "Couldn't refresh — showing your saved emails.",
+      "forceSyncNotice": "Resyncing your inbox — showing your saved emails for now.",
       "emptyTitle": "It's empty here",
       "emptyDescription": "Search for another email or",
       "clearFilters": "clear filters"
