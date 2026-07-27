@@ -5,6 +5,7 @@ import { useLabels } from '@/hooks/use-labels';
 import { authProxy } from '@/lib/auth-proxy';
 import { useEffect, useState } from 'react';
 import type { Route } from './+types/page';
+import { log } from '@/lib/log';
 
 const ALLOWED_FOLDERS = new Set(['inbox', 'draft', 'sent', 'spam', 'bin', 'archive', 'snoozed']);
 
@@ -16,9 +17,16 @@ export async function clientLoader({ params, request }: Route.ClientLoaderArgs) 
   // chargement) et retardait d'autant le batch tRPC de la liste, alors que le
   // backend refuse déjà toute requête non authentifiée. La garde reste en
   // place : elle s'exécute en parallèle et redirige si la session est absente.
-  void authProxy.api.getSession({ headers: request.headers }).then((session) => {
-    if (!session) window.location.href = `${import.meta.env.VITE_PUBLIC_APP_URL}/login`;
-  });
+  void authProxy.api
+    .getSession({ headers: request.headers })
+    .then((session) => {
+      if (!session) window.location.href = `${import.meta.env.VITE_PUBLIC_APP_URL}/login`;
+    })
+    .catch((error: unknown) => {
+      // Échec réseau transitoire : ne pas rediriger (le backend refuse déjà les
+      // requêtes non authentifiées), ne pas laisser un rejet non capté.
+      log.error('[clientLoader] Vérification de session non bloquante échouée', error);
+    });
 
   return {
     folder: params.folder,
