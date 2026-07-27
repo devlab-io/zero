@@ -529,3 +529,82 @@ describe('parseOutgoing — construction MIME (encodage réel)', () => {
     expect(decodeRaw(raw)).toContain('ancien');
   });
 });
+
+// ---------------------------------------------------------------------------
+// P6 — entrées HOSTILES sur les deux fonctions qui n'avaient aucune garde.
+//
+// Les deux consomment du `JSON.parse` (driver/gmail-batch.ts) ou une valeur relue en KV
+// (lib/scheduled-send.ts) : le type ne garantit rien à l'exécution. Formes mesurées avant
+// correction : `findAttachments(null)` → « parts is not iterable » ; `findAttachments([null])`
+// → TypeError sur `part.filename` ; `parseOutgoing(null)` → TypeError de déstructuration ;
+// `parseOutgoing` sans `message` → « Cannot read properties of undefined (reading 'trim') ».
+// ---------------------------------------------------------------------------
+
+describe('findAttachments — entrées hostiles (P6)', () => {
+  it('rend une liste vide au lieu de lever sur une entrée non itérable', () => {
+    expect(findAttachments(null as never)).toEqual([]);
+    expect(findAttachments(undefined as never)).toEqual([]);
+    expect(findAttachments('INBOX' as never)).toEqual([]);
+    expect(findAttachments({ length: 2 } as never)).toEqual([]);
+  });
+
+  it('écarte les entrées nulles et conserve les parties exploitables', () => {
+    const parts = [
+      null,
+      undefined,
+      'texte',
+      { filename: 'facture.pdf', body: { attachmentId: 'a1' }, mimeType: 'application/pdf' },
+    ] as unknown as gmail_v1.Schema$MessagePart[];
+
+    const found = findAttachments(parts);
+    expect(found).toHaveLength(1);
+    expect(found[0].filename).toBe('facture.pdf');
+  });
+
+  it('survit à une branche `parts` hostile en profondeur', () => {
+    const parts = [
+      {
+        mimeType: 'multipart/mixed',
+        parts: [null, { filename: 'photo.png', body: { attachmentId: 'a2' } }],
+      },
+    ] as unknown as gmail_v1.Schema$MessagePart[];
+
+    expect(findAttachments(parts).map((p) => p.filename)).toEqual(['photo.png']);
+  });
+});
+
+describe('parseOutgoing — entrées hostiles (P6)', () => {
+  const config = { auth: { email: 'thomas@devlab.io' } } as never;
+
+  it('refuse un payload absent avec un message diagnosticable', async () => {
+    await expect(parseOutgoing(null as never, config)).rejects.toThrow(
+      'Outgoing message payload required',
+    );
+    await expect(parseOutgoing(undefined as never, config)).rejects.toThrow(
+      'Outgoing message payload required',
+    );
+  });
+
+  it('refuse un corps manquant AVANT toute construction MIME', async () => {
+    const sansCorps = {
+      to: [{ email: 'client@example.com' }],
+      subject: 'Relance',
+      attachments: [],
+      headers: {},
+    } as unknown as IOutgoingMessage;
+
+    // Avant : « Cannot read properties of undefined (reading 'trim') », classée AMBIGUË en
+    // aval, donc réservation `unresolved` (terminale) pour un mail jamais émis.
+    await expect(parseOutgoing(sansCorps, config)).rejects.toThrow('Message body required');
+    expect(sanitizeTipTapHtml).not.toHaveBeenCalled();
+  });
+
+  it('refuse un destinataire absent, comme avant', async () => {
+    await expect(
+      parseOutgoing(
+        { to: [], subject: 's', message: 'm', attachments: [], headers: {} } as never,
+        config,
+      ),
+    ).rejects.toThrow('Recipient address required');
+  });
+});

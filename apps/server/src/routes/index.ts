@@ -20,16 +20,17 @@ import { createLocalJWKSet, jwtVerify } from 'jose';
 import { trpcServer } from '@hono/trpc-server';
 import { toHonoResponse } from '../lib/errors';
 import { agentsMiddleware } from 'hono-agents';
+import { createAuthLease } from '../lib/auth';
 import { invariant } from '../lib/invariant';
 import { initTracing } from '../lib/tracing';
 import { env, type ZeroEnv } from '../env';
 import type { HonoContext } from '../ctx';
-import { createAuth } from '../lib/auth';
 import { ZeroMCP } from './agent/mcp';
 import { EProviders } from '../types';
 import { publicRouter } from './auth';
 import { autumnApi } from './autumn';
 import { appRouter } from '../trpc';
+import type { Context } from 'hono';
 import { sql } from 'drizzle-orm';
 import { cors } from 'hono/cors';
 import { createDb } from '../db';
@@ -88,15 +89,35 @@ function hashIpAddress(ip: string | undefined): string | undefined {
   return `ip_${Math.abs(hash).toString(16).padStart(8, '0')}`;
 }
 
+/**
+ * Relâche une ressource de requête HORS du chemin de latence quand un ExecutionContext est
+ * disponible, en l'attendant sinon. `release` ne doit jamais rejeter (cf. `createAuthLease`).
+ */
+const deferRelease = (c: Context<HonoContext>, release: () => Promise<void>) => {
+  const task = release();
+  try {
+    c.executionCtx.waitUntil(task);
+  } catch {
+    // Pas d'ExecutionContext (tests, appel direct) : la libération reste due.
+    void task;
+  }
+};
+
 // Wires the agent authorisation policy (lib/agent-authorization.ts) to the real session
 // and connection-ownership lookups. Kept out of the middleware literal so the policy
 // stays unit-testable and this file stays a routing composition.
 const authorizeAgent = (request: Request, lobby: AgentLobby) =>
   authorizeAgentAccess(request, lobby, {
     resolveUserId: async (headers) => {
-      const auth = await createAuth();
-      const session = await auth.api.getSession({ headers });
-      return session?.user?.id;
+      // Chemin chaud : ce hook est appelé sur CHAQUE connexion/requête d'agent. Sa
+      // connexion Postgres n'était jamais relâchée. Elle ne sert qu'à cette lecture.
+      const { auth, release } = await createAuthLease();
+      try {
+        const session = await auth.api.getSession({ headers });
+        return session?.user?.id;
+      } finally {
+        await release();
+      }
     },
     ownsConnection: async (userId, connectionId) => {
       const db = await getZeroDB(userId);
@@ -143,7 +164,10 @@ export const api = new Hono<HonoContext>()
       },
     );
 
-    const auth = await createAuth();
+    // `auth` reste consommé bien après ce point (`/auth/*` via `c.var.auth.handler`,
+    // `signOut` depuis les gardes tRPC) : la connexion ne peut être relâchée qu'à la FIN de
+    // la requête, d'où le `finally` tout en bas de ce middleware.
+    const { auth, release: releaseAuth } = await createAuthLease();
     c.set('auth', auth);
     const session = await auth.api.getSession({ headers: c.req.raw.headers });
     c.set('sessionUser', session?.user);
@@ -237,6 +261,12 @@ export const api = new Hono<HonoContext>()
         error instanceof Error ? error.message : 'Unknown request error',
       );
       throw error;
+    } finally {
+      // La réponse est composée ; plus personne ne consommera `c.var.auth`. La fermeture
+      // part en `waitUntil` pour rester hors du chemin de latence (ce middleware est le
+      // chemin le plus chaud du service) ; sans ExecutionContext — tests, exécution
+      // directe — on attend, `release` ne rejetant jamais.
+      deferRelease(c, releaseAuth);
     }
     // Note: Trace will be completed by TRPC middleware after logging
 
@@ -299,8 +329,12 @@ export const app = new Hono<HonoContext>()
     }),
   )
   .get('.well-known/oauth-authorization-server', async (c) => {
-    const auth = await createAuth();
-    return oAuthDiscoveryMetadata(auth)(c.req.raw);
+    const { auth, release } = await createAuthLease();
+    try {
+      return await oAuthDiscoveryMetadata(auth)(c.req.raw);
+    } finally {
+      deferRelease(c, release);
+    }
   })
   .mount(
     '/sse',
@@ -310,8 +344,15 @@ export const app = new Hono<HonoContext>()
         logger.info('No auth provided');
         return new Response('Unauthorized', { status: 401 });
       }
-      const auth = await createAuth();
-      const session = await auth.api.getMcpSession({ headers: request.headers });
+      const { auth, release } = await createAuthLease();
+      let session: Awaited<ReturnType<typeof auth.api.getMcpSession>>;
+      try {
+        session = await auth.api.getMcpSession({ headers: request.headers });
+      } finally {
+        // La session MCP est la seule lecture faite par cette instance : on relâche dès
+        // qu'elle est résolue, hors du chemin de latence.
+        ctx.waitUntil(release());
+      }
       if (!session) {
         logger.info('Invalid auth provided', describeRequest(request));
         return new Response('Unauthorized', { status: 401 });
@@ -341,8 +382,13 @@ export const app = new Hono<HonoContext>()
         if (!request.headers.get('Authorization')) {
           return new Response('Unauthorized', { status: 401 });
         }
-        const auth = await createAuth();
-        const session = await auth.api.getMcpSession({ headers: request.headers });
+        const { auth, release } = await createAuthLease();
+        let session: Awaited<ReturnType<typeof auth.api.getMcpSession>>;
+        try {
+          session = await auth.api.getMcpSession({ headers: request.headers });
+        } finally {
+          ctx.waitUntil(release());
+        }
         if (!session) {
           logger.info('Invalid auth provided', describeRequest(request));
           return new Response('Unauthorized', { status: 401 });
@@ -365,8 +411,13 @@ export const app = new Hono<HonoContext>()
       if (!authBearer) {
         return new Response('Unauthorized', { status: 401 });
       }
-      const auth = await createAuth();
-      const session = await auth.api.getMcpSession({ headers: request.headers });
+      const { auth, release } = await createAuthLease();
+      let session: Awaited<ReturnType<typeof auth.api.getMcpSession>>;
+      try {
+        session = await auth.api.getMcpSession({ headers: request.headers });
+      } finally {
+        ctx.waitUntil(release());
+      }
       if (!session) {
         logger.info('Invalid auth provided', describeRequest(request));
         return new Response('Unauthorized', { status: 401 });

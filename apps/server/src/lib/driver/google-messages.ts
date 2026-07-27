@@ -11,12 +11,15 @@ export class GmailMessages {
       'getAttachment',
       async () => {
         const response = await this.t.execute(
-          (gmail) =>
-            gmail.users.messages.attachments.get({
-              userId: 'me',
-              messageId,
-              id: attachmentId,
-            }),
+          (gmail, signal) =>
+            gmail.users.messages.attachments.get(
+              {
+                userId: 'me',
+                messageId,
+                id: attachmentId,
+              },
+              { signal },
+            ),
           { retry: true },
         );
 
@@ -35,11 +38,14 @@ export class GmailMessages {
       'getMessageAttachments',
       async () => {
         const res = await this.t.execute(
-          (gmail) =>
-            gmail.users.messages.get({
-              userId: 'me',
-              id: messageId,
-            }),
+          (gmail, signal) =>
+            gmail.users.messages.get(
+              {
+                userId: 'me',
+                id: messageId,
+              },
+              { signal },
+            ),
           { retry: true },
         );
         const attachmentParts = (
@@ -52,7 +58,10 @@ export class GmailMessages {
         // `batchAttachmentsGet` renvoie un tableau COMPLET (ordre préservé) ou lève sur échec
         // — aucune PJ perdue en silence.
         const datas = await this.t.batchAttachmentsGet(
-          attachmentParts.map((part) => ({ messageId, attachmentId: part.body?.attachmentId ?? '' })),
+          attachmentParts.map((part) => ({
+            messageId,
+            attachmentId: part.body?.attachmentId ?? '',
+          })),
         );
 
         return attachmentParts.map((part, i) => ({
@@ -77,14 +86,17 @@ export class GmailMessages {
       'create',
       async () => {
         const { raw } = await parseOutgoing(data, this.t.config);
-        const res = await this.t.execute((gmail) =>
-          gmail.users.messages.send({
-            userId: 'me',
-            requestBody: {
-              raw,
-              threadId: data.threadId,
+        const res = await this.t.execute((gmail, signal) =>
+          gmail.users.messages.send(
+            {
+              userId: 'me',
+              requestBody: {
+                raw,
+                threadId: data.threadId,
+              },
             },
-          }),
+            { signal },
+          ),
         );
         return res.data;
       },
@@ -96,8 +108,8 @@ export class GmailMessages {
     return this.t.withErrorHandler(
       'delete',
       async () => {
-        const res = await this.t.execute((gmail) =>
-          gmail.users.messages.delete({ userId: 'me', id }),
+        const res = await this.t.execute((gmail, signal) =>
+          gmail.users.messages.delete({ userId: 'me', id }, { signal }),
         );
         return res.data;
       },
@@ -110,13 +122,16 @@ export class GmailMessages {
       'getRawEmail',
       async () => {
         const res = await this.t.execute(
-          (gmail) =>
-            gmail.users.messages.get({
-              userId: 'me',
-              id: messageId,
-              format: 'raw',
-              quotaUser: this.t.config.auth?.email,
-            }),
+          (gmail, signal) =>
+            gmail.users.messages.get(
+              {
+                userId: 'me',
+                id: messageId,
+                format: 'raw',
+                quotaUser: this.t.config.auth?.email,
+              },
+              { signal },
+            ),
           { retry: true },
         );
 

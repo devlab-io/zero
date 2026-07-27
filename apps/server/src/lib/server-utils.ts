@@ -3,6 +3,7 @@ import { getActiveConnection, getZeroDB } from './connection-context';
 // Réexport : `getActiveConnection` et `getZeroDB` vivent dans le module feuille
 // lib/connection-context.ts pour casser le cycle server-utils ↔ driver (ADR-less, cf. pitbull A4).
 export { getActiveConnection, getZeroDB };
+import { AppError, fromDriverSetupResult, type DriverSetupRpcResult } from './errors';
 import { resolvePubSubTokenPolicy, verifyPubSubToken } from './pubsub-auth';
 import { OutgoingMessageType } from '../routes/agent/types';
 import { defaultPageSize, FOLDERS } from './utils';
@@ -10,7 +11,6 @@ import { connection } from '../db/schema';
 import { createClient } from 'dormroom';
 import { createDriver } from './driver';
 import { TtlCache } from './ttl-cache';
-import { AppError } from './errors';
 import { logger } from './logger';
 import { eq } from 'drizzle-orm';
 import { Effect } from 'effect';
@@ -132,14 +132,33 @@ const getShardClient = async (connectionId: string, shardId: string) => {
   });
   const handshakeKey = `${connectionId}:${shardId}`;
   if (!shardHandshakeDone.has(handshakeKey)) {
+    // Peut être `undefined` face à une instance de Durable Object qui n'a pas encore repris
+    // le nouveau contrat (fenêtre de déploiement) : dans ce cas il n'y a pas de verdict à
+    // lire, et l'ancienne sémantique — l'échec arrive par le `catch` — s'applique telle quelle.
+    let verdict: DriverSetupRpcResult | undefined;
     try {
       // setName exécute déjà setupAuth sous blockConcurrencyWhile : un seul RPC.
-      await shardClient.stub.setName(connectionId);
-      shardHandshakeDone.add(handshakeKey);
+      verdict = await shardClient.stub.setName(connectionId);
     } catch (error) {
+      // Ici, et SEULEMENT ici : une panne d'infrastructure du RPC lui-même. Elle ne dit rien
+      // de l'autorisation du porteur, elle reste donc un échec opaque.
       logger.error(`Failed to initialize shard ${shardId} for connection ${connectionId}:`, error);
       throw new Error(`Shard initialization failed: ${error}`);
     }
+    if (verdict && !verdict.ok) {
+      // Le DO ne JETTE plus son échec d'initialisation, il le rend. On reconstruit donc la
+      // classe ICI, dans l'isolate du Worker : `AppError.connectionExpired` survit jusqu'à
+      // `classifyDriverFailure` (qui pose `X-Zero-Redirect`) et jusqu'à l'`errorFormatter`
+      // tRPC (qui publie `appCode: CONNECTION_EXPIRED`). Avant, l'enveloppe
+      // `Shard initialization failed: …` réduisait tout à `INTERNAL` et le parcours de
+      // reconnexion n'était plus jamais proposé.
+      logger.error(`Shard ${shardId} refused initialization for connection ${connectionId}:`, {
+        code: verdict.code,
+        message: verdict.message,
+      });
+      throw fromDriverSetupResult(verdict);
+    }
+    shardHandshakeDone.add(handshakeKey);
   }
   return shardClient;
 };

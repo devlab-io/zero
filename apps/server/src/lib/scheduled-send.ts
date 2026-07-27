@@ -170,12 +170,37 @@ export function normalizeStoredAttachments(payload: StoredOutgoingMessage): Stor
 }
 
 /**
+ * Forme MINIMALE sans laquelle aucun envoi ne peut aboutir.
+ *
+ * La validation s'arrêtait à « objet non-tableau ». Un corps `{to:[{email}], subject}` sans
+ * `message` traversait donc, et c'est `parseOutgoing` qui levait — AVANT toute émission
+ * réseau, mais avec une erreur nue, sans statut. `classifySendFailure` ne pouvant rien
+ * prouver, elle rendait `ambiguous`, et la réservation était réglée `unresolved` :
+ * TERMINAL et non rejouable, pour un mail dont pas un octet n'était parti. Le refus est
+ * désormais typé à la lecture, donc classé `not-accepted-permanent` → `failed`,
+ * diagnosticable par `mail.scheduledSendStatus`.
+ *
+ * `to` et `message` sont exactement ce qu'`IOutgoingMessage` déclare obligatoire ; on ne
+ * durcit rien, on fait respecter le contrat au moment où la donnée redevient `unknown`.
+ */
+function assertSendableShape(payload: StoredOutgoingMessage): StoredOutgoingMessage {
+  const { to, message } = payload as { to?: unknown; message?: unknown };
+  if (!Array.isArray(to) || to.length === 0) {
+    throw new ScheduledSendPayloadError('stored payload has no recipient');
+  }
+  if (typeof message !== 'string') {
+    throw new ScheduledSendPayloadError('stored payload has no message body');
+  }
+  return payload;
+}
+
+/**
  * Décode et normalise un corps stocké. Toute donnée irrécupérable (JSON corrompu,
- * `attachments: [null]`, `attachments: [{}]`) devient une `ScheduledSendPayloadError` :
- * l'ancien code laissait `JSON.parse` lever HORS de tout try, et `main.ts` livrait le lot
- * avec `Promise.all` — un seul payload corrompu faisait donc rejouer le LOT ENTIER de
- * `send-email-queue` à chaque tentative, jusqu'à épuisement des cinq essais, sans
- * dead-letter queue. La boucle d'échec était déterministe.
+ * `attachments: [null]`, `attachments: [{}]`, destinataire ou corps manquant) devient une
+ * `ScheduledSendPayloadError` : l'ancien code laissait `JSON.parse` lever HORS de tout try,
+ * et `main.ts` livrait le lot avec `Promise.all` — un seul payload corrompu faisait donc
+ * rejouer le LOT ENTIER de `send-email-queue` à chaque tentative, jusqu'à épuisement des
+ * cinq essais, sans dead-letter queue. La boucle d'échec était déterministe.
  */
 export function parseStoredPayload(raw: string): StoredOutgoingMessage {
   let decoded: unknown;
@@ -187,6 +212,7 @@ export function parseStoredPayload(raw: string): StoredOutgoingMessage {
   if (decoded === null || typeof decoded !== 'object' || Array.isArray(decoded)) {
     throw new ScheduledSendPayloadError('stored payload is not an object');
   }
+  assertSendableShape(decoded as StoredOutgoingMessage);
   try {
     return normalizeStoredAttachments(decoded as StoredOutgoingMessage);
   } catch (error) {
@@ -355,11 +381,17 @@ export async function deliverScheduledEmail(
   let payload: StoredOutgoingMessage;
   if (input.mail) {
     try {
-      payload = normalizeStoredAttachments(input.mail);
+      // Même garde de forme que sur le chemin KV : le corps porté par le message de queue
+      // n'est pas plus digne de confiance, et un `message` manquant y produisait la même
+      // issue `unresolved` terminale pour un mail jamais émis.
+      payload = normalizeStoredAttachments(assertSendableShape(input.mail));
     } catch (error) {
-      const wrapped = new ScheduledSendPayloadError('queued attachments cannot be rehydrated', {
-        cause: error,
-      });
+      const wrapped =
+        error instanceof ScheduledSendPayloadError
+          ? error
+          : new ScheduledSendPayloadError('queued attachments cannot be rehydrated', {
+              cause: error,
+            });
       logger.error(`Unrecoverable queued payload for scheduled email ${messageId}:`, error);
       await writeStatus('failed');
       capture(wrapped, { phase: 'payload-decode', source: 'queue' });

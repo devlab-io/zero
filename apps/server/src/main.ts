@@ -21,8 +21,8 @@ import { ZeroMCP } from './routes/agent/mcp';
 import { WorkflowRunner } from './pipelines';
 import { initTracing } from './lib/tracing';
 import { logger } from './lib/logger';
-import { createDb } from './db';
 import { app } from './routes';
+import { withDb } from './db';
 
 const handler = {
   async fetch(request: Request, env: ZeroEnv, ctx: ExecutionContext): Promise<Response> {
@@ -332,12 +332,14 @@ export default class Entry extends WorkerEntrypoint<ZeroEnv> {
 
   private async processExpiredSubscriptions() {
     logger.info('[SCHEDULED] Checking for expired subscriptions...');
-    const { db, conn } = createDb(this.env.HYPERDRIVE.connectionString);
-    const allAccounts = await db.query.connection.findMany({
-      where: (fields, { isNotNull, and }) =>
-        and(isNotNull(fields.accessToken), isNotNull(fields.refreshToken)),
-    });
-    await conn.end();
+    // `withDb` : le `conn.end()` d'origine était la ligne SUIVANTE, donc sauté dès que la
+    // requête levait — un cron qui échoue laissait une connexion ouverte à chaque passage.
+    const allAccounts = await withDb(this.env.HYPERDRIVE.connectionString, (db) =>
+      db.query.connection.findMany({
+        where: (fields, { isNotNull, and }) =>
+          and(isNotNull(fields.accessToken), isNotNull(fields.refreshToken)),
+      }),
+    );
     logger.debug('[SCHEDULED] allAccounts', allAccounts.length);
     const now = new Date();
     const fiveDaysAgo = new Date(now.getTime() - 5 * 24 * 60 * 60 * 1000);

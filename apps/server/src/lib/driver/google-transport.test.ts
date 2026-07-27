@@ -1,6 +1,3 @@
-import { describe, expect, it, vi, beforeEach } from 'vitest';
-import type { BatchHttp } from './gmail-batch';
-import type { ManagerConfig } from './types';
 import {
   buildMixedResponse,
   countSubRequests,
@@ -8,6 +5,9 @@ import {
   makeCapturingBatchHttp,
   statusByPath,
 } from './__fixtures__/batch-http-fake';
+import { describe, expect, it, vi, beforeEach } from 'vitest';
+import type { BatchHttp } from './gmail-batch';
+import type { ManagerConfig } from './types';
 
 // --- Couture d'injection : le transport importe `../../env` (→ cloudflare:workers) et
 // `./utils` (→ server-utils → dormroom → cloudflare:workers). On neutralise les DEUX ;
@@ -36,7 +36,10 @@ vi.mock('./utils', () => ({
 }));
 
 // Import APRÈS les mocks (hoistés par vitest de toute façon).
-const { GmailTransport } = await import('./google-transport');
+const { GmailTransport, WRITE_ATTEMPT_TIMEOUT_MS } = await import('./google-transport');
+const { GmailMessages } = await import('./google-messages');
+const { DEFAULT_BACKOFF } = await import('./gmail-backoff');
+const { gmailHttpFailure } = await import('./__fixtures__/send-failure');
 const { GmailBatchError } = await import('./gmail-batch');
 const { GOOGLE_OAUTH_SCOPE_STRING } = await import('../google-scopes');
 
@@ -78,7 +81,9 @@ describe('GmailTransport — configuration auth', () => {
 
   it('getQuotaUser() = undefined sans email d’auth', () => {
     expect(make({} as ManagerConfig).getQuotaUser()).toBeUndefined();
-    expect(make({ auth: { refreshToken: 'r' } } as unknown as ManagerConfig).getQuotaUser()).toBeUndefined();
+    expect(
+      make({ auth: { refreshToken: 'r' } } as unknown as ManagerConfig).getQuotaUser(),
+    ).toBeUndefined();
   });
 });
 
@@ -100,7 +105,8 @@ describe('GmailTransport.execute — dispatch unique + compteur (couture #31)', 
 
   it('sans retry : une erreur remonte immédiatement, 1 seul appel compté', async () => {
     const t = make(authedConfig);
-    await expect(t.execute(async () => Promise.reject({ code: 429 }))).rejects.toEqual({ code: 429 });
+    const erreur = gmailHttpFailure(429);
+    await expect(t.execute(async () => Promise.reject(erreur))).rejects.toBe(erreur);
     expect(t.getGmailCallCount()).toBe(1);
   });
 
@@ -110,7 +116,7 @@ describe('GmailTransport.execute — dispatch unique + compteur (couture #31)', 
     const r = await t.execute(
       async () => {
         calls += 1;
-        if (calls <= 2) return Promise.reject({ code: 429 });
+        if (calls <= 2) return Promise.reject(gmailHttpFailure(429));
         return 'ok';
       },
       { retry: true },
@@ -214,7 +220,7 @@ describe('GmailTransport.batchThreadsGet — coalescing + complétude', () => {
 describe('GmailTransport.batchAttachmentsGet — données base64url ordonnées', () => {
   const attHttp: BatchHttp = async (req) => {
     const n = countSubRequests(req.body);
-    const statuses = new Array(n).fill(200);
+    const statuses = Array.from({ length: n }, () => 200);
     return {
       status: 200,
       contentType: 'multipart/mixed; boundary=r',
@@ -240,7 +246,7 @@ describe('GmailTransport.batchAttachmentsGet — données base64url ordonnées',
   });
 
   it('data absente → chaîne vide (jamais undefined)', async () => {
-    const http: BatchHttp = async (req) => ({
+    const http: BatchHttp = async (_req) => ({
       status: 200,
       contentType: 'multipart/mixed; boundary=r',
       text: buildMixedResponse([200], 'r', () => ({})),
@@ -301,5 +307,143 @@ describe('GmailTransport — error handlers (async & sync)', () => {
         throw new Error('nope');
       }),
     ).toThrow(/standardized:sync:nope/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// P4 — LES ÉCRITURES PARTAIENT SANS AUCUNE BORNE DE TEMPS, ENVOI COMPRIS.
+//
+// `execute` faisait `if (!opts?.retry) return attempt();` : les dix écritures Gmail
+// (`drafts.send`, `drafts.create/update/delete`, `messages.send/modify/trash/delete`,
+// `labels.*`) n'avaient ni timeout par tentative ni deadline. Une socket figée immobilisait
+// l'invocation Workers entière. Et `attempt` était construit `() => fn(this.gmail)` : le
+// signal d'annulation que `withGmailBackoff` fournit était JETÉ, donc la capacité
+// documentée à gmail-backoff.ts n'était réalisée par AUCUN appelant de production.
+// ---------------------------------------------------------------------------
+
+/** Fabrique de signaux pilotée par le test : on déclenche l'abort quand on veut. */
+const signauxPilotes = () => {
+  const controleurs: AbortController[] = [];
+  const armes: number[] = [];
+  return {
+    controleurs,
+    armes,
+    timeoutSignal: (ms: number) => {
+      armes.push(ms);
+      const c = new AbortController();
+      controleurs.push(c);
+      return c.signal;
+    },
+  };
+};
+
+describe('GmailTransport.execute — bornes de temps des ÉCRITURES (P4)', () => {
+  it('une écriture reçoit un AbortSignal armé sur le timeout d’écriture', async () => {
+    const s = signauxPilotes();
+    const t = make(authedConfig, {
+      backoffDeps: { ...instantBackoffDeps, timeoutSignal: s.timeoutSignal },
+    });
+
+    let recu: AbortSignal | undefined;
+    await t.execute(async (_g, signal) => {
+      recu = signal;
+      return 'ok';
+    });
+
+    expect(recu).toBeInstanceOf(AbortSignal);
+    expect(recu?.aborted).toBe(false);
+    expect(s.armes).toEqual([WRITE_ATTEMPT_TIMEOUT_MS]);
+  });
+
+  it('une écriture qui ne rend jamais la main est COUPÉE (avant : blocage indéfini)', async () => {
+    const s = signauxPilotes();
+    const t = make(authedConfig, {
+      backoffDeps: { ...instantBackoffDeps, timeoutSignal: s.timeoutSignal },
+    });
+
+    await expect(
+      t.execute(
+        () =>
+          new Promise<string>(() => {
+            queueMicrotask(() => s.controleurs[0].abort());
+          }),
+      ),
+    ).rejects.toThrow(`Gmail request timed out after ${WRITE_ATTEMPT_TIMEOUT_MS}ms`);
+    expect(t.getGmailCallCount()).toBe(1);
+  });
+
+  it('une écriture n’est JAMAIS rejouée, même sur une erreur classée rejouable', async () => {
+    const s = signauxPilotes();
+    const t = make(authedConfig, {
+      backoffDeps: { ...instantBackoffDeps, timeoutSignal: s.timeoutSignal },
+    });
+    const erreur = gmailHttpFailure(429);
+    let calls = 0;
+
+    await expect(
+      t.execute(async () => {
+        calls += 1;
+        throw erreur;
+      }),
+    ).rejects.toBe(erreur);
+
+    // Un 429 EST rejouable pour une lecture ; une écriture non idempotente, jamais.
+    expect(calls).toBe(1);
+    expect(t.getGmailCallCount()).toBe(1);
+  });
+
+  it('le timeout d’écriture est plus généreux que celui d’une lecture (corps MIME)', () => {
+    expect(WRITE_ATTEMPT_TIMEOUT_MS).toBeGreaterThan(DEFAULT_BACKOFF.attemptTimeoutMs);
+  });
+
+  it('une lecture conserve son propre timeout et son rejeu', async () => {
+    const s = signauxPilotes();
+    const t = make(authedConfig, {
+      backoffDeps: { ...instantBackoffDeps, timeoutSignal: s.timeoutSignal },
+    });
+    let calls = 0;
+
+    const r = await t.execute(
+      async (_g, signal) => {
+        calls += 1;
+        expect(signal.aborted).toBe(false);
+        if (calls === 1) throw gmailHttpFailure(503);
+        return 'ok';
+      },
+      { retry: true },
+    );
+
+    expect(r).toBe('ok');
+    expect(calls).toBe(2);
+    expect(s.armes).toEqual([DEFAULT_BACKOFF.attemptTimeoutMs, DEFAULT_BACKOFF.attemptTimeoutMs]);
+  });
+});
+
+describe('propagation du signal jusqu’à gaxios — chemin d’ENVOI réel (P4)', () => {
+  it('GmailMessages.create passe le signal en options de `users.messages.send`', async () => {
+    const s = signauxPilotes();
+    const t = make(authedConfig, {
+      backoffDeps: { ...instantBackoffDeps, timeoutSignal: s.timeoutSignal },
+    });
+
+    const send = vi.fn(async (_params: unknown, options?: { signal?: AbortSignal }) => {
+      // C'est ICI que la borne devient effective : gaxios annule son `fetch` sur ce signal.
+      expect(options?.signal).toBeInstanceOf(AbortSignal);
+      return { data: { id: 'sent-1' } };
+    });
+    (t as unknown as { gmail: unknown }).gmail = { users: { messages: { send } } };
+
+    const messages = new GmailMessages(t);
+    const data = await messages.create({
+      to: [{ email: 'client@example.com', name: 'Client' }],
+      subject: 'Relance',
+      message: '<p>Bonjour</p>',
+      attachments: [],
+      headers: {},
+    } as never);
+
+    expect(send).toHaveBeenCalledTimes(1);
+    expect((data as { id: string }).id).toBe('sent-1');
+    expect(s.armes).toEqual([WRITE_ATTEMPT_TIMEOUT_MS]);
   });
 });

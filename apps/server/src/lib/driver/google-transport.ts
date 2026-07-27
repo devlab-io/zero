@@ -1,22 +1,17 @@
 import {
-  deleteActiveConnection,
-  FatalErrors,
-  sanitizeContext,
-  StandardizedError,
-} from './utils';
-import {
-  DEFAULT_BACKOFF,
-  withGmailBackoff,
-  type BackoffDeps,
-  type BackoffOptions,
-} from './gmail-backoff';
-import {
   assertBatchComplete,
   runBatched,
   RECOMMENDED_BATCH_SIZE,
   type BatchHttp,
   type BatchSubRequest,
 } from './gmail-batch';
+import {
+  DEFAULT_BACKOFF,
+  withGmailBackoff,
+  type BackoffDeps,
+  type BackoffOptions,
+} from './gmail-backoff';
+import { deleteActiveConnection, FatalErrors, sanitizeContext, StandardizedError } from './utils';
 import { GOOGLE_OAUTH_SCOPE_STRING } from '../google-scopes';
 import { type gmail_v1, gmail } from '@googleapis/gmail';
 import { OAuth2Client } from 'google-auth-library';
@@ -35,7 +30,20 @@ export interface GmailTransportDeps {
   batchConcurrency?: number;
   /** Générateur d'ID de boundary (injectable pour déterminisme). */
   boundaryId?: () => string;
+  /** Timeout d'une ÉCRITURE Gmail, en ms. Défaut {@link WRITE_ATTEMPT_TIMEOUT_MS}. */
+  writeTimeoutMs?: number;
 }
+
+/**
+ * Timeout d'une écriture Gmail (une seule tentative, jamais rejouée).
+ *
+ * Délibérément plus généreux que `attemptTimeoutMs` (15 s, calibré pour une LECTURE) : une
+ * écriture porte le corps MIME, pièces jointes comprises — Gmail accepte jusqu'à 25 Mo par
+ * message —, et une borne trop serrée transformerait un envoi lent mais valide en issue
+ * AMBIGUË (`unresolved`, terminale) alors que Gmail l'aurait accepté. 30 s borne
+ * l'invocation sans fabriquer ce faux négatif.
+ */
+export const WRITE_ATTEMPT_TIMEOUT_MS = 30_000;
 
 /**
  * GmailTransport — point UNIQUE d'exécution des requêtes Gmail HTTP du driver Google.
@@ -65,6 +73,7 @@ export class GmailTransport {
   private readonly batchSize: number;
   private readonly batchConcurrency: number;
   private readonly boundaryId: () => string;
+  private readonly writeTimeoutMs: number;
 
   constructor(
     public readonly config: ManagerConfig,
@@ -81,13 +90,20 @@ export class GmailTransport {
     this.gmail = gmail({ version: 'v1', auth: this.auth });
 
     this.backoffOptions = { ...DEFAULT_BACKOFF, ...deps.backoff };
+    // `now` et `timeoutSignal` étaient SILENCIEUSEMENT jetés ici : les deux bornes de temps
+    // de `withGmailBackoff` n'étaient donc pas injectables depuis le transport, et aucun
+    // test ne pouvait éprouver l'annulation d'une requête sans horloge réelle.
     this.backoffDeps = {
       sleep: deps.backoffDeps?.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms))),
       random: deps.backoffDeps?.random ?? Math.random,
+      ...(deps.backoffDeps?.now ? { now: deps.backoffDeps.now } : {}),
+      ...(deps.backoffDeps?.timeoutSignal ? { timeoutSignal: deps.backoffDeps.timeoutSignal } : {}),
     };
     this.batchSize = Math.max(1, Math.min(deps.batchSize ?? RECOMMENDED_BATCH_SIZE, 100));
     this.batchConcurrency = Math.max(1, deps.batchConcurrency ?? 5);
-    this.boundaryId = deps.boundaryId ?? (() => `${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    this.writeTimeoutMs = Math.max(1, deps.writeTimeoutMs ?? WRITE_ATTEMPT_TIMEOUT_MS);
+    this.boundaryId =
+      deps.boundaryId ?? (() => `${Date.now()}-${Math.random().toString(36).slice(2)}`);
     this.batchHttp = deps.batchHttp ?? this.defaultBatchHttp.bind(this);
   }
 
@@ -119,19 +135,44 @@ export class GmailTransport {
   }
 
   /**
-   * Exécute une requête Gmail HTTP unique. Compte le round-trip. Si `opts.retry` (lectures
-   * idempotentes uniquement), applique le backoff expo + jitter sur 429/403-rate/5xx.
+   * Exécute une requête Gmail HTTP unique. Compte le round-trip.
+   *
+   * DEUX régimes, et les deux sont désormais BORNÉS DANS LE TEMPS :
+   *  - `opts.retry` (lectures idempotentes) : backoff expo + jitter sur 429/403-rate/5xx,
+   *    timeout par tentative et deadline absolue de `withGmailBackoff` ;
+   *  - sans `retry` (les dix ÉCRITURES : `drafts.send`, `drafts.create/update/delete`,
+   *    `messages.send/modify/trash/delete`, `labels.*`) : UNE seule tentative, jamais
+   *    rejouée, mais sous un timeout. Ce chemin partait auparavant sans aucune deadline
+   *    (`if (!opts?.retry) return attempt();`) : une socket figée immobilisait
+   *    l'invocation Workers entière — y compris sur le chemin d'ENVOI.
+   *
+   * `maxRetries: 0` est ce qui rend la boucle non rejouante : une tentative, puis l'erreur
+   * est propagée telle quelle. On ne réutilise donc rien du rejeu, seulement ses bornes.
+   *
+   * `fn` reçoit l'`AbortSignal` de la tentative — la capacité documentée à
+   * gmail-backoff.ts ne l'était que sur le papier : `execute` construisait
+   * `() => fn(this.gmail)` et JETAIT le signal, si bien qu'aucun appel de production ne
+   * pouvait annuler son `fetch`. Les 26 appels le passent maintenant à gaxios (`{ signal }`).
    */
   public execute<T>(
-    fn: (gmail: gmail_v1.Gmail) => Promise<T>,
+    fn: (gmail: gmail_v1.Gmail, signal: AbortSignal) => Promise<T>,
     opts?: { retry?: boolean },
   ): Promise<T> {
-    const attempt = () => {
+    const attempt = (signal: AbortSignal) => {
       this.gmailCallCount += 1;
-      return fn(this.gmail);
+      return fn(this.gmail, signal);
     };
-    if (!opts?.retry) return attempt();
-    return withGmailBackoff(attempt, this.backoffOptions, this.backoffDeps);
+    if (opts?.retry) return withGmailBackoff(attempt, this.backoffOptions, this.backoffDeps);
+    return withGmailBackoff(
+      attempt,
+      {
+        ...this.backoffOptions,
+        maxRetries: 0,
+        attemptTimeoutMs: this.writeTimeoutMs,
+        totalDeadlineMs: this.writeTimeoutMs,
+      },
+      this.backoffDeps,
+    );
   }
 
   // --- Batch HTTP (coalescing round-trips) ---

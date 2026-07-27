@@ -8,7 +8,7 @@ import { Ratelimit, type RatelimitConfig } from '@upstash/ratelimit';
 import { createLoggingMiddleware } from '../lib/trpc-logging';
 import { getConnInfo } from 'hono/cloudflare-workers';
 import { initTRPC, TRPCError } from '@trpc/server';
-import { resolveErrorCode } from '../lib/errors';
+import { withAppCode } from '../lib/errors';
 import { env } from 'cloudflare:workers';
 import { logger } from '../lib/logger';
 import type { ZeroEnv } from '../env';
@@ -61,7 +61,7 @@ type TrpcContext = {
 const t = initTRPC.context<TrpcContext>().create({
   transformer: superjson,
   errorFormatter({ shape, error }) {
-    return { ...shape, data: { ...shape.data, appCode: resolveErrorCode(error) } };
+    return withAppCode(shape, error);
   },
 });
 

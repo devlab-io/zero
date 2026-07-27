@@ -50,6 +50,9 @@ export function gmailHttpFailure(
   // statut et l'heuristique de libellé réseau. Il ne fabrique pas une forme d'erreur — la
   // forme reste celle du vrai `GaxiosError` —, il ne choisit qu'une chaîne de message.
   message = `Request failed with status code ${status}`,
+  // En-têtes de la RÉPONSE, exposés par gaxios sous `err.response.headers` — le seul endroit
+  // où `parseRetryAfterMs` va chercher un `Retry-After` serveur.
+  headers: Record<string, string> = {},
 ): ProviderError {
   return new gaxios.GaxiosError(
     message,
@@ -57,7 +60,7 @@ export function gmailHttpFailure(
     {
       status,
       statusText: 'error',
-      headers: {},
+      headers,
       config: {},
       request: {},
       data: reasons.length

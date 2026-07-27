@@ -14,6 +14,12 @@
  * Reuse or distribution of this file requires a license from Zero Email Inc.
  */
 
+import {
+  driverSetupSucceeded,
+  fromDriverSetupResult,
+  toDriverSetupResult,
+  type DriverSetupRpcResult,
+} from '../../lib/errors';
 import type { IGetThreadResponse, IGetThreadsResponse, MailManager } from '../../lib/driver/types';
 import { attemptScheduledSend, type StoredOutgoingMessage } from '../../lib/scheduled-send';
 import { countThreads, countThreadsByLabels, deleteSpamThreads, type DB } from './db';
@@ -36,7 +42,7 @@ import { logger } from '../../lib/logger';
 import { type ZeroEnv } from '../../env';
 import * as schema from './db/schema';
 import { threads } from './db/schema';
-import { createDb } from '../../db';
+import { withDb } from '../../db';
 import { eq } from 'drizzle-orm';
 
 import * as recipients from './recipients';
@@ -84,7 +90,13 @@ export class ZeroDriver extends DurableObject<ZeroEnv> {
         const storedName = await ctx.storage.get<string>(outbox.DRAFT_OUTBOX_CONNECTION_ID_KEY);
         if (storedName && storedName !== 'general') {
           this.name = storedName;
-          await this.setupAuth();
+          const verdict = await this.setupAuth();
+          if (!verdict.ok) {
+            logger.error('[ZeroDriver] Self-init could not resolve a driver:', {
+              code: verdict.code,
+              message: verdict.message,
+            });
+          }
         }
       } catch (error) {
         logger.error('[ZeroDriver] Self-init from storage failed, deferring to setName:', error);
@@ -92,13 +104,20 @@ export class ZeroDriver extends DurableObject<ZeroEnv> {
     });
   }
 
-  async setName(name: string) {
-    if (this.name === name && this.driver) return;
+  /**
+   * Handshake d'initialisation, appelé par `getShardClient` (lib/server-utils.ts). Rend le
+   * verdict de `setupAuth` au lieu de le jeter : c'est ce qui permet à l'appelant, côté
+   * Worker, de reconstruire une `AppError` TYPÉE que la frontière RPC ne peut plus aplatir.
+   */
+  async setName(name: string): Promise<DriverSetupRpcResult> {
+    if (this.name === name && this.driver) return driverSetupSucceeded;
     this.name = name;
     await this.ctx.storage.put(outbox.DRAFT_OUTBOX_CONNECTION_ID_KEY, name);
+    let verdict: DriverSetupRpcResult = driverSetupSucceeded;
     await this.ctx.blockConcurrencyWhile(async () => {
-      await this.setupAuth();
+      verdict = await this.setupAuth();
     });
+    return verdict;
   }
 
   getDatabaseSize() {
@@ -201,20 +220,40 @@ export class ZeroDriver extends DurableObject<ZeroEnv> {
     return sync.forceReSync(internal(this));
   }
 
-  public async setupAuth() {
-    if (this.name === 'general') return;
+  /**
+   * Résout le driver de la connexion. NE JETTE PAS : rend un verdict.
+   *
+   * `connectionToDriver` lève `AppError.connectionExpired('Invalid connection …')` quand
+   * l'octroi OAuth a perdu ses jetons. Jetée ici, cette erreur perdait sa CLASSE en
+   * traversant la frontière RPC du Durable Object (mesure : propriétés propres
+   * `['stack','message','remote']`), `getShardClient` la ré-emballait, et le verdict
+   * dégénérait en `INTERNAL` : l'utilisateur ne se voyait plus jamais proposer de se
+   * reconnecter. Même principe que `sendScheduled` ci-dessus — on classe ici, seule une
+   * valeur de retour traverse fidèlement.
+   *
+   * Second effet : `setName` appelle `setupAuth` sous `blockConcurrencyWhile`, où une
+   * exception fait AVORTER l'instance de Durable Object. Un octroi expiré ne détruit donc
+   * plus l'instance.
+   */
+  public async setupAuth(): Promise<DriverSetupRpcResult> {
+    if (this.name === 'general') return driverSetupSucceeded;
     if (!this.driver) {
-      const { db, conn } = createDb(this.env.HYPERDRIVE.connectionString);
-      const _connection = await db.query.connection.findFirst({
-        where: eq(connection.id, this.name),
-      });
+      // `withDb` : le `conn.end()` d'origine passait par `waitUntil` et sautait dès qu'une
+      // requête levait avant lui.
+      const _connection = await withDb(this.env.HYPERDRIVE.connectionString, (db) =>
+        db.query.connection.findFirst({ where: eq(connection.id, this.name) }),
+      );
       if (_connection) {
-        this.driver = connectionToDriver(_connection);
-        this.connection = _connection;
+        try {
+          this.driver = connectionToDriver(_connection);
+          this.connection = _connection;
+        } catch (error) {
+          return toDriverSetupResult(error);
+        }
       }
-      this.ctx.waitUntil(conn.end());
     }
     if (!this.agent) this.agent = await getZeroSocketAgent(this.name);
+    return driverSetupSucceeded;
   }
 
   async armDraftOutboxAlarm(scheduledSendAt?: number | null) {
@@ -473,7 +512,11 @@ export class ZeroDriver extends DurableObject<ZeroEnv> {
     const { connectionId, threadIds, keyNames } = payload;
     try {
       if (!this.driver) {
-        await this.setupAuth();
+        // On est DANS le Durable Object : rehausser le verdict en `AppError` typée ici est
+        // sans risque (aucune frontière RPC entre ce `throw` et le `catch` ci-dessous), et
+        // c'est la seule façon de ne pas poursuivre en silence sans driver.
+        const verdict = await this.setupAuth();
+        if (!verdict.ok) throw fromDriverSetupResult(verdict);
       }
 
       if (threadIds.length) {

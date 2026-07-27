@@ -34,19 +34,25 @@ export class GmailLabels {
 
         const getUserLabelsEffect = Effect.tryPromise({
           try: () =>
-            this.t.execute((gmail) => gmail.users.labels.list({ userId: 'me' }), { retry: true }),
+            this.t.execute(
+              (gmail, signal) => gmail.users.labels.list({ userId: 'me' }, { signal }),
+              { retry: true },
+            ),
           catch: (error) => ({ _tag: 'LabelListFailed' as const, error }),
         });
 
         const getArchiveCountEffect = Effect.tryPromise({
           try: () =>
             this.t.execute(
-              (gmail) =>
-                gmail.users.threads.list({
-                  userId: 'me',
-                  q: 'in:archive',
-                  maxResults: 1,
-                }),
+              (gmail, signal) =>
+                gmail.users.threads.list(
+                  {
+                    userId: 'me',
+                    q: 'in:archive',
+                    maxResults: 1,
+                  },
+                  { signal },
+                ),
               { retry: true },
             ),
           catch: (error) => ({ _tag: 'ArchiveFetchFailed' as const, error }),
@@ -56,11 +62,14 @@ export class GmailLabels {
           Effect.tryPromise({
             try: () =>
               this.t.execute(
-                (gmail) =>
-                  gmail.users.labels.get({
-                    userId: 'me',
-                    id: label.id ?? undefined,
-                  }),
+                (gmail, signal) =>
+                  gmail.users.labels.get(
+                    {
+                      userId: 'me',
+                      id: label.id ?? undefined,
+                    },
+                    { signal },
+                  ),
                 { retry: true },
               ),
             catch: (error) => ({ _tag: 'LabelFetchFailed' as const, error, labelId: label.id }),
@@ -152,10 +161,13 @@ export class GmailLabels {
 
   public async getUserLabels() {
     const res = await this.t.execute(
-      (gmail) =>
-        gmail.users.labels.list({
-          userId: 'me',
-        }),
+      (gmail, signal) =>
+        gmail.users.labels.list(
+          {
+            userId: 'me',
+          },
+          { signal },
+        ),
       { retry: true },
     );
     // wtf google, null values for EVERYTHING?
@@ -174,11 +186,14 @@ export class GmailLabels {
 
   public async getLabel(labelId: string): Promise<Label> {
     const res = await this.t.execute(
-      (gmail) =>
-        gmail.users.labels.get({
-          userId: 'me',
-          id: labelId,
-        }),
+      (gmail, signal) =>
+        gmail.users.labels.get(
+          {
+            userId: 'me',
+            id: labelId,
+          },
+          { signal },
+        ),
       { retry: true },
     );
     return {
@@ -196,48 +211,57 @@ export class GmailLabels {
     name: string;
     color?: { backgroundColor: string; textColor: string };
   }) {
-    await this.t.execute((gmail) =>
-      gmail.users.labels.create({
-        userId: 'me',
-        requestBody: {
-          name: label.name,
-          labelListVisibility: 'labelShow',
-          messageListVisibility: 'show',
-          color: label.color
-            ? mapToGoogleLabelColor({
-                backgroundColor: label.color.backgroundColor,
-                textColor: label.color.textColor,
-              })
-            : undefined,
+    await this.t.execute((gmail, signal) =>
+      gmail.users.labels.create(
+        {
+          userId: 'me',
+          requestBody: {
+            name: label.name,
+            labelListVisibility: 'labelShow',
+            messageListVisibility: 'show',
+            color: label.color
+              ? mapToGoogleLabelColor({
+                  backgroundColor: label.color.backgroundColor,
+                  textColor: label.color.textColor,
+                })
+              : undefined,
+          },
         },
-      }),
+        { signal },
+      ),
     );
   }
 
   public async updateLabel(id: string, label: Label) {
-    await this.t.execute((gmail) =>
-      gmail.users.labels.update({
-        userId: 'me',
-        id: id,
-        requestBody: {
-          name: label.name,
-          color: label.color
-            ? mapToGoogleLabelColor({
-                backgroundColor: label.color.backgroundColor,
-                textColor: label.color.textColor,
-              })
-            : undefined,
+    await this.t.execute((gmail, signal) =>
+      gmail.users.labels.update(
+        {
+          userId: 'me',
+          id: id,
+          requestBody: {
+            name: label.name,
+            color: label.color
+              ? mapToGoogleLabelColor({
+                  backgroundColor: label.color.backgroundColor,
+                  textColor: label.color.textColor,
+                })
+              : undefined,
+          },
         },
-      }),
+        { signal },
+      ),
     );
   }
 
   public async deleteLabel(id: string) {
-    await this.t.execute((gmail) =>
-      gmail.users.labels.delete({
-        userId: 'me',
-        id: id,
-      }),
+    await this.t.execute((gmail, signal) =>
+      gmail.users.labels.delete(
+        {
+          userId: 'me',
+          id: id,
+        },
+        { signal },
+      ),
     );
   }
 
@@ -264,12 +288,15 @@ export class GmailLabels {
       const effects = chunk.map((threadId) =>
         Effect.tryPromise({
           try: async () => {
-            const response = await this.t.execute((gmail) =>
-              gmail.users.threads.modify({
-                userId: 'me',
-                id: threadId,
-                requestBody,
-              }),
+            const response = await this.t.execute((gmail, signal) =>
+              gmail.users.threads.modify(
+                {
+                  userId: 'me',
+                  id: threadId,
+                  requestBody,
+                },
+                { signal },
+              ),
             );
             return { threadId, status: 'fulfilled' as const, value: response.data };
           },

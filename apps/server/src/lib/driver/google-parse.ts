@@ -135,8 +135,22 @@ export function parseMessage(
   };
 }
 
-export async function parseOutgoing(
-  {
+/**
+ * Construit le MIME brut d'un message sortant.
+ *
+ * La DÉSTRUCTURATION était la première instruction : `parseOutgoing(null)` levait un
+ * TypeError avant toute garde, et un corps sans `message` mourait plus loin sur
+ * « Cannot read properties of undefined (reading 'trim') ». Or cette fonction est appelée
+ * par `create`/`sendDraft`, donc par l'envoi différé : une erreur non diagnosticable y est
+ * classée AMBIGUË et la réservation est réglée `unresolved` — terminal, non rejouable —
+ * alors qu'aucun octet n'est parti. Les deux formes rendent désormais un refus explicite,
+ * que `classifySendFailure` peut traiter comme la non-acceptation prouvée qu'elle est.
+ */
+export async function parseOutgoing(outgoing: IOutgoingMessage, config: ManagerConfig) {
+  if (typeof outgoing !== 'object' || outgoing === null) {
+    throw new Error('Outgoing message payload required');
+  }
+  const {
     to,
     subject,
     message,
@@ -146,9 +160,12 @@ export async function parseOutgoing(
     bcc,
     fromEmail,
     originalMessage = null,
-  }: IOutgoingMessage,
-  config: ManagerConfig,
-) {
+  } = outgoing;
+
+  if (typeof message !== 'string') {
+    throw new Error('Message body required');
+  }
+
   const { createMimeMessage } = await import('mimetext');
   const msg = createMimeMessage();
 
@@ -318,12 +335,25 @@ export async function parseOutgoing(
   };
 }
 
+/**
+ * Pièces jointes d'un arbre de parties Gmail, sur une entrée POTENTIELLEMENT HOSTILE.
+ *
+ * Comme `parseMessage`, cette fonction consomme du `JSON.parse` (driver/gmail-batch.ts) : le
+ * type ne garantit rien à l'exécution. `findAttachments(null)` levait « parts is not
+ * iterable » et `findAttachments([null])` un TypeError sur `part.filename` — dans les deux
+ * cas au milieu d'un `Promise.all` qui parse le fil entier, donc UN fil hostile emportait
+ * tout le lot. On écarte les entrées inexploitables et on conserve les autres.
+ */
 export function findAttachments(
-  parts: gmail_v1.Schema$MessagePart[],
+  parts: gmail_v1.Schema$MessagePart[] | null | undefined,
 ): gmail_v1.Schema$MessagePart[] {
+  if (!Array.isArray(parts)) return [];
+
   let results: gmail_v1.Schema$MessagePart[] = [];
 
   for (const part of parts) {
+    if (typeof part !== 'object' || part === null) continue;
+
     if (part.filename && part.filename.length > 0) {
       const contentDisposition =
         part.headers?.find((h) => h.name?.toLowerCase() === 'content-disposition')?.value || '';

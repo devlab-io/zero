@@ -32,6 +32,7 @@ import {
 import { generateAutomaticDraft } from '../../thread-workflow-utils';
 import type { ParsedDraft } from '../../lib/driver/types';
 import type { CreateDraftData } from '../../lib/schemas';
+import { fromDriverSetupResult } from '../../lib/errors';
 import { reSyncThread } from '../../lib/server-utils';
 import type { ZeroDriverInternal } from './internal';
 import type { IOutgoingMessage } from '../../types';
@@ -81,7 +82,11 @@ export async function processDraftOutboxAlarm(self: ZeroDriverInternal) {
   if (!connectionId) return;
 
   self.name = connectionId;
-  await self.setupAuth();
+  // `setupAuth` rend désormais un verdict au lieu de jeter (sa classe ne survivait pas à la
+  // frontière RPC). Ici on est DANS le Durable Object : on le rehausse en erreur typée pour
+  // conserver le comportement observable de l'alarme — échec journalisé et capturé.
+  const setup = await self.setupAuth();
+  if (!setup.ok) throw fromDriverSetupResult(setup);
 
   const { db, conn } = createDb(self.env.HYPERDRIVE.connectionString);
   try {

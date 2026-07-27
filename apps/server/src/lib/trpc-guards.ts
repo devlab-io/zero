@@ -11,7 +11,7 @@
 // exact same inputs/outputs the original inline code used. trpc.ts calls them and its
 // behavior is unchanged; only these functions are directly unit-tested.
 
-import { AppError, toTRPCError } from './errors';
+import { AppError, resolveErrorCode, toTRPCError } from './errors';
 import { TRPCError } from '@trpc/server';
 
 export type SessionUser = { id: string; name: string; email: string };
@@ -102,6 +102,28 @@ export async function classifyDriverFailure(
   connectionId: string,
   deps: DriverFailureDeps,
 ): Promise<TRPCError | undefined> {
+  // 1) LE CODE D'ABORD. Un octroi sans jetons est détecté DANS le Durable Object
+  // (`connectionToDriver` → `AppError.connectionExpired`), rendu en verdict typé par
+  // `setName`, puis reconstruit en `AppError` par `getShardClient` — donc la classe est
+  // encore là quand on arrive ici. Auparavant l'erreur traversait la frontière RPC en
+  // `Error` nu, `getShardClient` la ré-emballait en `Shard initialization failed: …`, et
+  // aucun marqueur ci-dessous ne la reconnaissait : plus aucun `X-Zero-Redirect`, donc
+  // plus aucune proposition de reconnexion pour un utilisateur qui en avait besoin.
+  //
+  // Aucun élargissement : `resolveErrorCode` ne rend ces deux codes que pour une `AppError`
+  // (directe ou en `cause` d'un `TRPCError`) — la table `TRPC_TO_APP` ne les produit jamais.
+  const appCode = resolveErrorCode(error);
+  if (appCode === 'MISSING_SCOPES') {
+    return toTRPCError(AppError.missingScopes('Required scopes missing', { cause: error }));
+  }
+  if (appCode === 'CONNECTION_EXPIRED') {
+    await deps.clearTokens();
+    deps.setReconnectHeader(connectionId);
+    return toTRPCError(
+      AppError.connectionExpired('Connection expired. Please reconnect.', { cause: error }),
+    );
+  }
+
   const message = error.message.toLowerCase();
 
   // Ces deux comparaisons restent des tests de chaîne parce que la chaîne vient de

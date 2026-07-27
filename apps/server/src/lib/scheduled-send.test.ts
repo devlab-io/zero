@@ -744,3 +744,92 @@ describe('normalizeStoredAttachments', () => {
     expect(normalizeStoredAttachments(BODY)).toBe(BODY);
   });
 });
+
+// ---------------------------------------------------------------------------
+// P6 — FORME MINIMALE DU CORPS STOCKÉ.
+//
+// La validation s'arrêtait à « objet non-tableau ». Un corps `{to:[{email}], subject}` sans
+// `message` traversait, puis `parseOutgoing` levait — AVANT toute émission réseau — avec
+// une erreur nue sans statut. `classifySendFailure` ne pouvant rien prouver, elle rendait
+// `ambiguous`, et la réservation était réglée `unresolved` : TERMINAL et non rejouable,
+// pour un mail dont pas un octet n'était parti. L'utilisateur voyait un mail bloqué,
+// définitivement, sans motif exploitable.
+// ---------------------------------------------------------------------------
+
+describe('parseStoredPayload — forme minimale exigible (P6)', () => {
+  it('refuse un corps sans `message`', () => {
+    const sansCorps = JSON.stringify({ to: [{ email: 'x@y.co' }], subject: 'S' });
+    expect(() => parseStoredPayload(sansCorps)).toThrow(ScheduledSendPayloadError);
+    expect(() => parseStoredPayload(sansCorps)).toThrow('no message body');
+  });
+
+  it('refuse un corps sans destinataire exploitable', () => {
+    expect(() => parseStoredPayload(JSON.stringify({ subject: 'S', message: 'M' }))).toThrow(
+      'no recipient',
+    );
+    expect(() =>
+      parseStoredPayload(JSON.stringify({ to: [], subject: 'S', message: 'M' })),
+    ).toThrow('no recipient');
+    expect(() =>
+      parseStoredPayload(JSON.stringify({ to: 'x@y.co', subject: 'S', message: 'M' })),
+    ).toThrow('no recipient');
+  });
+
+  it('laisse passer un corps valide, y compris un envoi de brouillon', () => {
+    expect(parseStoredPayload(JSON.stringify(BODY))).toMatchObject({ message: 'M' });
+    expect(parseStoredPayload(JSON.stringify({ ...BODY, draftId: 'd1' }))).toMatchObject({
+      draftId: 'd1',
+    });
+  });
+});
+
+describe('deliverScheduledEmail — un corps mal formé finit `failed`, jamais `unresolved` (P6)', () => {
+  const malforme = JSON.stringify({ to: [{ email: 'x@y.co' }], subject: 'S' });
+
+  it('depuis KV : issue `failed`, aucun appel au driver, aucun rejeu', async () => {
+    const statusKV = makeStore({ 'mal-1': 'pending' });
+    const gate = openGate();
+    const send = vi.fn(async () => {});
+    const retry = vi.fn();
+
+    const out = await deliverScheduledEmail(
+      { messageId: 'mal-1', connectionId: 'c' },
+      {
+        statusKV,
+        payloadKV: makeStore({ 'mal-1': malforme }),
+        reservation: gate,
+        send,
+        retry,
+        logger: silentLogger,
+      },
+    );
+
+    expect(out).toMatchObject({ outcome: 'invalid-payload' });
+    expect(send).not.toHaveBeenCalled();
+    expect(retry).not.toHaveBeenCalled();
+    // AVANT : la réservation partait, l'envoi levait dans parseOutgoing, et l'issue
+    // inscrite était `unresolved` — terminale — pour un mail jamais émis.
+    expect(gate.settled).toEqual([]);
+    expect(statusKV.map.get('mal-1')).toBe('failed');
+  });
+
+  it('depuis la queue : même issue, et l’erreur reste une ScheduledSendPayloadError', async () => {
+    const out = await deliverScheduledEmail(
+      {
+        messageId: 'mal-2',
+        connectionId: 'c',
+        mail: { to: [{ email: 'x@y.co' }], subject: 'S' } as unknown as StoredOutgoingMessage,
+      },
+      {
+        statusKV: makeStore(),
+        payloadKV: makeStore(),
+        reservation: openGate(),
+        send: vi.fn(async () => {}),
+        logger: silentLogger,
+      },
+    );
+
+    expect(out).toMatchObject({ outcome: 'invalid-payload' });
+    expect((out as { error: unknown }).error).toBeInstanceOf(ScheduledSendPayloadError);
+  });
+});

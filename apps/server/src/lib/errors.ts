@@ -19,7 +19,7 @@
 //   - `lib/connection-context.ts` et `lib/trpc-guards.ts` lèvent des `AppError` typées ;
 //   - `apps/mail/providers/query-provider.tsx` discrimine sur `appCode`, plus sur le texte.
 
-import { TRPCError } from '@trpc/server';
+import { TRPCError, type TRPCDefaultErrorShape } from '@trpc/server';
 
 export const ErrorCode = {
   VALIDATION: 'VALIDATION',
@@ -163,6 +163,18 @@ export function resolveErrorCode(err: unknown): ErrorCode {
   return 'INTERNAL';
 }
 
+/**
+ * Corps de l'`errorFormatter` tRPC (voir `trpc/trpc.ts`) : publie le CODE STABLE sur
+ * `data.appCode` de CHAQUE erreur qui sort d'une procédure. C'est la seule chose que le
+ * client relit (`apps/mail/lib/error-codes.ts`) — plus aucun message n'est comparé.
+ *
+ * Extrait ici pour qu'un test puisse éprouver la chaîne complète avec le formateur RÉEL,
+ * sans monter tout `trpc.ts` (hono/AsyncLocalStorage, Redis, rate limiter).
+ */
+export function withAppCode(shape: TRPCDefaultErrorShape, error: unknown) {
+  return { ...shape, data: { ...shape.data, appCode: resolveErrorCode(error) } };
+}
+
 /** Maps any thrown value to a TRPCError with a stable code; unknown → generic 500. */
 export function toTRPCError(err: unknown): TRPCError {
   if (err instanceof TRPCError) return err;
@@ -174,6 +186,76 @@ export function toTRPCError(err: unknown): TRPCError {
     });
   }
   return new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: GENERIC_MESSAGE, cause: err });
+}
+
+// ---------------------------------------------------------------------------
+// Verdict d'initialisation d'un driver, transporté à travers la frontière RPC d'un
+// Durable Object.
+// ---------------------------------------------------------------------------
+
+/**
+ * Codes qu'un échec de `ZeroDriver.setupAuth` peut porter. Volontairement restreint :
+ * ce canal ne sert qu'à faire survivre la DISCRIMINATION, pas à republier la taxonomie.
+ */
+export type DriverSetupFailureCode = Extract<
+  ErrorCode,
+  'CONNECTION_EXPIRED' | 'NOT_FOUND' | 'INTERNAL'
+>;
+
+/**
+ * Résultat de `ZeroDriver.setName` / `setupAuth`.
+ *
+ * MÊME MESURE que `ScheduledSendAttemptRpcResult` (lib/send-reservation.ts) : une erreur
+ * JETÉE depuis une méthode de Durable Object arrive côté Worker en `Error` NU — propriétés
+ * propres `['stack','message','remote']`, ni `code`, ni `cause`, ni le prototype. Une
+ * `AppError.connectionExpired` levée dans le DO y perdait donc sa CLASSE, `getShardClient`
+ * la ré-emballait en `new Error('Shard initialization failed: …')`, `resolveErrorCode`
+ * rendait `INTERNAL`, et le client ne se voyait plus jamais proposer de se reconnecter.
+ *
+ * Seule une VALEUR DE RETOUR sérialisable traverse fidèlement. Forme PLATE pour la raison
+ * déjà documentée sur `SendReservationRpcResult` : le typage des stubs enveloppe chaque
+ * propriété d'un objet retourné dans son propre thenable, ce qui ne s'unifie pas avec une
+ * union discriminée (TS2769).
+ */
+export type DriverSetupRpcResult = {
+  ok: boolean;
+  code: DriverSetupFailureCode | null;
+  message: string | null;
+};
+
+const DRIVER_SETUP_CODES: ReadonlySet<string> = new Set<DriverSetupFailureCode>([
+  'CONNECTION_EXPIRED',
+  'NOT_FOUND',
+  'INTERNAL',
+]);
+
+export const driverSetupSucceeded: DriverSetupRpcResult = { ok: true, code: null, message: null };
+
+/** Classe un échec de `setupAuth` DANS le Durable Object, où l'erreur est encore entière. */
+export function toDriverSetupResult(error: unknown): DriverSetupRpcResult {
+  const code = resolveErrorCode(error);
+  return {
+    ok: false,
+    code: DRIVER_SETUP_CODES.has(code) ? (code as DriverSetupFailureCode) : 'INTERNAL',
+    message: error instanceof Error ? error.message : String(error),
+  };
+}
+
+/**
+ * Rehausse le verdict en `AppError` TYPÉE, côté Worker. La classe est reconstruite ici,
+ * dans l'isolate qui va la propager : `resolveErrorCode` la reconnaît, et l'`errorFormatter`
+ * tRPC publie donc `CONNECTION_EXPIRED` sur le fil au lieu d'`INTERNAL`.
+ */
+export function fromDriverSetupResult(result: DriverSetupRpcResult): AppError {
+  const message = result.message ?? 'Driver setup failed';
+  switch (result.code) {
+    case 'CONNECTION_EXPIRED':
+      return AppError.connectionExpired(message);
+    case 'NOT_FOUND':
+      return AppError.notFound(message);
+    default:
+      return AppError.internal(message);
+  }
 }
 
 export interface NormalizedErrorBody {
