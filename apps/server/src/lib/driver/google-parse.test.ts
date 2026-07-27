@@ -182,6 +182,139 @@ describe('parseMessage — extraction des en-têtes (cas réel complet)', () => 
   });
 });
 
+// ---------------------------------------------------------------------------
+// P12 — parseMessage levait un TypeError BRUT sur les formes hostiles.
+//
+// Provenance réelle de ces formes : le corps d'une réponse Gmail sort de `JSON.parse`
+// (driver/gmail-batch.ts:106 — `body = JSON.parse(rawBody)`, typé `unknown` puis assigné
+// par assertion), donc aucune garantie d'exécution sur la forme. Et google-threads.ts:161
+// parse le fil ENTIER sous un `Promise.all` : une seule ligne hostile faisait rejeter tout
+// le lot.
+//
+// Sonde /tmp comparant HEAD et le code corrigé sur 24 formes : 12 levaient AVANT, 0 APRÈS.
+//   undefined ....................... TypeError: Cannot destructure property 'id' of 'undefined'
+//   null ............................ TypeError: Cannot destructure property 'id' of 'object null'
+//   headers = chaîne/objet/nombre ... TypeError: payload?.headers?.find is not a function
+//   headers = [null] / [undefined] .. TypeError: Cannot read properties of null (reading 'name')
+//   headers name non-string ......... TypeError: h.name?.toLowerCase is not a function
+//   labelIds = chaîne/objet ......... TypeError: labelIds?.map is not a function
+//   snippet non-string .............. TypeError: html.replace is not a function (he.decode)
+// ---------------------------------------------------------------------------
+
+describe('parseMessage — formes hostiles : message dégradé, jamais d’exception (P12)', () => {
+  // Les replis attendus sont EXACTEMENT ceux du message vide déjà supporté (`parseMessage({})`).
+  const attendreDegrade = (r: ReturnType<typeof parseMessage>) => {
+    expect(r.id).toBe('ERROR');
+    expect(r.threadId).toBe('');
+    expect(r.title).toBe('ERROR');
+    expect(r.receivedOn).toBe('Failed');
+    expect(r.subject).toBe('(no subject)');
+    expect(r.sender).toEqual({ name: '', email: 'no-sender@unknown' });
+    expect(r.to).toEqual([]);
+    expect(r.cc).toBeNull();
+    expect(r.tags).toEqual([]);
+    expect(r.unread).toBe(false);
+    expect(r.isDraft).toBe(false);
+    expect(r.tls).toBe(false);
+  };
+
+  it('entrée undefined → dégradé (la déstructuration levait avant toute garde)', () => {
+    attendreDegrade(parseMessage(undefined as never));
+  });
+
+  it('entrée null → dégradé', () => {
+    attendreDegrade(parseMessage(null as never));
+  });
+
+  it('entrée non-objet (chaîne, nombre) → dégradé', () => {
+    attendreDegrade(parseMessage('coucou' as never));
+    attendreDegrade(parseMessage(42 as never));
+  });
+
+  it('`headers` non tabulaire (chaîne, objet, nombre) → dégradé', () => {
+    for (const headers of ['From: a@b.c', { From: 'a@b.c' }, 7]) {
+      attendreDegrade(parseMessage({ payload: { headers } } as never));
+    }
+  });
+
+  it('`payload` non-objet → dégradé', () => {
+    attendreDegrade(parseMessage({ payload: 'oops' } as never));
+  });
+
+  it('`labelIds` non tabulaire (chaîne, objet) → dégradé, tags vides', () => {
+    attendreDegrade(parseMessage({ labelIds: 'INBOX' } as never));
+    attendreDegrade(parseMessage({ labelIds: { a: 1 } } as never));
+  });
+
+  it('`snippet` non-string → titre ERROR au lieu de faire lever he.decode', () => {
+    expect(parseMessage({ snippet: 42 } as never).title).toBe('ERROR');
+    expect(parseMessage({ snippet: { a: 1 } } as never).title).toBe('ERROR');
+  });
+
+  it('entrée d’en-tête nulle ou sans nom exploitable : écartée, les autres SONT extraites', () => {
+    // Dégradation PARTIELLE : une entrée pourrie ne doit pas coûter les en-têtes valides.
+    const r = parseMessage({
+      id: 'm9',
+      threadId: 't9',
+      labelIds: ['UNREAD', null, 42, 'DRAFT'],
+      payload: {
+        headers: [
+          null,
+          undefined,
+          'From: usurpateur@evil.example',
+          { name: 42, value: 'x' },
+          { name: 'From', value: 'Alice <alice@example.com>' },
+          { name: 'Subject', value: 'Toujours lisible' },
+          { name: 'To', value: 42 },
+          { name: 'To', value: 'bob@example.com' },
+        ],
+      },
+    } as never);
+
+    expect(r.id).toBe('m9');
+    expect(r.threadId).toBe('t9');
+    expect(r.sender).toEqual({ name: 'Alice', email: 'alice@example.com' });
+    expect(r.subject).toBe('Toujours lisible');
+    expect(r.to).toEqual([{ name: '', email: 'bob@example.com' }]);
+    expect(r.tags).toEqual([
+      { id: 'UNREAD', name: 'UNREAD', type: 'user' },
+      { id: 'DRAFT', name: 'DRAFT', type: 'user' },
+    ]);
+    expect(r.unread).toBe(true);
+    expect(r.isDraft).toBe(true);
+  });
+
+  it('une ligne hostile n’emporte plus le LOT (forme google-threads.ts : Promise.all)', async () => {
+    // Reproduit la boucle du produit : data.messages.map(parseMessage) sous Promise.all.
+    const lot = [
+      { id: 'ok-1', payload: { headers: [{ name: 'From', value: 'a@b.c' }] } },
+      { payload: { headers: 'hostile' } },
+      { id: 'ok-2', payload: { headers: [{ name: 'From', value: 'c@d.e' }] } },
+    ];
+
+    const parsed = await Promise.all(lot.map(async (m) => parseMessage(m as never)));
+
+    expect(parsed.map((p) => p.id)).toEqual(['ok-1', 'ERROR', 'ok-2']);
+    expect(parsed[0].sender.email).toBe('a@b.c');
+    expect(parsed[2].sender.email).toBe('c@d.e');
+  });
+
+  it('en-tête SimpleLogin toujours honoré malgré des entrées pourries autour', () => {
+    // getSimpleLoginSender (driver/utils.ts) déréférence `payload.headers` sans garde : il
+    // reçoit désormais les en-têtes normalisés, donc ne peut plus lever non plus.
+    const r = parseMessage({
+      payload: {
+        headers: [
+          null,
+          { name: 'X-SimpleLogin-Original-From', value: 'origin@real.io' },
+          { name: 'From', value: 'alias@simplelogin.io' },
+        ],
+      },
+    } as never);
+    expect(r.sender).toEqual({ name: 'origin@real.io', email: 'origin@real.io' });
+  });
+});
+
 describe('findAttachments — sélection récursive des pièces jointes', () => {
   it('inclut une PJ nommée non-inline, exclut une image inline avec Content-ID', () => {
     const parts: gmail_v1.Schema$MessagePart[] = [

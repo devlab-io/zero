@@ -534,9 +534,30 @@ export const mailRouter = router({
         }
       }
 
-      // La marque d'annulation vivait 1 h. Au-dela, elle expirait AVANT l'echeance et le
-      // consommateur, ne voyant plus `cancelled`, envoyait un mail que l'utilisateur avait
-      // annule. Elle couvre desormais l'echeance connue (ou le delai de file maximal).
+      // BARRIERE FORTE, d'abord. L'annulation ne vivait que dans KV, alors que
+      // `scheduled-send.ts` documente lui-meme ce controle comme un pre-filtre non garant :
+      // KV est eventuellement coherent et sans compare-and-set, donc une marque posee
+      // pendant que la livraison lisait encore `pending` laissait le mail partir. La
+      // reservation SQL du Durable Object, elle, est atomique — et c'est deja elle qui
+      // decide si l'envoi part.
+      const registry = getConnectionRegistry(env, activeConnection.id);
+      const cancellation = await registry.cancelScheduledSend(messageId, Date.now());
+      if (!cancellation.cancelled) {
+        // L'envoi est en vol ou deja regle : le dire, plutot que d'effacer le payload et
+        // de laisser croire a une annulation qui n'a pas eu lieu.
+        return {
+          success: false,
+          error:
+            cancellation.reason === 'in-flight'
+              ? 'Too late to cancel: the send is already in progress'
+              : 'Too late to cancel: the send already completed',
+        } as const;
+      }
+
+      // Surface de LECTURE seulement, desormais. La marque d'annulation vivait 1 h ;
+      // au-dela elle expirait AVANT l'echeance et le consommateur, ne voyant plus
+      // `cancelled`, envoyait un mail que l'utilisateur avait annule. Elle couvre
+      // desormais l'echeance connue (ou le delai de file maximal).
       await statusKV.put(messageId, 'cancelled', {
         expirationTtl: cancelTtlSeconds(scheduledSendAt, Date.now()),
       });

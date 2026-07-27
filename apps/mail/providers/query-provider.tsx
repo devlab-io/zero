@@ -1,9 +1,16 @@
 import {
+  MutationCache,
+  QueryCache,
+  QueryClient,
+  hashKey,
+  type InfiniteData,
+  type Mutation,
+} from '@tanstack/react-query';
+import {
   PersistQueryClientProvider,
   type PersistedClient,
   type Persister,
 } from '@tanstack/react-query-persist-client';
-import { QueryCache, QueryClient, hashKey, type InfiniteData } from '@tanstack/react-query';
 import { selectQueriesForPersistence, shouldPersistQuery } from '@/lib/query-persistence';
 import { readRetryDelay, shouldRetryRead } from '@/lib/query-retry';
 import { useEffect, useMemo, type PropsWithChildren } from 'react';
@@ -14,8 +21,10 @@ import { signOut, useSession } from '@/lib/auth-client';
 import type { AppRouter } from '@zero/server/trpc';
 import { CACHE_BURST_KEY } from '@/lib/constants';
 import { get, set, del, keys } from 'idb-keyval';
+import { m } from '@/paraglide/messages';
 import superjson from 'superjson';
 import { log } from '@/lib/log';
+import { toast } from 'sonner';
 
 const QUERY_CACHE_PREFIX = 'zero-query-cache';
 
@@ -61,8 +70,48 @@ function createIDBPersister(idbValidKey: IDBValidKey = 'zero-query-cache') {
   } satisfies Persister;
 }
 
+/**
+ * Retour utilisateur sur échec de mutation.
+ *
+ * Une mutation qui échoue est une ACTION de l'utilisateur qui n'a pas eu lieu (envoi,
+ * archivage, suppression). Le `onError` global se contentait de `log.error(err.message)` :
+ * la console voyait l'échec, l'utilisateur ne voyait rien et croyait son action passée.
+ *
+ * Précédence, du plus explicite au plus général :
+ *  1. `meta.silentError === true` — la mutation demande explicitement le silence ;
+ *  2. `meta.errorMessage` (string) — message imposé par l'appelant, gagne sur tout ;
+ *  3. la mutation déclare son propre `onError` — elle possède déjà son retour utilisateur,
+ *     on ne double pas le toast (c'est le cas de mail-content, prompts-dialog,
+ *     settings/connections, settings/danger-zone, queue-review) ;
+ *  4. sinon, toast générique.
+ *
+ * Rendu ici plutôt que dans `defaultOptions.mutations.onError` parce que ce dernier est
+ * ÉCRASÉ (et non complété) par le `onError` d'une mutation : les mutations qui gèrent leur
+ * erreur n'étaient alors même plus journalisées. Le `MutationCache` voit tout, meta comprise.
+ */
+export function resolveMutationErrorToast(
+  mutation: Mutation<unknown, unknown, unknown> | undefined,
+  fallback: string,
+): string | null {
+  const meta = mutation?.options.meta;
+  if (meta?.silentError === true) return null;
+  if (typeof meta?.errorMessage === 'string') return meta.errorMessage;
+  if (typeof mutation?.options.onError === 'function') return null;
+  return fallback;
+}
+
 export const makeQueryClient = (cacheOwner: string) =>
   new QueryClient({
+    mutationCache: new MutationCache({
+      onError: (err, _variables, _context, mutation) => {
+        log.error(err.message || 'Mutation failed');
+        const message = resolveMutationErrorToast(
+          mutation,
+          m['common.actions.errorTryAgainLater'](),
+        );
+        if (message) toast.error(message);
+      },
+    }),
     queryCache: new QueryCache({
       onError: (err, { meta }) => {
         if (meta && meta.noGlobalError === true) return;
@@ -95,7 +144,8 @@ export const makeQueryClient = (cacheOwner: string) =>
       },
       mutations: {
         // No `retry` here on purpose: non-idempotent mutations must not auto-retry.
-        onError: (err) => log.error(err.message),
+        // Le retour d'erreur (log + toast) vit dans le `mutationCache` ci-dessus : ici il
+        // serait écrasé par toute mutation déclarant son propre `onError`.
       },
     },
   });

@@ -4,10 +4,10 @@ import {
   type StoredOutgoingMessage,
 } from './lib/scheduled-send';
 import { SyncThreadsCoordinatorWorkflow } from './workflows/sync-threads-coordinator-workflow';
+import { fromScheduledSendAttempt, SendNotDispatchedError } from './lib/send-reservation';
 import { SyncThreadsWorkflow } from './workflows/sync-threads-workflow';
 import { createSendReservationGate } from './lib/connection-registry';
 import { ShardRegistry, ZeroAgent, ZeroDriver } from './routes/agent';
-import { SendNotDispatchedError } from './lib/send-reservation';
 import { renewWatchSubscription } from './lib/subscribe-queue';
 import { ThreadSyncWorker } from './routes/agent/sync-worker';
 import { EProviders, type IEmailSendBatch } from './types';
@@ -148,15 +148,16 @@ export default class Entry extends WorkerEntrypoint<ZeroEnv> {
                       cause: error,
                     });
                   }
-                  if (payload.draftId) {
-                    const { draftId, ...rest } = payload;
-                    await agent.stub.sendDraft(
-                      draftId,
-                      rest as Parameters<typeof agent.stub.sendDraft>[1],
-                    );
-                  } else {
-                    await agent.stub.create(payload as Parameters<typeof agent.stub.create>[0]);
-                  }
+                  // `sendScheduled` NE JETTE PAS : elle classe l'echec dans le Durable
+                  // Object, ou l'enveloppe du driver est encore entiere, et rend deux
+                  // chaines. Une erreur jetee a travers cette frontiere RPC arrive en
+                  // `Error` nu (mesure sur workerd : proprietes propres stack/message/
+                  // remote), donc `classifySendFailure` cote appelant ne voyait jamais le
+                  // moindre statut : tout echec devenait `ambiguous`.
+                  const attempt = await agent.stub.sendScheduled(
+                    payload as Parameters<typeof agent.stub.sendScheduled>[0],
+                  );
+                  if (!attempt.ok) throw fromScheduledSendAttempt(attempt);
                 },
                 retry: () => msg.retry?.(),
                 capture: (error, context) =>

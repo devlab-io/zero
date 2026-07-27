@@ -93,12 +93,22 @@ type GmailErrorShape = {
   errors?: { reason?: string }[];
 };
 
-/** Extrait un code HTTP numérique quelle que soit la forme d'erreur googleapis/gaxios. */
+/**
+ * Extrait un code HTTP numérique quelle que soit la forme d'erreur googleapis/gaxios.
+ *
+ * Le `??` en chaîne s'arrêtait au premier champ DÉFINI, pas au premier champ NUMÉRIQUE :
+ * un `code` non numérique — `'ECONNRESET'` de gaxios sur panne de transport, ou le
+ * `'UNKNOWN_ERROR'` que pose l'enveloppe du driver — masquait le `status` réellement
+ * présent et faisait rendre `undefined`. On parcourt désormais les trois porteurs et on
+ * rend le premier qui donne un nombre fini.
+ */
 export function extractStatus(err: unknown): number | undefined {
   const e = (err ?? {}) as GmailErrorShape;
-  const raw = e.code ?? e.status ?? e.response?.status;
-  const n = typeof raw === 'string' ? Number.parseInt(raw, 10) : raw;
-  return typeof n === 'number' && Number.isFinite(n) ? n : undefined;
+  for (const raw of [e.code, e.status, e.response?.status]) {
+    const n = typeof raw === 'string' ? Number.parseInt(raw, 10) : raw;
+    if (typeof n === 'number' && Number.isFinite(n)) return n;
+  }
+  return undefined;
 }
 
 /**
@@ -152,6 +162,24 @@ export interface BackoffOptions {
   maxMs: number;
   /** Plafond appliqué à un Retry-After serveur en ms. Défaut 30000. */
   retryAfterCapMs: number;
+  /**
+   * Timeout appliqué à CHAQUE tentative, en ms. Défaut 15000.
+   *
+   * Aucun appel sortant du driver ne portait de borne : une requête Gmail qui ne rend jamais
+   * la main (socket ouverte, réponse jamais terminée) immobilisait l'invocation entière.
+   * 15 s couvre largement une lecture Gmail normale, y compris un batch, tout en laissant de
+   * la place à au moins deux tentatives sous la deadline par défaut.
+   */
+  attemptTimeoutMs: number;
+  /**
+   * Deadline ABSOLUE sur l'ensemble de la boucle de rejeu, en ms depuis la première
+   * tentative. Défaut 60000.
+   *
+   * Sans elle, le pire cas était 5 rejeux × `retryAfterCapMs` (30 s) de sommeil, soit 150 s
+   * de sommeil PLUS six requêtes non bornées — sur une invocation Workers, c'est un blocage.
+   * Franchie, on cesse de rejouer et on propage la dernière erreur : l'appelant décide.
+   */
+  totalDeadlineMs: number;
 }
 
 export const DEFAULT_BACKOFF: BackoffOptions = {
@@ -160,6 +188,8 @@ export const DEFAULT_BACKOFF: BackoffOptions = {
   factor: 2,
   maxMs: 8000,
   retryAfterCapMs: 30000,
+  attemptTimeoutMs: 15000,
+  totalDeadlineMs: 60000,
 };
 
 /**
@@ -180,6 +210,10 @@ export function computeBackoffDelayMs(
 export interface BackoffDeps {
   sleep: (ms: number) => Promise<void>;
   random: () => number;
+  /** Horloge, injectable pour éprouver la deadline sans horloge réelle. Défaut `Date.now`. */
+  now?: () => number;
+  /** Fabrique du signal d'annulation par tentative. Défaut `AbortSignal.timeout`. */
+  timeoutSignal?: (ms: number) => AbortSignal;
 }
 
 const realDeps: BackoffDeps = {
@@ -188,28 +222,82 @@ const realDeps: BackoffDeps = {
 };
 
 /**
+ * Erreur de dépassement du timeout par tentative.
+ *
+ * Elle porte `code: 'ETIMEDOUT'` — le code que le transport produit RÉELLEMENT pour cette
+ * condition — donc `isRetryableGmailError` la classe rejouable par le chemin transport déjà
+ * en place, sans toucher au classifieur. On ne propage volontairement PAS la `DOMException`
+ * d'`AbortSignal.timeout` : son champ `code` vaut 23 (ABORT_ERR), que `extractStatus` lirait
+ * comme un statut HTTP 23 et qui rendrait l'erreur non rejouable.
+ */
+function attemptTimeoutError(timeoutMs: number): Error {
+  return Object.assign(new Error(`Gmail request timed out after ${timeoutMs}ms`), {
+    code: 'ETIMEDOUT',
+  });
+}
+
+/**
+ * Borne une tentative par son signal : dès que le signal est avorté, on cesse d'attendre la
+ * promesse (le `fetch` sous-jacent reçoit le signal et s'annule de lui-même quand il l'honore).
+ */
+function raceAttempt<T>(run: Promise<T>, signal: AbortSignal, timeoutMs: number): Promise<T> {
+  if (signal.aborted) return Promise.reject(attemptTimeoutError(timeoutMs));
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(attemptTimeoutError(timeoutMs));
+    signal.addEventListener('abort', onAbort, { once: true });
+    const settle = () => signal.removeEventListener('abort', onAbort);
+    run.then(
+      (value) => {
+        settle();
+        resolve(value);
+      },
+      (error) => {
+        settle();
+        reject(error);
+      },
+    );
+  });
+}
+
+/**
  * Exécute `fn` avec retry sur erreurs Gmail transitoires (429/403-rate/5xx). Honore un
  * Retry-After serveur (plafonné), sinon backoff expo + jitter. Toute autre erreur est
  * relancée immédiatement. `onRetry` reçoit chaque délai (observabilité/tests).
+ *
+ * Deux bornes de temps, absentes jusqu'ici :
+ *  - `opts.attemptTimeoutMs` par tentative — `fn` reçoit l'`AbortSignal` correspondant et
+ *    peut le passer à son `fetch` ; qu'il l'honore ou non, la boucle cesse d'attendre ;
+ *  - `opts.totalDeadlineMs` sur l'ENSEMBLE de la boucle — franchie, on cesse de rejouer et
+ *    on propage la dernière erreur. Le timeout d'une tentative est en outre écrêté à ce
+ *    qu'il reste de deadline, pour qu'une seule tentative ne puisse pas la déborder.
  */
 export async function withGmailBackoff<T>(
-  fn: () => Promise<T>,
+  fn: (signal: AbortSignal) => Promise<T>,
   opts: BackoffOptions = DEFAULT_BACKOFF,
   deps: BackoffDeps = realDeps,
   onRetry?: (info: { attempt: number; delayMs: number; error: unknown }) => void,
 ): Promise<T> {
+  const now = deps.now ?? Date.now;
+  const makeSignal = deps.timeoutSignal ?? ((ms: number) => AbortSignal.timeout(ms));
+  const deadlineAt = now() + opts.totalDeadlineMs;
+
   let lastError: unknown;
   for (let attempt = 0; attempt <= opts.maxRetries; attempt++) {
+    const attemptTimeoutMs = Math.max(1, Math.min(opts.attemptTimeoutMs, deadlineAt - now()));
+    const signal = makeSignal(attemptTimeoutMs);
     try {
-      return await fn();
+      return await raceAttempt(fn(signal), signal, attemptTimeoutMs);
     } catch (error) {
       lastError = error;
       if (attempt >= opts.maxRetries || !isRetryableGmailError(error)) throw error;
-      const serverMs = parseRetryAfterMs(error);
+      const serverMs = parseRetryAfterMs(error, now);
       const delayMs =
         serverMs !== undefined
           ? Math.min(serverMs, opts.retryAfterCapMs)
           : computeBackoffDelayMs(attempt, opts, deps.random);
+      // Deadline absolue : dormir puis rejouer nous ferait dépasser — on s'arrête ici et on
+      // propage la dernière erreur plutôt que d'immobiliser l'invocation.
+      if (now() + delayMs >= deadlineAt) throw error;
       onRetry?.({ attempt, delayMs, error });
       await deps.sleep(delayMs);
     }

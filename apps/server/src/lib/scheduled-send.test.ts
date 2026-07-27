@@ -15,6 +15,10 @@ import {
   type SendReservationGate,
   type StoredOutgoingMessage,
 } from './scheduled-send';
+import {
+  envelopedSendFailure,
+  envelopedTransportFailure,
+} from './driver/__fixtures__/send-failure';
 import { ScheduledSendPayloadError, type SettledSendOutcome } from './send-reservation';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -422,7 +426,7 @@ describe('deliverScheduledEmail — rejeu apres echec', () => {
   };
 
   it('une panne de TRANSPORT ne rejoue PAS : le mail a pu partir', async () => {
-    const { out, retry, statusKV, gate } = await failWith(new TypeError('fetch failed'), 'amb-1');
+    const { out, retry, statusKV, gate } = await failWith(envelopedTransportFailure(), 'amb-1');
     // La regression exacte, refutation (c) : `fetch failed` etait classe transitoire par
     // gmail-backoff, donc `scheduled-send` remettait `failed` et rejouait — et le mail
     // partait deux fois quand Gmail avait accepte la requete avant la coupure.
@@ -435,39 +439,33 @@ describe('deliverScheduledEmail — rejeu apres echec', () => {
   });
 
   it('un timeout ne rejoue pas', async () => {
-    const { out, retry } = await failWith(new Error('request timed out'), 'amb-2');
+    const { out, retry } = await failWith(envelopedTransportFailure('ETIMEDOUT'), 'amb-2');
     expect(out).toMatchObject({ outcome: 'unresolved' });
     expect(retry).not.toHaveBeenCalled();
   });
 
   it('un 5xx ne rejoue pas : Gmail a recu la requete', async () => {
-    const { out, retry, gate } = await failWith(
-      Object.assign(new Error('backend'), { code: 503 }),
-      'amb-3',
-    );
+    const { out, retry, gate } = await failWith(envelopedSendFailure(503), 'amb-3');
     expect(out).toMatchObject({ outcome: 'unresolved' });
     expect(retry).not.toHaveBeenCalled();
     expect(gate.settled[0]).toMatchObject({ outcome: 'unresolved', detail: 'http-503' });
   });
 
   it('une issue ambigue est CAPTUREE et conserve le corps', async () => {
-    const { capture, payloadKV } = await failWith(new TypeError('fetch failed'), 'amb-4');
+    const { capture, payloadKV } = await failWith(envelopedTransportFailure(), 'amb-4');
     expect(capture).toHaveBeenCalledTimes(1);
     expect(payloadKV.map.has('amb-4')).toBe(true);
   });
 
   it('un 429 (refus PROUVE, transitoire) rejoue', async () => {
-    const { out, retry, statusKV } = await failWith(
-      Object.assign(new Error('rate'), { code: 429 }),
-      'ret-1',
-    );
+    const { out, retry, statusKV } = await failWith(envelopedSendFailure(429), 'ret-1');
     expect(out).toMatchObject({ outcome: 'failed', retried: true });
     expect(retry).toHaveBeenCalledTimes(1);
     expect(statusKV.map.get('ret-1')).toBe('failed');
   });
 
   it('un 400 (refus PROUVE, definitif) ne rejoue pas mais reste `failed`', async () => {
-    const { out, retry, statusKV, payloadKV } = await failWith({ code: 400 }, 'perm-1');
+    const { out, retry, statusKV, payloadKV } = await failWith(envelopedSendFailure(400), 'perm-1');
     expect(out).toMatchObject({ outcome: 'failed', retried: false });
     expect(retry).not.toHaveBeenCalled();
     expect(statusKV.map.get('perm-1')).toBe('failed');
@@ -476,7 +474,7 @@ describe('deliverScheduledEmail — rejeu apres echec', () => {
   });
 
   it('tout echec d’envoi est CAPTURE', async () => {
-    const { capture } = await failWith({ code: 400 }, 'perm-2');
+    const { capture } = await failWith(envelopedSendFailure(400), 'perm-2');
     expect(capture).toHaveBeenCalledTimes(1);
     expect(capture.mock.calls[0][1]).toMatchObject({
       extra: expect.objectContaining({ failureClass: 'not-accepted-permanent' }),
@@ -515,7 +513,7 @@ describe('deliverScheduledEmail — une ecriture KV en echec ne perd plus le mai
         payloadKV: makeStore(),
         reservation: gate,
         send: vi.fn(async () => {
-          throw Object.assign(new Error('rate'), { code: 429 });
+          throw envelopedSendFailure(429);
         }),
         capture,
         logger: silentLogger,

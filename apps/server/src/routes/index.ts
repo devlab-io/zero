@@ -493,7 +493,37 @@ export const app = new Hono<HonoContext>()
       }
       const providerId = c.req.param('providerId');
       if (providerId === EProviders.google) {
-        const body = await c.req.json<{ historyId: string }>();
+        // Le jeton D'ABORD, le corps ENSUITE. Le corps JSON etait parse avant toute
+        // verification : un appelant non authentifie faisait travailler le parseur sur une
+        // charge qu'il choisissait. Plus rien n'est desormais lu du corps avant le 403.
+        const authHeader = c.req.header('Authorization');
+        invariant(authHeader, 'missing Authorization header');
+        const isValid = await verifyToken(authHeader.split(' ')[1]);
+        if (!isValid) {
+          // 403 et non 200 : un 200 acquittait la notification ET masquait le refus. Pub/Sub
+          // ne redélivre pas sur 403 — c'est voulu, un jeton refusé ne devient pas valide en
+          // le rejouant, et le refus reste visible dans les métriques de l'abonnement.
+          // Aucun champ du corps n'est journalise ici : il n'est pas encore lu, et il vient
+          // d'un appelant non authentifie.
+          logger.debug('[GOOGLE] invalid request');
+          span.setAttributes({ 'auth.status': 'invalid' });
+          return c.json({ error: 'Forbidden' }, { status: 403 });
+        }
+
+        span.setAttributes({ 'auth.status': 'valid' });
+
+        // Un corps illisible faisait lever `c.req.json()` : l'exception remontait au catch
+        // du handler, qui la RELANCAIT — soit une 500 opaque. Un corps mal forme est une
+        // faute de l'appelant : 400 explicite, et Pub/Sub ne redelivre pas indefiniment.
+        let body: { historyId: string };
+        try {
+          body = await c.req.json<{ historyId: string }>();
+        } catch {
+          logger.debug('[GOOGLE] malformed JSON body');
+          span.setAttributes({ 'error.type': 'invalid_json_body' });
+          return c.json({ error: 'Invalid JSON body' }, { status: 400 });
+        }
+
         const subHeader = c.req.header('x-goog-pubsub-subscription-name');
 
         span.setAttributes({
@@ -508,19 +538,6 @@ export const app = new Hono<HonoContext>()
           span.setAttributes({ 'error.type': 'missing_subscription_header' });
           return c.json({}, { status: 200 });
         }
-        const authHeader = c.req.header('Authorization');
-        invariant(authHeader, 'missing Authorization header');
-        const isValid = await verifyToken(authHeader.split(' ')[1]);
-        if (!isValid) {
-          // 403 et non 200 : un 200 acquittait la notification ET masquait le refus. Pub/Sub
-          // ne redélivre pas sur 403 — c'est voulu, un jeton refusé ne devient pas valide en
-          // le rejouant, et le refus reste visible dans les métriques de l'abonnement.
-          logger.debug('[GOOGLE] invalid request', { historyId: body.historyId });
-          span.setAttributes({ 'auth.status': 'invalid' });
-          return c.json({ error: 'Forbidden' }, { status: 403 });
-        }
-
-        span.setAttributes({ 'auth.status': 'valid' });
 
         try {
           await env.thread_queue.send({

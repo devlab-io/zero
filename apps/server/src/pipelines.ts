@@ -29,7 +29,7 @@ import { logger } from './lib/logger';
 import { EProviders } from './types';
 import type { ZeroEnv } from './env';
 import { eq } from 'drizzle-orm';
-import { createDb } from './db';
+import { withDb } from './db';
 
 // --- Journalisation des workflows Effect (A5) ----------------------------------------
 //
@@ -224,13 +224,30 @@ export class WorkflowRunner extends DurableObject<ZeroEnv> {
         });
       }
 
+      // Une lecture de curseur en ÉCHEC ne doit JAMAIS être ramenée au même `null` qu'un
+      // curseur ABSENT. L'`Effect.orElse(() => Effect.succeed(null))` qui vivait ici
+      // perdait du mail, en silence et définitivement : `null` fait démarrer `history.list`
+      // au `nextHistoryId` de CETTE notification (voir `historyId: previousHistoryId ||
+      // historyId` juste en dessous), donc la plage d'historique de la notification est
+      // sautée ; puis le run se terminant en succès, `completeHistoryNotification` avance
+      // le curseur au-delà de cette plage — les messages qu'elle portait ne sont plus
+      // jamais lus par personne.
+      //
+      // On fait donc échouer le run. C'est le seul choix qui ferme le chemin : le curseur
+      // n'est avancé que par `completeHistoryNotification`, à l'intérieur de
+      // `runZeroWorkflow`, et échouer ici empêche `runZeroWorkflow` d'être seulement
+      // appelé. L'échec est journalisé par l'`Effect.tapError` en bas de ce pipe, envoyé à
+      // Sentry par `captureEntrypointFailure`, puis rejoué par le consommateur
+      // `thread-queue` (main.ts : `captureServerException` + `msg.retry()`).
       const previousHistoryId = yield* Effect.tryPromise({
         try: () => getConnectionRegistry(this.env, connectionId).getLastProcessedHistoryId(),
-        catch: () => ({
+        catch: (error) => ({
           _tag: 'WorkflowCreationFailed' as const,
-          error: 'Failed to get history ID',
+          error: `Failed to get history ID for connection ${connectionId}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
         }),
-      }).pipe(Effect.orElse(() => Effect.succeed(null)));
+      });
 
       span.setAttributes({ 'history.previous_id': previousHistoryId || 'none' });
 
@@ -317,30 +334,27 @@ export class WorkflowRunner extends DurableObject<ZeroEnv> {
         reason: claim.reason,
       });
 
-      const { db, conn } = createDb(this.env.HYPERDRIVE.connectionString);
-
+      // `withDb` relâche la connexion dans un `finally`. Elle ne l'était auparavant que sur
+      // le chemin nominal : « connexion introuvable », « connexion non autorisée » et toute
+      // panne de la requête elle-même laissaient la connexion ouverte — et l'`Effect.catchAll`
+      // en bas de ce pipe n'y avait pas accès pour rattraper le coup.
       const foundConnection = yield* Effect.tryPromise({
-        try: async () => {
-          logger.info('[ZERO_WORKFLOW] Finding connection:', connectionId);
-          const [foundConnection] = await db
-            .select()
-            .from(connection)
-            .where(eq(connection.id, connectionId.toString()));
-          await conn.end();
-          if (!foundConnection) {
-            throw new Error(`Connection not found ${connectionId}`);
-          }
-          if (!foundConnection.accessToken || !foundConnection.refreshToken) {
-            throw new Error(`Connection is not authorized ${connectionId}`);
-          }
-          logger.info('[ZERO_WORKFLOW] Found connection:', foundConnection.id);
-          return foundConnection;
-        },
-        catch: (error) => ({ _tag: 'DatabaseError' as const, error }),
-      });
-
-      yield* Effect.tryPromise({
-        try: async () => conn.end(),
+        try: () =>
+          withDb(this.env.HYPERDRIVE.connectionString, async (db) => {
+            logger.info('[ZERO_WORKFLOW] Finding connection:', connectionId);
+            const [found] = await db
+              .select()
+              .from(connection)
+              .where(eq(connection.id, connectionId.toString()));
+            if (!found) {
+              throw new Error(`Connection not found ${connectionId}`);
+            }
+            if (!found.accessToken || !found.refreshToken) {
+              throw new Error(`Connection is not authorized ${connectionId}`);
+            }
+            logger.info('[ZERO_WORKFLOW] Found connection:', found.id);
+            return found;
+          }),
         catch: (error) => ({ _tag: 'DatabaseError' as const, error }),
       });
 
@@ -630,29 +644,25 @@ export class WorkflowRunner extends DurableObject<ZeroEnv> {
 
       if (providerId === EProviders.google) {
         yield* wfLog('[THREAD_WORKFLOW] Processing Google provider workflow');
-        const { db, conn } = createDb(this.env.HYPERDRIVE.connectionString);
-
+        // Idem `runZeroWorkflow` : la libération passe par le `finally` de `withDb`, seul
+        // chemin qui couvre aussi les deux `throw` de validation ci-dessous.
         const foundConnection = yield* Effect.tryPromise({
-          try: async () => {
-            logger.info('[THREAD_WORKFLOW] Finding connection:', connectionId);
-            const [foundConnection] = await db
-              .select()
-              .from(connection)
-              .where(eq(connection.id, connectionId.toString()));
-            if (!foundConnection) {
-              throw new Error(`Connection not found ${connectionId}`);
-            }
-            if (!foundConnection.accessToken || !foundConnection.refreshToken) {
-              throw new Error(`Connection is not authorized ${connectionId}`);
-            }
-            logger.info('[THREAD_WORKFLOW] Found connection:', foundConnection.id);
-            return foundConnection;
-          },
-          catch: (error) => ({ _tag: 'DatabaseError' as const, error }),
-        });
-
-        yield* Effect.tryPromise({
-          try: async () => conn.end(),
+          try: () =>
+            withDb(this.env.HYPERDRIVE.connectionString, async (db) => {
+              logger.info('[THREAD_WORKFLOW] Finding connection:', connectionId);
+              const [found] = await db
+                .select()
+                .from(connection)
+                .where(eq(connection.id, connectionId.toString()));
+              if (!found) {
+                throw new Error(`Connection not found ${connectionId}`);
+              }
+              if (!found.accessToken || !found.refreshToken) {
+                throw new Error(`Connection is not authorized ${connectionId}`);
+              }
+              logger.info('[THREAD_WORKFLOW] Found connection:', found.id);
+              return found;
+            }),
           catch: (error) => ({ _tag: 'DatabaseError' as const, error }),
         });
 

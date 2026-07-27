@@ -15,7 +15,9 @@
  */
 
 import type { IGetThreadResponse, IGetThreadsResponse, MailManager } from '../../lib/driver/types';
+import { attemptScheduledSend, type StoredOutgoingMessage } from '../../lib/scheduled-send';
 import { countThreads, countThreadsByLabels, deleteSpamThreads, type DB } from './db';
+import type { ScheduledSendAttemptRpcResult } from '../../lib/send-reservation';
 import { connectionToDriver, getZeroSocketAgent } from '../../lib/server-utils';
 import type { IOutgoingMessage, ISnoozeBatch, Sender } from '../../types';
 import { OutgoingMessageType, type OutgoingMessage } from './types';
@@ -143,6 +145,26 @@ export class ZeroDriver extends DurableObject<ZeroEnv> {
     const result = await this.driver.create(data);
     this.invalidateRecipientCache();
     return result;
+  }
+
+  /**
+   * Envoi différé (`send-email-queue`) — NE JETTE PAS, rend un verdict.
+   *
+   * `create`/`sendDraft` ci-dessus jettent, et c'est juste pour leurs appelants tRPC. Mais
+   * le consommateur de la file d'envoi différé, lui, doit CLASSER l'échec : rejouer un
+   * refus prouvé, ne jamais rejouer une issue ambiguë. Or une erreur jetée depuis un
+   * Durable Object arrive chez l'appelant en `Error` nu — mesuré sur workerd : propriétés
+   * propres `['stack','message','remote']`, ni `code`, ni `status`, ni `cause`. La
+   * classification faite côté appelant était donc structurellement aveugle.
+   *
+   * On classe ici, où l'enveloppe `StandardizedError` est encore entière, et seul le
+   * verdict (deux chaînes) traverse la frontière — une valeur de retour, elle, est
+   * sérialisée fidèlement.
+   */
+  async sendScheduled(payload: StoredOutgoingMessage): Promise<ScheduledSendAttemptRpcResult> {
+    const attempt = await attemptScheduledSend(this.driver, payload);
+    if (attempt.ok) this.invalidateRecipientCache();
+    return attempt;
   }
 
   async delete(id: string) {

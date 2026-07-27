@@ -60,9 +60,7 @@
             "description": "Email address of an already-connected account to select"
           }
         },
-        "required": [
-          "email"
-        ],
+        "required": ["email"],
         "additionalProperties": false
       }
     },
@@ -128,9 +126,7 @@
             "description": "Search text; matched against stored thread metadata"
           }
         },
-        "required": [
-          "query"
-        ],
+        "required": ["query"],
         "additionalProperties": false
       }
     },
@@ -148,9 +144,7 @@
             "description": "Thread id to fetch on demand"
           }
         },
-        "required": [
-          "threadId"
-        ],
+        "required": ["threadId"],
         "additionalProperties": false
       }
     },
@@ -168,9 +162,7 @@
             "description": "Thread id to summarize"
           }
         },
-        "required": [
-          "id"
-        ],
+        "required": ["id"],
         "additionalProperties": false
       }
     },
@@ -200,9 +192,7 @@
             "description": "Label id to fetch"
           }
         },
-        "required": [
-          "id"
-        ],
+        "required": ["id"],
         "additionalProperties": false
       }
     },
@@ -267,12 +257,7 @@
                   }
                 }
               },
-              "required": [
-                "body",
-                "from",
-                "subject",
-                "to"
-              ],
+              "required": ["body", "from", "subject", "to"],
               "additionalProperties": false
             },
             "description": "Prior thread messages for context"
@@ -284,9 +269,7 @@
             }
           }
         },
-        "required": [
-          "prompt"
-        ],
+        "required": ["prompt"],
         "additionalProperties": false
       }
     },
@@ -309,7 +292,8 @@
               "sending",
               "sent",
               "cancelled",
-              "failed"
+              "failed",
+              "unresolved"
             ],
             "description": "Filter to one outbox status"
           }
@@ -331,9 +315,7 @@
             "description": "Outbox item id owned by the authenticated user"
           }
         },
-        "required": [
-          "id"
-        ],
+        "required": ["id"],
         "additionalProperties": false
       }
     },
@@ -358,9 +340,7 @@
                   "type": "string"
                 }
               },
-              "required": [
-                "email"
-              ],
+              "required": ["email"],
               "additionalProperties": false
             }
           },
@@ -376,9 +356,7 @@
                   "type": "string"
                 }
               },
-              "required": [
-                "email"
-              ],
+              "required": ["email"],
               "additionalProperties": false
             }
           },
@@ -408,18 +386,12 @@
                   "type": "string"
                 }
               },
-              "required": [
-                "email"
-              ],
+              "required": ["email"],
               "additionalProperties": false
             }
           }
         },
-        "required": [
-          "message",
-          "subject",
-          "to"
-        ],
+        "required": ["message", "subject", "to"],
         "additionalProperties": false
       }
     },
@@ -463,9 +435,7 @@
             "description": "Outbox item id to cancel (idempotent)"
           }
         },
-        "required": [
-          "id"
-        ],
+        "required": ["id"],
         "additionalProperties": false
       }
     },
@@ -483,9 +453,7 @@
             "description": "Failed outbox item id to re-queue (idempotent)"
           }
         },
-        "required": [
-          "id"
-        ],
+        "required": ["id"],
         "additionalProperties": false
       }
     }

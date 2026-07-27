@@ -57,10 +57,13 @@ import {
   ScheduledSendPayloadError,
   settledOutcomeFor,
   shouldRetryAfter,
+  toScheduledSendAttempt,
+  type ScheduledSendAttemptRpcResult,
   type SendReservationRpcResult,
   type SettledSendOutcome,
 } from './send-reservation';
 import { toAttachmentFiles, type AttachmentFile, type SerializedAttachment } from './attachments';
+import type { MailManager } from './driver/types';
 import type { IOutgoingMessage } from '../types';
 
 /** Plafond d'`expirationTtl` accepté par KV (un an). */
@@ -190,6 +193,45 @@ export function parseStoredPayload(raw: string): StoredOutgoingMessage {
     throw new ScheduledSendPayloadError('stored attachments cannot be rehydrated', {
       cause: error,
     });
+  }
+}
+
+/** Le strict nécessaire du driver pour émettre un envoi différé. */
+export type ScheduledSendDriver = Pick<MailManager, 'create' | 'sendDraft'>;
+
+/**
+ * Émet l'envoi et CLASSE son issue là où l'erreur est encore entière.
+ *
+ * Appelée depuis `ZeroDriver.sendScheduled`, c'est-à-dire DANS le Durable Object. Le
+ * classement ne peut pas se faire chez l'appelant : une erreur jetée à travers la frontière
+ * RPC d'un DO y arrive en `Error` nu — mesuré sur workerd, propriétés propres
+ * `['stack','message','remote']`, ni `code`, ni `status`, ni `cause`. Seule une valeur de
+ * retour traverse fidèlement, d'où le verdict rendu plutôt que jeté.
+ */
+export async function attemptScheduledSend(
+  driver: ScheduledSendDriver | null,
+  payload: StoredOutgoingMessage,
+): Promise<ScheduledSendAttemptRpcResult> {
+  if (!driver) {
+    // Rien n'a été émis : l'instance n'a pas encore de driver. Panne d'infrastructure
+    // transitoire, pas un refus du fournisseur — donc rejouable, jamais ambiguë.
+    return {
+      ok: false,
+      failureClass: 'not-accepted-retryable',
+      detail: 'not-dispatched',
+      message: 'No driver available',
+    };
+  }
+  try {
+    if (payload.draftId) {
+      const { draftId, ...rest } = payload;
+      await driver.sendDraft(draftId, rest as IOutgoingMessage);
+    } else {
+      await driver.create(payload as IOutgoingMessage);
+    }
+    return { ok: true, failureClass: null, detail: null, message: null };
+  } catch (error) {
+    return toScheduledSendAttempt(error);
   }
 }
 

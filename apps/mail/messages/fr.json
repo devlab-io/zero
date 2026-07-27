@@ -452,6 +452,7 @@
       "emailSent": "Email envoyé",
       "sendCancelled": "Envoi annulé",
       "failedToCancel": "Échec de l'annulation",
+      "tooLateToCancel": "Trop tard pour annuler — l'email est déjà parti",
       "undo": "Annuler"
     },
     "setupPhone": {
@@ -507,7 +508,8 @@
       "failed": "L'action sur la file a échoué",
       "cannotApprove": "Seuls les brouillons prêts peuvent être approuvés",
       "cannotReject": "Cet élément ne peut plus être rejeté",
-      "cannotOpen": "Cet élément n'a aucun brouillon ou fil à ouvrir"
+      "cannotOpen": "Cet élément n'a aucun brouillon ou fil à ouvrir",
+      "cannotRetry": "Cet element ne peut pas etre rejoue : l'issue de l'envoi est inconnue."
     },
     "status": {
       "queued": "En file",
@@ -517,7 +519,8 @@
       "sending": "Envoi",
       "sent": "Envoyé",
       "cancelled": "Annulé",
-      "failed": "Échec"
+      "failed": "Échec",
+      "unresolved": "Issue inconnue"
     },
     "statusDescription": {
       "queued": "En attente de l'agent.",
@@ -527,7 +530,8 @@
       "sending": "L'envoi est en cours.",
       "sent": "Envoyé par le chemin approuvé.",
       "cancelled": "Annulé avant envoi.",
-      "failed": "Nécessite une relance ou un suivi manuel."
+      "failed": "Nécessite une relance ou un suivi manuel.",
+      "unresolved": "L'envoi a ete emis et son issue est inconnue. Non rejoue, pour ne pas creer de doublon — verifiez le dossier Envoyes."
     },
     "item": {
       "untitled": "Brouillon sans objet",

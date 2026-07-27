@@ -8,6 +8,10 @@ import {
   shouldRetryAfter,
   type SendReservationRecord,
 } from './send-reservation';
+import {
+  envelopedSendFailure,
+  envelopedTransportFailure,
+} from './driver/__fixtures__/send-failure';
 import { isRetryableGmailError } from './driver/gmail-backoff';
 import { describe, expect, it } from 'vitest';
 
@@ -94,9 +98,7 @@ describe('classifySendFailure — ne rejouer que ce qui prouve la non-acceptatio
   });
 
   it.each([500, 502, 503, 504])('un %i est ambigu : Gmail a reçu la requête', (status) => {
-    expect(classifySendFailure(Object.assign(new Error('boom'), { code: status }))).toBe(
-      'ambiguous',
-    );
+    expect(classifySendFailure(envelopedSendFailure(status))).toBe('ambiguous');
   });
 
   it('une erreur sans forme identifiable est ambiguë', () => {
@@ -107,36 +109,37 @@ describe('classifySendFailure — ne rejouer que ce qui prouve la non-acceptatio
   });
 
   it('un 429 PROUVE le refus et est transitoire : rejouable', () => {
-    const err = Object.assign(new Error('rate limited'), { code: 429 });
+    const err = envelopedSendFailure(429);
     expect(classifySendFailure(err)).toBe('not-accepted-retryable');
     expect(shouldRetryAfter(classifySendFailure(err))).toBe(true);
   });
 
   it('un 408 PROUVE que la requête n’a pas été traitée : rejouable', () => {
-    expect(classifySendFailure({ status: 408 })).toBe('not-accepted-retryable');
+    expect(classifySendFailure(envelopedSendFailure(408))).toBe('not-accepted-retryable');
   });
 
   it('un 403 de quota est rejouable, un 403 de permission ne l’est pas', () => {
-    const quota = { code: 403, errors: [{ reason: 'userRateLimitExceeded' }] };
+    const quota = envelopedSendFailure(403, ['userRateLimitExceeded']);
     expect(classifySendFailure(quota)).toBe('not-accepted-retryable');
 
-    const forbidden = { code: 403, errors: [{ reason: 'forbidden' }] };
+    const forbidden = envelopedSendFailure(403, ['forbidden']);
     expect(classifySendFailure(forbidden)).toBe('not-accepted-permanent');
     expect(shouldRetryAfter(classifySendFailure(forbidden))).toBe(false);
   });
 
   it('un 403 de quota niché dans response.data est reconnu', () => {
-    const nested = {
-      code: 403,
-      response: { data: { error: { errors: [{ reason: 'quotaExceeded' }] } } },
-    };
+    // C'est la SEULE place où Gmail met ses motifs : `response.data.error.errors`. Le
+    // premier niveau `err.errors` n'existe que sur les erreurs synthétisées par
+    // `googleapis-common`, jamais sur celles du chemin d'envoi.
+    const nested = envelopedSendFailure(403, ['quotaExceeded']);
+    expect(nested.response?.data?.error?.errors).toEqual([{ reason: 'quotaExceeded' }]);
     expect(classifySendFailure(nested)).toBe('not-accepted-retryable');
   });
 
   it.each([400, 401, 404, 413, 422])(
     'un %i est une non-acceptation PROUVÉE mais définitive : jamais rejouée',
     (status) => {
-      const cls = classifySendFailure({ code: status });
+      const cls = classifySendFailure(envelopedSendFailure(status));
       expect(cls).toBe('not-accepted-permanent');
       // Rejouer un refus déterministe brûlerait les cinq tentatives de la queue sans
       // aucune chance d'aboutir, et il n'y a pas de dead-letter queue.
@@ -171,8 +174,13 @@ describe('classifySendFailure — ne rejouer que ce qui prouve la non-acceptatio
 
   it('un 4xx déterministe ne se requalifie pas en panne réseau à cause de son libellé', () => {
     // `terminated` et `fetch failed` sont des motifs réseau ; un statut serveur prime.
-    const err = { code: 400, message: 'fetch failed while terminated' };
+    // Enveloppe RÉELLE d'un 400 dont SEUL le message est forcé : c'est une règle de
+    // précédence qu'on pince ici (le statut l'emporte sur l'heuristique de libellé), et
+    // elle doit tenir même sur la combinaison que gaxios ne compose pas de lui-même.
+    const err = envelopedSendFailure(400, [], 'fetch failed while terminated');
+    expect(err.status).toBe(400);
     expect(classifySendFailure(err)).toBe('not-accepted-permanent');
+    expect(describeSendFailure(err)).toBe('http-400');
   });
 });
 
@@ -197,7 +205,8 @@ describe('settledOutcomeFor', () => {
 
 describe('describeSendFailure — la trace exigée par une issue ambiguë', () => {
   it('nomme le statut, le transport, ou l’inconnu', () => {
-    expect(describeSendFailure({ code: 503 })).toBe('http-503');
+    expect(describeSendFailure(envelopedSendFailure(503))).toBe('http-503');
+    expect(describeSendFailure(envelopedTransportFailure())).toBe('transport-failure');
     expect(describeSendFailure(new TypeError('fetch failed'))).toBe('transport-failure');
     expect(describeSendFailure(new Error('mystère'))).toBe('unknown-error');
     expect(describeSendFailure(new ScheduledSendPayloadError('x'))).toBe('payload-unrecoverable');

@@ -40,7 +40,18 @@ const KV = {
   scheduled_emails: makeKV(),
 };
 const send_email_queue = { send: vi.fn(async () => {}) };
-const fakeEnv = { ...KV, send_email_queue };
+
+// Registre de connexion (Durable Object) : c'est desormais LUI qui decide si une
+// annulation d'envoi differe est encore possible, et non plus la seule marque KV. Le fake
+// est pilotable pour pouvoir exercer les deux verdicts, accepte et refuse.
+const registryStub = {
+  cancelScheduledSend: vi.fn(async () => ({ cancelled: true, reason: 'cancelled' })),
+};
+const SHARD_REGISTRY = {
+  idFromName: vi.fn((name: string) => ({ name })),
+  get: vi.fn(() => registryStub),
+};
+const fakeEnv = { ...KV, send_email_queue, SHARD_REGISTRY };
 vi.mock('../../env', () => ({ env: fakeEnv }));
 
 vi.mock('../../lib/logger', () => ({
@@ -446,6 +457,10 @@ describe('mail router — send (immédiat / planifié / erreurs)', () => {
 });
 
 describe('mail router — unsend (ownership)', () => {
+  beforeEach(() => {
+    registryStub.cancelScheduledSend.mockResolvedValue({ cancelled: true, reason: 'cancelled' });
+  });
+
   it('rejette l’annulation d’un email planifié d’un autre propriétaire', async () => {
     KV.scheduled_emails.map.set('mid', JSON.stringify({ connectionId: 'other' }));
     const r = await call('unsend', { messageId: 'mid' });
@@ -490,6 +505,61 @@ describe('mail router — unsend (ownership)', () => {
       KV.pending_emails_status.put.mock.calls.at(-1)?.[2] as { expirationTtl?: number } | undefined
     )?.expirationTtl;
     expect(ttl).toBeGreaterThan(12 * 3600);
+  });
+
+  // -------------------------------------------------------------------------
+  // L'annulation passe par la BARRIERE FORTE (constat 4).
+  //
+  // Elle ne vivait que dans KV, alors que `scheduled-send.ts` documente lui-meme ce
+  // controle comme un pre-filtre non garant : KV est eventuellement coherent et sans
+  // compare-and-set. La garantie appartient a la reservation SQL du Durable Object, la
+  // meme qui decide deja si l'envoi part.
+  // -------------------------------------------------------------------------
+
+  it('l’annulation est posee dans le REGISTRE, pas seulement dans KV', async () => {
+    KV.scheduled_emails.map.set('mid-do', JSON.stringify({ connectionId: 'conn-1' }));
+    const r = await call('unsend', { messageId: 'mid-do' });
+
+    expect(r).toEqual({ success: true });
+    expect(registryStub.cancelScheduledSend).toHaveBeenCalledWith('mid-do', expect.any(Number));
+    // Et sur le registre de SA connexion, pas un autre.
+    expect(SHARD_REGISTRY.idFromName).toHaveBeenCalledWith('connection:conn-1:registry');
+  });
+
+  it('un envoi DEJA EN VOL fait echouer l’annulation au lieu de la simuler', async () => {
+    registryStub.cancelScheduledSend.mockResolvedValue({ cancelled: false, reason: 'in-flight' });
+    KV.scheduled_emails.map.set('mid-late', JSON.stringify({ connectionId: 'conn-1' }));
+    KV.pending_emails_payload.map.set('mid-late', JSON.stringify({ connectionId: 'conn-1' }));
+    KV.pending_emails_payload.delete.mockClear();
+
+    const r = await call('unsend', { messageId: 'mid-late' });
+
+    expect(r).toMatchObject({ success: false });
+    expect(String(r.error)).toContain('Too late');
+    // Le defaut exact qu'on ferme : le corps du mail etait efface et l'utilisateur croyait
+    // avoir annule un envoi qui partait quand meme.
+    expect(KV.pending_emails_payload.delete).not.toHaveBeenCalled();
+  });
+
+  it('un envoi DEJA REGLE fait echouer l’annulation', async () => {
+    registryStub.cancelScheduledSend.mockResolvedValue({
+      cancelled: false,
+      reason: 'already-settled',
+    });
+    KV.scheduled_emails.map.set('mid-done', JSON.stringify({ connectionId: 'conn-1' }));
+
+    const r = await call('unsend', { messageId: 'mid-done' });
+    expect(r).toMatchObject({ success: false });
+    expect(String(r.error)).toContain('already completed');
+  });
+
+  it('le controle de propriete precede toujours l’ecriture dans le registre', async () => {
+    registryStub.cancelScheduledSend.mockClear();
+    KV.scheduled_emails.map.set('mid-thief', JSON.stringify({ connectionId: 'other' }));
+
+    const r = await call('unsend', { messageId: 'mid-thief' });
+    expect(r).toMatchObject({ success: false });
+    expect(registryStub.cancelScheduledSend).not.toHaveBeenCalled();
   });
 });
 

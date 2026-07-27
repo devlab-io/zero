@@ -37,8 +37,17 @@
 
 import { extractStatus, isNetworkError } from './driver/gmail-backoff';
 
-/** Issue définitive attachée à une réservation réglée. */
-export type SettledSendOutcome = 'sent' | 'failed' | 'unresolved';
+/**
+ * Issue définitive attachée à une réservation réglée.
+ *
+ * `cancelled` est posée par l'utilisateur AVANT que la réservation ne parte, via
+ * `ShardRegistry.cancelScheduledSend`. Elle vit dans la même table que les autres issues
+ * pour une raison précise : c'est la SEULE barrière forte du chemin. L'annulation ne
+ * vivait que dans KV (`trpc/routes/mail.ts`), or le pré-filtre KV est documenté ici même
+ * comme non garant — éventuellement cohérent, sans compare-and-set. Une annulation qui
+ * n'atteignait pas KV à temps laissait le mail partir.
+ */
+export type SettledSendOutcome = 'sent' | 'failed' | 'unresolved' | 'cancelled';
 
 export type SendReservationRecord =
   | { status: 'sending'; reservedAt: number }
@@ -46,7 +55,10 @@ export type SendReservationRecord =
 
 export type SendReservationDecision =
   | { action: 'reserve'; reason: 'first-arrival' | 'retry-after-proven-failure' }
-  | { action: 'skip'; reason: 'in-flight' | 'already-sent' | 'unresolved-outcome' };
+  | {
+      action: 'skip';
+      reason: 'in-flight' | 'already-sent' | 'unresolved-outcome' | 'cancelled';
+    };
 
 /**
  * Forme plate de `SendReservationDecision` pour traverser la frontière RPC d'un Durable
@@ -70,7 +82,9 @@ export type SendReservationRpcResult = {
  * - réglée `unresolved`               -> refuse : l'issue est AMBIGUË (transport coupé,
  *                                        timeout, 5xx). Gmail a pu accepter ;
  * - réglée `failed`                   -> réserve : la non-acceptation est PROUVÉE, rejouer
- *                                        ne peut pas produire de doublon.
+ *                                        ne peut pas produire de doublon ;
+ * - réglée `cancelled`                -> refuse : l'utilisateur a repris la main avant
+ *                                        l'émission. Refus DÉFINITIF, jamais rejouable.
  */
 export function decideSendReservation(
   existing: SendReservationRecord | undefined,
@@ -90,6 +104,8 @@ export function decideSendReservation(
       return { action: 'skip', reason: 'unresolved-outcome' };
     case 'failed':
       return { action: 'reserve', reason: 'retry-after-proven-failure' };
+    case 'cancelled':
+      return { action: 'skip', reason: 'cancelled' };
   }
 }
 
@@ -123,6 +139,36 @@ export class SendNotDispatchedError extends Error {
   constructor(message: string, options?: { cause?: unknown }) {
     super(message, options);
     this.name = 'SendNotDispatchedError';
+  }
+}
+
+/**
+ * Verdict d'un envoi CLASSÉ LÀ OÙ L'ERREUR EXISTAIT ENCORE, puis transporté à travers la
+ * frontière RPC d'un Durable Object.
+ *
+ * MESURÉ (sonde workerd via miniflare 4.20250816, local) : une erreur jetée depuis une
+ * méthode de Durable Object arrive côté Worker en `Error` NU. Propriétés propres
+ * observées : `['stack','message','remote']` ; `name` vaut `'Error'`, `message` vaut
+ * `'StandardizedError: Too Many Requests'`. Ni `code`, ni `status`, ni `errors`, ni
+ * `cause`, ni le prototype. Faire porter le statut par `StandardizedError` (correction
+ * indispensable, et suffisante pour la file de brouillons qui vit DANS le DO) ne suffit
+ * donc PAS pour l'envoi différé : son appel `agent.stub.create/sendDraft` traverse cette
+ * frontière, et tout ce qui n'est pas le message y est détruit.
+ *
+ * La seule chose qui traverse intacte est une VALEUR DE RETOUR sérialisable. `ZeroDriver`
+ * classe donc l'échec avec `classifySendFailure`/`describeSendFailure` — dans le DO, où
+ * l'enveloppe est encore entière —, rend deux chaînes, et l'appelant les rehausse ici en
+ * erreur typée. Même principe que `SendNotDispatchedError` : seul celui qui voit la panne
+ * peut la qualifier.
+ */
+export class RemoteSendFailure extends Error {
+  readonly failureClass: SendFailureClass;
+  readonly detail: string;
+  constructor(failureClass: SendFailureClass, detail: string, message: string) {
+    super(message || detail);
+    this.name = 'RemoteSendFailure';
+    this.failureClass = failureClass;
+    this.detail = detail;
   }
 }
 
@@ -180,6 +226,10 @@ function isQuota403(err: unknown): boolean {
  * L'absence de statut (panne de transport, timeout client) est ambiguë par construction.
  */
 export function classifySendFailure(error: unknown): SendFailureClass {
+  // Verdict déjà rendu dans le Durable Object, avant que la frontière RPC ne réduise
+  // l'erreur à son message. Le reclasser ici reviendrait à jeter la seule information
+  // qui ait survécu.
+  if (error instanceof RemoteSendFailure) return error.failureClass;
   if (error instanceof ScheduledSendPayloadError) return 'not-accepted-permanent';
   // Rien n'a été émis, et la cause est typiquement transitoire : rejouer est sûr ET utile.
   if (error instanceof SendNotDispatchedError) return 'not-accepted-retryable';
@@ -205,12 +255,77 @@ export function classifySendFailure(error: unknown): SendFailureClass {
  * `unresolved` serait indiscernable d'un mail jamais tenté.
  */
 export function describeSendFailure(error: unknown): string {
+  if (error instanceof RemoteSendFailure) return error.detail;
   if (error instanceof ScheduledSendPayloadError) return 'payload-unrecoverable';
   if (error instanceof SendNotDispatchedError) return 'not-dispatched';
   const status = extractStatus(error);
   if (status !== undefined) return `http-${status}`;
   if (isNetworkError(error)) return 'transport-failure';
   return 'unknown-error';
+}
+
+/**
+ * Résultat d'une tentative d'envoi traversant la frontière RPC du Durable Object.
+ *
+ * Forme PLATE, pour la raison déjà documentée sur `SendReservationRpcResult` : le typage
+ * des stubs enveloppe chaque propriété d'un objet retourné dans son propre thenable, ce
+ * qui ne s'unifie pas avec une union discriminée (TS2769). `failureClass`/`detail` sont
+ * nuls quand `ok` vaut `true`.
+ */
+export type ScheduledSendAttemptRpcResult = {
+  ok: boolean;
+  failureClass: SendFailureClass | null;
+  detail: string | null;
+  message: string | null;
+};
+
+/** Classe un échec d'envoi en résultat transportable. Appelé DANS le Durable Object. */
+export function toScheduledSendAttempt(error: unknown): ScheduledSendAttemptRpcResult {
+  return {
+    ok: false,
+    failureClass: classifySendFailure(error),
+    detail: describeSendFailure(error),
+    message: error instanceof Error ? error.message : String(error),
+  };
+}
+
+/** Rehausse un résultat RPC en erreur typée, côté appelant. `ok` doit être faux. */
+export function fromScheduledSendAttempt(
+  attempt: ScheduledSendAttemptRpcResult,
+): RemoteSendFailure {
+  return new RemoteSendFailure(
+    attempt.failureClass ?? 'ambiguous',
+    attempt.detail ?? 'unknown-error',
+    attempt.message ?? '',
+  );
+}
+
+/**
+ * Issues sur lesquelles une annulation arrive TROP TARD. `sending` n'en fait pas partie
+ * ici parce qu'il n'est pas une issue : il est traité à part, et c'est le cas critique —
+ * une tentative est en vol, l'annuler serait mentir à l'utilisateur.
+ */
+export const UNCANCELLABLE_OUTCOMES: ReadonlySet<SettledSendOutcome> = new Set<SettledSendOutcome>([
+  'sent',
+  'unresolved',
+]);
+
+/**
+ * Décide si une demande d'annulation peut encore être honorée, au vu de la réservation.
+ * Pure, pour la même raison que `decideSendReservation` : c'est la règle qui décide si un
+ * mail part ou non, elle doit être démontrable aux bornes.
+ */
+export function decideSendCancellation(
+  existing: SendReservationRecord | undefined,
+): { action: 'cancel' } | { action: 'refuse'; reason: 'in-flight' | 'already-settled' } {
+  if (!existing) return { action: 'cancel' };
+  // Une tentative est partie : son issue est inconnue, l'annulation ne peut plus rien.
+  if (existing.status === 'sending') return { action: 'refuse', reason: 'in-flight' };
+  if (UNCANCELLABLE_OUTCOMES.has(existing.outcome)) {
+    return { action: 'refuse', reason: 'already-settled' };
+  }
+  // `failed` (non-acceptation prouvée) et `cancelled` : annuler reste juste, et idempotent.
+  return { action: 'cancel' };
 }
 
 /** L'issue à inscrire dans la réservation pour une classe d'échec donnée. */

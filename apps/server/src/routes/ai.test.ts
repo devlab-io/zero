@@ -26,16 +26,29 @@ vi.mock('../services/call-service/system-prompt', () => ({ systemPrompt: () => '
 vi.mock('../env', () => ({
   env: { DISABLE_CALLS: false, VOICE_SECRET: 's', HYPERDRIVE: { connectionString: 'x' } },
 }));
-vi.mock('../db', () => ({
-  createDb: () => ({
-    db: {
-      query: {
-        user: { findFirst: async () => ({ id: 'u1', defaultConnectionId: 'c1' }) },
-        connection: { findFirst: async () => ({ id: 'c1', userId: 'u1' }) },
-      },
+const createDb = () => ({
+  db: {
+    query: {
+      user: { findFirst: async () => ({ id: 'u1', defaultConnectionId: 'c1' }) },
+      connection: { findFirst: async () => ({ id: 'c1', userId: 'u1' }) },
     },
-    conn: { end: async () => {} },
-  }),
+  },
+  conn: { end: async () => {} },
+});
+
+vi.mock('../db', () => ({
+  createDb,
+  // La route emprunte désormais `withDb` (libération de la connexion dans un `finally`).
+  // Le double reproduit ce contrat ; la libération elle-même est prouvée sur le VRAI
+  // helper dans src/db/with-db.test.ts, et sur cette route dans src/routes/ai-db-release.test.ts.
+  withDb: async (_url: string, run: (db: unknown) => Promise<unknown>) => {
+    const { db, conn } = createDb();
+    try {
+      return await run(db);
+    } finally {
+      await conn.end();
+    }
+  },
 }));
 vi.mock('./agent/tools', () => ({ tools: async () => toolset }));
 

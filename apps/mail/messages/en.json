@@ -452,6 +452,7 @@
       "emailSent": "Email sent",
       "sendCancelled": "Send cancelled",
       "failedToCancel": "Failed to cancel",
+      "tooLateToCancel": "Too late to cancel — the email has been sent",
       "undo": "Undo"
     },
     "setupPhone": {
@@ -507,7 +508,8 @@
       "failed": "Queue action failed",
       "cannotApprove": "Only ready drafts can be approved",
       "cannotReject": "This item can no longer be rejected",
-      "cannotOpen": "This item has no draft or thread to open"
+      "cannotOpen": "This item has no draft or thread to open",
+      "cannotRetry": "This item cannot be retried: the send outcome is unknown."
     },
     "status": {
       "queued": "Queued",
@@ -517,7 +519,8 @@
       "sending": "Sending",
       "sent": "Sent",
       "cancelled": "Cancelled",
-      "failed": "Failed"
+      "failed": "Failed",
+      "unresolved": "Unresolved"
     },
     "statusDescription": {
       "queued": "Waiting for the agent.",
@@ -527,7 +530,8 @@
       "sending": "Sending is in progress.",
       "sent": "Sent by the approved path.",
       "cancelled": "Cancelled before sending.",
-      "failed": "Needs a retry or manual follow-up."
+      "failed": "Needs a retry or manual follow-up.",
+      "unresolved": "Send was issued and its outcome is unknown. Not replayed, to avoid a duplicate — check the Sent folder."
     },
     "item": {
       "untitled": "Untitled draft",

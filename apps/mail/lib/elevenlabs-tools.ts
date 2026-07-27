@@ -1,5 +1,5 @@
-import { log } from '@/lib/log';
 import { trpcClient } from '@/providers/query-provider';
+import { log } from '@/lib/log';
 
 /**
  * Normalises a caught value into a display string. tRPC/fetch rejections are
@@ -50,6 +50,7 @@ export const toolExecutors = {
         })),
       };
     } catch (error) {
+      log.error('elevenlabs listEmails failed', error);
       return { success: false, error: getErrorMessage(error) };
     }
   },
@@ -90,6 +91,7 @@ export const toolExecutors = {
         message: `Retrieved email with thread ID: ${threadId}`,
       };
     } catch (error) {
+      log.error('elevenlabs getEmail failed', error);
       return { success: false, error: getErrorMessage(error) };
     }
   },
@@ -108,6 +110,7 @@ export const toolExecutors = {
       });
       return { success: true, message: 'Email sent successfully' };
     } catch (error) {
+      log.error('elevenlabs sendEmail failed', error);
       return { success: false, error: getErrorMessage(error) };
     }
   },
@@ -116,6 +119,7 @@ export const toolExecutors = {
       await trpcClient.mail.markAsRead.mutate({ ids: params.threadIds });
       return { success: true, message: 'Emails marked as read' };
     } catch (error) {
+      log.error('elevenlabs markAsRead failed', error);
       return { success: false, error: getErrorMessage(error) };
     }
   },
@@ -124,6 +128,7 @@ export const toolExecutors = {
       await trpcClient.mail.markAsUnread.mutate({ ids: params.threadIds });
       return { success: true, message: 'Emails marked as unread' };
     } catch (error) {
+      log.error('elevenlabs markAsUnread failed', error);
       return { success: false, error: getErrorMessage(error) };
     }
   },
@@ -132,6 +137,7 @@ export const toolExecutors = {
       await trpcClient.mail.bulkArchive.mutate({ ids: params.threadIds });
       return { success: true, message: 'Emails archived' };
     } catch (error) {
+      log.error('elevenlabs archiveEmails failed', error);
       return { success: false, error: getErrorMessage(error) };
     }
   },
@@ -140,6 +146,7 @@ export const toolExecutors = {
       await trpcClient.mail.bulkDelete.mutate({ ids: params.threadIds });
       return { success: true, message: 'Emails moved to trash' };
     } catch (error) {
+      log.error('elevenlabs deleteEmails failed', error);
       return { success: false, error: getErrorMessage(error) };
     }
   },
@@ -156,6 +163,7 @@ export const toolExecutors = {
       await trpcClient.mail.bulkDelete.mutate({ ids: [threadId] });
       return { success: true, message: 'Email deleted' };
     } catch (error) {
+      log.error('elevenlabs deleteEmail failed', error);
       return { success: false, error: getErrorMessage(error) };
     }
   },
@@ -173,6 +181,7 @@ export const toolExecutors = {
 
       return { success: true, message: 'Label created' };
     } catch (error) {
+      log.error('elevenlabs createLabel failed', error);
       return { success: false, error: getErrorMessage(error) };
     }
   },
@@ -191,6 +200,7 @@ export const toolExecutors = {
       });
       return { success: true, message: 'Label applied' };
     } catch (error) {
+      log.error('elevenlabs applyLabel failed', error);
       return { success: false, error: getErrorMessage(error) };
     }
   },
@@ -219,6 +229,7 @@ export const toolExecutors = {
       });
       return { success: true, message: 'Label removed' };
     } catch (error) {
+      log.error('elevenlabs removeLabel failed', error);
       return { success: false, error: getErrorMessage(error) };
     }
   },
@@ -243,6 +254,7 @@ export const toolExecutors = {
         })),
       };
     } catch (error) {
+      log.error('elevenlabs searchEmails failed', error);
       return { success: false, error: getErrorMessage(error) };
     }
   },
@@ -294,6 +306,7 @@ export const toolExecutors = {
         result: text,
       };
     } catch (error) {
+      log.error('elevenlabs webSearch failed', error);
       return { success: false, error: getErrorMessage(error) };
     }
   },
@@ -363,6 +376,7 @@ export const toolExecutors = {
         };
       }
     } catch (error) {
+      log.error('elevenlabs summarizeEmail failed', error);
       return { success: false, error: getErrorMessage(error) };
     }
   },

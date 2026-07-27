@@ -260,6 +260,26 @@ describe('outbox inspect / cancel / retry — ownership-scoped + idempotent', ()
     );
   });
 
+  it('un item `unresolved` ne peut pas etre rejoue par l’outil MCP', async () => {
+    // Meme verrou que l'UI et que le routeur tRPC : un envoi d'issue INCONNUE a pu etre
+    // accepte par Gmail, le rejouer renverrait le mail. La surface agent ne doit pas etre
+    // la porte derobee par laquelle le doublon rentre.
+    const item = seedItem('unresolved');
+    let retried = false;
+    const box = {
+      current: item,
+      getItem: async () => item,
+      retry: async () => {
+        retried = true;
+        return item;
+      },
+    };
+    expect(await handleRetryOutboxItem(box, 'outbox-1')).toMatch(
+      /can only be retried from status failed; current status unresolved/,
+    );
+    expect(retried).toBe(false);
+  });
+
   it('formatOutboxItem never leaks send internals', () => {
     const parsed = JSON.parse(formatOutboxItem(seedItem('draft_ready')));
     expect(parsed).toMatchObject({

@@ -15,6 +15,7 @@
  */
 
 import {
+  decideSendCancellation,
   decideSendReservation,
   type SendReservationRecord,
   type SendReservationRpcResult,
@@ -256,6 +257,48 @@ export class ShardRegistry extends DurableObject<ZeroEnv> {
     }
 
     return { action: decision.action, reason: decision.reason };
+  }
+
+  /**
+   * ANNULE un envoi différé, dans la seule barrière forte du chemin.
+   *
+   * Le défaut fermé : l'annulation n'était posée que dans KV (`trpc/routes/mail.ts`), et
+   * `scheduled-send.ts` documente lui-même ce contrôle KV comme « un pré-filtre bon marché »
+   * dont la garantie repose ailleurs. KV est éventuellement cohérent et sans
+   * compare-and-set : une marque d'annulation écrite pendant que la livraison lisait encore
+   * `pending` laissait le mail partir. La réservation SQL du DO, elle, est atomique.
+   *
+   * Même compare-and-set que {@link reserveScheduledSend}, à l'envers : la clause `WHERE`
+   * n'autorise l'annulation que si aucune tentative n'est en vol ni réglée pour de bon.
+   * `rowsWritten` est vérifié, donc un perdant de course apprend qu'il a perdu au lieu de
+   * croire avoir annulé.
+   *
+   * Idempotente : ré-annuler une annulation reste un succès.
+   */
+  async cancelScheduledSend(
+    messageId: string,
+    now: number,
+  ): Promise<{ cancelled: boolean; reason: string }> {
+    const decision = decideSendCancellation(this.readReservation(messageId));
+    if (decision.action === 'refuse') return { cancelled: false, reason: decision.reason };
+
+    const cursor = this.sql.exec(
+      `INSERT INTO scheduled_send_reservations (message_id, status, outcome, reserved_at, settled_at, detail)
+       VALUES (?, 'settled', 'cancelled', NULL, ?, 'user-cancelled')
+       ON CONFLICT(message_id) DO UPDATE SET
+         status = 'settled', outcome = 'cancelled', reserved_at = NULL,
+         settled_at = excluded.settled_at, detail = 'user-cancelled'
+       WHERE scheduled_send_reservations.status = 'settled'
+         AND scheduled_send_reservations.outcome IN ('failed', 'cancelled')`,
+      messageId,
+      now,
+    );
+    cursor.toArray();
+    // Une course a fait passer la réservation en `sending` (ou l'a réglée) entre la lecture
+    // et l'écriture : l'annulation n'a pas eu lieu, et il faut le dire.
+    if (cursor.rowsWritten < 1) return { cancelled: false, reason: 'in-flight' };
+
+    return { cancelled: true, reason: 'cancelled' };
   }
 
   /**

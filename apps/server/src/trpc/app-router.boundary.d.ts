@@ -1152,8 +1152,8 @@ export declare const appRouter: import('@trpc/server').TRPCBuiltRouter<
           input: {
             folder?: string | undefined;
             q?: string | undefined;
-            labelIds?: string[] | undefined;
             maxResults?: number | undefined;
+            labelIds?: string[] | undefined;
             cursor?: string | undefined;
           };
           output: {
@@ -1422,6 +1422,12 @@ export declare const appRouter: import('@trpc/server').TRPCBuiltRouter<
             | {
                 readonly success: false;
                 readonly error: 'Invalid payload data';
+              }
+            | {
+                readonly success: false;
+                readonly error:
+                  | 'Too late to cancel: the send is already in progress'
+                  | 'Too late to cancel: the send already completed';
               }
             | {
                 success: boolean;
@@ -1763,8 +1769,9 @@ export declare const appRouter: import('@trpc/server').TRPCBuiltRouter<
                   | 'sent'
                   | 'queued'
                   | 'failed'
-                  | 'sending'
+                  | 'unresolved'
                   | 'cancelled'
+                  | 'sending'
                   | 'generating'
                   | 'draft_ready'
                   | 'approved'

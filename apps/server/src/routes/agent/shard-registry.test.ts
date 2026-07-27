@@ -13,12 +13,17 @@
 
 import type { SendReservationRpcResult, SettledSendOutcome } from '../../lib/send-reservation';
 import { deliverScheduledEmail, type ScheduledSendStore } from '../../lib/scheduled-send';
+import { envelopedSendFailure } from '../../lib/driver/__fixtures__/send-failure';
 import { createDurableObjectCtx } from '../../../tests/stubs/sqlite-sql-storage';
 import { describe, expect, it, vi } from 'vitest';
 import { ShardRegistry } from './shard-registry';
 
 type RegistryLike = {
   reserveScheduledSend(messageId: string, now: number): Promise<SendReservationRpcResult>;
+  cancelScheduledSend(
+    messageId: string,
+    now: number,
+  ): Promise<{ cancelled: boolean; reason: string }>;
   settleScheduledSend(
     messageId: string,
     outcome: SettledSendOutcome,
@@ -202,14 +207,14 @@ describe('ShardRegistry.reserveScheduledSend — exclusion mutuelle (réfutation
 // Le chemin de production complet : deliverScheduledEmail + le vrai DO.
 // ---------------------------------------------------------------------------
 
-describe('deliverScheduledEmail × ShardRegistry — un seul envoi réel (réfutation b)', () => {
-  /** Branchement identique à celui de main.ts (`createSendReservationGate`). */
-  const gateFor = (registry: RegistryLike) => ({
-    reserve: (messageId: string, now: number) => registry.reserveScheduledSend(messageId, now),
-    settle: (messageId: string, outcome: SettledSendOutcome, now: number, detail?: string) =>
-      registry.settleScheduledSend(messageId, outcome, now, detail),
-  });
+/** Branchement identique à celui de main.ts (`createSendReservationGate`). */
+const gateFor = (registry: RegistryLike) => ({
+  reserve: (messageId: string, now: number) => registry.reserveScheduledSend(messageId, now),
+  settle: (messageId: string, outcome: SettledSendOutcome, now: number, detail?: string) =>
+    registry.settleScheduledSend(messageId, outcome, now, detail),
+});
 
+describe('deliverScheduledEmail × ShardRegistry — un seul envoi réel (réfutation b)', () => {
   it('DEUX LIVRAISONS CONCURRENTES du même message : le driver n’est appelé QU’UNE FOIS', async () => {
     const registry = makeRegistry();
     const statusKV = makeStore({ 'msg-race': 'pending' });
@@ -348,7 +353,8 @@ describe('deliverScheduledEmail × ShardRegistry — un seul envoi réel (réfut
     const registry = makeRegistry();
     const statusKV = makeStore({ 'msg-429': 'pending' });
     const payloadKV = makeStore({ 'msg-429': JSON.stringify(BODY) });
-    const rateLimited = Object.assign(new Error('rate limited'), { code: 429 });
+    // Vraie `GaxiosError` du paquet installé, passée par la vraie enveloppe du driver.
+    const rateLimited = envelopedSendFailure(429);
     const send = vi.fn().mockRejectedValueOnce(rateLimited).mockResolvedValue(undefined);
     const retry = vi.fn();
     const deps = {
@@ -367,5 +373,122 @@ describe('deliverScheduledEmail × ShardRegistry — un seul envoi réel (réfut
     const second = await deliverScheduledEmail({ messageId: 'msg-429', connectionId: 'c' }, deps);
     expect(second).toEqual({ outcome: 'sent' });
     expect(send).toHaveBeenCalledTimes(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Annulation d'un envoi différé (constat 4) — dans la barrière FORTE, pas dans KV.
+//
+// Même exigence de preuve que pour la réservation : rien n'est simulé. C'est la classe
+// `ShardRegistry` déployée, sur un vrai moteur SQLite, avec ses migrations réellement
+// appliquées ; le `ON CONFLICT ... WHERE` et `rowsWritten` sont ceux de SQLite. La
+// question à laquelle ces tests répondent n'est pas « la décision pure dit-elle non ? »
+// mais « un mail annulé peut-il encore partir ? ».
+// ---------------------------------------------------------------------------
+
+describe('ShardRegistry.cancelScheduledSend — annuler avant que ça parte', () => {
+  it('une annulation avant toute tentative EMPÊCHE l’envoi', async () => {
+    const registry = makeRegistry();
+
+    expect(await registry.cancelScheduledSend('msg-c1', 1_000)).toEqual({
+      cancelled: true,
+      reason: 'cancelled',
+    });
+
+    // Le contrôle qui compte : la livraison qui arrive ensuite refuse de réserver.
+    expect(await registry.reserveScheduledSend('msg-c1', 2_000)).toEqual({
+      action: 'skip',
+      reason: 'cancelled',
+    });
+  });
+
+  it('bout en bout : un mail annulé n’est jamais remis au driver', async () => {
+    const registry = makeRegistry();
+    const send = vi.fn();
+
+    await registry.cancelScheduledSend('msg-c2', 1_000);
+
+    const out = await deliverScheduledEmail(
+      { messageId: 'msg-c2', connectionId: 'c', mail: BODY },
+      {
+        statusKV: makeStore({ 'msg-c2': 'pending' }),
+        payloadKV: makeStore({ 'msg-c2': JSON.stringify(BODY) }),
+        reservation: gateFor(registry),
+        send,
+        logger: silentLogger,
+      },
+    );
+
+    expect(out).toMatchObject({ outcome: 'skipped' });
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it('une annulation ARRIVÉE TROP TARD est refusée, pas silencieusement avalée', async () => {
+    const registry = makeRegistry();
+    // Une livraison a réservé : la tentative est en vol.
+    expect(await registry.reserveScheduledSend('msg-c3', 1_000)).toMatchObject({
+      action: 'reserve',
+    });
+
+    // Le défaut fermé ici : côté KV, cette annulation « réussissait », effaçait le payload,
+    // et l'utilisateur croyait avoir annulé un mail qui partait quand même.
+    expect(await registry.cancelScheduledSend('msg-c3', 2_000)).toEqual({
+      cancelled: false,
+      reason: 'in-flight',
+    });
+  });
+
+  it('on n’annule pas un mail déjà PARTI', async () => {
+    const registry = makeRegistry();
+    await registry.reserveScheduledSend('msg-c4', 1_000);
+    await registry.settleScheduledSend('msg-c4', 'sent', 2_000);
+
+    expect(await registry.cancelScheduledSend('msg-c4', 3_000)).toEqual({
+      cancelled: false,
+      reason: 'already-settled',
+    });
+  });
+
+  it('on n’annule pas une issue AMBIGUË : Gmail a pu accepter', async () => {
+    const registry = makeRegistry();
+    await registry.reserveScheduledSend('msg-c5', 1_000);
+    await registry.settleScheduledSend('msg-c5', 'unresolved', 2_000, 'transport-failure');
+
+    expect(await registry.cancelScheduledSend('msg-c5', 3_000)).toEqual({
+      cancelled: false,
+      reason: 'already-settled',
+    });
+  });
+
+  it('un échec PROUVÉ reste annulable — c’est le seul état rejouable', async () => {
+    const registry = makeRegistry();
+    await registry.reserveScheduledSend('msg-c6', 1_000);
+    await registry.settleScheduledSend('msg-c6', 'failed', 2_000, 'http-429');
+
+    expect(await registry.cancelScheduledSend('msg-c6', 3_000)).toMatchObject({ cancelled: true });
+    // Et le rejeu qui allait suivre ne part plus.
+    expect(await registry.reserveScheduledSend('msg-c6', 4_000)).toEqual({
+      action: 'skip',
+      reason: 'cancelled',
+    });
+  });
+
+  it('annuler deux fois reste un succès (idempotence)', async () => {
+    const registry = makeRegistry();
+    await registry.cancelScheduledSend('msg-c7', 1_000);
+    expect(await registry.cancelScheduledSend('msg-c7', 2_000)).toMatchObject({ cancelled: true });
+  });
+
+  it('l’annulation est INSCRITE et lisible, pas seulement effective', async () => {
+    const registry = makeRegistry();
+    await registry.cancelScheduledSend('msg-c8', 1_000);
+
+    // Sans trace, un mail jamais parti serait indiscernable d'un mail jamais tenté — la
+    // procédure de lecture `mail.scheduledSendStatus` s'appuie sur ces colonnes.
+    expect(await registry.getScheduledSendReservation('msg-c8')).toMatchObject({
+      status: 'settled',
+      outcome: 'cancelled',
+      detail: 'user-cancelled',
+    });
   });
 });

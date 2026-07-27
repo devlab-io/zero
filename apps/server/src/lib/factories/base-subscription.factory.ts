@@ -2,7 +2,7 @@ import { defaultLabels, EProviders } from '../../types';
 
 import { connection } from '../../db/schema';
 
-import { createDb } from '../../db';
+import { withDb } from '../../db';
 import { eq } from 'drizzle-orm';
 import { env } from '../../env';
 
@@ -42,13 +42,15 @@ export abstract class BaseSubscriptionFactory {
   abstract verifyToken(token: string): Promise<boolean>;
 
   protected async getConnectionFromDb(connectionId: string) {
-    // Revisit
-    const { db, conn } = createDb(env.HYPERDRIVE.connectionString);
-    const connectionData = await db.query.connection.findFirst({
-      where: eq(connection.id, connectionId),
-    });
-    await conn.end();
-    return connectionData;
+    // `withDb` relâche la connexion dans un `finally` : le `conn.end()` d'origine ne
+    // s'exécutait que si la requête aboutissait, alors que ce chemin est celui du
+    // renouvellement du watch Gmail — appelé en boucle par la queue `subscribe-queue`,
+    // donc celui où une connexion perdue par échec se répétait le plus.
+    return withDb(env.HYPERDRIVE.connectionString, (db) =>
+      db.query.connection.findFirst({
+        where: eq(connection.id, connectionId),
+      }),
+    );
   }
 
   protected async initializeConnectionLabels(connectionId: string): Promise<void> {
