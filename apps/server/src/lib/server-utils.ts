@@ -613,6 +613,25 @@ export const getActiveConnection = async () => {
   const activeConnection = await stub.getActiveConnection(sessionUser.id);
   if (activeConnection) return activeConnection;
 
+  // Devlab (robustesse) : un `null` du DO ne suffit pas à détruire la session.
+  // Le DO peut répondre `null` de façon transitoire (démarrage à froid, cache
+  // local pas encore peuplé) ; on confirme d'abord contre Postgres, source de
+  // vérité, et on ne déconnecte que si l'utilisateur n'a réellement aucune
+  // connexion. Sinon on remonte une erreur transitoire, que l'appelant peut
+  // réessayer sans perdre sa session.
+  const db = await getZeroDB(sessionUser.id);
+  const connections = await db.findManyConnections().catch((err: unknown) => {
+    logger.warn(`[getActiveConnection] Confirmation Postgres échouée pour ${sessionUser.id}:`, err);
+    return null;
+  });
+
+  if (connections === null || connections.length > 0) {
+    logger.warn(
+      `[getActiveConnection] DO sans connexion active pour ${sessionUser.id} mais Postgres en rapporte ${connections?.length ?? 'inconnu'} — traité comme transitoire, session conservée`,
+    );
+    throw new Error('Active connection temporarily unavailable');
+  }
+
   try {
     if (auth) {
       await auth.api.revokeSession({ headers: c.req.raw.headers });

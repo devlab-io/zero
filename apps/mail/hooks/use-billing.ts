@@ -1,7 +1,7 @@
 import { useAutumn, useCustomer } from 'autumn-js/react';
-import { signOut } from '@/lib/auth-client';
 import { isProCustomer } from '@/lib/utils';
 import { useEffect, useMemo } from 'react';
+import { log } from '@/lib/log';
 
 type FeatureState = {
   total: number;
@@ -63,8 +63,13 @@ export const useBilling = () => {
   const { customer, refetch, isLoading, error } = useCustomer();
   const { attach, track, openBillingPortal } = useAutumn();
 
+  // Devlab (robustesse) : un échec de l'API de facturation ne doit PAS
+  // déconnecter. Ce `signOut()` transformait n'importe quel hoquet d'Autumn —
+  // ou un simple appel parti avant que la session ne soit établie — en
+  // déconnexion complète de l'utilisateur. On journalise et on retombe sur
+  // DEFAULT_FEATURES ; l'authentification reste gérée par la couche tRPC.
   useEffect(() => {
-    if (error) signOut();
+    if (error) log.error('[useBilling] Échec de récupération du client Autumn', error);
   }, [error]);
 
   const { isPro, ...customerFeatures } = useMemo(() => {
