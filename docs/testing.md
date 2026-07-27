@@ -44,7 +44,7 @@ E2E lives in `packages/testing` and is **run locally, not in CI** for this wave.
 # one-time: install Playwright browsers
 pnpm --filter=@zero/testing exec playwright install
 
-# start the app the specs drive (default baseURL http://localhost:3000)
+# start the app the specs drive (baseURL http://localhost:3001 — le port servi par vite)
 pnpm --filter=@zero/mail start           # or: pnpm dev
 
 # in another shell, run the e2e suite
@@ -87,8 +87,9 @@ retries and `forbidOnly`.
 5. **Lint security-critical files** — `oxlint@1.9.0` (pinned to the same version
    as `.husky/pre-commit`; no `@latest` anywhere).
 6. **Ratchets (non-growing, blocking)** — `loc-ratchet` (A1 LOC per-file budgets +
-   cross-app frontier ≤5), `type-ratchet` (A2 `any`: mail ≤79, server ≤91),
-   `console-ratchet` (A5 `console.*`: server ≤462, front ≤143). Each runs the
+   cross-app frontier imports **= 0**, max 0), `type-ratchet` (A2 `any`: mail ≤23,
+   server ≤15, total ≤38 ; plus `@ts-expect-error` ≤4, `@ts-ignore` ≤1, non-null
+   assertions = 0), `console-ratchet` (A5 `console.*`: server ≤8, front ≤6). Each runs the
    FROZEN grading-rubric command verbatim so counts match the cold judge. Bornes
    are the niveau9 baseline; they prevent regression only — the palier-9 targets
    are reached by later issues lowering these numbers.
@@ -108,6 +109,11 @@ retries and `forbidOnly`.
     (`--env local`) and mail (no worker deploy; validates the bundle).
 
 ### Ratchet scripts (`scripts/checks/`)
+
+> Les seuils ci-dessus ont été re-mesurés le 2026-07-26 contre les scripts eux-mêmes
+> (`scripts/checks/*.mjs`) : ils étaient publiés 3 à 58 fois plus larges que la réalité
+> (`any` mail 79 pour 23, `console.*` serveur 462 pour 8), ce qui laissait croire à une
+> tolérance de dette qui n'existe pas.
 
 Each ratchet re-runs the exact frozen counting command and exits non-zero with
 context when a budget is exceeded. Run them locally the same way CI does:

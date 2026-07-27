@@ -4,6 +4,7 @@ import { getBrowserTimezone, isValidTimezone } from './timezones';
 import { APIError, createAuthMiddleware } from 'better-auth/api';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import { getZeroDB, resetConnection } from './server-utils';
+import { resolveTrustedOrigins } from './trusted-origins';
 import { getSocialProviders } from './auth-providers';
 import { redis, resend, twilio } from './services';
 import { defaultUserSettings } from './schemas';
@@ -82,7 +83,15 @@ const scheduleCampaign = (userInfo: { address: string; name: string }) =>
 
 const connectionHandlerHook = async (account: Account) => {
   if (!account.accessToken || !account.refreshToken) {
-    logger.error('Missing Access/Refresh Tokens', { account });
+    // Never log the account object itself: it carries the Google OAuth access/refresh
+    // tokens and the idToken (pitbull A1, axe 10).
+    logger.error('Missing Access/Refresh Tokens', {
+      accountId: account.id,
+      providerId: account.providerId,
+      userId: account.userId,
+      hasAccess: Boolean(account.accessToken),
+      hasRefresh: Boolean(account.refreshToken),
+    });
     throw new APIError('EXPECTATION_FAILED', {
       message: 'Missing Access/Refresh Tokens, contact us on Discord for support',
     });
@@ -157,7 +166,15 @@ const connectionHandlerHook = async (account: Account) => {
 // request ». De plus le flux réel n'appelle createAuth qu'UNE fois par requête (middleware /api
 // OU un mount /mcp|/sse|discovery — jamais cumulés), donc « multiple par requête » est faux.
 // Une connexion neuve par requête est le contrat correct en Workers. Voir rapport #31.
-export const createAuth = async () => {
+//
+// CE QUI MANQUAIT : la connexion neuve n'était JAMAIS refermée. `createAuthConfig` faisait
+// `const { db } = createDb(...)` sans capturer `conn`, et `createAuth` est appelé sur le
+// chemin le plus chaud du service (middleware `'*'` de l'app Hono, plus `authorizeAgent`),
+// c'est-à-dire à CHAQUE requête d'API. Un pool postgres-js neuf par requête, abandonné,
+// jusqu'à l'éviction de l'isolate. `createAuthLease` rend désormais la connexion avec
+// l'instance : l'appelant la relâche quand SA requête est finie — la seule borne juste,
+// puisque `c.var.auth` reste consommé après le middleware (`auth.handler`, `signOut` tRPC).
+const buildAuth = async () => {
   const twilioClient = twilio();
   // Devlab: Dub attribution analytics is opt-in — only wire the plugin when a
   // DUB_API_KEY is configured; otherwise auth events tried to phone dub.co.
@@ -171,7 +188,9 @@ export const createAuth = async () => {
       })()
     : null;
 
-  return betterAuth({
+  const { config, release } = createAuthConfig();
+
+  const auth = betterAuth({
     plugins: [
       ...(dubPlugin ? [dubPlugin] : []),
       mcp({
@@ -337,16 +356,34 @@ export const createAuth = async () => {
         }
       }),
     },
-    ...createAuthConfig(),
+    ...config,
   });
+
+  return { auth, release };
 };
+
+/**
+ * Instance better-auth ET la libération de la connexion Postgres qu'elle capture. À
+ * préférer partout : l'appelant sait, lui, quand sa requête est terminée.
+ */
+export const createAuthLease = buildAuth;
+
+/** Instance seule. Réservé aux appelants dont la requête relâche par un autre chemin. */
+export const createAuth = async () => (await buildAuth()).auth;
 
 const createAuthConfig = () => {
   // Devlab self-host: Redis optionnel — sans REDIS_URL/TOKEN, better-auth
   // retombe sur Postgres seul (pas de secondaryStorage).
   const cache = env.REDIS_URL && env.REDIS_TOKEN ? redis() : null;
-  const { db } = createDb(env.HYPERDRIVE.connectionString);
-  return {
+  const { db, conn } = createDb(env.HYPERDRIVE.connectionString);
+  // Ne doit JAMAIS rejeter : elle est appelée depuis un `finally` / un `waitUntil`, où une
+  // exception masquerait l'erreur d'origine ou tuerait l'invocation pour rien.
+  const release = async () => {
+    await conn.end().catch((error: unknown) => {
+      logger.error('[AUTH] échec de la libération de la connexion Postgres', error);
+    });
+  };
+  const config = {
     database: drizzleAdapter(db, { provider: 'pg' }),
     ...(cache
       ? {
@@ -376,16 +413,14 @@ const createAuthConfig = () => {
       },
     },
     baseURL: env.VITE_PUBLIC_BACKEND_URL,
-    trustedOrigins: [
-      'https://app.0.email',
-      'https://sapi.0.email',
-      'https://staging.0.email',
-      'https://0.email',
-      'http://localhost:3000',
-      // Devlab: front served on 3001 locally + trust the configured app URL
-      'http://localhost:3001',
-      env.VITE_PUBLIC_APP_URL,
-    ],
+    // Origines de confiance : celles de CE déploiement, et rien d'autre. La liste d'origine
+    // portait quatre domaines de l'AMONT (0.email, app./sapi./staging.0.email) et les deux
+    // ports locaux, appliqués jusqu'en production — soit quatre tiers autorisés à porter des
+    // requêtes authentifiées contre nos utilisateurs, sur une infrastructure que nous ne
+    // contrôlons pas. Les origines locales ne survivent qu'en développement local ;
+    // `BETTER_AUTH_TRUSTED_ORIGINS` (liste séparée par des virgules) reste le point
+    // d'extension explicite pour un déploiement qui en a besoin.
+    trustedOrigins: resolveTrustedOrigins(env as unknown as Record<string, string | undefined>),
     session: {
       cookieCache: {
         enabled: true,
@@ -411,11 +446,9 @@ const createAuthConfig = () => {
       throw: true,
     },
   } satisfies BetterAuthOptions;
-};
 
-export const createSimpleAuth = () => {
-  return betterAuth(createAuthConfig());
+  return { config, release };
 };
 
 export type Auth = Awaited<ReturnType<typeof createAuth>>;
-export type SimpleAuth = ReturnType<typeof createSimpleAuth>;
+export type AuthLease = Awaited<ReturnType<typeof createAuthLease>>;

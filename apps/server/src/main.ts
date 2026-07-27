@@ -1,25 +1,28 @@
-import { logger } from './lib/logger';
 import {
-  toAttachmentFiles,
-  type SerializedAttachment,
-  type AttachmentFile,
-} from './lib/attachments';
+  deliverScheduledEmail,
+  type ScheduledSendStore,
+  type StoredOutgoingMessage,
+} from './lib/scheduled-send';
 import { SyncThreadsCoordinatorWorkflow } from './workflows/sync-threads-coordinator-workflow';
-import { WorkerEntrypoint } from 'cloudflare:workers';
-import { getZeroAgent } from './lib/server-utils';
+import { fromScheduledSendAttempt, SendNotDispatchedError } from './lib/send-reservation';
 import { SyncThreadsWorkflow } from './workflows/sync-threads-workflow';
+import { createSendReservationGate } from './lib/connection-registry';
 import { ShardRegistry, ZeroAgent, ZeroDriver } from './routes/agent';
+import { renewWatchSubscription } from './lib/subscribe-queue';
 import { ThreadSyncWorker } from './routes/agent/sync-worker';
-import { EProviders, type IEmailSendBatch, type IOutgoingMessage } from './types';
+import { EProviders, type IEmailSendBatch } from './types';
 import { ThinkingMCP } from './lib/sequential-thinking';
+import { WorkerEntrypoint } from 'cloudflare:workers';
+import { captureServerException } from './lib/sentry';
+import { bootEnv, env, type ZeroEnv } from './env';
+import { getZeroAgent } from './lib/server-utils';
 import { enableBrainFunction } from './lib/brain';
 import { ZeroMCP } from './routes/agent/mcp';
 import { WorkflowRunner } from './pipelines';
 import { initTracing } from './lib/tracing';
-import { bootEnv, env, type ZeroEnv } from './env';
-import { captureServerException } from './lib/sentry';
-import { createDb } from './db';
+import { logger } from './lib/logger';
 import { app } from './routes';
+import { withDb } from './db';
 
 const handler = {
   async fetch(request: Request, env: ZeroEnv, ctx: ExecutionContext): Promise<Response> {
@@ -45,92 +48,124 @@ export default class Entry extends WorkerEntrypoint<ZeroEnv> {
     batch: MessageBatch<unknown> | { queue: string; messages: Array<{ body: IEmailSendBatch }> },
   ) {
     bootEnv(this.env as unknown as Record<string, unknown>);
+    try {
+      await this.dispatchQueueBatch(batch);
+    } catch (err) {
+      // `queue()` n'etait couvert par aucune capture : une exception ici ne produisait
+      // qu'une ligne de log, jamais un evenement Sentry ni une alerte.
+      this.ctx.waitUntil(
+        captureServerException(err, this.env, { transaction: `queue ${batch.queue}` }),
+      );
+      throw err;
+    }
+  }
+
+  /**
+   * Livre chaque message d'un lot INDÉPENDAMMENT.
+   *
+   * `Promise.all` rejetait le lot entier au premier message en échec. Combiné au
+   * `JSON.parse` non gardé de `scheduled-send.ts`, un seul payload KV corrompu faisait
+   * rejouer TOUS les messages du lot, à chaque tentative, jusqu'à épuisement des cinq
+   * essais — et sans dead-letter queue, les mails sains du lot étaient renvoyés cinq fois
+   * chacun. `allSettled` isole les messages ; un rejet résiduel est journalisé, CAPTURÉ, et
+   * suivi d'un `retry()` sur CE message seul — sinon l'isolation transformerait une panne
+   * inattendue (lecture KV en échec, DO injoignable) en acquittement muet, c'est-à-dire en
+   * mail perdu. Tous les points de rejet possibles sont antérieurs à la réservation
+   * d'envoi, donc redemander une livraison ne peut pas produire de doublon.
+   */
+  private async settleQueueBatch(
+    queue: string,
+    entries: Array<{ task: Promise<unknown>; retry?: () => void }>,
+  ): Promise<void> {
+    const results = await Promise.allSettled(entries.map((entry) => entry.task));
+    results.forEach((result, index) => {
+      if (result.status !== 'rejected') return;
+      logger.error(`[QUEUE] message handler rejected on ${queue}`, result.reason);
+      this.ctx.waitUntil(
+        captureServerException(result.reason, this.env, { transaction: `queue ${queue}` }),
+      );
+      entries[index].retry?.();
+    });
+  }
+
+  private async dispatchQueueBatch(
+    batch: MessageBatch<unknown> | { queue: string; messages: Array<{ body: IEmailSendBatch }> },
+  ) {
     switch (true) {
       case batch.queue.startsWith('subscribe-queue'): {
-        logger.info('batch', batch);
-        await Promise.all(
-          (batch.messages as unknown as Array<{ body: { connectionId: string; providerId: EProviders } }>).map(async (msg) => {
-            const connectionId = msg.body.connectionId;
-            const providerId = msg.body.providerId;
-            try {
-              await enableBrainFunction({ id: connectionId, providerId });
-            } catch (error) {
-              logger.error(
-                `Failed to enable brain function for connection ${connectionId}:`,
-                error,
-              );
-            }
-          }),
+        // Le lot entier etait journalise en `info` : il porte les identifiants de
+        // connexion de chaque destinataire. Retrograde en `debug`, borne au denombrement.
+        logger.debug('[SUBSCRIBE_QUEUE] batch received', { size: batch.messages.length });
+        await this.settleQueueBatch(
+          batch.queue,
+          (
+            batch.messages as unknown as Array<{
+              body: { connectionId: string; providerId: EProviders };
+              retry?: () => void;
+            }>
+          ).map((msg) => ({
+            retry: () => msg.retry?.(),
+            task: renewWatchSubscription(
+              { connectionId: msg.body.connectionId, providerId: msg.body.providerId },
+              {
+                enable: ({ id, providerId }) =>
+                  enableBrainFunction({ id, providerId: providerId as EProviders }),
+                retry: () => msg.retry?.(),
+                logger,
+              },
+            ),
+          })),
         );
         logger.info('[SUBSCRIBE_QUEUE] batch done');
         return;
       }
       case batch.queue.startsWith('send-email-queue'): {
-        await Promise.all(
-          (batch.messages as Array<{ body: IEmailSendBatch }>).map(async (msg) => {
+        const { pending_emails_status: statusKV, pending_emails_payload: payloadKV } = this.env as {
+          pending_emails_status: ScheduledSendStore;
+          pending_emails_payload: ScheduledSendStore;
+        };
+        await this.settleQueueBatch(
+          batch.queue,
+          (batch.messages as Array<{ body: IEmailSendBatch; retry?: () => void }>).map((msg) => {
             const { messageId, connectionId, mail } = msg.body;
-
-            const { pending_emails_status: statusKV, pending_emails_payload: payloadKV } = this
-              .env as { pending_emails_status: KVNamespace; pending_emails_payload: KVNamespace };
-
-            const status = await statusKV.get(messageId);
-            if (status === 'cancelled') {
-              logger.info(`Email ${messageId} cancelled – skipping send.`);
-              return;
-            }
-
-            let payload = mail;
-            if (!payload) {
-              const stored = await payloadKV.get(messageId);
-              if (!stored) {
-                logger.error(`No payload found for scheduled email ${messageId}`);
-                return;
-              }
-              payload = JSON.parse(stored);
-            }
-
-            const agent = await getZeroAgent(connectionId, this.ctx);
-            try {
-              const p = payload as Omit<IOutgoingMessage, 'attachments'> & { attachments?: (SerializedAttachment | AttachmentFile)[]; draftId?: string };
-              if (Array.isArray(p.attachments)) {
-                const attachments = p.attachments;
-
-                const processedAttachments = await Promise.all(
-                  attachments.map(
-                    async (att: SerializedAttachment | AttachmentFile, index: number) => {
-                      if ('arrayBuffer' in att && typeof att.arrayBuffer === 'function') {
-                        return { attachment: att as AttachmentFile, index };
-                      } else {
-                        const processed = toAttachmentFiles([att as SerializedAttachment]);
-                        return { attachment: processed[0], index };
-                      }
-                    },
-                  ),
-                );
-
-                const orderedAttachments = new Array<AttachmentFile>(attachments.length);
-                processedAttachments.forEach(({ attachment, index }) => {
-                  orderedAttachments[index] = attachment;
-                });
-
-                p.attachments = orderedAttachments;
-              }
-
-              if (p.draftId) {
-                const { draftId, ...rest } = p;
-                await agent.stub.sendDraft(draftId, rest as IOutgoingMessage);
-              } else {
-                await agent.stub.create(p as IOutgoingMessage);
-              }
-
-              await statusKV.delete(messageId);
-              await payloadKV.delete(messageId);
-              logger.info(`Email ${messageId} sent successfully`);
-            } catch (error) {
-              logger.error(`Failed to send scheduled email ${messageId}:`, error);
-              await statusKV.delete(messageId);
-              await payloadKV.delete(messageId);
-            }
+            const task = deliverScheduledEmail(
+              { messageId, connectionId, mail: mail as StoredOutgoingMessage | undefined },
+              {
+                statusKV,
+                payloadKV,
+                // Le verrou d'envoi : SQL transactionnel dans le DO de la connexion, seul
+                // moyen d'empêcher deux livraisons concurrentes d'envoyer deux fois.
+                reservation: createSendReservationGate(this.env, connectionId),
+                send: async (targetConnectionId, payload) => {
+                  let agent: Awaited<ReturnType<typeof getZeroAgent>>;
+                  try {
+                    agent = await getZeroAgent(targetConnectionId, this.ctx);
+                  } catch (error) {
+                    // La resolution du stub precede TOUT appel au fournisseur : si elle
+                    // echoue, rien n'a ete emis. Sans ce marqueur, l'erreur etait classee
+                    // ambigue et bloquait definitivement un mail jamais tente.
+                    throw new SendNotDispatchedError('failed to resolve mail agent', {
+                      cause: error,
+                    });
+                  }
+                  // `sendScheduled` NE JETTE PAS : elle classe l'echec dans le Durable
+                  // Object, ou l'enveloppe du driver est encore entiere, et rend deux
+                  // chaines. Une erreur jetee a travers cette frontiere RPC arrive en
+                  // `Error` nu (mesure sur workerd : proprietes propres stack/message/
+                  // remote), donc `classifySendFailure` cote appelant ne voyait jamais le
+                  // moindre statut : tout echec devenait `ambiguous`.
+                  const attempt = await agent.stub.sendScheduled(
+                    payload as Parameters<typeof agent.stub.sendScheduled>[0],
+                  );
+                  if (!attempt.ok) throw fromScheduledSendAttempt(attempt);
+                },
+                retry: () => msg.retry?.(),
+                capture: (error, context) =>
+                  this.ctx.waitUntil(captureServerException(error, this.env, context)),
+                logger,
+              },
+            );
+            return { task, retry: () => msg.retry?.() };
           }),
         );
         return;
@@ -138,41 +173,62 @@ export default class Entry extends WorkerEntrypoint<ZeroEnv> {
       case batch.queue.startsWith('thread-queue'): {
         const tracer = initTracing();
 
-        await Promise.all(
-          (batch.messages as unknown as Array<{ body: { providerId: string; historyId: string; subscriptionName: string } }>).map(async (msg) => {
-            const span = tracer.startSpan('thread_queue_processing', {
-              attributes: {
-                'provider.id': msg.body.providerId,
-                'history.id': msg.body.historyId,
-                'subscription.name': msg.body.subscriptionName,
-                'queue.name': batch.queue,
-              },
-            });
-
-            try {
-              const providerId = msg.body.providerId;
-              const historyId = msg.body.historyId;
-              const subscriptionName = msg.body.subscriptionName;
-
-              const workflowRunner = env.WORKFLOW_RUNNER.get(env.WORKFLOW_RUNNER.newUniqueId());
-              const result = await workflowRunner.runMainWorkflow({
-                providerId,
-                historyId,
-                subscriptionName,
+        await this.settleQueueBatch(
+          batch.queue,
+          (
+            batch.messages as unknown as Array<{
+              body: { providerId: string; historyId: string; subscriptionName: string };
+              retry?: () => void;
+            }>
+          ).map((msg) => ({
+            retry: () => msg.retry?.(),
+            task: (async () => {
+              const span = tracer.startSpan('thread_queue_processing', {
+                attributes: {
+                  'provider.id': msg.body.providerId,
+                  'history.id': msg.body.historyId,
+                  'subscription.name': msg.body.subscriptionName,
+                  'queue.name': batch.queue,
+                },
               });
-              logger.info('[THREAD_QUEUE] result', result);
-              span.setAttributes({
-                'workflow.result': typeof result === 'string' ? result : JSON.stringify(result),
-                'workflow.success': true,
-              });
-            } catch (error) {
-              logger.error('Error running workflow', error);
-              span.recordException(error as Error);
-              span.setStatus({ code: 2, message: (error as Error).message });
-            } finally {
-              span.end();
-            }
-          }),
+
+              try {
+                const providerId = msg.body.providerId;
+                const historyId = msg.body.historyId;
+                const subscriptionName = msg.body.subscriptionName;
+
+                const workflowRunner = env.WORKFLOW_RUNNER.get(env.WORKFLOW_RUNNER.newUniqueId());
+                const result = await workflowRunner.runMainWorkflow({
+                  providerId,
+                  historyId,
+                  subscriptionName,
+                });
+                // Sortie complete du workflow (compteurs + identifiants de fil) : `debug`.
+                logger.debug('[THREAD_QUEUE] result', result);
+                span.setAttributes({
+                  'workflow.result': typeof result === 'string' ? result : JSON.stringify(result),
+                  'workflow.success': true,
+                });
+              } catch (error) {
+                // Sans retry explicite, l'exception etait avalee et le message ACKe :
+                // la notification Gmail etait perdue definitivement.
+                logger.error('Error running workflow', error);
+                span.recordException(error as Error);
+                span.setStatus({ code: 2, message: (error as Error).message });
+                // ...et le rejeu, lui, ne produisait AUCUN evenement : une notification qui
+                // echoue en boucle jusqu'a epuisement de ses tentatives restait invisible.
+                this.ctx.waitUntil(
+                  captureServerException(error, this.env, {
+                    transaction: `queue ${batch.queue}`,
+                    extra: { historyId: msg.body.historyId, providerId: msg.body.providerId },
+                  }),
+                );
+                msg.retry?.();
+              } finally {
+                span.end();
+              }
+            })(),
+          })),
         );
         break;
       }
@@ -182,9 +238,35 @@ export default class Entry extends WorkerEntrypoint<ZeroEnv> {
     bootEnv(this.env as unknown as Record<string, unknown>);
     logger.info('Running scheduled tasks...');
 
-    await this.processScheduledEmails();
+    // Les deux taches sont INDEPENDANTES et doivent le rester. Enchainees derriere un
+    // `await`, une panne de la premiere (KV `list` indisponible) empechait la seconde de
+    // s'executer — c'est-a-dire empechait le renouvellement des watch Gmail, la panne
+    // meme que ce cron existe pour eviter. Chacune est capturee pour son propre compte ;
+    // le tick echoue quand meme si l'une a echoue, pour que la plateforme le sache.
+    const outcomes = await Promise.allSettled([
+      this.runScheduledTask('scheduled processScheduledEmails', () =>
+        this.processScheduledEmails(),
+      ),
+      this.runScheduledTask('scheduled processExpiredSubscriptions', () =>
+        this.processExpiredSubscriptions(),
+      ),
+    ]);
+    const failure = outcomes.find((outcome) => outcome.status === 'rejected');
+    if (failure && failure.status === 'rejected') throw failure.reason;
+  }
 
-    await this.processExpiredSubscriptions();
+  /**
+   * Execute une tache de cron en la CAPTURANT. Les deux crons s'executaient hors de toute
+   * capture ; `scheduled()` en a recu une, mais `processScheduledEmails` la neutralisait en
+   * avalant tout dans un try/catch englobant.
+   */
+  private async runScheduledTask(transaction: string, task: () => Promise<void>): Promise<void> {
+    try {
+      await task();
+    } catch (err) {
+      this.ctx.waitUntil(captureServerException(err, this.env, { transaction }));
+      throw err;
+    }
   }
 
   private async processScheduledEmails() {
@@ -194,62 +276,71 @@ export default class Entry extends WorkerEntrypoint<ZeroEnv> {
       send_email_queue: Queue<IEmailSendBatch>;
     };
 
-    try {
-      const now = Date.now();
-      const twelveHoursFromNow = now + 12 * 60 * 60 * 1000;
+    const now = Date.now();
+    const twelveHoursFromNow = now + 12 * 60 * 60 * 1000;
 
-      let cursor: string | undefined = undefined;
-      const batchSize = 1000;
+    let cursor: string | undefined = undefined;
+    const batchSize = 1000;
 
-      do {
-        const listResp: {
-          keys: { name: string }[];
-          cursor?: string;
-        } = await scheduledKV.list({ cursor, limit: batchSize });
-        cursor = listResp.cursor;
+    do {
+      const listResp: {
+        keys: { name: string }[];
+        cursor?: string;
+      } = await scheduledKV.list({ cursor, limit: batchSize });
+      cursor = listResp.cursor;
 
-        for (const key of listResp.keys) {
-          try {
-            const scheduledData = await scheduledKV.get(key.name);
-            if (!scheduledData) continue;
+      for (const key of listResp.keys) {
+        try {
+          const scheduledData = await scheduledKV.get(key.name);
+          if (!scheduledData) continue;
 
-            const { messageId, connectionId, sendAt } = JSON.parse(scheduledData);
+          const { messageId, connectionId, sendAt } = JSON.parse(scheduledData);
 
-            if (sendAt <= twelveHoursFromNow) {
-              const delaySeconds = Math.max(0, Math.floor((sendAt - now) / 1000));
+          if (sendAt <= twelveHoursFromNow) {
+            const delaySeconds = Math.max(0, Math.floor((sendAt - now) / 1000));
 
-              logger.info(`Queueing scheduled email ${messageId} with ${delaySeconds}s delay`);
+            logger.info(`Queueing scheduled email ${messageId} with ${delaySeconds}s delay`);
 
-              const queueBody: IEmailSendBatch = {
-                messageId,
-                connectionId,
-                sendAt,
-              };
+            const queueBody: IEmailSendBatch = {
+              messageId,
+              connectionId,
+              sendAt,
+            };
 
-              await send_email_queue.send(queueBody, { delaySeconds });
-              await scheduledKV.delete(key.name);
+            await send_email_queue.send(queueBody, { delaySeconds });
+            await scheduledKV.delete(key.name);
 
-              logger.info(`Successfully queued scheduled email ${messageId}`);
-            }
-          } catch (error) {
-            logger.error('Failed to process scheduled email key', key.name, error);
+            logger.info(`Successfully queued scheduled email ${messageId}`);
           }
+        } catch (error) {
+          // Une clef isolee illisible ne doit pas arreter la mise en file des autres —
+          // mais elle doit REMONTER : ce catch ne journalisait plus rien d'exploitable.
+          // Le catch ENGLOBANT, lui, a disparu : il avalait toute panne de `list()` ou de
+          // la queue, ce qui neutralisait la capture Sentry de `scheduled()` installee
+          // juste au-dessus, et le cron d'envoi differe echouait sans aucun evenement.
+          logger.error('Failed to process scheduled email key', key.name, error);
+          this.ctx.waitUntil(
+            captureServerException(error, this.env, {
+              transaction: 'scheduled processScheduledEmails',
+              extra: { key: key.name },
+            }),
+          );
         }
-      } while (cursor);
-    } catch (error) {
-      logger.error('Error processing scheduled emails:', error);
-    }
+      }
+    } while (cursor);
   }
 
   private async processExpiredSubscriptions() {
     logger.info('[SCHEDULED] Checking for expired subscriptions...');
-    const { db, conn } = createDb(this.env.HYPERDRIVE.connectionString);
-    const allAccounts = await db.query.connection.findMany({
-      where: (fields, { isNotNull, and }) =>
-        and(isNotNull(fields.accessToken), isNotNull(fields.refreshToken)),
-    });
-    await conn.end();
-    logger.info('[SCHEDULED] allAccounts', allAccounts.length);
+    // `withDb` : le `conn.end()` d'origine était la ligne SUIVANTE, donc sauté dès que la
+    // requête levait — un cron qui échoue laissait une connexion ouverte à chaque passage.
+    const allAccounts = await withDb(this.env.HYPERDRIVE.connectionString, (db) =>
+      db.query.connection.findMany({
+        where: (fields, { isNotNull, and }) =>
+          and(isNotNull(fields.accessToken), isNotNull(fields.refreshToken)),
+      }),
+    );
+    logger.debug('[SCHEDULED] allAccounts', allAccounts.length);
     const now = new Date();
     const fiveDaysAgo = new Date(now.getTime() - 5 * 24 * 60 * 60 * 1000);
 
@@ -327,8 +418,10 @@ export default class Entry extends WorkerEntrypoint<ZeroEnv> {
       );
     }
 
+    // `allAccounts.keys` est la METHODE Array.prototype.keys : `.length` y vaut son arite,
+    // soit 0. Le cron journalisait donc invariablement « Processed 0 accounts ».
     logger.info(
-      `[SCHEDULED] Processed ${allAccounts.keys.length} accounts, found ${expiredSubscriptions.length} expired subscriptions`,
+      `[SCHEDULED] Processed ${allAccounts.length} accounts, found ${expiredSubscriptions.length} expired subscriptions`,
     );
   }
 }

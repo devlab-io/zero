@@ -309,7 +309,8 @@
               "sending",
               "sent",
               "cancelled",
-              "failed"
+              "failed",
+              "unresolved"
             ],
             "description": "Filter to one outbox status"
           }

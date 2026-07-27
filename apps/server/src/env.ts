@@ -1,6 +1,7 @@
 import type { ThinkingMCP, ThreadSyncWorker, WorkflowRunner, ZeroDB, ZeroMCP } from './main';
 import type { ShardRegistry, ZeroAgent, ZeroDriver } from './routes/agent';
 
+import { configureLoggerFromEnv } from './lib/logger';
 import { env as _env } from 'cloudflare:workers';
 import type { QueryableHandler } from 'dormroom';
 import { assertServerEnv } from './env-schema';
@@ -34,6 +35,8 @@ export type ZeroEnv = {
   connection_labels: KVNamespace;
   prompts_storage: KVNamespace;
   NODE_ENV: 'local' | 'development' | 'production';
+  /** Seuil du logger serveur (lib/logger.ts). Non defini => `info` en prod, `debug` ailleurs. */
+  LOG_LEVEL?: 'debug' | 'info' | 'warn' | 'error';
   JWT_SECRET: 'secret';
   ELEVENLABS_API_KEY: '1234567890';
   DISABLE_CALLS: 'true' | '';
@@ -107,6 +110,32 @@ export type ZeroEnv = {
   DD_API_KEY: string;
   DD_APP_KEY: string;
   DD_SITE: string;
+  /**
+   * Audience exigée dans le jeton OIDC des notifications push Pub/Sub. Absente, elle est
+   * DÉDUITE de `DEV_PROXY ?? VITE_PUBLIC_BACKEND_URL` suivi de `/a8n/notify/google` — la même
+   * expression que le endpoint push écrit par l'abonnement, dont Pub/Sub fait l'audience.
+   * Le contrôle est donc actif partout ; cette variable ne sert qu'à le surcharger quand
+   * l'abonnement a été créé avec une autre URL. Cf. lib/pubsub-auth.ts.
+   */
+  PUBSUB_AUDIENCE?: string;
+  /**
+   * Compte de service émetteur exigé pour les notifications push Pub/Sub. Absent = repli sur
+   * le `client_email` de GOOGLE_S_ACCOUNT ; absent des deux = ce contrôle seul est désactivé.
+   */
+  PUBSUB_SERVICE_ACCOUNT_EMAIL?: string;
+  /**
+   * Hôte d'ingestion Sentry accepté par le tunnel `/monitoring/sentry`. Absent = tunnel refusé
+   * (fail-closed) : mieux vaut perdre des événements que les relayer chez un tiers.
+   */
+  SENTRY_TUNNEL_HOST?: string;
+  /** Identifiants de projet Sentry acceptés par le tunnel, séparés par des virgules. */
+  SENTRY_TUNNEL_PROJECT_IDS?: string;
+  /**
+   * Sel du hachage d'IP dans les traces. Secret : un sel connu rend le hachage réversible par
+   * table de correspondance sur l'espace IPv4. Absent hors local = avertissement au premier
+   * hachage, repli de développement utilisé.
+   */
+  IP_HASH_SALT?: string;
   /** Devlab: server-side Sentry — absent = Sentry disabled (clean no-op). */
   SENTRY_DSN?: string;
   /** Devlab: build/release tag attached to captured Sentry events. */
@@ -126,8 +155,12 @@ export { env };
 let booted = false;
 
 /** Boot guard: validates the required env exactly once per isolate. Call at first request. */
-export function bootEnv(raw: Record<string, unknown> = env as unknown as Record<string, unknown>): void {
+export function bootEnv(
+  raw: Record<string, unknown> = env as unknown as Record<string, unknown>,
+): void {
   if (booted) return;
+  // Avant `assertServerEnv` : un echec de boot doit deja etre journalise au bon niveau.
+  configureLoggerFromEnv(raw);
   assertServerEnv(raw);
   booted = true;
 }

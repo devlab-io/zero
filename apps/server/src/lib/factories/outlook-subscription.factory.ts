@@ -1,6 +1,7 @@
 import {
   BaseSubscriptionFactory,
   type SubscriptionData,
+  type SubscriptionResult,
   type UnsubscriptionData,
 } from './base-subscription.factory';
 import { EProviders } from '../../types';
@@ -8,7 +9,7 @@ import { EProviders } from '../../types';
 export class OutlookSubscriptionFactory extends BaseSubscriptionFactory {
   readonly providerId = EProviders.microsoft;
 
-  public async subscribe(_: { body: SubscriptionData }): Promise<Response> {
+  public async subscribe(_: { body: SubscriptionData }): Promise<SubscriptionResult> {
     // TODO: Implement Outlook subscription logic
     // This will handle Microsoft Graph API subscriptions for Outlook
 

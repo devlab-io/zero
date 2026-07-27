@@ -1,3 +1,9 @@
 bun.lockb
 node_modules
 .next
+
+# Artefacts generes et committes : le formatage doit rester celui du generateur,
+# sinon le test de non-derive compare deux formatages differents.
+docs/agent/mcp-schema.snapshot.json
+apps/server/src/trpc/app-router.boundary.d.ts
+apps/mail/paraglide

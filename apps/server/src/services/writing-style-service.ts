@@ -4,7 +4,7 @@ import { logger } from '../lib/logger';
 import { writingStyleMatrix } from '../db/schema';
 
 import { eq } from 'drizzle-orm';
-import { createDb } from '../db';
+import { withDb } from '../db';
 import pRetry from 'p-retry';
 import { env } from '../env';
 import { z } from 'zod';
@@ -162,13 +162,11 @@ export const getWritingStyleMatrixForConnectionId = async ({
   connectionId: string;
   backupContent?: string;
 }) => {
-  const { db, conn } = createDb(env.HYPERDRIVE.connectionString);
-
-  const matrix = await db.query.writingStyleMatrix.findFirst({
-    where: eq(writingStyleMatrix.connectionId, connectionId),
-  });
-
-  await conn.end();
+  const matrix = await withDb(env.HYPERDRIVE.connectionString, (db) =>
+    db.query.writingStyleMatrix.findFirst({
+      where: eq(writingStyleMatrix.connectionId, connectionId),
+    }),
+  );
 
   if (!matrix && backupContent) {
     if (!backupContent.trim()) {
@@ -190,46 +188,50 @@ export const getWritingStyleMatrixForConnectionId = async ({
 export const updateWritingStyleMatrix = async (connectionId: string, emailBody: string) => {
   const emailStyleMatrix = await extractStyleMatrix(emailBody);
 
+  // Le site le plus coûteux du lot : la connexion était ouverte À L'INTÉRIEUR du `pRetry`
+  // et refermée APRÈS la transaction. Une transaction qui échoue — le cas même que
+  // `pRetry` existe pour couvrir — sautait le `conn.end()`, et la tentative suivante en
+  // ouvrait une nouvelle : chaque échec fuyait une connexion de plus.
   await pRetry(
     async () => {
-      const { db, conn } = createDb(env.HYPERDRIVE.connectionString);
-      await db.transaction(async (tx) => {
-        const [existingMatrix] = await tx
-          .select({
-            numMessages: writingStyleMatrix.numMessages,
-            style: writingStyleMatrix.style,
-          })
-          .from(writingStyleMatrix)
-          .where(eq(writingStyleMatrix.connectionId, connectionId));
-
-        if (existingMatrix) {
-          const newStyle = createUpdatedMatrixFromNewEmail(
-            existingMatrix.numMessages,
-            existingMatrix.style as WritingStyleMatrix,
-            emailStyleMatrix,
-          );
-
-          await tx
-            .update(writingStyleMatrix)
-            .set({
-              numMessages: existingMatrix.numMessages + 1,
-              style: newStyle,
+      await withDb(env.HYPERDRIVE.connectionString, async (db) => {
+        await db.transaction(async (tx) => {
+          const [existingMatrix] = await tx
+            .select({
+              numMessages: writingStyleMatrix.numMessages,
+              style: writingStyleMatrix.style,
             })
+            .from(writingStyleMatrix)
             .where(eq(writingStyleMatrix.connectionId, connectionId));
-        } else {
-          const newStyle = initializeStyleMatrixFromEmail(emailStyleMatrix);
 
-          await tx
-            .insert(writingStyleMatrix)
-            .values({
-              connectionId,
-              numMessages: 1,
-              style: newStyle,
-            })
-            .onConflictDoNothing();
-        }
+          if (existingMatrix) {
+            const newStyle = createUpdatedMatrixFromNewEmail(
+              existingMatrix.numMessages,
+              existingMatrix.style as WritingStyleMatrix,
+              emailStyleMatrix,
+            );
+
+            await tx
+              .update(writingStyleMatrix)
+              .set({
+                numMessages: existingMatrix.numMessages + 1,
+                style: newStyle,
+              })
+              .where(eq(writingStyleMatrix.connectionId, connectionId));
+          } else {
+            const newStyle = initializeStyleMatrixFromEmail(emailStyleMatrix);
+
+            await tx
+              .insert(writingStyleMatrix)
+              .values({
+                connectionId,
+                numMessages: 1,
+                style: newStyle,
+              })
+              .onConflictDoNothing();
+          }
+        });
       });
-      await conn.end();
     },
     {
       retries: 1,

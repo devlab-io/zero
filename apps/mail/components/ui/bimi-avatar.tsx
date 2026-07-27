@@ -50,9 +50,14 @@ export const BimiAvatar = ({
   const trpc = useTRPC();
   const [useDefaultFallback, setUseDefaultFallback] = useState(false);
 
+  // Interrogé par DOMAINE, pas par adresse (pitbull A13, axe 6). Un enregistrement BIMI
+  // appartient au domaine : quarante expéditeurs de la même entreprise partagent donc une
+  // seule entrée de cache React Query et un seul appel réseau, au lieu de quarante.
+  const domain = useMemo(() => email?.split('@')[1]?.toLowerCase() ?? '', [email]);
+
   const { data: bimiData, isLoading } = useQuery({
-    ...trpc.bimi.getByEmail.queryOptions({ email: email || '' }),
-    enabled: !!email && !useDefaultFallback,
+    ...trpc.bimi.getByDomain.queryOptions({ domain }),
+    enabled: !!domain && !useDefaultFallback,
     staleTime: 1000 * 60 * 60 * 24, // Cache for 24 hours
     gcTime: 1000 * 60 * 60 * 24 * 7, // Keep in cache for 7 days
   });

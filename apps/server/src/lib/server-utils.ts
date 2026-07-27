@@ -1,16 +1,20 @@
 import type { IGetThreadResponse, IGetThreadsResponse } from './driver/types';
+import { getActiveConnection, getZeroDB } from './connection-context';
+// Réexport : `getActiveConnection` et `getZeroDB` vivent dans le module feuille
+// lib/connection-context.ts pour casser le cycle server-utils ↔ driver (ADR-less, cf. pitbull A4).
+export { getActiveConnection, getZeroDB };
+import { AppError, fromDriverSetupResult, type DriverSetupRpcResult } from './errors';
+import { resolvePubSubTokenPolicy, verifyPubSubToken } from './pubsub-auth';
 import { OutgoingMessageType } from '../routes/agent/types';
 import { defaultPageSize, FOLDERS } from './utils';
-import { getContext } from 'hono/context-storage';
 import { connection } from '../db/schema';
-import type { HonoContext } from '../ctx';
 import { createClient } from 'dormroom';
 import { createDriver } from './driver';
 import { TtlCache } from './ttl-cache';
 import { logger } from './logger';
 import { eq } from 'drizzle-orm';
-import { createDb } from '../db';
 import { Effect } from 'effect';
+import { withDb } from '../db';
 import { env } from '../env';
 
 const mbToBytes = (mb: number) => mb * 1024 * 1024;
@@ -37,16 +41,67 @@ const invalidateShardTopology = (connectionId: string) => {
 
 // Isolate cache for hot listThreads calls: 5 s collapses the repeated reads of a
 // single navigation; the sync pushes real updates over the websocket anyway.
-const threadsListCache = new TtlCache<IGetThreadsResponse>(5_000, 200);
+const THREADS_LIST_TTL_MS = 5_000;
+const threadsListCache = new TtlCache<IGetThreadsResponse>(THREADS_LIST_TTL_MS, 200);
+
+// --- Invalidation de la liste de fils (A?, point 10) ---------------------------------
+//
+// Ce cache n'avait AUCUN point d'invalidation : archiver, supprimer ou réétiqueter un fil
+// laissait la liste d'avant la mutation servie pendant les 5 s restantes — l'utilisateur
+// voyait son action se défaire sous ses yeux, puis se refaire.
+//
+// L'invalidation passe par une VERSION par connexion, préfixée à la clé de cache, plutôt
+// que par une suppression de clés : les clés portent le dossier, la pagination et les
+// libellés, donc une mutation n'a aucun moyen d'énumérer celles qu'elle périme, et
+// `TtlCache` n'expose pas de suppression par préfixe. Incrémenter la version rend
+// inatteignables, d'un coup, toutes les entrées de la connexion ; elles s'effacent ensuite
+// d'elles-mêmes par TTL.
+//
+// La table des versions se purge seule : une version cesse d'être utile dès qu'aucune
+// entrée de la génération PRÉCÉDENTE ne peut plus être vivante, c'est-à-dire au bout de
+// `THREADS_LIST_TTL_MS`. Retirer l'entrée alors — donc revenir à la version 0 — ne peut
+// pas ressusciter une entrée périmée : toute entrée portant la version 0 aurait au moins
+// cet âge, donc serait déjà expirée. La table reste ainsi bornée aux seules connexions
+// mutées dans les 5 dernières secondes, sans dépendre d'une éviction LRU.
+const threadsListVersions = new Map<string, { version: number; bumpedAt: number }>();
+
+const pruneThreadsListVersions = (now: number) => {
+  for (const [id, entry] of threadsListVersions) {
+    if (entry.bumpedAt + THREADS_LIST_TTL_MS <= now) threadsListVersions.delete(id);
+  }
+};
+
+const threadsListVersion = (connectionId: string, now: number = Date.now()): number => {
+  const entry = threadsListVersions.get(connectionId);
+  if (!entry) return 0;
+  if (entry.bumpedAt + THREADS_LIST_TTL_MS <= now) {
+    threadsListVersions.delete(connectionId);
+    return 0;
+  }
+  return entry.version;
+};
+
+/**
+ * Périme la liste de fils en cache pour cette connexion. À appeler depuis TOUT chemin qui
+ * mute un fil (archivage, suppression, étiquetage, lu/non lu), afin que la lecture qui suit
+ * la mutation reparte de la projection et non d'une liste d'avant.
+ *
+ * Portée : l'isolate courant. C'est exactement la portée du cache lui-même — `threadsListCache`
+ * est une `Map` de module, non partagée entre isolates —, donc l'invalidation ne peut pas
+ * être moins couvrante que ce qu'elle invalide.
+ */
+export const invalidateThreadsListCache = (connectionId: string, now: number = Date.now()) => {
+  const current = threadsListVersions.get(connectionId);
+  const stillFresh = current && current.bumpedAt + THREADS_LIST_TTL_MS > now;
+  threadsListVersions.set(connectionId, {
+    version: (stillFresh ? current.version : 0) + 1,
+    bumpedAt: now,
+  });
+  pruneThreadsListVersions(now);
+};
 // sendDoState wakes the ZeroAgent DO; broadcasting state at most once a minute
 // per connection is enough for a background refresh.
 const doStateThrottle = new TtlCache<true>(60_000, 500);
-
-export const getZeroDB = async (userId: string) => {
-  const stub = env.ZERO_DB.get(env.ZERO_DB.idFromName(userId));
-  const rpcTarget = await stub.setMetaData(userId);
-  return rpcTarget;
-};
 
 class MockExecutionContext implements ExecutionContext {
   async waitUntil(promise: Promise<unknown>) {
@@ -77,14 +132,33 @@ const getShardClient = async (connectionId: string, shardId: string) => {
   });
   const handshakeKey = `${connectionId}:${shardId}`;
   if (!shardHandshakeDone.has(handshakeKey)) {
+    // Peut être `undefined` face à une instance de Durable Object qui n'a pas encore repris
+    // le nouveau contrat (fenêtre de déploiement) : dans ce cas il n'y a pas de verdict à
+    // lire, et l'ancienne sémantique — l'échec arrive par le `catch` — s'applique telle quelle.
+    let verdict: DriverSetupRpcResult | undefined;
     try {
       // setName exécute déjà setupAuth sous blockConcurrencyWhile : un seul RPC.
-      await shardClient.stub.setName(connectionId);
-      shardHandshakeDone.add(handshakeKey);
+      verdict = await shardClient.stub.setName(connectionId);
     } catch (error) {
+      // Ici, et SEULEMENT ici : une panne d'infrastructure du RPC lui-même. Elle ne dit rien
+      // de l'autorisation du porteur, elle reste donc un échec opaque.
       logger.error(`Failed to initialize shard ${shardId} for connection ${connectionId}:`, error);
       throw new Error(`Shard initialization failed: ${error}`);
     }
+    if (verdict && !verdict.ok) {
+      // Le DO ne JETTE plus son échec d'initialisation, il le rend. On reconstruit donc la
+      // classe ICI, dans l'isolate du Worker : `AppError.connectionExpired` survit jusqu'à
+      // `classifyDriverFailure` (qui pose `X-Zero-Redirect`) et jusqu'à l'`errorFormatter`
+      // tRPC (qui publie `appCode: CONNECTION_EXPIRED`). Avant, l'enveloppe
+      // `Shard initialization failed: …` réduisait tout à `INTERNAL` et le parcours de
+      // reconnexion n'était plus jamais proposé.
+      logger.error(`Shard ${shardId} refused initialization for connection ${connectionId}:`, {
+        code: verdict.code,
+        message: verdict.message,
+      });
+      throw fromDriverSetupResult(verdict);
+    }
+    shardHandshakeDone.add(handshakeKey);
   }
   return shardClient;
 };
@@ -330,6 +404,9 @@ export const modifyThreadLabelsInDB = async (
   const shard = await getShardClient(connectionId, threadResult.shardId);
   await shard.stub.modifyThreadLabelsInDB(threadId, addLabels, removeLabels);
 
+  // Les libellés d'un fil viennent de changer : la liste mise en cache est périmée.
+  invalidateThreadsListCache(connectionId);
+
   const agent = await getZeroSocketAgent(connectionId);
   await agent.invalidateDoStateCache();
 
@@ -416,6 +493,8 @@ export const forceReSync = async (connectionId: string) => {
 
   await deleteAllShards(registry);
   invalidateShardTopology(connectionId);
+  // Les tables de fils viennent d'être supprimées : toute liste en cache est fausse.
+  invalidateThreadsListCache(connectionId);
 
   const agent = await getZeroAgent(connectionId);
   return agent.stub.forceReSync();
@@ -455,7 +534,7 @@ export const getThreadsFromDB = async (
   // go through other routes and must stay fresh.
   const cacheable = !params.q && params.folder !== FOLDERS.DRAFT;
   const cacheKey = cacheable
-    ? `${connectionId}:${params.folder ?? ''}:${maxResults}:${params.pageToken ?? ''}:${[...(params.labelIds ?? [])].sort().join(',')}`
+    ? `v${threadsListVersion(connectionId)}:${connectionId}:${params.folder ?? ''}:${maxResults}:${params.pageToken ?? ''}:${[...(params.labelIds ?? [])].sort().join(',')}`
     : null;
   const cached = cacheKey ? threadsListCache.get(cacheKey) : undefined;
   if (cached) return cached;
@@ -523,7 +602,7 @@ export const getDatabaseSize = async (connectionId: string): Promise<number> => 
 };
 
 export const deleteAllSpam = async (connectionId: string) => {
-  return Effect.runPromise(
+  const result = await Effect.runPromise(
     aggregateShardDataEffect<{ deletedCount: number }>(
       connectionId,
       (shard) => Effect.promise(() => shard.stub.deleteAllSpam()),
@@ -532,6 +611,9 @@ export const deleteAllSpam = async (connectionId: string) => {
       }),
     ),
   );
+  // Des fils viennent d'être supprimés : la liste en cache ne les reflète pas.
+  invalidateThreadsListCache(connectionId);
+  return result;
 };
 
 type CountResult = { label: string; count: number };
@@ -602,32 +684,12 @@ export const getZeroSocketAgent = async (connectionId: string) => {
   return stub;
 };
 
-export const getActiveConnection = async () => {
-  const c = getContext<HonoContext>();
-  const { sessionUser, auth } = c.var;
-  if (!sessionUser) throw new Error('Session Not Found');
-
-  // Un seul RPC : la logique défaut-sinon-première vit dans le DO ZeroDB, qui
-  // mémorise le résultat en local (invalidé par ses propres écritures).
-  const stub = env.ZERO_DB.get(env.ZERO_DB.idFromName(sessionUser.id));
-  const activeConnection = await stub.getActiveConnection(sessionUser.id);
-  if (activeConnection) return activeConnection;
-
-  try {
-    if (auth) {
-      await auth.api.revokeSession({ headers: c.req.raw.headers });
-      await auth.api.signOut({ headers: c.req.raw.headers });
-    }
-  } catch (err) {
-    logger.warn(`[getActiveConnection] Session cleanup failed for user ${sessionUser.id}:`, err);
-  }
-  logger.error(`No connections found for user ${sessionUser.id}`);
-  throw new Error('No connections found for user');
-};
-
 export const connectionToDriver = (activeConnection: typeof connection.$inferSelect) => {
   if (!activeConnection.accessToken || !activeConnection.refreshToken) {
-    throw new Error(`Invalid connection ${JSON.stringify(activeConnection?.id)}`);
+    // Une connexion sans jeton n'est pas récupérable par un rejeu : c'est un octroi à
+    // refaire. Le code stable remplace le `err.message.includes('Invalid connection')`
+    // que le client comparait à travers le réseau.
+    throw AppError.connectionExpired(`Invalid connection ${JSON.stringify(activeConnection?.id)}`);
   }
 
   return createDriver(activeConnection.providerId, {
@@ -640,30 +702,28 @@ export const connectionToDriver = (activeConnection: typeof connection.$inferSel
   });
 };
 
-export const verifyToken = async (token: string) => {
-  const response = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${token}`, {
-    method: 'GET',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-  });
-
-  if (!response.ok) {
-    throw new Error(`Failed to verify token: ${await response.text()}`);
+/**
+ * Autorise une notification push Pub/Sub. La vérification réelle (signature JWKS Google +
+ * revendications iss/email_verified/email/aud) vit dans lib/pubsub-auth.ts ; ici on ne fait
+ * que résoudre la politique depuis l'environnement et journaliser un refus.
+ */
+export const verifyToken = async (token: string | undefined) => {
+  const result = await verifyPubSubToken(token, resolvePubSubTokenPolicy());
+  if (!result.ok) {
+    logger.warn('[PUBSUB_AUTH] rejected push notification token', { reason: result.reason });
   }
-
-  const data = await response.json();
-  return !!data;
+  return result.ok;
 };
 
 export const resetConnection = async (connectionId: string) => {
   // Route through the ZeroDB DO (not a direct Hyperdrive write) so its in-memory
   // active-connection cache is invalidated by the update.
-  const { db, conn } = createDb(env.HYPERDRIVE.connectionString);
-  const row = await db.query.connection.findFirst({
-    where: eq(connection.id, connectionId),
-  });
-  await conn.end();
+  // `withDb` : le `conn.end()` d'origine ne s'exécutait que si la requête aboutissait.
+  const row = await withDb(env.HYPERDRIVE.connectionString, (db) =>
+    db.query.connection.findFirst({
+      where: eq(connection.id, connectionId),
+    }),
+  );
   if (!row) return;
 
   const zeroDb = await getZeroDB(row.userId);

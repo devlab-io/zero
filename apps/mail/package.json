@@ -5,13 +5,18 @@
   "type": "module",
   "scripts": {
     "dev": "react-router dev",
-    "build": "react-router build",
+    "build": "react-router build && node scripts/csp-hashes.mjs",
     "start": "wrangler dev --port 3000 --show-interactive-dev-session=false",
     "types": "wrangler types",
-    "deploy": "wrangler deploy",
+    "deploy": "echo 'ERREUR: `wrangler deploy` sans --env deploie le worker racine (pas staging/production) et echoue au build car les regles de chargement .sql vivent dans les blocs d env. Utiliser deploy:staging ou deploy:production.' && exit 1",
     "lint": "eslint .",
+    "codegen": "paraglide-js compile --project ./project.inlang --outdir ./paraglide",
     "test": "vitest run",
-    "machine-translate": "inlang machine translate --project project.inlang"
+    "machine-translate": "inlang machine translate --project project.inlang",
+    "deploy:staging": "node scripts/build-env.mjs staging && wrangler deploy --env staging",
+    "deploy:production": "node scripts/build-env.mjs production && wrangler deploy --env production",
+    "build:staging": "node scripts/build-env.mjs staging",
+    "build:production": "node scripts/build-env.mjs production"
   },
   "dependencies": {
     "@ai-sdk/perplexity": "1.1.9",

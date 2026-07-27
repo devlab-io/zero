@@ -13,17 +13,18 @@
  *
  * Reuse or distribution of this file requires a license from Zero Email Inc.
  */
-import { logger } from '../lib/logger';
+import { persistSyncedThread } from '../lib/driver/gmail-sync-persist';
 import { getZeroAgent, connectionToDriver } from '../lib/server-utils';
 import { WorkflowEntrypoint, WorkflowStep } from 'cloudflare:workers';
-import type { WorkflowEvent } from 'cloudflare:workers';
 import { GoogleMailManager } from '../lib/driver/google';
-import { persistSyncedThread } from '../lib/driver/gmail-sync-persist';
+import type { WorkflowEvent } from 'cloudflare:workers';
+import { captureServerException } from '../lib/sentry';
 import type { ParsedMessage } from '../types';
 import { connection } from '../db/schema';
+import { logger } from '../lib/logger';
 import type { ZeroEnv } from '../env';
 import { eq } from 'drizzle-orm';
-import { createDb } from '../db';
+import { withDb } from '../db';
 
 export interface SyncThreadsParams {
   connectionId: string;
@@ -55,7 +56,28 @@ interface PageProcessingResult {
 }
 
 export class SyncThreadsWorkflow extends WorkflowEntrypoint<ZeroEnv, SyncThreadsParams> {
+  /**
+   * Point d'entrée du Workflow. `captureServerException` n'existait qu'en main.ts (fetch,
+   * queue, scheduled) : un Workflow qui casse n'émettait AUCUN événement, alors même que
+   * Cloudflare Workflows retente le step puis abandonne l'instance en silence. La
+   * synchronisation d'une boîte pouvait donc mourir sans laisser d'alerte.
+   */
   async run(
+    event: WorkflowEvent<SyncThreadsParams>,
+    step: WorkflowStep,
+  ): Promise<SyncThreadsResult> {
+    try {
+      return await this.execute(event, step);
+    } catch (error) {
+      await captureServerException(error, this.env, {
+        transaction: 'SyncThreadsWorkflow.run',
+        extra: { connectionId: event.payload.connectionId, folder: event.payload.folder },
+      });
+      throw error;
+    }
+  }
+
+  private async execute(
     event: WorkflowEvent<SyncThreadsParams>,
     step: WorkflowStep,
   ): Promise<SyncThreadsResult> {
@@ -78,13 +100,14 @@ export class SyncThreadsWorkflow extends WorkflowEntrypoint<ZeroEnv, SyncThreads
     };
 
     const setupResult = await step.do(`setup-connection-${connectionId}-${folder}`, async () => {
-      const { db, conn } = createDb(this.env.HYPERDRIVE.connectionString);
-
-      const foundConnection = await db.query.connection.findFirst({
-        where: eq(connection.id, connectionId),
-      });
-
-      await conn.end();
+      // `withDb` : le `conn.end()` d'origine ne s'exécutait que si la requête aboutissait, et
+      // ce bloc est un `step.do` que Cloudflare REJOUE — chaque rejeu ajoutait donc une
+      // connexion perdue de plus.
+      const foundConnection = await withDb(this.env.HYPERDRIVE.connectionString, (db) =>
+        db.query.connection.findFirst({
+          where: eq(connection.id, connectionId),
+        }),
+      );
 
       if (!foundConnection) {
         throw new Error(`Connection ${connectionId} not found`);

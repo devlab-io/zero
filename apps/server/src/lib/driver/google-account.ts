@@ -36,10 +36,15 @@ export class GmailAccount {
 
   public getEmailAliases() {
     return this.t.withErrorHandler('getEmailAliases', async () => {
-      const profile = await this.t.execute((gmail) =>
-        gmail.users.getProfile({
-          userId: 'me',
-        }),
+      const profile = await this.t.execute(
+        (gmail, signal) =>
+          gmail.users.getProfile(
+            {
+              userId: 'me',
+            },
+            { signal },
+          ),
+        { retry: true },
       );
 
       const primaryEmail = profile.data.emailAddress || '';
@@ -47,10 +52,15 @@ export class GmailAccount {
         { email: primaryEmail, primary: true },
       ];
 
-      const settings = await this.t.execute((gmail) =>
-        gmail.users.settings.sendAs.list({
-          userId: 'me',
-        }),
+      const settings = await this.t.execute(
+        (gmail, signal) =>
+          gmail.users.settings.sendAs.list(
+            {
+              userId: 'me',
+            },
+            { signal },
+          ),
+        { retry: true },
       );
 
       if (settings.data.sendAs) {

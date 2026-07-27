@@ -37,6 +37,14 @@ BETTER_AUTH_TRUSTED_ORIGINS=""
 GOOGLE_REDIRECT_URI=""
 GOOGLE_APPLICATION_CREDENTIALS=""
 GOOGLE_S_ACCOUNT=""
+# Politique d'autorisation des notifications push Pub/Sub (src/lib/pubsub-auth.ts).
+# Toujours exigés, quoi qu'il arrive : signature JWKS Google, iss, email_verified, email.
+# PUBSUB_AUDIENCE : audience attendue = l'URL du endpoint push, soit
+#   "${VITE_PUBLIC_BACKEND_URL}/a8n/notify/google". Absente = ce contrôle seul est désactivé.
+# PUBSUB_SERVICE_ACCOUNT_EMAIL : compte de service émetteur attendu. Absent = repli sur le
+#   client_email de GOOGLE_S_ACCOUNT.
+PUBSUB_AUDIENCE=""
+PUBSUB_SERVICE_ACCOUNT_EMAIL=""
 GITHUB_CLIENT_ID=""
 GITHUB_CLIENT_SECRET=""
 MICROSOFT_CLIENT_ID=""
@@ -89,6 +97,13 @@ MEET_API_URL=""
 # --- Observability (all opt-in; absent = disabled, clean no-op) ---
 SENTRY_DSN=""
 SENTRY_RELEASE=""
+# Tunnel /monitoring/sentry : hôte d'ingestion et projets acceptés, PROPRES à ce déploiement.
+# Absents = le tunnel refuse (fail-closed) plutôt que de relayer vers un projet tiers.
+SENTRY_TUNNEL_HOST=""
+SENTRY_TUNNEL_PROJECT_IDS=""
+# Sel du hachage d'IP dans les traces (secret). Absent hors NODE_ENV=local : avertissement au
+# boot et repli de développement — un sel connu rend le hachage réversible.
+IP_HASH_SALT=""
 DD_API_KEY=""
 DD_APP_KEY=""
 DD_SITE=""

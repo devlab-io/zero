@@ -1,47 +1,75 @@
 import { systemPrompt } from '../services/call-service/system-prompt';
+import { isAuthorizedVoiceCaller } from '../lib/voice-auth';
 import type { tools } from './agent/tools';
 import { logger } from '../lib/logger';
 import { Tools } from '../types';
-import { createDb } from '../db';
+import { withDb } from '../db';
 import { env } from '../env';
 import { Hono } from 'hono';
 import { z } from 'zod';
 
 type ToolsReturnType = Awaited<ReturnType<typeof tools>>;
 
+/** Résultat minimal d'un `safeParse`, sans dépendre de l'instance de zod de l'appelant. */
+type ParseResult =
+  | { success: true; data: unknown }
+  | { success: false; error: { message: string } };
+
+type ParseableSchema = { safeParse: (value: unknown) => ParseResult };
+
+/**
+ * Reconnaissance par FORME plutôt que par `instanceof` : `ai` embarque sa propre copie de
+ * zod selon la résolution de dépendances, et un `instanceof` faux ferait retomber
+ * silencieusement dans l'absence de validation — précisément le défaut qu'on ferme.
+ */
+const isParseable = (value: unknown): value is ParseableSchema =>
+  typeof value === 'object' &&
+  value !== null &&
+  typeof (value as { safeParse?: unknown }).safeParse === 'function';
+
+// Résolution de la connexion de l'appelant vocal : la première branche du `or` d'origine
+// (`connection.id === user.defaultConnectionId`) n'était PAS cadrée par `userId`. Rien ne
+// vérifie à l'écriture qu'un `defaultConnectionId` appartient bien à son porteur ; une valeur
+// pointant sur la connexion d'autrui donnait donc à l'appelant les outils de l'agent sur la
+// boîte mail d'un autre utilisateur. Les deux branches sont désormais cadrées.
 export const aiRouter = new Hono();
 
 aiRouter.get('/', (c) => c.text('Twilio + ElevenLabs + AI Phone System Ready'));
 
-// Add CORS headers for /do/* routes
+// Pas d'en-têtes CORS ici (pitbull A7, axe 4) : ces routes s'authentifient par un secret
+// partagé serveur-à-serveur. Un `Access-Control-Allow-Origin: *` n'y servait aucun appelant
+// légitime — un navigateur qui détiendrait ce secret l'aurait déjà divulgué — et exposait la
+// surface à n'importe quelle origine.
 aiRouter.use('/do/*', async (c, next) => {
-  c.header('Access-Control-Allow-Origin', '*');
-  c.header('Access-Control-Allow-Headers', 'Content-Type, X-Voice-Secret, X-Caller');
-  c.header('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  if (c.req.method === 'OPTIONS') {
-    return c.text('');
-  }
+  if (c.req.method === 'OPTIONS') return c.body(null, 204);
   return next();
 });
 
 aiRouter.post('/do/:action', async (c) => {
-  //   if (env.DISABLE_CALLS) return c.json({ success: false, error: 'Not implemented' }, 400);
-  if (env.VOICE_SECRET !== c.req.header('X-Voice-Secret'))
+  if (env.DISABLE_CALLS) return c.json({ success: false, error: 'Not implemented' }, 400);
+  if (!isAuthorizedVoiceCaller(env.VOICE_SECRET, c.req.header('X-Voice-Secret')))
     return c.json({ success: false, error: 'Unauthorized' }, 401);
   const caller = c.req.header('X-Caller');
   if (!caller) return c.json({ success: false, error: 'Unauthorized' }, 401);
-  const { db, conn } = createDb(env.HYPERDRIVE.connectionString);
-  const user = await db.query.user.findFirst({
-    where: (user, { eq, and }) =>
-      and(eq(user.phoneNumber, caller), eq(user.phoneNumberVerified, true)),
-  });
-  if (!user) return c.json({ success: false, error: 'Unauthorized' }, 401);
+  // Fuite de connexion refermée : le `return` anticipé sur `!user` sautait par-dessus le
+  // `conn.end()`, tout comme n'importe quelle panne de l'une des deux requêtes. La
+  // résolution entière tient désormais dans le `finally` de `withDb`.
+  const connection = await withDb(env.HYPERDRIVE.connectionString, async (db) => {
+    const user = await db.query.user.findFirst({
+      where: (user, { eq, and }) =>
+        and(eq(user.phoneNumber, caller), eq(user.phoneNumberVerified, true)),
+    });
+    if (!user) return undefined;
 
-  const connection = await db.query.connection.findFirst({
-    where: (connection, { eq, or }) =>
-      or(eq(connection.id, user.defaultConnectionId ?? ''), eq(connection.userId, user.id)),
+    return db.query.connection.findFirst({
+      // Les DEUX branches sont cadrées par `userId` (cf. en-tête du fichier).
+      where: (connection, { and, eq, or }) =>
+        or(
+          and(eq(connection.id, user.defaultConnectionId ?? ''), eq(connection.userId, user.id)),
+          eq(connection.userId, user.id),
+        ),
+    });
   });
-  await conn.end();
   if (!connection) return c.json({ success: false, error: 'Unauthorized' }, 401);
 
   try {
@@ -58,7 +86,27 @@ aiRouter.post('/do/:action', async (c) => {
       return c.json({ success: false, error: `Tool '${action}' not found` }, 404);
     }
 
-    const result = await tool.execute?.(body || {}, {
+    // Le corps JSON était passé TEL QUEL à `execute`, ce qui court-circuitait le schéma zod
+    // que l'outil déclare : les outils de l'agent recevaient des entrées non validées, alors
+    // que le même outil appelé par le modèle est toujours parsé par le SDK. On repasse par
+    // le schéma de l'outil, à la main.
+    const schema = (tool as { parameters?: unknown }).parameters;
+    if (!isParseable(schema)) {
+      return c.json({ success: false, error: `Tool '${action}' declares no input schema` }, 500);
+    }
+
+    const parsed = schema.safeParse(body ?? {});
+    if (!parsed.success) {
+      return c.json(
+        { success: false, error: `Invalid input for tool '${action}': ${parsed.error.message}` },
+        400,
+      );
+    }
+
+    const execute = tool.execute as
+      | ((input: unknown, options: { toolCallId: string; messages: [] }) => Promise<unknown>)
+      | undefined;
+    const result = await execute?.(parsed.data, {
       toolCallId: crypto.randomUUID(),
       messages: [],
     });
@@ -80,7 +128,7 @@ aiRouter.post('/call', async (c) => {
     return c.json({ success: false, error: 'Not implemented' }, 400);
   }
 
-  if (env.VOICE_SECRET !== c.req.header('X-Voice-Secret')) {
+  if (!isAuthorizedVoiceCaller(env.VOICE_SECRET, c.req.header('X-Voice-Secret'))) {
     logger.info('[DEBUG] Invalid voice secret');
     return c.json({ success: false, error: 'Unauthorized' }, 401);
   }
@@ -104,26 +152,30 @@ aiRouter.post('/call', async (c) => {
   }
 
   logger.info('[DEBUG] Connecting to database');
-  const { db, conn } = createDb(env.HYPERDRIVE.connectionString);
+  // Même fuite qu'au-dessus : le `return` sur « utilisateur non vérifié » précédait le
+  // `conn.end()`. `withDb` la referme.
+  const connection = await withDb(env.HYPERDRIVE.connectionString, async (db) => {
+    logger.info('[DEBUG] Finding user by phone number:', c.req.header('X-Caller'));
+    const user = await db.query.user.findFirst({
+      where: (user, { eq, and }) =>
+        and(eq(user.phoneNumber, caller), eq(user.phoneNumberVerified, true)),
+    });
 
-  logger.info('[DEBUG] Finding user by phone number:', c.req.header('X-Caller'));
-  const user = await db.query.user.findFirst({
-    where: (user, { eq, and }) =>
-      and(eq(user.phoneNumber, caller), eq(user.phoneNumberVerified, true)),
+    if (!user) {
+      logger.info('[DEBUG] User not found or not verified');
+      return undefined;
+    }
+
+    logger.info('[DEBUG] Finding connection for user:', user.id);
+    return db.query.connection.findFirst({
+      // Les DEUX branches sont cadrées par `userId` (cf. en-tête du fichier).
+      where: (connection, { and, eq, or }) =>
+        or(
+          and(eq(connection.id, user.defaultConnectionId ?? ''), eq(connection.userId, user.id)),
+          eq(connection.userId, user.id),
+        ),
+    });
   });
-
-  if (!user) {
-    logger.info('[DEBUG] User not found or not verified');
-    return c.json({ success: false, error: 'Unauthorized' }, 401);
-  }
-
-  logger.info('[DEBUG] Finding connection for user:', user.id);
-  const connection = await db.query.connection.findFirst({
-    where: (connection, { eq, or }) =>
-      or(eq(connection.id, user.defaultConnectionId ?? ''), eq(connection.userId, user.id)),
-  });
-
-  await conn.end();
 
   if (!connection) {
     logger.info('[DEBUG] No connection found for user');

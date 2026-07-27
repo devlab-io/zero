@@ -21,17 +21,20 @@ export class GmailDrafts {
       'sendDraft',
       async () => {
         const { raw } = await parseOutgoing(data, this.t.config);
-        await this.t.execute((gmail) =>
-          gmail.users.drafts.send({
-            userId: 'me',
-            requestBody: {
-              id: draftId,
-              message: {
-                raw,
+        await this.t.execute((gmail, signal) =>
+          gmail.users.drafts.send(
+            {
+              userId: 'me',
+              requestBody: {
                 id: draftId,
+                message: {
+                  raw,
+                  id: draftId,
+                },
               },
             },
-          }),
+            { signal },
+          ),
         );
       },
       { draftId, data },
@@ -42,12 +45,15 @@ export class GmailDrafts {
     return this.t.withErrorHandler(
       'deleteDraft',
       async () => {
-        await this.t.execute((gmail) =>
-          gmail.users.drafts.delete({
-            userId: 'me',
-            id: draftId,
-            quotaUser: this.t.getQuotaUser(),
-          }),
+        await this.t.execute((gmail, signal) =>
+          gmail.users.drafts.delete(
+            {
+              userId: 'me',
+              id: draftId,
+              quotaUser: this.t.getQuotaUser(),
+            },
+            { signal },
+          ),
         );
       },
       { draftId },
@@ -58,12 +64,17 @@ export class GmailDrafts {
     return this.t.withErrorHandler(
       'getDraft',
       async () => {
-        const res = await this.t.execute((gmail) =>
-          gmail.users.drafts.get({
-            userId: 'me',
-            id: draftId,
-            format: 'full',
-          }),
+        const res = await this.t.execute(
+          (gmail, signal) =>
+            gmail.users.drafts.get(
+              {
+                userId: 'me',
+                id: draftId,
+                format: 'full',
+              },
+              { signal },
+            ),
+          { retry: true },
         );
 
         if (!res.data) {
@@ -87,13 +98,18 @@ export class GmailDrafts {
       'listDrafts',
       async () => {
         const { q: normalizedQ } = normalizeSearch('draft', q ?? '');
-        const res = await this.t.execute((gmail) =>
-          gmail.users.drafts.list({
-            userId: 'me',
-            q: normalizedQ ? normalizedQ : undefined,
-            maxResults,
-            pageToken: pageToken ? pageToken : undefined,
-          }),
+        const res = await this.t.execute(
+          (gmail, signal) =>
+            gmail.users.drafts.list(
+              {
+                userId: 'me',
+                q: normalizedQ ? normalizedQ : undefined,
+                maxResults,
+                pageToken: pageToken ? pageToken : undefined,
+              },
+              { signal },
+            ),
+          { retry: true },
         );
 
         const drafts = await Promise.all(
@@ -101,12 +117,17 @@ export class GmailDrafts {
             if (!draft.id) return null;
             const draftId = draft.id;
             try {
-              const msg = await this.t.execute((gmail) =>
-                gmail.users.drafts.get({
-                  userId: 'me',
-                  id: draftId,
-                  format: 'full',
-                }),
+              const msg = await this.t.execute(
+                (gmail, signal) =>
+                  gmail.users.drafts.get(
+                    {
+                      userId: 'me',
+                      id: draftId,
+                      format: 'full',
+                    },
+                    { signal },
+                  ),
+                { retry: true },
               );
               const message = msg.data.message;
               if (!message) return null;
@@ -233,19 +254,25 @@ export class GmailDrafts {
 
         if (data.id) {
           const draftId = data.id;
-          res = await this.t.execute((gmail) =>
-            gmail.users.drafts.update({
-              userId: 'me',
-              id: draftId,
-              requestBody,
-            }),
+          res = await this.t.execute((gmail, signal) =>
+            gmail.users.drafts.update(
+              {
+                userId: 'me',
+                id: draftId,
+                requestBody,
+              },
+              { signal },
+            ),
           );
         } else {
-          res = await this.t.execute((gmail) =>
-            gmail.users.drafts.create({
-              userId: 'me',
-              requestBody,
-            }),
+          res = await this.t.execute((gmail, signal) =>
+            gmail.users.drafts.create(
+              {
+                userId: 'me',
+                requestBody,
+              },
+              { signal },
+            ),
           );
         }
 

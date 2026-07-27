@@ -13,18 +13,34 @@
  *
  * Reuse or distribution of this file requires a license from Zero Email Inc.
  */
-import { logger } from '../lib/logger';
+import {
+  awaitPageCompletion,
+  childWorkflowId,
+  createOrAttachPageWorkflow,
+  type PageWorkflowBinding,
+} from './sync-coordinator-utils';
 import { WorkflowEntrypoint, WorkflowStep } from 'cloudflare:workers';
 import { connectionToDriver } from '../lib/server-utils';
 import type { WorkflowEvent } from 'cloudflare:workers';
+import { captureServerException } from '../lib/sentry';
 import { connection } from '../db/schema';
+import { logger } from '../lib/logger';
 import type { ZeroEnv } from '../env';
 import { eq } from 'drizzle-orm';
-import { createDb } from '../db';
+import { withDb } from '../db';
 
 export interface SyncThreadsCoordinatorParams {
   connectionId: string;
   folder: string;
+}
+
+/** Sortie d'un workflow enfant de page (une passe de `SYNC_THREADS_WORKFLOW`). */
+interface SyncPageOutput {
+  synced?: number;
+  totalThreads?: number;
+  successfulSyncs?: number;
+  failedSyncs?: number;
+  nextPageToken?: string | null;
 }
 
 export interface SyncThreadsCoordinatorResult {
@@ -48,7 +64,28 @@ export class SyncThreadsCoordinatorWorkflow extends WorkflowEntrypoint<
   ZeroEnv,
   SyncThreadsCoordinatorParams
 > {
+  /**
+   * Point d'entrée du Workflow. `captureServerException` n'existait qu'en main.ts (fetch,
+   * queue, scheduled) : un Workflow qui casse n'émettait AUCUN événement, alors même que
+   * Cloudflare Workflows retente le step puis abandonne l'instance en silence. La
+   * synchronisation d'une boîte pouvait donc mourir sans laisser d'alerte.
+   */
   async run(
+    event: WorkflowEvent<SyncThreadsCoordinatorParams>,
+    step: WorkflowStep,
+  ): Promise<SyncThreadsCoordinatorResult> {
+    try {
+      return await this.execute(event, step);
+    } catch (error) {
+      await captureServerException(error, this.env, {
+        transaction: 'SyncThreadsCoordinatorWorkflow.run',
+        extra: { connectionId: event.payload.connectionId, folder: event.payload.folder },
+      });
+      throw error;
+    }
+  }
+
+  private async execute(
     event: WorkflowEvent<SyncThreadsCoordinatorParams>,
     step: WorkflowStep,
   ): Promise<SyncThreadsCoordinatorResult> {
@@ -70,13 +107,14 @@ export class SyncThreadsCoordinatorWorkflow extends WorkflowEntrypoint<
     };
 
     const setupResult = await step.do(`setup-connection-${connectionId}-${folder}`, async () => {
-      const { db, conn } = createDb(this.env.HYPERDRIVE.connectionString);
-
-      const foundConnection = await db.query.connection.findFirst({
-        where: eq(connection.id, connectionId),
-      });
-
-      await conn.end();
+      // `withDb` : le `conn.end()` d'origine ne s'exécutait que si la requête aboutissait, et
+      // ce bloc est un `step.do` que Cloudflare REJOUE — chaque rejeu ajoutait donc une
+      // connexion perdue de plus.
+      const foundConnection = await withDb(this.env.HYPERDRIVE.connectionString, (db) =>
+        db.query.connection.findFirst({
+          where: eq(connection.id, connectionId),
+        }),
+      );
 
       if (!foundConnection) {
         throw new Error(`Connection ${connectionId} not found`);
@@ -124,9 +162,17 @@ export class SyncThreadsCoordinatorWorkflow extends WorkflowEntrypoint<
             `[SyncThreadsCoordinatorWorkflow] Processing page ${pageNumber} for ${folder}`,
           );
 
-          // Create workflow for this page
-          const instance = await this.env.SYNC_THREADS_WORKFLOW.create({
-            params: {
+          // Identifiant DÉTERMINISTE : sans lui, chaque nouvelle tentative de ce step par
+          // Cloudflare Workflows créait une instance enfant SUPPLÉMENTAIRE et re-synchronisait
+          // la page entière. Le rattachement rend le rejeu inoffensif.
+          const childId = childWorkflowId(event.instanceId, folder, pageNumber);
+          const instance = await createOrAttachPageWorkflow(
+            this.env.SYNC_THREADS_WORKFLOW as unknown as PageWorkflowBinding<
+              Record<string, unknown>,
+              SyncPageOutput
+            >,
+            childId,
+            {
               connectionId,
               folder,
               pageNumber,
@@ -134,57 +180,28 @@ export class SyncThreadsCoordinatorWorkflow extends WorkflowEntrypoint<
               maxCount,
               singlePageMode: true,
             },
-          });
+          );
 
           logger.info(
-            `[SyncThreadsCoordinatorWorkflow] Created workflow ${instance.id} for page ${pageNumber}`,
+            `[SyncThreadsCoordinatorWorkflow] Page ${pageNumber} handled by workflow ${instance.id}`,
           );
 
           // Poll avec backoff exponentiel (issue #31) : plus de plancher plat de 5 s/page.
           // Une page qui se termine vite rend la main en <1 s au lieu d'attendre 5 s ;
           // l'intervalle croît 250 ms → 5 s (plafond), budget total ~5 min inchangé.
-          const pollBaseMs = 250;
-          const pollMaxMs = 5000;
-          const pollFactor = 1.6;
-          const deadline = Date.now() + 5 * 60 * 1000; // 5 minutes budget (préservé)
-          let pollAttempt = 0;
+          // Un état terminal sort désormais IMMÉDIATEMENT, avec son vrai motif.
+          const result = await awaitPageCompletion(instance, {
+            sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+            now: () => Date.now(),
+          });
 
-          while (Date.now() < deadline) {
-            const delayMs = Math.min(
-              pollMaxMs,
-              Math.round(pollBaseMs * Math.pow(pollFactor, pollAttempt)),
-            );
-            await new Promise((resolve) => setTimeout(resolve, delayMs));
-
-            try {
-              const status = await instance.status();
-              if (status.status === 'complete') {
-                return { result: status.output, workflowId: instance.id };
-              } else if (status.status === 'errored') {
-                throw new Error(`Workflow ${instance.id} failed`);
-              }
-            } catch (error) {
-              if (Date.now() >= deadline) {
-                throw error;
-              }
-            }
-
-            pollAttempt++;
-          }
-
-          throw new Error(`Workflow ${instance.id} timed out`);
+          return { result: result ?? null, workflowId: instance.id };
         },
       );
 
       // Update result with this page's data
       if (pageResult?.result) {
-        const workflowResult = pageResult.result as {
-          synced?: number;
-          totalThreads?: number;
-          successfulSyncs?: number;
-          failedSyncs?: number;
-          nextPageToken?: string | null;
-        };
+        const workflowResult = pageResult.result;
         result.pageWorkflowResults.push({
           pageNumber,
           workflowId: pageResult.workflowId,

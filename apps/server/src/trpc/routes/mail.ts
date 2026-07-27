@@ -8,9 +8,18 @@ import {
   deleteAllSpam,
   reSyncThread,
 } from '../../lib/server-utils';
+import {
+  cancelTtlSeconds,
+  MAX_QUEUE_DELAY_SECONDS,
+  MAX_SCHEDULE_AHEAD_SECONDS,
+  scheduleTtlSeconds,
+} from '../../lib/scheduled-send';
 import { IGetThreadResponseSchema, type IGetThreadsResponse } from '../../lib/driver/types';
+import { makeBulkLabelProcedure, makeToggleLabelProcedure } from './mail-label-procedures';
 import type { DeleteAllSpamResponse, IEmailSendBatch } from '../../types';
 import { activeDriverProcedure, router, privateProcedure } from '../trpc';
+import { getConnectionRegistry } from '../../lib/connection-registry';
+import { outgoingHeadersSchema } from '../../lib/mime-headers';
 import { processEmailHtml } from '../../lib/email-processor';
 import { defaultPageSize, FOLDERS } from '../../lib/utils';
 import { toAttachmentFiles } from '../../lib/attachments';
@@ -266,156 +275,11 @@ export const mailRouter = router({
       return { success: false, error: 'No label changes specified' };
     }),
 
-  toggleStar: activeDriverProcedure
-    .input(
-      z.object({
-        ids: z.string().array(),
-      }),
-    )
-    .mutation(async ({ input, ctx }) => {
-      const { activeConnection } = ctx;
-      const executionCtx = getContext<HonoContext>().executionCtx;
-      const { stub: agent } = await getZeroAgent(activeConnection.id, executionCtx);
-      const { threadIds } = await agent.normalizeIds(input.ids);
-
-      if (!threadIds.length) {
-        return { success: false, error: 'No thread IDs provided' };
-      }
-
-      const threadResults = await Promise.allSettled(
-        threadIds.map(async (id: string) => {
-          const thread = await getThread(activeConnection.id, id);
-          return thread.result;
-        }),
-      );
-
-      let anyStarred = false;
-      let processedThreads = 0;
-
-      for (const result of threadResults) {
-        if (result.status === 'fulfilled' && result.value && result.value.messages.length > 0) {
-          processedThreads++;
-          const isThreadStarred = result.value.messages.some((message) =>
-            message.tags?.some((tag) => tag.name.toLowerCase().startsWith('starred')),
-          );
-          if (isThreadStarred) {
-            anyStarred = true;
-            break;
-          }
-        }
-      }
-
-      const shouldStar = processedThreads > 0 && !anyStarred;
-
-      await Promise.all(
-        threadIds.map((threadId) =>
-          modifyThreadLabelsInDB(
-            activeConnection.id,
-            threadId,
-            shouldStar ? ['STARRED'] : [],
-            shouldStar ? [] : ['STARRED'],
-          ),
-        ),
-      );
-
-      return { success: true };
-    }),
-  toggleImportant: activeDriverProcedure
-    .input(
-      z.object({
-        ids: z.string().array(),
-      }),
-    )
-    .mutation(async ({ input, ctx }) => {
-      const { activeConnection } = ctx;
-      const executionCtx = getContext<HonoContext>().executionCtx;
-      const { stub: agent } = await getZeroAgent(activeConnection.id, executionCtx);
-      const { threadIds } = await agent.normalizeIds(input.ids);
-
-      if (!threadIds.length) {
-        return { success: false, error: 'No thread IDs provided' };
-      }
-
-      const threadResults = await Promise.allSettled(
-        threadIds.map(async (id: string) => {
-          const thread = await getThread(activeConnection.id, id);
-          return thread.result;
-        }),
-      );
-
-      let anyImportant = false;
-      let processedThreads = 0;
-
-      for (const result of threadResults) {
-        if (result.status === 'fulfilled' && result.value && result.value.messages.length > 0) {
-          processedThreads++;
-          const isThreadImportant = result.value.messages.some((message) =>
-            message.tags?.some((tag) => tag.name.toLowerCase().startsWith('important')),
-          );
-          if (isThreadImportant) {
-            anyImportant = true;
-            break;
-          }
-        }
-      }
-
-      const shouldMarkImportant = processedThreads > 0 && !anyImportant;
-
-      await Promise.all(
-        threadIds.map((threadId) =>
-          modifyThreadLabelsInDB(
-            activeConnection.id,
-            threadId,
-            shouldMarkImportant ? ['IMPORTANT'] : [],
-            shouldMarkImportant ? [] : ['IMPORTANT'],
-          ),
-        ),
-      );
-
-      return { success: true };
-    }),
-  bulkStar: activeDriverProcedure
-    .input(
-      z.object({
-        ids: z.string().array(),
-      }),
-    )
-    .mutation(async ({ input, ctx }) => {
-      const { activeConnection } = ctx;
-      return Promise.all(
-        input.ids.map((threadId) =>
-          modifyThreadLabelsInDB(activeConnection.id, threadId, ['STARRED'], []),
-        ),
-      );
-    }),
-  bulkMarkImportant: activeDriverProcedure
-    .input(
-      z.object({
-        ids: z.string().array(),
-      }),
-    )
-    .mutation(async ({ input, ctx }) => {
-      const { activeConnection } = ctx;
-      return Promise.all(
-        input.ids.map((threadId) =>
-          modifyThreadLabelsInDB(activeConnection.id, threadId, ['IMPORTANT'], []),
-        ),
-      );
-    }),
-  bulkUnstar: activeDriverProcedure
-    .input(
-      z.object({
-        ids: z.string().array(),
-      }),
-    )
-    .mutation(async ({ input, ctx }) => {
-      const { activeConnection } = ctx;
-      return Promise.all(
-        input.ids.map((threadId) =>
-          modifyThreadLabelsInDB(activeConnection.id, threadId, [], ['STARRED']),
-        ),
-      );
-    }),
+  toggleStar: makeToggleLabelProcedure('STARRED'),
+  toggleImportant: makeToggleLabelProcedure('IMPORTANT'),
+  bulkStar: makeBulkLabelProcedure('STARRED', 'add'),
+  bulkMarkImportant: makeBulkLabelProcedure('IMPORTANT', 'add'),
+  bulkUnstar: makeBulkLabelProcedure('STARRED', 'remove'),
   deleteAllSpam: activeDriverProcedure.mutation(async ({ ctx }): Promise<DeleteAllSpamResponse> => {
     const { activeConnection } = ctx;
     try {
@@ -435,20 +299,7 @@ export const mailRouter = router({
       };
     }
   }),
-  bulkUnmarkImportant: activeDriverProcedure
-    .input(
-      z.object({
-        ids: z.string().array(),
-      }),
-    )
-    .mutation(async ({ input, ctx }) => {
-      const { activeConnection } = ctx;
-      return Promise.all(
-        input.ids.map((threadId) =>
-          modifyThreadLabelsInDB(activeConnection.id, threadId, [], ['IMPORTANT']),
-        ),
-      );
-    }),
+  bulkUnmarkImportant: makeBulkLabelProcedure('IMPORTANT', 'remove'),
 
   send: activeDriverProcedure
     .input(
@@ -457,7 +308,7 @@ export const mailRouter = router({
         subject: z.string(),
         message: z.string(),
         attachments: z.array(serializedFileSchema).optional().default([]),
-        headers: z.record(z.string()).optional().default({}),
+        headers: outgoingHeadersSchema.optional().default({}),
         cc: z.array(senderSchema).optional(),
         bcc: z.array(senderSchema).optional(),
         threadId: z.string().optional(),
@@ -511,14 +362,36 @@ export const mailRouter = router({
             return { success: false, error: 'Schedule time must be in the future' } as const;
           }
 
+          // Borne HAUTE. Elle manquait : au-delà d'un an, `scheduleTtlSeconds` plafonne à
+          // `MAX_KV_TTL_SECONDS` et le CORPS du message expire AVANT son échéance. Le cron
+          // ne remet en file que `{messageId, connectionId, sendAt}` — jamais le corps — et
+          // le mail disparaît sans que le client, qui a reçu `{success:true}`, l'apprenne.
+          // C'est la perte silencieuse que l'alignement des TTL croyait avoir fermée : elle
+          // subsistait dans ce cas limite, faute de refuser l'échéance en amont.
+          if ((parsedTime - now) / 1000 > MAX_SCHEDULE_AHEAD_SECONDS) {
+            // Littérale, comme les autres motifs de refus : le client conserve un type
+            // d'erreur exploitable. La valeur « 365 » est verrouillée par un test
+            // (scheduled-send.test.ts) qui casse si `MAX_SCHEDULE_AHEAD_SECONDS` bouge.
+            return {
+              success: false,
+              error:
+                'Schedule time must be at most 365 days ahead: beyond that the message body cannot be stored until its due date',
+            } as const;
+          }
+
           targetTime = parsedTime;
         } else {
           targetTime = Date.now() + 15_000;
         }
 
         const rawDelaySeconds = Math.floor((targetTime - Date.now()) / 1000);
-        const maxQueueDelay = 43200; // 12 hours
-        const isLongTerm = rawDelaySeconds > maxQueueDelay;
+        const isLongTerm = rawDelaySeconds > MAX_QUEUE_DELAY_SECONDS;
+
+        // UNE seule duree de vie pour les trois clefs. Le corps etait ecrit avec 24 h fixes
+        // alors que la planification pouvait courir jusqu'a un an : tout mail programme
+        // au-dela de ~24 h perdait son contenu AVANT son echeance, et le cron ne remet en
+        // file que `{messageId, connectionId, sendAt}` — jamais le corps.
+        const ttlSeconds = scheduleTtlSeconds(rawDelaySeconds);
 
         const {
           pending_emails_status: statusKV,
@@ -529,7 +402,7 @@ export const mailRouter = router({
 
         try {
           await statusKV.put(messageId, 'pending', {
-            expirationTtl: 60 * 60 * 24,
+            expirationTtl: ttlSeconds,
           });
         } catch (error) {
           logger.error(`Failed to write pending status to KV for message ${messageId}`, error);
@@ -545,7 +418,7 @@ export const mailRouter = router({
 
         try {
           await payloadKV.put(messageId, JSON.stringify(mailPayload), {
-            expirationTtl: 60 * 60 * 24,
+            expirationTtl: ttlSeconds,
           });
         } catch (error) {
           logger.error(`Failed to write email payload to KV for message ${messageId}`, error);
@@ -561,7 +434,7 @@ export const mailRouter = router({
                 connectionId: activeConnection.id,
                 sendAt: targetTime,
               }),
-              { expirationTtl: Math.min(Math.ceil(rawDelaySeconds + 3600), 31556952) },
+              { expirationTtl: ttlSeconds },
             );
           } catch (error) {
             logger.error(
@@ -627,16 +500,18 @@ export const mailRouter = router({
         scheduled_emails: scheduledKV,
       } = env;
 
+      let scheduledSendAt: number | undefined;
       const scheduledData = await scheduledKV.get(messageId);
       if (scheduledData) {
         try {
-          const { connectionId } = JSON.parse(scheduledData);
+          const { connectionId, sendAt } = JSON.parse(scheduledData);
           if (connectionId !== activeConnection.id) {
             return {
               success: false,
               error: "Unauthorized: Cannot cancel another user's scheduled email",
             } as const;
           }
+          scheduledSendAt = typeof sendAt === 'number' ? sendAt : undefined;
         } catch (error) {
           logger.error('Failed to parse scheduled data for ownership verification:', error);
           return { success: false, error: 'Invalid scheduled email data' } as const;
@@ -659,14 +534,76 @@ export const mailRouter = router({
         }
       }
 
+      // BARRIERE FORTE, d'abord. L'annulation ne vivait que dans KV, alors que
+      // `scheduled-send.ts` documente lui-meme ce controle comme un pre-filtre non garant :
+      // KV est eventuellement coherent et sans compare-and-set, donc une marque posee
+      // pendant que la livraison lisait encore `pending` laissait le mail partir. La
+      // reservation SQL du Durable Object, elle, est atomique — et c'est deja elle qui
+      // decide si l'envoi part.
+      const registry = getConnectionRegistry(env, activeConnection.id);
+      const cancellation = await registry.cancelScheduledSend(messageId, Date.now());
+      if (!cancellation.cancelled) {
+        // L'envoi est en vol ou deja regle : le dire, plutot que d'effacer le payload et
+        // de laisser croire a une annulation qui n'a pas eu lieu.
+        return {
+          success: false,
+          error:
+            cancellation.reason === 'in-flight'
+              ? 'Too late to cancel: the send is already in progress'
+              : 'Too late to cancel: the send already completed',
+        } as const;
+      }
+
+      // Surface de LECTURE seulement, desormais. La marque d'annulation vivait 1 h ;
+      // au-dela elle expirait AVANT l'echeance et le consommateur, ne voyant plus
+      // `cancelled`, envoyait un mail que l'utilisateur avait annule. Elle couvre
+      // desormais l'echeance connue (ou le delai de file maximal).
       await statusKV.put(messageId, 'cancelled', {
-        expirationTtl: 60 * 60,
+        expirationTtl: cancelTtlSeconds(scheduledSendAt, Date.now()),
       });
 
       await payloadKV.delete(messageId);
       await scheduledKV.delete(messageId); // Clean up long-term schedule if it exists
 
       return { success: true };
+    }),
+  /**
+   * Issue d'un envoi différé. `pending_emails_status` était ÉCRIT et jamais lu : ni une
+   * procédure tRPC ni l'interface n'y touchaient. Le client recevait
+   * `{success:true, scheduled:true}` et n'apprenait jamais qu'un mail avait échoué, ni
+   * qu'il était resté bloqué sur une issue ambiguë. Cette procédure est le lecteur qui
+   * manquait.
+   *
+   * `reservation` est la source de vérité (SQL transactionnel du DO de la connexion) ;
+   * `status` n'est que la surface KV, qui peut avoir expiré ou n'avoir pas pu être écrite.
+   * L'autorisation est structurelle : on n'interroge que le registre de SA propre
+   * connexion, il n'existe pas de chemin vers celui d'une autre.
+   */
+  scheduledSendStatus: activeDriverProcedure
+    .input(z.object({ messageId: z.string().min(1) }))
+    .query(async ({ ctx, input }) => {
+      const { activeConnection } = ctx;
+      const status = await env.pending_emails_status.get(input.messageId);
+      const registry = getConnectionRegistry(env, activeConnection.id);
+      const reservation = await registry.getScheduledSendReservation(input.messageId);
+
+      return {
+        messageId: input.messageId,
+        status: status ?? null,
+        reservation: reservation
+          ? {
+              status: reservation.status,
+              outcome: reservation.outcome,
+              reservedAt: reservation.reservedAt,
+              settledAt: reservation.settledAt,
+              detail: reservation.detail,
+            }
+          : null,
+        // `sending` sans règlement = tentative dont l'issue n'est jamais revenue. C'est le
+        // coût assumé du « jamais de doublon » : ce mail ne repartira pas seul, et il doit
+        // être visible plutôt que silencieux.
+        stuck: reservation?.status === 'sending',
+      };
     }),
   delete: activeDriverProcedure
     .input(
@@ -813,7 +750,11 @@ export const mailRouter = router({
   processEmailContent: privateProcedure
     .input(
       z.object({
-        html: z.string(),
+        // Borne d'entrée : `processEmailHtml` parse deux fois le HTML (sanitize-html puis
+        // cheerio). Non bornée, la procédure acceptait des mégaoctets — 3,2 Mo mesurés à
+        // 3,1 s de CPU — sur un worker dont le rate limiting n'est pas actif. 2 Mo est la
+        // même borne que celle du sanitiseur destiné au LLM (lib/mail-sanitize).
+        html: z.string().max(2_000_000),
         shouldLoadImages: z.boolean(),
         theme: z.enum(['light', 'dark']),
       }),

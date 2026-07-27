@@ -15,11 +15,12 @@
  */
 
 import type { IGetThreadResponse, MailManager } from '../../lib/driver/types';
+import type { DriverSetupRpcResult } from '../../lib/errors';
 import type { CreateDraftData } from '../../lib/schemas';
 import type { IOutgoingMessage } from '../../types';
+import type { connection } from '../../db/schema';
 import type { ThreadSyncResult } from './errors';
 import type { ZeroAgent } from './chat-agent';
-import type { connection } from '../../db/schema';
 import type { ZeroEnv } from '../../env';
 import type { DB } from './db';
 
@@ -59,7 +60,7 @@ export interface ZeroDriverInternal {
   // --- public methods the free functions call back into ---
   invalidateRecipientCache(): void;
   reloadFolder(folder: string): Promise<void>;
-  setupAuth(): Promise<void>;
+  setupAuth(): Promise<DriverSetupRpcResult>;
   syncThread(params: { threadId: string }): Promise<ThreadSyncResult>;
   getThread(threadId: string, includeDrafts?: boolean): Promise<IGetThreadResponse>;
   getThreadCount(): Promise<number>;

@@ -96,15 +96,38 @@
             "binding": "send_email_queue",
           },
         ],
+        // max_retries : sans ce reglage, Cloudflare abandonne apres 3 tentatives par
+        // defaut, et le message disparait sans trace — y compris un envoi d'e-mail
+        // utilisateur. Porte a 5, avec un consommateur desormais idempotent
+        // (lib/scheduled-send.ts : reservation `sending`), donc un rejeu ne peut plus
+        // produire de doublon.
+        //
+        // ACTION REQUISE COTE CLOUDFLARE (non faisable depuis ce depot, aucun acces
+        // distant autorise) — les dead-letter queues n'existent PAS encore. `wrangler
+        // deploy` transmet `dead_letter_queue` tel quel a l'API Queues (verifie dans
+        // wrangler 4.32.0, `updateQueueConsumers`) : il ne la cree pas. Declarer une file
+        // inexistante ferait donc echouer le deploiement. `--dry-run` ne valide RIEN a
+        // distance et ne peut pas servir de preuve. Sequence a executer, puis decommenter
+        // les lignes `dead_letter_queue` ci-dessous :
+        //   wrangler queues create subscribe-queue-dlq
+        //   wrangler queues create thread-queue-dlq
+        //   wrangler queues create send-email-queue-dlq
+        //   (idem suffixes -staging-dlq et -prod-dlq pour les deux autres environnements)
         "consumers": [
           {
             "queue": "subscribe-queue",
+            "max_retries": 5,
+            // "dead_letter_queue": "subscribe-queue-dlq",
           },
           {
             "queue": "thread-queue",
+            "max_retries": 5,
+            // "dead_letter_queue": "thread-queue-dlq",
           },
           {
             "queue": "send-email-queue",
+            "max_retries": 5,
+            // "dead_letter_queue": "send-email-queue-dlq",
           },
         ],
       },
@@ -324,15 +347,22 @@
             "binding": "send_email_queue",
           },
         ],
+        // Cf. bloc racine : max_retries actif, dead-letter queues a creer cote Cloudflare.
         "consumers": [
           {
             "queue": "subscribe-queue-staging",
+            "max_retries": 5,
+            "dead_letter_queue": "subscribe-queue-staging-dlq",
           },
           {
             "queue": "thread-queue-staging",
+            "max_retries": 5,
+            "dead_letter_queue": "thread-queue-staging-dlq",
           },
           {
             "queue": "send-email-queue-staging",
+            "max_retries": 5,
+            "dead_letter_queue": "send-email-queue-staging-dlq",
           },
         ],
       },
@@ -457,9 +487,11 @@
       "observability": {
         "enabled": true,
         // Native Workers Traces: automatic spans for DO/R2/fetch + custom spans
-        // via cloudflare:workers tracing API. Full sampling during the latency
-        // audit; lower head_sampling_rate once the baseline is established.
-        "traces": { "enabled": true, "head_sampling_rate": 1 },
+        // via cloudflare:workers tracing API. Le commentaire precedent promettait
+        // d'abaisser le taux « une fois la reference etablie » ; elle l'est. Production
+        // a 0,1 (echantillonnage de tete : 1 requete sur 10 tracee, cout et volume
+        // divises par dix), staging reste a 1 pour continuer a mesurer finement.
+        "traces": { "enabled": true, "head_sampling_rate": 0.1 },
       },
       "hyperdrive": [
         {
@@ -531,15 +563,22 @@
             "binding": "send_email_queue",
           },
         ],
+        // Cf. bloc racine : max_retries actif, dead-letter queues a creer cote Cloudflare.
         "consumers": [
           {
             "queue": "subscribe-queue-prod",
+            "max_retries": 5,
+            "dead_letter_queue": "subscribe-queue-prod-dlq",
           },
           {
             "queue": "thread-queue-prod",
+            "max_retries": 5,
+            "dead_letter_queue": "thread-queue-prod-dlq",
           },
           {
             "queue": "send-email-queue-prod",
+            "max_retries": 5,
+            "dead_letter_queue": "send-email-queue-prod-dlq",
           },
         ],
       },

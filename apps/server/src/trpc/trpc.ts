@@ -1,11 +1,17 @@
-import { logger } from '../lib/logger';
+import {
+  requireSessionUser,
+  rejectWithoutActiveConnection,
+  classifyDriverFailure,
+} from '../lib/trpc-guards';
 import { getActiveConnection, getZeroDB } from '../lib/server-utils';
 import { Ratelimit, type RatelimitConfig } from '@upstash/ratelimit';
-import { getConnInfo } from 'hono/cloudflare-workers';
-import { env } from 'cloudflare:workers';
-import type { ZeroEnv } from '../env';
-import { initTRPC, TRPCError } from '@trpc/server';
 import { createLoggingMiddleware } from '../lib/trpc-logging';
+import { getConnInfo } from 'hono/cloudflare-workers';
+import { initTRPC, TRPCError } from '@trpc/server';
+import { withAppCode } from '../lib/errors';
+import { env } from 'cloudflare:workers';
+import { logger } from '../lib/logger';
+import type { ZeroEnv } from '../env';
 
 import { redis } from '../lib/services';
 import type { Context } from 'hono';
@@ -47,7 +53,17 @@ type TrpcContext = {
   sessionUser?: BoundarySessionUser;
 };
 
-const t = initTRPC.context<TrpcContext>().create({ transformer: superjson });
+// `errorFormatter` publie un CODE STABLE sur chaque erreur tRPC (lib/errors.ts). Sans lui,
+// le client n'avait d'autre choix que de comparer des messages à travers le réseau
+// (`err.message === 'Required scopes missing'`), ce qui liait le comportement d'auth de
+// l'UI au libellé exact d'une chaîne côté serveur. `data.appCode` est désormais la seule
+// chose que le client relit — cf. apps/mail/providers/query-provider.tsx.
+const t = initTRPC.context<TrpcContext>().create({
+  transformer: superjson,
+  errorFormatter({ shape, error }) {
+    return withAppCode(shape, error);
+  },
+});
 
 const loggingMiddleware = createLoggingMiddleware();
 
@@ -58,45 +74,60 @@ export const privateProcedure = publicProcedure.use(async ({ ctx, next }) => {
   const { addRequestSpan, completeRequestSpan } = await import('../lib/trace-context');
 
   // Start auth validation span
-  const authSpan = addRequestSpan(ctx.c, 'trpc_auth_validation', {
-    hasSessionUser: !!ctx.sessionUser,
-    procedure: 'private',
-  }, {
-    'trpc.auth_required': 'true'
-  });
+  const authSpan = addRequestSpan(
+    ctx.c,
+    'trpc_auth_validation',
+    {
+      hasSessionUser: !!ctx.sessionUser,
+      procedure: 'private',
+    },
+    {
+      'trpc.auth_required': 'true',
+    },
+  );
 
-  if (!ctx.sessionUser) {
+  let sessionUser: BoundarySessionUser;
+  try {
+    sessionUser = requireSessionUser(ctx.sessionUser);
+  } catch (error) {
     if (authSpan) {
-      completeRequestSpan(ctx.c, authSpan.id, {
-        success: false,
-        reason: 'no_session_user',
-      }, 'UNAUTHORIZED: No session user found');
+      completeRequestSpan(
+        ctx.c,
+        authSpan.id,
+        {
+          success: false,
+          reason: 'no_session_user',
+        },
+        'UNAUTHORIZED: No session user found',
+      );
     }
-
-    throw new TRPCError({
-      code: 'UNAUTHORIZED',
-    });
+    throw error;
   }
 
   if (authSpan) {
     completeRequestSpan(ctx.c, authSpan.id, {
       success: true,
-      userId: ctx.sessionUser.id,
+      userId: sessionUser.id,
     });
   }
 
-  return next({ ctx: { ...ctx, sessionUser: ctx.sessionUser } });
+  return next({ ctx: { ...ctx, sessionUser } });
 });
 
 export const activeConnectionProcedure = privateProcedure.use(async ({ ctx, next }) => {
   const { addRequestSpan, completeRequestSpan } = await import('../lib/trace-context');
 
   // Start connection validation span
-  const connectionSpan = addRequestSpan(ctx.c, 'trpc_connection_validation', {
-    userId: ctx.sessionUser.id,
-  }, {
-    'trpc.connection_required': 'true'
-  });
+  const connectionSpan = addRequestSpan(
+    ctx.c,
+    'trpc_connection_validation',
+    {
+      userId: ctx.sessionUser.id,
+    },
+    {
+      'trpc.connection_required': 'true',
+    },
+  );
 
   try {
     const activeConnection = await getActiveConnection();
@@ -112,61 +143,44 @@ export const activeConnectionProcedure = privateProcedure.use(async ({ ctx, next
     return next({ ctx: { ...ctx, activeConnection } });
   } catch (err) {
     if (connectionSpan) {
-      completeRequestSpan(ctx.c, connectionSpan.id, {
-        success: false,
-        reason: 'connection_not_found',
-      }, err instanceof Error ? err.message : 'Failed to get active connection');
+      completeRequestSpan(
+        ctx.c,
+        connectionSpan.id,
+        {
+          success: false,
+          reason: 'connection_not_found',
+        },
+        err instanceof Error ? err.message : 'Failed to get active connection',
+      );
     }
 
-    await ctx.c.var.auth.api.signOut({ headers: ctx.c.req.raw.headers });
-    throw new TRPCError({
-      code: 'BAD_REQUEST',
-      message: err instanceof Error ? err.message : 'Failed to get active connection',
-    });
+    throw await rejectWithoutActiveConnection(err, () =>
+      ctx.c.var.auth.api.signOut({ headers: ctx.c.req.raw.headers }),
+    );
   }
 });
-
-const permissionErrors = ['precondition check', 'insufficient permission', 'invalid credentials'];
 
 export const activeDriverProcedure = activeConnectionProcedure.use(async ({ ctx, next }) => {
   const { activeConnection, sessionUser } = ctx;
   const res = await next({ ctx: { ...ctx } });
 
   if (!res.ok) {
-    const errorMessage = res.error.message.toLowerCase();
+    const failure = await classifyDriverFailure(res.error, activeConnection.id, {
+      clearTokens: async () => {
+        const db = await getZeroDB(sessionUser.id);
+        await db.updateConnection(activeConnection.id, {
+          accessToken: null,
+          refreshToken: null,
+        });
+      },
+      setReconnectHeader: (connectionId) =>
+        ctx.c.header(
+          'X-Zero-Redirect',
+          `/settings/connections?disconnectedConnectionId=${connectionId}`,
+        ),
+    });
 
-    const isPermissionError = permissionErrors.some((errorType) =>
-      errorMessage.includes(errorType),
-    );
-
-    if (isPermissionError) {
-      throw new TRPCError({
-        code: 'BAD_REQUEST',
-        message: 'Required scopes missing',
-        cause: res.error,
-      });
-    }
-
-    // Handle token expiration/refresh issues
-    if (errorMessage.includes('invalid_grant')) {
-      // Remove the access token and refresh token
-      const db = await getZeroDB(sessionUser.id);
-      await db.updateConnection(activeConnection.id, {
-        accessToken: null,
-        refreshToken: null,
-      });
-
-      ctx.c.header(
-        'X-Zero-Redirect',
-        `/settings/connections?disconnectedConnectionId=${activeConnection.id}`,
-      );
-
-      throw new TRPCError({
-        code: 'UNAUTHORIZED',
-        message: 'Connection expired. Please reconnect.',
-        cause: res.error,
-      });
-    }
+    if (failure) throw failure;
   }
 
   return res;

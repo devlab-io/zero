@@ -17,6 +17,7 @@
 import {
   beginGeneratingDraftOutboxJob,
   beginSendingDraftOutboxJob,
+  decideDraftOutboxSendSettlement,
   failDraftOutboxJob,
   findNextApprovedDraftOutboxSendAt,
   findNextDueApprovedDraftOutboxItem,
@@ -24,18 +25,27 @@ import {
   getDraftOutboxItem,
   markDraftOutboxJobReady,
   markDraftOutboxJobSent,
+  settleSendingDraftOutboxJob,
   type DraftOutboxItem,
+  type DraftOutboxStatus,
 } from '../../lib/draft-outbox';
 import { generateAutomaticDraft } from '../../thread-workflow-utils';
-import { invariant } from '../../lib/invariant';
 import type { ParsedDraft } from '../../lib/driver/types';
-import type { ZeroDriverInternal } from './internal';
-import { reSyncThread } from '../../lib/server-utils';
 import type { CreateDraftData } from '../../lib/schemas';
+import { fromDriverSetupResult } from '../../lib/errors';
+import { reSyncThread } from '../../lib/server-utils';
+import type { ZeroDriverInternal } from './internal';
 import type { IOutgoingMessage } from '../../types';
+import { invariant } from '../../lib/invariant';
 import { createDb } from '../../db';
 
 export const DRAFT_OUTBOX_CONNECTION_ID_KEY = 'draftOutboxConnectionId';
+
+/**
+ * Issues sur lesquelles il n'y a plus rien à écrire. `unresolved` en fait partie : y
+ * repasser un `failed` le rendrait rejouable, ce qui est exactement le doublon qu'on ferme.
+ */
+const TERMINAL_OUTBOX_STATUSES = new Set<DraftOutboxStatus>(['sent', 'cancelled', 'unresolved']);
 
 type OutboxDb = ReturnType<typeof createDb>['db'];
 
@@ -72,7 +82,11 @@ export async function processDraftOutboxAlarm(self: ZeroDriverInternal) {
   if (!connectionId) return;
 
   self.name = connectionId;
-  await self.setupAuth();
+  // `setupAuth` rend désormais un verdict au lieu de jeter (sa classe ne survivait pas à la
+  // frontière RPC). Ici on est DANS le Durable Object : on le rehausse en erreur typée pour
+  // conserver le comportement observable de l'alarme — échec journalisé et capturé.
+  const setup = await self.setupAuth();
+  if (!setup.ok) throw fromDriverSetupResult(setup);
 
   const { db, conn } = createDb(self.env.HYPERDRIVE.connectionString);
   try {
@@ -141,10 +155,16 @@ async function generateDraftOutboxItem(
 
 async function sendDraftOutboxItem(self: ZeroDriverInternal, db: OutboxDb, item: DraftOutboxItem) {
   let current = item;
+  // Frontière exacte de l'irréversible : tant qu'elle est fausse, AUCUN octet n'a été
+  // soumis au fournisseur et rejouer est sûr. Elle est posée juste avant `sendDraft`, et
+  // reste vraie pour tout ce qui suit — y compris l'écriture de `sent`, dont l'échec
+  // signifie « le mail est parti mais nous ne l'avons pas noté ».
+  let dispatched = false;
   try {
     current = await beginSendingDraftOutboxJob(db, item);
     invariant(current.gmailDraftId, 'outbox item has no gmailDraftId');
     const draft = await self.getDraft(current.gmailDraftId);
+    dispatched = true;
     await self.sendDraft(current.gmailDraftId, toOutgoingMessage(self, current, draft));
     await markDraftOutboxJobSent(db, current);
 
@@ -152,7 +172,50 @@ async function sendDraftOutboxItem(self: ZeroDriverInternal, db: OutboxDb, item:
       self.ctx.waitUntil(reSyncThread(current.connectionId, current.threadId));
     }
   } catch (error) {
-    await failLatestDraftOutboxState(db, item, error);
+    await settleFailedDraftOutboxSend(db, item, error, dispatched);
+  }
+}
+
+/**
+ * Règle un envoi de brouillon en échec, en distinguant ce qui est rejouable de ce qui ne
+ * l'est pas.
+ *
+ * Le défaut fermé ici : ce chemin appelait `failDraftOutboxJob` pour TOUTE erreur, y
+ * compris une coupure survenue après que Gmail eut accepté l'envoi. L'item passait
+ * `failed`, l'UI proposait « Réessayer », et le rejeu renvoyait le mail — un doublon
+ * présenté comme une réparation.
+ *
+ * Le classement s'appuie sur `classifySendFailure`, qui lit l'enveloppe `StandardizedError`
+ * du driver. Contrairement au chemin d'envoi différé, aucune frontière RPC ne s'interpose :
+ * cette fonction s'exécute DANS le Durable Object, l'erreur y est encore entière.
+ */
+async function settleFailedDraftOutboxSend(
+  db: OutboxDb,
+  item: DraftOutboxItem,
+  error: unknown,
+  dispatched: boolean,
+) {
+  const latest = await getDraftOutboxItem(db, {
+    id: item.id,
+    connectionId: item.connectionId,
+  });
+  if (!latest) return;
+
+  const message = error instanceof Error ? error.message : String(error);
+  const settlement = decideDraftOutboxSendSettlement(latest.status, error, dispatched);
+
+  switch (settlement.action) {
+    case 'ignore':
+      return;
+    case 'fail':
+      await failDraftOutboxJob(db, latest, message);
+      return;
+    case 'settle-sending':
+      await settleSendingDraftOutboxJob(db, latest, {
+        error: message,
+        failureClass: settlement.failureClass,
+      });
+      return;
   }
 }
 
@@ -161,7 +224,7 @@ async function failLatestDraftOutboxState(db: OutboxDb, item: DraftOutboxItem, e
     id: item.id,
     connectionId: item.connectionId,
   });
-  if (!latest || latest.status === 'sent' || latest.status === 'cancelled') return;
+  if (!latest || TERMINAL_OUTBOX_STATUSES.has(latest.status)) return;
 
   await failDraftOutboxJob(db, latest, error instanceof Error ? error.message : String(error));
 }

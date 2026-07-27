@@ -33,6 +33,7 @@
 
 import type { DraftOutboxItem, DraftOutboxStatus } from '../../lib/draft-outbox/state-machine';
 import { draftOutboxStatuses } from '../../lib/draft-outbox/state-machine';
+import { sanitizeMailField } from '../../lib/mail-sanitize';
 import type { ThreadsResponse } from '@zero/types';
 import type { Sender } from '../../types';
 import { z } from 'zod';
@@ -94,10 +95,17 @@ export function buildCapabilities(
 // Pure formatters (safe against the historical "sender undefined" MCP crash)
 // ---------------------------------------------------------------------------
 
-/** Render a sender safely — never dereferences a missing name/email (bug #36). */
+/**
+ * Render a sender safely — never dereferences a missing name/email (bug #36).
+ *
+ * Nom ET adresse sont choisis par l'expéditeur et partent vers un modèle porteur d'outils :
+ * ils passent par `sanitizeMailField` (aplatissement sur une ligne, retrait de l'invisible,
+ * borne de longueur). Sans cela, un saut de ligne dans le nom fabriquait une ligne de rendu
+ * supplémentaire dans `formatCompactThreadList`.
+ */
 export function formatSender(sender?: Partial<Sender> | null): string {
-  const email = sender?.email?.trim();
-  const name = sender?.name?.replace(/[<>]/g, '').trim();
+  const email = sanitizeMailField(sender?.email, '');
+  const name = sanitizeMailField(sender?.name?.replace(/[<>]/g, ''), '');
   if (!email) return name || 'Unknown sender';
   return name ? `${name} <${email}>` : email;
 }
@@ -111,7 +119,7 @@ export function formatCompactThread(thread: ThreadsResponse['threads'][number]):
   const labels = (thread.labels ?? []).map((l) => l.name).join(', ') || '—';
   return [
     `ID: ${thread.id}`,
-    `Subject: ${thread.subject ?? '(no subject)'}`,
+    `Subject: ${sanitizeMailField(thread.subject, '(no subject)')}`,
     `From: ${formatSender(thread.sender)}`,
     `Date: ${thread.receivedOn ?? 'unknown'}`,
     `Unread: ${thread.unread ? 'yes' : 'no'}`,
@@ -425,24 +433,132 @@ export interface McpToolDefinition {
  * marks the mutation tools the spec requires to be idempotent.
  */
 export const MCP_TOOL_DEFINITIONS: McpToolDefinition[] = [
-  { name: 'getServerCapabilities', category: 'read', mutates: false, idempotent: true, description: mcpToolDescriptions.getServerCapabilities },
-  { name: 'getConnections', category: 'read', mutates: false, idempotent: true, description: mcpToolDescriptions.getConnections },
-  { name: 'getActiveConnection', category: 'read', mutates: false, idempotent: true, description: mcpToolDescriptions.getActiveConnection },
-  { name: 'setActiveConnection', category: 'read', mutates: false, idempotent: true, description: mcpToolDescriptions.setActiveConnection },
-  { name: 'listThreads', category: 'read', mutates: false, idempotent: true, description: mcpToolDescriptions.listThreads },
-  { name: 'searchThreads', category: 'read', mutates: false, idempotent: true, description: mcpToolDescriptions.searchThreads },
-  { name: 'getThread', category: 'read', mutates: false, idempotent: true, description: mcpToolDescriptions.getThread },
-  { name: 'getThreadSummary', category: 'read', mutates: false, idempotent: true, description: mcpToolDescriptions.getThreadSummary },
-  { name: 'getUserLabels', category: 'read', mutates: false, idempotent: true, description: mcpToolDescriptions.getUserLabels },
-  { name: 'getLabel', category: 'read', mutates: false, idempotent: true, description: mcpToolDescriptions.getLabel },
-  { name: 'getCurrentDate', category: 'read', mutates: false, idempotent: true, description: mcpToolDescriptions.getCurrentDate },
-  { name: 'composeEmail', category: 'read', mutates: false, idempotent: true, description: mcpToolDescriptions.composeEmail },
-  { name: 'listOutbox', category: 'read', mutates: false, idempotent: true, description: mcpToolDescriptions.listOutbox },
-  { name: 'getOutboxItem', category: 'read', mutates: false, idempotent: true, description: mcpToolDescriptions.getOutboxItem },
-  { name: 'createDraft', category: 'write', mutates: true, idempotent: true, description: mcpToolDescriptions.createDraft },
-  { name: 'enqueueDraftJob', category: 'write', mutates: true, idempotent: true, description: mcpToolDescriptions.enqueueDraftJob },
-  { name: 'cancelOutboxItem', category: 'write', mutates: true, idempotent: true, description: mcpToolDescriptions.cancelOutboxItem },
-  { name: 'retryOutboxItem', category: 'write', mutates: true, idempotent: true, description: mcpToolDescriptions.retryOutboxItem },
+  {
+    name: 'getServerCapabilities',
+    category: 'read',
+    mutates: false,
+    idempotent: true,
+    description: mcpToolDescriptions.getServerCapabilities,
+  },
+  {
+    name: 'getConnections',
+    category: 'read',
+    mutates: false,
+    idempotent: true,
+    description: mcpToolDescriptions.getConnections,
+  },
+  {
+    name: 'getActiveConnection',
+    category: 'read',
+    mutates: false,
+    idempotent: true,
+    description: mcpToolDescriptions.getActiveConnection,
+  },
+  {
+    name: 'setActiveConnection',
+    category: 'read',
+    mutates: false,
+    idempotent: true,
+    description: mcpToolDescriptions.setActiveConnection,
+  },
+  {
+    name: 'listThreads',
+    category: 'read',
+    mutates: false,
+    idempotent: true,
+    description: mcpToolDescriptions.listThreads,
+  },
+  {
+    name: 'searchThreads',
+    category: 'read',
+    mutates: false,
+    idempotent: true,
+    description: mcpToolDescriptions.searchThreads,
+  },
+  {
+    name: 'getThread',
+    category: 'read',
+    mutates: false,
+    idempotent: true,
+    description: mcpToolDescriptions.getThread,
+  },
+  {
+    name: 'getThreadSummary',
+    category: 'read',
+    mutates: false,
+    idempotent: true,
+    description: mcpToolDescriptions.getThreadSummary,
+  },
+  {
+    name: 'getUserLabels',
+    category: 'read',
+    mutates: false,
+    idempotent: true,
+    description: mcpToolDescriptions.getUserLabels,
+  },
+  {
+    name: 'getLabel',
+    category: 'read',
+    mutates: false,
+    idempotent: true,
+    description: mcpToolDescriptions.getLabel,
+  },
+  {
+    name: 'getCurrentDate',
+    category: 'read',
+    mutates: false,
+    idempotent: true,
+    description: mcpToolDescriptions.getCurrentDate,
+  },
+  {
+    name: 'composeEmail',
+    category: 'read',
+    mutates: false,
+    idempotent: true,
+    description: mcpToolDescriptions.composeEmail,
+  },
+  {
+    name: 'listOutbox',
+    category: 'read',
+    mutates: false,
+    idempotent: true,
+    description: mcpToolDescriptions.listOutbox,
+  },
+  {
+    name: 'getOutboxItem',
+    category: 'read',
+    mutates: false,
+    idempotent: true,
+    description: mcpToolDescriptions.getOutboxItem,
+  },
+  {
+    name: 'createDraft',
+    category: 'write',
+    mutates: true,
+    idempotent: true,
+    description: mcpToolDescriptions.createDraft,
+  },
+  {
+    name: 'enqueueDraftJob',
+    category: 'write',
+    mutates: true,
+    idempotent: true,
+    description: mcpToolDescriptions.enqueueDraftJob,
+  },
+  {
+    name: 'cancelOutboxItem',
+    category: 'write',
+    mutates: true,
+    idempotent: true,
+    description: mcpToolDescriptions.cancelOutboxItem,
+  },
+  {
+    name: 'retryOutboxItem',
+    category: 'write',
+    mutates: true,
+    idempotent: true,
+    description: mcpToolDescriptions.retryOutboxItem,
+  },
 ];
 
 // ---------------------------------------------------------------------------

@@ -11,26 +11,71 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import { logger } from './lib/logger';
 import {
   createDefaultWorkflows,
   type WorkflowContext,
 } from './thread-workflow-utils/workflow-engine';
 import { getServiceAccount } from './lib/factories/google-subscription.factory';
+import { getConnectionRegistry } from './lib/connection-registry';
 import { getThread, getZeroAgent } from './lib/server-utils';
+import { captureServerException } from './lib/sentry';
 import { DurableObject } from 'cloudflare:workers';
 import { bulkDeleteKeys } from './lib/bulk-delete';
 import { type gmail_v1 } from '@googleapis/gmail';
-import { Effect, Console, Logger } from 'effect';
-import { connection } from './db/schema';
-import { EPrompts, EProviders } from './types';
-import type { ZeroEnv } from './env';
 import { initTracing } from './lib/tracing';
+import { connection } from './db/schema';
+import { Effect, Logger } from 'effect';
+import { logger } from './lib/logger';
+import { EProviders } from './types';
+import type { ZeroEnv } from './env';
 import { eq } from 'drizzle-orm';
-import { createDb } from './db';
+import { withDb } from './db';
 
-// Configure pretty logger to stderr
-export const loggerLayer = Logger.add(Logger.prettyLogger({ stderr: true }));
+// --- Journalisation des workflows Effect (A5) ----------------------------------------
+//
+// Ce fichier émettait 44 `Console.log` d'Effect. `Console` écrit DIRECTEMENT sur la console
+// de la plateforme : il contourne entièrement le seuil `LOG_LEVEL` de lib/logger. Sur
+// Workers, cette sortie part vers `wrangler tail` et logpush — un stockage tiers, durable
+// et facturé —, et l'une de ces lignes était
+// `[MAIN_WORKFLOW] Starting workflow with payload:` suivie de la charge utile COMPLÈTE de
+// la notification. Aucune de ces lignes n'était filtrable.
+//
+// `wfLog` remplace `Console.log` : tout passe par lib/logger, et une ligne QUI PORTE UNE
+// CHARGE UTILE — c'est-à-dire qui a des arguments au-delà du message — est rétrogradée en
+// `debug`, donc muette dès que le seuil vaut `info`.
+const wfLog = (message: string, ...rest: unknown[]) =>
+  Effect.sync(() => {
+    if (rest.length > 0) logger.debug(message, ...rest);
+    else logger.info(message);
+  });
+
+/**
+ * Le Logger d'Effect (`Effect.log*`) écrivait sur stderr via `prettyLogger`, hors du même
+ * seuil. Il est remplacé par un logger qui délègue à lib/logger, niveau pour niveau.
+ */
+export const loggerLayer = Logger.replace(
+  Logger.defaultLogger,
+  Logger.make(({ logLevel, message }) => {
+    const parts = Array.isArray(message) ? message : [message];
+    const [head, ...rest] = parts;
+    const text = typeof head === 'string' ? head : JSON.stringify(head);
+    switch (logLevel.label) {
+      case 'FATAL':
+      case 'ERROR':
+        logger.error(text, ...rest);
+        break;
+      case 'WARN':
+        logger.warn(text, ...rest);
+        break;
+      case 'INFO':
+        logger.info(text, ...rest);
+        break;
+      default:
+        logger.debug(text, ...rest);
+        break;
+    }
+  }),
+);
 
 const isValidUUID = (str: string): boolean => {
   const regex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -42,27 +87,22 @@ const validateArguments = (
   serviceAccount: { project_id: string },
 ): Effect.Effect<string, MainWorkflowError> =>
   Effect.gen(function* () {
-    yield* Console.log('[MAIN_WORKFLOW] Validating arguments');
+    yield* wfLog('[MAIN_WORKFLOW] Validating arguments');
     const regex = new RegExp(
       `projects/${serviceAccount.project_id}/subscriptions/notifications__([a-z0-9-]+)`,
     );
     const match = params.subscriptionName.toString().match(regex);
     if (!match) {
-      yield* Console.log('[MAIN_WORKFLOW] Invalid subscription name:', params.subscriptionName);
+      yield* wfLog('[MAIN_WORKFLOW] Invalid subscription name:', params.subscriptionName);
       return yield* Effect.fail({
         _tag: 'InvalidSubscriptionName' as const,
         subscriptionName: params.subscriptionName,
       });
     }
     const [, connectionId] = match;
-    yield* Console.log('[MAIN_WORKFLOW] Extracted connectionId:', connectionId);
+    yield* wfLog('[MAIN_WORKFLOW] Extracted connectionId:', connectionId);
     return connectionId;
   });
-
-// Helper function for generating prompt names
-export const getPromptName = (connectionId: string, prompt: EPrompts) => {
-  return `${connectionId}-${prompt}`;
-};
 
 export type ZeroWorkflowParams = {
   connectionId: string;
@@ -101,7 +141,6 @@ export type MainWorkflowError =
   | { _tag: 'WorkflowCreationFailed'; error: unknown };
 
 export type ZeroWorkflowError =
-  | { _tag: 'HistoryAlreadyProcessing'; connectionId: string; historyId: string }
   | { _tag: 'ConnectionNotFound'; connectionId: string }
   | { _tag: 'ConnectionNotAuthorized'; connectionId: string }
   | { _tag: 'HistoryNotFound'; historyId: string; connectionId: string }
@@ -135,6 +174,22 @@ export class WorkflowRunner extends DurableObject<ZeroEnv> {
   }
 
   /**
+   * Capture d'exception sur les POINTS D'ENTRÉE RPC de ce Durable Object.
+   *
+   * `captureServerException` n'existait qu'en main.ts (fetch, queue, scheduled). Un
+   * workflow qui casse à l'intérieur du DO remontait bien jusqu'au consommateur
+   * `thread-queue`, mais ce dernier attrapait, journalisait, rejouait — et n'émettait
+   * AUCUN événement. Le traitement des notifications Gmail pouvait donc échouer en boucle
+   * sans qu'aucune alerte ne parte.
+   */
+  private captureEntrypointFailure(transaction: string) {
+    return async (error: unknown): Promise<never> => {
+      await captureServerException(error, this.env, { transaction });
+      throw error;
+    };
+  }
+
+  /**
    * This function runs the main workflow. The main workflow is responsible for processing incoming messages from a Pub/Sub subscription and passing them to the appropriate pipeline.
    * It validates the subscription name and extracts the connection ID.
    * @param params
@@ -146,12 +201,12 @@ export class WorkflowRunner extends DurableObject<ZeroEnv> {
       attributes: {
         'provider.id': params.providerId,
         'history.id': params.historyId,
-        'subscription.name': params.subscriptionName
-      }
+        'subscription.name': params.subscriptionName,
+      },
     });
 
     return Effect.gen(this, function* () {
-      yield* Console.log('[MAIN_WORKFLOW] Starting workflow with payload:', params);
+      yield* wfLog('[MAIN_WORKFLOW] Starting workflow with payload:', params);
 
       const { providerId, historyId } = params;
 
@@ -161,7 +216,7 @@ export class WorkflowRunner extends DurableObject<ZeroEnv> {
       span.setAttributes({ 'connection.id': connectionId });
 
       if (!isValidUUID(connectionId)) {
-        yield* Console.log('[MAIN_WORKFLOW] Invalid connection id format:', connectionId);
+        yield* wfLog('[MAIN_WORKFLOW] Invalid connection id format:', connectionId);
         span.setAttributes({ 'error.type': 'invalid_connection_id' });
         return yield* Effect.fail({
           _tag: 'InvalidConnectionId' as const,
@@ -169,19 +224,36 @@ export class WorkflowRunner extends DurableObject<ZeroEnv> {
         });
       }
 
+      // Une lecture de curseur en ÉCHEC ne doit JAMAIS être ramenée au même `null` qu'un
+      // curseur ABSENT. L'`Effect.orElse(() => Effect.succeed(null))` qui vivait ici
+      // perdait du mail, en silence et définitivement : `null` fait démarrer `history.list`
+      // au `nextHistoryId` de CETTE notification (voir `historyId: previousHistoryId ||
+      // historyId` juste en dessous), donc la plage d'historique de la notification est
+      // sautée ; puis le run se terminant en succès, `completeHistoryNotification` avance
+      // le curseur au-delà de cette plage — les messages qu'elle portait ne sont plus
+      // jamais lus par personne.
+      //
+      // On fait donc échouer le run. C'est le seul choix qui ferme le chemin : le curseur
+      // n'est avancé que par `completeHistoryNotification`, à l'intérieur de
+      // `runZeroWorkflow`, et échouer ici empêche `runZeroWorkflow` d'être seulement
+      // appelé. L'échec est journalisé par l'`Effect.tapError` en bas de ce pipe, envoyé à
+      // Sentry par `captureEntrypointFailure`, puis rejoué par le consommateur
+      // `thread-queue` (main.ts : `captureServerException` + `msg.retry()`).
       const previousHistoryId = yield* Effect.tryPromise({
-        try: () => this.env.gmail_history_id.get(connectionId),
-        catch: () => ({
+        try: () => getConnectionRegistry(this.env, connectionId).getLastProcessedHistoryId(),
+        catch: (error) => ({
           _tag: 'WorkflowCreationFailed' as const,
-          error: 'Failed to get history ID',
+          error: `Failed to get history ID for connection ${connectionId}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
         }),
-      }).pipe(Effect.orElse(() => Effect.succeed(null)));
+      });
 
       span.setAttributes({ 'history.previous_id': previousHistoryId || 'none' });
 
       if (providerId === EProviders.google) {
-        yield* Console.log('[MAIN_WORKFLOW] Processing Google provider workflow');
-        yield* Console.log('[MAIN_WORKFLOW] Previous history ID:', previousHistoryId);
+        yield* wfLog('[MAIN_WORKFLOW] Processing Google provider workflow');
+        yield* wfLog('[MAIN_WORKFLOW] Previous history ID:', previousHistoryId);
 
         const zeroWorkflowParams = {
           connectionId,
@@ -194,10 +266,12 @@ export class WorkflowRunner extends DurableObject<ZeroEnv> {
           catch: (error) => ({ _tag: 'WorkflowCreationFailed' as const, error }),
         });
 
-        yield* Console.log('[MAIN_WORKFLOW] Zero workflow result:', result);
-        span.setAttributes({ 'workflow.result': typeof result === 'string' ? result : JSON.stringify(result) });
+        yield* wfLog('[MAIN_WORKFLOW] Zero workflow result:', result);
+        span.setAttributes({
+          'workflow.result': typeof result === 'string' ? result : JSON.stringify(result),
+        });
       } else {
-        yield* Console.log('[MAIN_WORKFLOW] Unsupported provider:', providerId);
+        yield* wfLog('[MAIN_WORKFLOW] Unsupported provider:', providerId);
         span.setAttributes({ 'error.type': 'unsupported_provider' });
         return yield* Effect.fail({
           _tag: 'UnsupportedProvider' as const,
@@ -205,86 +279,82 @@ export class WorkflowRunner extends DurableObject<ZeroEnv> {
         });
       }
 
-      yield* Console.log('[MAIN_WORKFLOW] Workflow completed successfully');
+      yield* wfLog('[MAIN_WORKFLOW] Workflow completed successfully');
       span.setAttributes({ 'workflow.success': true });
       return 'Workflow completed successfully';
-    }).pipe(
-      Effect.tap(() => Effect.sync(() => span.end())),
-      Effect.tapError((error) => Effect.sync(() => {
-        span.recordException(error as unknown as Error);
-        span.setStatus({ code: 2, message: String(error) });
-        span.end();
-      })),
-      Effect.tapError((error) => Console.log('[MAIN_WORKFLOW] Error in workflow:', error)),
-      Effect.provide(loggerLayer),
-      Effect.runPromise,
-    );
+    })
+      .pipe(
+        Effect.tap(() => Effect.sync(() => span.end())),
+        Effect.tapError((error) =>
+          Effect.sync(() => {
+            span.recordException(error as unknown as Error);
+            span.setStatus({ code: 2, message: String(error) });
+            span.end();
+          }),
+        ),
+        Effect.tapError((error) => wfLog('[MAIN_WORKFLOW] Error in workflow:', error)),
+        Effect.provide(loggerLayer),
+        Effect.runPromise,
+      )
+      .catch(this.captureEntrypointFailure('WorkflowRunner.runMainWorkflow'));
   }
 
   public runZeroWorkflow(params: ZeroWorkflowParams) {
     return Effect.gen(this, function* () {
-      yield* Console.log('[ZERO_WORKFLOW] Starting workflow with payload:', params);
+      yield* wfLog('[ZERO_WORKFLOW] Starting workflow with payload:', params);
       const { connectionId, historyId, nextHistoryId } = params;
 
-      const historyProcessingKey = `history_${connectionId}__${historyId}`;
-      const keysToDelete: string[] = [];
+      const registry = getConnectionRegistry(this.env, connectionId);
+      const notificationHistoryId = nextHistoryId.toString();
 
-      // Atomic lock acquisition to prevent race conditions
-      const lockAcquired = yield* Effect.tryPromise({
-        try: async () => {
-          const response = await this.env.gmail_processing_threads.put(
-            historyProcessingKey,
-            'true',
-            {
-              expirationTtl: 3600,
-            },
-          );
-          return response !== null; // null means key already existed
-        },
+      // Verrou d'idempotence. La clé est le historyId de CETTE notification : la seule
+      // valeur que chaque redélivrance du même push porte à l'identique. Voir
+      // lib/history-lock.ts (décision) et routes/agent/shard-registry.ts (stockage).
+      const claim = yield* Effect.tryPromise({
+        try: () => registry.claimHistoryNotification(notificationHistoryId, Date.now()),
         catch: (error) => ({ _tag: 'WorkflowCreationFailed' as const, error }),
       });
 
-      if (!lockAcquired) {
-        yield* Console.log('[ZERO_WORKFLOW] History already being processed:', {
+      if (claim.action === 'skip') {
+        yield* wfLog('[ZERO_WORKFLOW] Skipping duplicate/redelivered notification:', {
           connectionId,
-          historyId,
+          notificationHistoryId,
+          reason: claim.reason,
         });
-        return yield* Effect.fail({
-          _tag: 'HistoryAlreadyProcessing' as const,
-          connectionId,
-          historyId,
-        });
+        // A skip is a deliberate no-op, not a failure: it must resolve successfully so
+        // the caller ACKs the message (no retry), and it must not run the failure-path
+        // cleanup below — that would wrongly release a lock a concurrent in-flight
+        // attempt still owns, or wipe a still-valid post-success mark.
+        return 'Skipped: duplicate notification';
       }
 
-      yield* Console.log(
-        '[ZERO_WORKFLOW] Acquired processing lock for history:',
-        historyProcessingKey,
-      );
-
-      const { db, conn } = createDb(this.env.HYPERDRIVE.connectionString);
-
-      const foundConnection = yield* Effect.tryPromise({
-        try: async () => {
-          logger.info('[ZERO_WORKFLOW] Finding connection:', connectionId);
-          const [foundConnection] = await db
-            .select()
-            .from(connection)
-            .where(eq(connection.id, connectionId.toString()));
-          await conn.end();
-          if (!foundConnection) {
-            throw new Error(`Connection not found ${connectionId}`);
-          }
-          if (!foundConnection.accessToken || !foundConnection.refreshToken) {
-            throw new Error(`Connection is not authorized ${connectionId}`);
-          }
-          logger.info('[ZERO_WORKFLOW] Found connection:', foundConnection.id);
-          return foundConnection;
-        },
-        catch: (error) => ({ _tag: 'DatabaseError' as const, error }),
+      yield* wfLog('[ZERO_WORKFLOW] Acquired processing lock for history notification:', {
+        connectionId,
+        notificationHistoryId,
+        reason: claim.reason,
       });
 
-      yield* Effect.tryPromise({
-        try: async () => conn.end(),
+      // `withDb` relâche la connexion dans un `finally`. Elle ne l'était auparavant que sur
+      // le chemin nominal : « connexion introuvable », « connexion non autorisée » et toute
+      // panne de la requête elle-même laissaient la connexion ouverte — et l'`Effect.catchAll`
+      // en bas de ce pipe n'y avait pas accès pour rattraper le coup.
+      const foundConnection = yield* Effect.tryPromise({
+        try: () =>
+          withDb(this.env.HYPERDRIVE.connectionString, async (db) => {
+            logger.info('[ZERO_WORKFLOW] Finding connection:', connectionId);
+            const [found] = await db
+              .select()
+              .from(connection)
+              .where(eq(connection.id, connectionId.toString()));
+            if (!found) {
+              throw new Error(`Connection not found ${connectionId}`);
+            }
+            if (!found.accessToken || !found.refreshToken) {
+              throw new Error(`Connection is not authorized ${connectionId}`);
+            }
+            logger.info('[ZERO_WORKFLOW] Found connection:', found.id);
+            return found;
+          }),
         catch: (error) => ({ _tag: 'DatabaseError' as const, error }),
       });
 
@@ -297,7 +367,7 @@ export class WorkflowRunner extends DurableObject<ZeroEnv> {
       });
 
       if (foundConnection.providerId === EProviders.google) {
-        yield* Console.log('[ZERO_WORKFLOW] Processing Google provider workflow');
+        yield* wfLog('[ZERO_WORKFLOW] Processing Google provider workflow');
 
         const history = yield* Effect.tryPromise({
           try: async () => {
@@ -311,18 +381,26 @@ export class WorkflowRunner extends DurableObject<ZeroEnv> {
           catch: (error) => ({ _tag: 'GmailApiError' as const, error }),
         });
 
-        yield* Effect.tryPromise({
-          try: () => {
-            logger.info('[ZERO_WORKFLOW] Updating next history ID:', nextHistoryId);
-            return this.env.gmail_history_id.put(connectionId.toString(), nextHistoryId.toString());
-          },
-          catch: (error) => ({ _tag: 'WorkflowCreationFailed' as const, error }),
-        });
+        // Note: the processed-historyId cursor is advanced only in
+        // completeHistoryNotification below, once this notification has actually
+        // finished (successfully or as a confirmed no-op) — not here, before threads
+        // are synced and labels are applied. Advancing it this early (the previous
+        // behavior, via a KV write mid-workflow) meant a crash between this point and
+        // completion left the cursor already past `nextHistoryId`: the next run's
+        // history.list would start from a point *after* the unprocessed batch and
+        // silently skip it forever.
 
         if (!history.length) {
-          yield* Console.log('[ZERO_WORKFLOW] No history found, skipping');
-          // Add the history processing key to cleanup list
-          keysToDelete.push(historyProcessingKey);
+          yield* wfLog('[ZERO_WORKFLOW] No history found, skipping');
+          yield* Effect.tryPromise({
+            try: () =>
+              registry.completeHistoryNotification(
+                notificationHistoryId,
+                nextHistoryId.toString(),
+                Date.now(),
+              ),
+            catch: (error) => ({ _tag: 'WorkflowCreationFailed' as const, error }),
+          });
           return 'No history found';
         }
 
@@ -368,7 +446,7 @@ export class WorkflowRunner extends DurableObject<ZeroEnv> {
           );
         });
 
-        yield* Console.log(
+        yield* wfLog(
           '[ZERO_WORKFLOW] Found unique thread IDs:',
           Array.from(threadLabelChanges.keys()),
           Array.from(threadsAdded),
@@ -402,16 +480,16 @@ export class WorkflowRunner extends DurableObject<ZeroEnv> {
           const failedCount = threadWorkflowParams.length - syncedCount;
 
           if (failedCount > 0) {
-            yield* Console.log(
+            yield* wfLog(
               `[ZERO_WORKFLOW] Warning: ${failedCount}/${threadWorkflowParams.length} thread syncs failed. Successfully synced: ${syncedCount}`,
             );
             // Continue with processing - sync failures shouldn't stop the entire workflow
             // The thread processing will continue with whatever data is available
           } else {
-            yield* Console.log(`[ZERO_WORKFLOW] Successfully synced all ${syncedCount} threads`);
+            yield* wfLog(`[ZERO_WORKFLOW] Successfully synced all ${syncedCount} threads`);
           }
 
-          yield* Console.log('[ZERO_WORKFLOW] Synced threads:', syncResults);
+          yield* wfLog('[ZERO_WORKFLOW] Synced threads:', syncResults);
 
           // Run thread workflow for each successfully synced thread
           if (syncedCount > 0) {
@@ -419,16 +497,16 @@ export class WorkflowRunner extends DurableObject<ZeroEnv> {
               try: () => agent.reloadFolder('inbox'),
               catch: (error) => ({ _tag: 'GmailApiError' as const, error }),
             }).pipe(
-              Effect.tap(() => Console.log('[ZERO_WORKFLOW] Successfully reloaded inbox folder')),
+              Effect.tap(() => wfLog('[ZERO_WORKFLOW] Successfully reloaded inbox folder')),
               Effect.orElse(() =>
                 Effect.gen(function* () {
-                  yield* Console.log('[ZERO_WORKFLOW] Failed to reload inbox folder');
+                  yield* wfLog('[ZERO_WORKFLOW] Failed to reload inbox folder');
                   return undefined;
                 }),
               ),
             );
 
-            yield* Console.log(
+            yield* wfLog(
               `[ZERO_WORKFLOW] Running thread workflows for ${syncedCount} synced threads`,
             );
 
@@ -440,13 +518,10 @@ export class WorkflowRunner extends DurableObject<ZeroEnv> {
                   providerId: foundConnection.providerId,
                 }).pipe(
                   Effect.tap(() =>
-                    Console.log(`[ZERO_WORKFLOW] Successfully ran thread workflow for ${threadId}`),
+                    wfLog(`[ZERO_WORKFLOW] Successfully ran thread workflow for ${threadId}`),
                   ),
                   Effect.tapError((error) =>
-                    Console.log(
-                      `[ZERO_WORKFLOW] Failed to run thread workflow for ${threadId}:`,
-                      error,
-                    ),
+                    wfLog(`[ZERO_WORKFLOW] Failed to run thread workflow for ${threadId}:`, error),
                   ),
                 ),
               ),
@@ -457,22 +532,22 @@ export class WorkflowRunner extends DurableObject<ZeroEnv> {
             const threadWorkflowFailedCount = syncedCount - threadWorkflowSuccessCount;
 
             if (threadWorkflowFailedCount > 0) {
-              yield* Console.log(
+              yield* wfLog(
                 `[ZERO_WORKFLOW] Warning: ${threadWorkflowFailedCount}/${syncedCount} thread workflows failed. Successfully processed: ${threadWorkflowSuccessCount}`,
               );
             } else {
-              yield* Console.log(
+              yield* wfLog(
                 `[ZERO_WORKFLOW] Successfully ran all ${threadWorkflowSuccessCount} thread workflows`,
               );
             }
           }
         } else {
-          yield* Console.log('[ZERO_WORKFLOW] No new threads to process');
+          yield* wfLog('[ZERO_WORKFLOW] No new threads to process');
         }
 
         // Process label changes for threads
         if (threadLabelChanges.size > 0) {
-          yield* Console.log(
+          yield* wfLog(
             `[ZERO_WORKFLOW] Processing label changes for ${threadLabelChanges.size} threads`,
           );
 
@@ -483,7 +558,7 @@ export class WorkflowRunner extends DurableObject<ZeroEnv> {
 
             // Only call if there are actual changes to make
             if (addLabels.length > 0 || removeLabels.length > 0) {
-              yield* Console.log(
+              yield* wfLog(
                 `[ZERO_WORKFLOW] Modifying labels for thread ${threadId}: +${addLabels.length} -${removeLabels.length}`,
               );
               yield* Effect.tryPromise({
@@ -492,9 +567,7 @@ export class WorkflowRunner extends DurableObject<ZeroEnv> {
               }).pipe(
                 Effect.orElse(() =>
                   Effect.gen(function* () {
-                    yield* Console.log(
-                      `[ZERO_WORKFLOW] Failed to modify labels for thread ${threadId}`,
-                    );
+                    yield* wfLog(`[ZERO_WORKFLOW] Failed to modify labels for thread ${threadId}`);
                     return undefined;
                   }),
                 ),
@@ -502,98 +575,94 @@ export class WorkflowRunner extends DurableObject<ZeroEnv> {
             }
           }
 
-          yield* Console.log('[ZERO_WORKFLOW] Completed label modifications');
+          yield* wfLog('[ZERO_WORKFLOW] Completed label modifications');
         } else {
-          yield* Console.log('[ZERO_WORKFLOW] No threads with label changes to process');
+          yield* wfLog('[ZERO_WORKFLOW] No threads with label changes to process');
         }
 
-        // Add history processing key to cleanup list
-        keysToDelete.push(historyProcessingKey);
+        // Mark the notification done — the mark is kept (TTL ~24h), not deleted, so a
+        // redelivery arriving after this point is skipped rather than replayed — and
+        // advance the processed-historyId cursor in the same DO write, now that
+        // threads/labels have actually been applied.
+        yield* Effect.tryPromise({
+          try: () =>
+            registry.completeHistoryNotification(
+              notificationHistoryId,
+              nextHistoryId.toString(),
+              Date.now(),
+            ),
+          catch: (error) => ({ _tag: 'WorkflowCreationFailed' as const, error }),
+        });
 
-        // Bulk delete all collected keys
-        if (keysToDelete.length > 0) {
-          yield* Effect.tryPromise({
-            try: async () => {
-              logger.info('[ZERO_WORKFLOW] Bulk deleting keys:', keysToDelete);
-              const result = await bulkDeleteKeys(keysToDelete);
-              logger.info('[ZERO_WORKFLOW] Bulk delete result:', result);
-              return result;
-            },
-            catch: (error) => ({ _tag: 'WorkflowCreationFailed' as const, error }),
-          }).pipe(
-            Effect.orElse(() => Effect.succeed({ successful: 0, failed: keysToDelete.length })),
-          );
-        }
-
-        yield* Console.log('[ZERO_WORKFLOW] Processing complete');
+        yield* wfLog('[ZERO_WORKFLOW] Processing complete');
         return 'Zero workflow completed successfully';
       } else {
-        yield* Console.log('[ZERO_WORKFLOW] Unsupported provider:', foundConnection.providerId);
+        yield* wfLog('[ZERO_WORKFLOW] Unsupported provider:', foundConnection.providerId);
         return yield* Effect.fail({
           _tag: 'UnsupportedProvider' as const,
           providerId: foundConnection.providerId,
         });
       }
-    }).pipe(
-      Effect.tapError((error) => Console.log('[ZERO_WORKFLOW] Error in workflow:', error)),
-      Effect.catchAll((error) => {
-        // Clean up processing flag on error using bulk delete
-        return Effect.tryPromise({
-          try: async () => {
-            const errorCleanupKey = `history_${params.connectionId}__${params.historyId}`;
-            logger.info(
-              '[ZERO_WORKFLOW] Clearing processing flag for history after error:',
-              errorCleanupKey,
-            );
-            const result = await bulkDeleteKeys([errorCleanupKey]);
-            logger.info('[ZERO_WORKFLOW] Error cleanup result:', result);
-            return result;
-          },
-          catch: () => ({
-            _tag: 'WorkflowCreationFailed' as const,
-            error: 'Failed to cleanup processing flag',
-          }),
-        }).pipe(
-          Effect.orElse(() => Effect.succeed({ successful: 0, failed: 1 })),
-          Effect.flatMap(() => Effect.fail(error)),
-        );
-      }),
-      Effect.provide(loggerLayer),
-      Effect.runPromise,
-    );
+    })
+      .pipe(
+        Effect.tapError((error) => wfLog('[ZERO_WORKFLOW] Error in workflow:', error)),
+        Effect.catchAll((error) => {
+          // Release the lock on failure (rather than leave it 'processing') so a genuine
+          // retry — queue msg.retry(), or a fresh Pub/Sub redelivery — isn't forced to
+          // wait out the stale-processing window before it can be reclaimed.
+          return Effect.tryPromise({
+            try: async () => {
+              const notificationHistoryId = params.nextHistoryId.toString();
+              logger.info(
+                '[ZERO_WORKFLOW] Releasing processing lock for notification after error:',
+                notificationHistoryId,
+              );
+              await getConnectionRegistry(this.env, params.connectionId).releaseHistoryNotification(
+                notificationHistoryId,
+              );
+            },
+            catch: () => ({
+              _tag: 'WorkflowCreationFailed' as const,
+              error: 'Failed to release processing lock',
+            }),
+          }).pipe(
+            Effect.orElse(() => Effect.succeed(undefined)),
+            Effect.flatMap(() => Effect.fail(error)),
+          );
+        }),
+        Effect.provide(loggerLayer),
+        Effect.runPromise,
+      )
+      .catch(this.captureEntrypointFailure('WorkflowRunner.runZeroWorkflow'));
   }
 
   public runThreadWorkflow(params: ThreadWorkflowParams) {
     return Effect.gen(this, function* () {
-      yield* Console.log('[THREAD_WORKFLOW] Starting workflow with payload:', params);
+      yield* wfLog('[THREAD_WORKFLOW] Starting workflow with payload:', params);
       const { connectionId, threadId, providerId } = params;
       const keysToDelete: string[] = [];
 
       if (providerId === EProviders.google) {
-        yield* Console.log('[THREAD_WORKFLOW] Processing Google provider workflow');
-        const { db, conn } = createDb(this.env.HYPERDRIVE.connectionString);
-
+        yield* wfLog('[THREAD_WORKFLOW] Processing Google provider workflow');
+        // Idem `runZeroWorkflow` : la libération passe par le `finally` de `withDb`, seul
+        // chemin qui couvre aussi les deux `throw` de validation ci-dessous.
         const foundConnection = yield* Effect.tryPromise({
-          try: async () => {
-            logger.info('[THREAD_WORKFLOW] Finding connection:', connectionId);
-            const [foundConnection] = await db
-              .select()
-              .from(connection)
-              .where(eq(connection.id, connectionId.toString()));
-            if (!foundConnection) {
-              throw new Error(`Connection not found ${connectionId}`);
-            }
-            if (!foundConnection.accessToken || !foundConnection.refreshToken) {
-              throw new Error(`Connection is not authorized ${connectionId}`);
-            }
-            logger.info('[THREAD_WORKFLOW] Found connection:', foundConnection.id);
-            return foundConnection;
-          },
-          catch: (error) => ({ _tag: 'DatabaseError' as const, error }),
-        });
-
-        yield* Effect.tryPromise({
-          try: async () => conn.end(),
+          try: () =>
+            withDb(this.env.HYPERDRIVE.connectionString, async (db) => {
+              logger.info('[THREAD_WORKFLOW] Finding connection:', connectionId);
+              const [found] = await db
+                .select()
+                .from(connection)
+                .where(eq(connection.id, connectionId.toString()));
+              if (!found) {
+                throw new Error(`Connection not found ${connectionId}`);
+              }
+              if (!found.accessToken || !found.refreshToken) {
+                throw new Error(`Connection is not authorized ${connectionId}`);
+              }
+              logger.info('[THREAD_WORKFLOW] Found connection:', found.id);
+              return found;
+            }),
           catch: (error) => ({ _tag: 'DatabaseError' as const, error }),
         });
 
@@ -608,7 +677,7 @@ export class WorkflowRunner extends DurableObject<ZeroEnv> {
         });
 
         if (!thread.messages || thread.messages.length === 0) {
-          yield* Console.log('[THREAD_WORKFLOW] Thread has no messages, skipping processing');
+          yield* wfLog('[THREAD_WORKFLOW] Thread has no messages, skipping processing');
           // Add thread processing key to cleanup list
           keysToDelete.push(threadId.toString());
           return 'Thread has no messages';
@@ -651,11 +720,11 @@ export class WorkflowRunner extends DurableObject<ZeroEnv> {
         const failedSteps = Array.from(workflowResults.errors.keys());
 
         if (successfulSteps.length > 0) {
-          yield* Console.log('[THREAD_WORKFLOW] Successfully executed steps:', successfulSteps);
+          yield* wfLog('[THREAD_WORKFLOW] Successfully executed steps:', successfulSteps);
         }
 
         if (failedSteps.length > 0) {
-          yield* Console.log('[THREAD_WORKFLOW] Failed steps:', failedSteps);
+          yield* wfLog('[THREAD_WORKFLOW] Failed steps:', failedSteps);
           // Log errors efficiently using forEach to avoid nested iteration
           workflowResults.errors.forEach((error, stepId) => {
             logger.info(`[THREAD_WORKFLOW] Error in step ${stepId}:`, error.message);
@@ -680,17 +749,17 @@ export class WorkflowRunner extends DurableObject<ZeroEnv> {
           );
         }
 
-        yield* Console.log('[THREAD_WORKFLOW] Thread processing complete');
+        yield* wfLog('[THREAD_WORKFLOW] Thread processing complete');
         return 'Thread workflow completed successfully';
       } else {
-        yield* Console.log('[THREAD_WORKFLOW] Unsupported provider:', providerId);
+        yield* wfLog('[THREAD_WORKFLOW] Unsupported provider:', providerId);
         return yield* Effect.fail({
           _tag: 'UnsupportedProvider' as const,
           providerId,
         });
       }
     }).pipe(
-      Effect.tapError((error) => Console.log('[THREAD_WORKFLOW] Error in workflow:', error)),
+      Effect.tapError((error) => wfLog('[THREAD_WORKFLOW] Error in workflow:', error)),
       Effect.catchAll((error) => {
         // Clean up thread processing flag on error using bulk delete
         return Effect.tryPromise({
@@ -714,160 +783,5 @@ export class WorkflowRunner extends DurableObject<ZeroEnv> {
       }),
       Effect.provide(loggerLayer),
     );
-  }
-
-  /** Testing workflows without Effect */
-  public runThreadWorkflowWithoutEffect(params: ThreadWorkflowParams): Promise<string> {
-    return this.runThreadWorkflowWithoutEffectImpl(params);
-  }
-
-  private async runThreadWorkflowWithoutEffectImpl(params: ThreadWorkflowParams): Promise<string> {
-    try {
-      logger.info('[THREAD_WORKFLOW] Starting workflow with payload:', params);
-      const { connectionId, threadId, providerId } = params;
-      const keysToDelete: string[] = [];
-
-      if (providerId === EProviders.google) {
-        logger.info('[THREAD_WORKFLOW] Processing Google provider workflow');
-        const { db, conn } = createDb(this.env.HYPERDRIVE.connectionString);
-
-        let foundConnection;
-        try {
-          logger.info('[THREAD_WORKFLOW] Finding connection:', connectionId);
-          const [connectionRecord] = await db
-            .select()
-            .from(connection)
-            .where(eq(connection.id, connectionId.toString()));
-
-          if (!connectionRecord) {
-            throw new Error(`Connection not found ${connectionId}`);
-          }
-          if (!connectionRecord.accessToken || !connectionRecord.refreshToken) {
-            throw new Error(`Connection is not authorized ${connectionId}`);
-          }
-          logger.info('[THREAD_WORKFLOW] Found connection:', connectionRecord.id);
-          foundConnection = connectionRecord;
-        } catch (error) {
-          logger.error('[THREAD_WORKFLOW] Database error:', error);
-          throw { _tag: 'DatabaseError' as const, error };
-        } finally {
-          try {
-            await conn.end();
-          } catch (error) {
-            logger.error('[THREAD_WORKFLOW] Failed to close connection:', error);
-          }
-        }
-
-        let thread;
-        try {
-          logger.info('[THREAD_WORKFLOW] Getting thread:', threadId);
-          const { result } = await getThread(connectionId.toString(), threadId.toString());
-          logger.info('[THREAD_WORKFLOW] Found thread with messages:', result.messages.length);
-          thread = result;
-        } catch (error) {
-          logger.error('[THREAD_WORKFLOW] Gmail API error:', error);
-          throw { _tag: 'GmailApiError' as const, error };
-        }
-
-        if (!thread.messages || thread.messages.length === 0) {
-          logger.info('[THREAD_WORKFLOW] Thread has no messages, skipping processing');
-          keysToDelete.push(threadId.toString());
-          return 'Thread has no messages';
-        }
-
-        const workflowEngine = createDefaultWorkflows();
-
-        const workflowContext: WorkflowContext = {
-          connectionId: connectionId.toString(),
-          threadId: threadId.toString(),
-          thread,
-          foundConnection,
-          results: new Map<string, unknown>(),
-          env: this.env,
-        };
-
-        let workflowResults;
-        try {
-          const allResults = new Map<string, unknown>();
-          const allErrors = new Map<string, Error>();
-
-          const workflowNames = workflowEngine.getWorkflowNames();
-
-          for (const workflowName of workflowNames) {
-            logger.info(`[THREAD_WORKFLOW] Executing workflow: ${workflowName}`);
-
-            try {
-              const { results, errors } = await workflowEngine.executeWorkflow(
-                workflowName,
-                workflowContext,
-              );
-
-              results.forEach((value, key) => allResults.set(key, value));
-              errors.forEach((value, key) => allErrors.set(key, value));
-
-              logger.info(`[THREAD_WORKFLOW] Completed workflow: ${workflowName}`);
-            } catch (error) {
-              logger.error(`[THREAD_WORKFLOW] Failed to execute workflow ${workflowName}:`, error);
-              const errorObj = error instanceof Error ? error : new Error(String(error));
-              allErrors.set(workflowName, errorObj);
-            }
-          }
-
-          workflowResults = { results: allResults, errors: allErrors };
-        } catch (error) {
-          logger.error('[THREAD_WORKFLOW] Workflow creation failed:', error);
-          throw { _tag: 'WorkflowCreationFailed' as const, error };
-        }
-
-        workflowEngine.clearContext(workflowContext);
-
-        const successfulSteps = Array.from(workflowResults.results.keys());
-        const failedSteps = Array.from(workflowResults.errors.keys());
-
-        if (successfulSteps.length > 0) {
-          logger.info('[THREAD_WORKFLOW] Successfully executed steps:', successfulSteps);
-        }
-
-        if (failedSteps.length > 0) {
-          logger.info('[THREAD_WORKFLOW] Failed steps:', failedSteps);
-          workflowResults.errors.forEach((error, stepId) => {
-            logger.info(`[THREAD_WORKFLOW] Error in step ${stepId}:`, error.message);
-          });
-        }
-
-        keysToDelete.push(threadId.toString());
-
-        if (keysToDelete.length > 0) {
-          try {
-            logger.info('[THREAD_WORKFLOW] Bulk deleting keys:', keysToDelete);
-            const result = await bulkDeleteKeys(keysToDelete);
-            logger.info('[THREAD_WORKFLOW] Bulk delete result:', result);
-          } catch (error) {
-            logger.error('[THREAD_WORKFLOW] Failed to bulk delete keys:', error);
-          }
-        }
-
-        logger.info('[THREAD_WORKFLOW] Thread processing complete');
-        return 'Thread workflow completed successfully';
-      } else {
-        logger.info('[THREAD_WORKFLOW] Unsupported provider:', providerId);
-        throw { _tag: 'UnsupportedProvider' as const, providerId };
-      }
-    } catch (error) {
-      logger.error('[THREAD_WORKFLOW] Error in workflow:', error);
-
-      try {
-        logger.info(
-          '[THREAD_WORKFLOW] Clearing processing flag for thread after error:',
-          params.threadId,
-        );
-        const result = await bulkDeleteKeys([params.threadId.toString()]);
-        logger.info('[THREAD_WORKFLOW] Error cleanup result:', result);
-      } catch (cleanupError) {
-        logger.error('[THREAD_WORKFLOW] Failed to cleanup thread processing flag:', cleanupError);
-      }
-
-      throw error;
-    }
   }
 }

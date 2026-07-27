@@ -12,6 +12,66 @@
 /** Codes de statut serveur transitoires côté Gmail (retry autorisé). */
 const TRANSIENT_5XX = new Set([500, 502, 503, 504]);
 
+/**
+ * 408 Request Timeout : la requête n'a jamais été traitée, la rejouer est sûr et c'est le
+ * seul 4xx dans ce cas. Il était classé NON rejouable, comme tous les 4xx.
+ */
+const TRANSIENT_4XX = new Set([408]);
+
+/**
+ * Codes d'erreur de TRANSPORT. Sur Workers, `fetch` échoue en `TypeError('fetch failed')`
+ * portant la cause réelle dans `err.cause` — jamais un statut HTTP. Le classifieur ne
+ * regardait QUE le statut : la panne la plus fréquente du chemin chaud (socket coupée,
+ * connexion réinitialisée, DNS momentané) sortait donc du backoff à la première tentative.
+ */
+const RETRYABLE_NETWORK_CODES = new Set([
+  'ECONNRESET',
+  'ECONNREFUSED',
+  'ECONNABORTED',
+  'EPIPE',
+  'ETIMEDOUT',
+  'ESOCKETTIMEDOUT',
+  'EAI_AGAIN',
+  'ENETUNREACH',
+  'ENETRESET',
+  'EHOSTUNREACH',
+  'UND_ERR_SOCKET',
+  'UND_ERR_CONNECT_TIMEOUT',
+  'UND_ERR_HEADERS_TIMEOUT',
+  'UND_ERR_BODY_TIMEOUT',
+]);
+
+/** Formulations de panne de transport, quand aucun code machine n'est porté. */
+const NETWORK_MESSAGE_PATTERNS: RegExp[] = [
+  /fetch failed/i,
+  /network connection lost/i,
+  /connection (?:was )?(?:reset|closed|refused|aborted)/i,
+  /socket hang ?up/i,
+  /request timed? out/i,
+  /terminated/i,
+];
+
+/** Profondeur maximale parcourue dans la chaîne `cause` (undici imbrique la vraie cause). */
+const MAX_CAUSE_DEPTH = 5;
+
+function hasNetworkSignature(err: unknown, depth = 0): boolean {
+  if (err === null || typeof err !== 'object' || depth > MAX_CAUSE_DEPTH) return false;
+  const e = err as { code?: unknown; message?: unknown; cause?: unknown };
+  if (typeof e.code === 'string' && RETRYABLE_NETWORK_CODES.has(e.code)) return true;
+  if (
+    typeof e.message === 'string' &&
+    NETWORK_MESSAGE_PATTERNS.some((p) => p.test(e.message as string))
+  ) {
+    return true;
+  }
+  return hasNetworkSignature(e.cause, depth + 1);
+}
+
+/** `true` si l'échec vient du transport, pas d'une réponse Gmail. */
+export function isNetworkError(err: unknown): boolean {
+  return hasNetworkSignature(err);
+}
+
 /** Raisons 403 signalant un dépassement de quota utilisateur (retryable). */
 const RATE_LIMIT_REASONS = new Set([
   'userRateLimitExceeded',
@@ -33,28 +93,46 @@ type GmailErrorShape = {
   errors?: { reason?: string }[];
 };
 
-/** Extrait un code HTTP numérique quelle que soit la forme d'erreur googleapis/gaxios. */
+/**
+ * Extrait un code HTTP numérique quelle que soit la forme d'erreur googleapis/gaxios.
+ *
+ * Le `??` en chaîne s'arrêtait au premier champ DÉFINI, pas au premier champ NUMÉRIQUE :
+ * un `code` non numérique — `'ECONNRESET'` de gaxios sur panne de transport, ou le
+ * `'UNKNOWN_ERROR'` que pose l'enveloppe du driver — masquait le `status` réellement
+ * présent et faisait rendre `undefined`. On parcourt désormais les trois porteurs et on
+ * rend le premier qui donne un nombre fini.
+ */
 export function extractStatus(err: unknown): number | undefined {
   const e = (err ?? {}) as GmailErrorShape;
-  const raw = e.code ?? e.status ?? e.response?.status;
-  const n = typeof raw === 'string' ? Number.parseInt(raw, 10) : raw;
-  return typeof n === 'number' && Number.isFinite(n) ? n : undefined;
+  for (const raw of [e.code, e.status, e.response?.status]) {
+    const n = typeof raw === 'string' ? Number.parseInt(raw, 10) : raw;
+    if (typeof n === 'number' && Number.isFinite(n)) return n;
+  }
+  return undefined;
 }
 
 /**
- * `true` si l'erreur est un rate-limit (429 ou 403 avec raison quota) ou un 5xx transitoire.
- * Miroir fidèle du classifieur historique `isRateLimit`, étendu aux 5xx.
+ * `true` si l'erreur est un rate-limit (429 ou 403 avec raison quota), un 5xx transitoire,
+ * un 408, ou une panne de TRANSPORT (`fetch failed`, ECONNRESET, socket coupée).
+ *
+ * Mesuré avant correction : `TypeError('fetch failed')`, `ECONNRESET` et le statut 408
+ * renvoyaient tous `false` — c'est-à-dire que le transitoire le plus fréquent sur Workers
+ * n'était jamais rejoué. Le classifieur ne lisait qu'un statut HTTP ; une panne de
+ * transport n'en porte aucun.
  */
 export function isRetryableGmailError(err: unknown): boolean {
   const status = extractStatus(err);
   if (status === 429) return true;
-  if (status !== undefined && TRANSIENT_5XX.has(status)) return true;
+  if (status !== undefined && (TRANSIENT_5XX.has(status) || TRANSIENT_4XX.has(status))) return true;
   if (status === 403) {
     const e = (err ?? {}) as GmailErrorShape;
     const errors = e.errors ?? e.response?.data?.error?.errors ?? [];
-    return errors.some((x) => RATE_LIMIT_REASONS.has(x.reason ?? ''));
+    if (errors.some((x) => RATE_LIMIT_REASONS.has(x.reason ?? ''))) return true;
   }
-  return false;
+  // Un 4xx déterministe (400/401/404…) ne doit jamais être requalifié en panne réseau à
+  // cause d'un mot de son libellé : le transport n'est consulté que sans statut serveur.
+  if (status !== undefined) return false;
+  return isNetworkError(err);
 }
 
 /**
@@ -84,6 +162,24 @@ export interface BackoffOptions {
   maxMs: number;
   /** Plafond appliqué à un Retry-After serveur en ms. Défaut 30000. */
   retryAfterCapMs: number;
+  /**
+   * Timeout appliqué à CHAQUE tentative, en ms. Défaut 15000.
+   *
+   * Aucun appel sortant du driver ne portait de borne : une requête Gmail qui ne rend jamais
+   * la main (socket ouverte, réponse jamais terminée) immobilisait l'invocation entière.
+   * 15 s couvre largement une lecture Gmail normale, y compris un batch, tout en laissant de
+   * la place à au moins deux tentatives sous la deadline par défaut.
+   */
+  attemptTimeoutMs: number;
+  /**
+   * Deadline ABSOLUE sur l'ensemble de la boucle de rejeu, en ms depuis la première
+   * tentative. Défaut 60000.
+   *
+   * Sans elle, le pire cas était 5 rejeux × `retryAfterCapMs` (30 s) de sommeil, soit 150 s
+   * de sommeil PLUS six requêtes non bornées — sur une invocation Workers, c'est un blocage.
+   * Franchie, on cesse de rejouer et on propage la dernière erreur : l'appelant décide.
+   */
+  totalDeadlineMs: number;
 }
 
 export const DEFAULT_BACKOFF: BackoffOptions = {
@@ -92,6 +188,8 @@ export const DEFAULT_BACKOFF: BackoffOptions = {
   factor: 2,
   maxMs: 8000,
   retryAfterCapMs: 30000,
+  attemptTimeoutMs: 15000,
+  totalDeadlineMs: 60000,
 };
 
 /**
@@ -112,6 +210,10 @@ export function computeBackoffDelayMs(
 export interface BackoffDeps {
   sleep: (ms: number) => Promise<void>;
   random: () => number;
+  /** Horloge, injectable pour éprouver la deadline sans horloge réelle. Défaut `Date.now`. */
+  now?: () => number;
+  /** Fabrique du signal d'annulation par tentative. Défaut `AbortSignal.timeout`. */
+  timeoutSignal?: (ms: number) => AbortSignal;
 }
 
 const realDeps: BackoffDeps = {
@@ -120,28 +222,82 @@ const realDeps: BackoffDeps = {
 };
 
 /**
+ * Erreur de dépassement du timeout par tentative.
+ *
+ * Elle porte `code: 'ETIMEDOUT'` — le code que le transport produit RÉELLEMENT pour cette
+ * condition — donc `isRetryableGmailError` la classe rejouable par le chemin transport déjà
+ * en place, sans toucher au classifieur. On ne propage volontairement PAS la `DOMException`
+ * d'`AbortSignal.timeout` : son champ `code` vaut 23 (ABORT_ERR), que `extractStatus` lirait
+ * comme un statut HTTP 23 et qui rendrait l'erreur non rejouable.
+ */
+function attemptTimeoutError(timeoutMs: number): Error {
+  return Object.assign(new Error(`Gmail request timed out after ${timeoutMs}ms`), {
+    code: 'ETIMEDOUT',
+  });
+}
+
+/**
+ * Borne une tentative par son signal : dès que le signal est avorté, on cesse d'attendre la
+ * promesse (le `fetch` sous-jacent reçoit le signal et s'annule de lui-même quand il l'honore).
+ */
+function raceAttempt<T>(run: Promise<T>, signal: AbortSignal, timeoutMs: number): Promise<T> {
+  if (signal.aborted) return Promise.reject(attemptTimeoutError(timeoutMs));
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(attemptTimeoutError(timeoutMs));
+    signal.addEventListener('abort', onAbort, { once: true });
+    const settle = () => signal.removeEventListener('abort', onAbort);
+    run.then(
+      (value) => {
+        settle();
+        resolve(value);
+      },
+      (error) => {
+        settle();
+        reject(error);
+      },
+    );
+  });
+}
+
+/**
  * Exécute `fn` avec retry sur erreurs Gmail transitoires (429/403-rate/5xx). Honore un
  * Retry-After serveur (plafonné), sinon backoff expo + jitter. Toute autre erreur est
  * relancée immédiatement. `onRetry` reçoit chaque délai (observabilité/tests).
+ *
+ * Deux bornes de temps, absentes jusqu'ici :
+ *  - `opts.attemptTimeoutMs` par tentative — `fn` reçoit l'`AbortSignal` correspondant et
+ *    peut le passer à son `fetch` ; qu'il l'honore ou non, la boucle cesse d'attendre ;
+ *  - `opts.totalDeadlineMs` sur l'ENSEMBLE de la boucle — franchie, on cesse de rejouer et
+ *    on propage la dernière erreur. Le timeout d'une tentative est en outre écrêté à ce
+ *    qu'il reste de deadline, pour qu'une seule tentative ne puisse pas la déborder.
  */
 export async function withGmailBackoff<T>(
-  fn: () => Promise<T>,
+  fn: (signal: AbortSignal) => Promise<T>,
   opts: BackoffOptions = DEFAULT_BACKOFF,
   deps: BackoffDeps = realDeps,
   onRetry?: (info: { attempt: number; delayMs: number; error: unknown }) => void,
 ): Promise<T> {
+  const now = deps.now ?? Date.now;
+  const makeSignal = deps.timeoutSignal ?? ((ms: number) => AbortSignal.timeout(ms));
+  const deadlineAt = now() + opts.totalDeadlineMs;
+
   let lastError: unknown;
   for (let attempt = 0; attempt <= opts.maxRetries; attempt++) {
+    const attemptTimeoutMs = Math.max(1, Math.min(opts.attemptTimeoutMs, deadlineAt - now()));
+    const signal = makeSignal(attemptTimeoutMs);
     try {
-      return await fn();
+      return await raceAttempt(fn(signal), signal, attemptTimeoutMs);
     } catch (error) {
       lastError = error;
       if (attempt >= opts.maxRetries || !isRetryableGmailError(error)) throw error;
-      const serverMs = parseRetryAfterMs(error);
+      const serverMs = parseRetryAfterMs(error, now);
       const delayMs =
         serverMs !== undefined
           ? Math.min(serverMs, opts.retryAfterCapMs)
           : computeBackoffDelayMs(attempt, opts, deps.random);
+      // Deadline absolue : dormir puis rejouer nous ferait dépasser — on s'arrête ici et on
+      // propage la dernière erreur plutôt que d'immobiliser l'invocation.
+      if (now() + delayMs >= deadlineAt) throw error;
       onRetry?.({ attempt, delayMs, error });
       await deps.sleep(delayMs);
     }
@@ -160,7 +316,7 @@ export async function mapWithConcurrency<T, R>(
   limit: number,
   fn: (item: T, index: number) => Promise<R>,
 ): Promise<R[]> {
-  const results = new Array<R>(items.length);
+  const results = Array.from({ length: items.length }) as R[];
   const bound = Math.max(1, Math.min(limit, items.length || 1));
   let cursor = 0;
   const workers = Array.from({ length: bound }, async () => {

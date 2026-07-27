@@ -1,8 +1,9 @@
-import { log } from '@/lib/log';
 import { cleanEmailAddresses } from '../lib/email-utils';
 import { trpcClient } from '@/providers/query-provider';
 import type { Route } from './+types/mailto-handler';
+import { escapeHtml } from '@/lib/escape-html';
 import { authProxy } from '@/lib/auth-proxy';
+import { log } from '@/lib/log';
 
 // Function to parse mailto URLs
 async function parseMailtoUrl(mailtoUrl: string) {
@@ -123,12 +124,19 @@ async function createDraftFromMailto(mailtoData: {
     const normalizedBody = mailtoData.body.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
 
     // Create proper HTML-encoded content by wrapping all paragraphs in <p> tags
-    // This is the format that will work best with the editor
+    // This is the format that will work best with the editor.
+    //
+    // Le corps d'un `mailto:` est du TEXTE (RFC 6068 §2) : il est échappé avant d'être
+    // enveloppé, sinon un lien `mailto:…?body=<img src=x onerror=…>` fabriquait du BALISAGE
+    // dans le brouillon de l'utilisateur — donc dans un message envoyé sous son nom. Les
+    // seules balises que ce document doit contenir sont celles produites ici.
     const htmlContent = `<!DOCTYPE html><html><body>
       ${normalizedBody
         .split(/\n\s*\n/)
         .map((paragraph) => {
-          return `<p>${paragraph.replace(/\n/g, '<br />').replace(/\s{2,}/g, (match) => '&nbsp;'.repeat(match.length))}</p>`;
+          return `<p>${escapeHtml(paragraph)
+            .replace(/\n/g, '<br />')
+            .replace(/\s{2,}/g, (match) => '&nbsp;'.repeat(match.length))}</p>`;
         })
         .join('\n')}
     </body></html>`;

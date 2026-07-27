@@ -14,8 +14,6 @@
  * Reuse or distribution of this file requires a license from Zero Email Inc.
  */
 
-import { logger } from '../../lib/logger';
-import { invariant } from '../../lib/invariant';
 import {
   appendResponseMessages,
   createDataStreamResponse,
@@ -24,22 +22,30 @@ import {
   type StreamTextOnFinishCallback,
 } from 'ai';
 import {
+  INTERNAL_SERVICE_HEADER,
+  internalServiceToken,
+  THINKING_MCP_PURPOSE,
+} from '../../lib/internal-service-auth';
+import {
   IncomingMessageType,
   OutgoingMessageType,
   type IncomingMessage,
   type OutgoingMessage,
 } from './types';
 import { DurableObjectOAuthClientProvider } from 'agents/mcp/do-oauth-client-provider';
-import { AiChatPrompt } from '../../lib/prompts';
+import { getPromptName } from '../../lib/prompt-names';
 import { reSyncThread } from '../../lib/server-utils';
 import { getPrompt } from '../../pipelines.effect';
 import { AIChatAgent } from 'agents/ai-chat-agent';
 import { ToolOrchestrator } from './orchestrator';
-import { getPromptName } from '../../pipelines';
+import { AiChatPrompt } from '../../lib/prompts';
+import { invariant } from '../../lib/invariant';
 import { anthropic } from '@ai-sdk/anthropic';
+import { hasMailboxScope } from '@zero/types';
 import type { WSMessage } from 'partyserver';
 import { tools as authTools } from './tools';
 import { processToolCalls } from './utils';
+import { logger } from '../../lib/logger';
 import { type ZeroEnv } from '../../env';
 import { type Connection } from 'agents';
 import { EPrompts } from '../../types';
@@ -63,8 +69,18 @@ export class ZeroAgent extends AIChatAgent<ZeroEnv> {
   }
 
   async registerThinkingMCP() {
+    // `/mcp/thinking/sse` n'est plus ouvert (cf. routes/index.ts). Cet appel est une boucle
+    // locale — même worker, même environnement — donc il s'authentifie avec le jeton de
+    // service dérivé de JWT_SECRET plutôt qu'avec un flux OAuth interactif, impossible à
+    // conduire depuis `onStart`. L'en-tête est porté par `requestInit`, que le transport SSE
+    // des `agents` fusionne dans le GET du flux ET dans les POST de messages.
+    const internalToken = await internalServiceToken(this.env.JWT_SECRET, THINKING_MCP_PURPOSE);
+
     await this.mcp.connect(this.env.VITE_PUBLIC_BACKEND_URL + '/mcp/thinking/sse', {
       transport: {
+        requestInit: internalToken
+          ? { headers: { [INTERNAL_SERVICE_HEADER]: internalToken } }
+          : undefined,
         authProvider: new DurableObjectOAuthClientProvider(
           this.ctx.storage,
           'thinking-mcp',
@@ -99,7 +115,9 @@ export class ZeroAgent extends AIChatAgent<ZeroEnv> {
   ) {
     const dataStreamResponse = createDataStreamResponse({
       execute: async (dataStream) => {
-        if (this.name === 'general') return;
+        // Le nom de l'instance EST l'identifiant de connexion sur lequel les outils
+        // agissent. Sans portée de boîte aux lettres, aucun outil ne doit s'exécuter.
+        if (!hasMailboxScope(this.name)) return;
         const connectionId = this.name;
         const orchestrator = new ToolOrchestrator(dataStream, connectionId);
 
@@ -196,6 +214,19 @@ export class ZeroAgent extends AIChatAgent<ZeroEnv> {
         logger.warn(error);
         // silently ignore invalid messages for now
         // TODO: log errors with log levels
+        return;
+      }
+      // Une instance SANS portée de boîte aux lettres (instance personnelle d'un
+      // utilisateur qui n'a pas de connexion active, ou l'ancien nom partagé `general`) ne
+      // peut rien faire d'utile : `getDataStreamResponse` y rend la main immédiatement.
+      // Le garde est remonté ICI, AVANT toute écriture — l'ordre était l'inverse : on
+      // diffusait puis on persistait (`persistMessages` efface la table puis réinsère et
+      // rediffuse) et seulement ensuite on constatait l'absence de portée. Rien n'est plus
+      // écrit ni diffusé sur une instance qui ne peut pas répondre.
+      if (!hasMailboxScope(this.name)) {
+        logger.warn('[ZeroAgent] message ignoré sur une instance sans portée de boîte', {
+          type: data.type,
+        });
         return;
       }
       switch (data.type) {
@@ -352,7 +383,12 @@ export class ZeroAgent extends AIChatAgent<ZeroEnv> {
       const cached = await this.ctx.storage.get('do_state_cache');
       if (!cached) return null;
 
-      const data = cached as { storageSize: number; counts: { label: string; count: number }[]; shards: number; timestamp: number };
+      const data = cached as {
+        storageSize: number;
+        counts: { label: string; count: number }[];
+        shards: number;
+        timestamp: number;
+      };
       const now = Date.now();
       const CACHE_TTL = 5 * 60 * 1000;
 

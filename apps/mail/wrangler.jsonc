@@ -11,6 +11,23 @@
     "binding": "ASSETS",
     "not_found_handling": "none",
     "html_handling": "force-trailing-slash",
+    // Sans ceci, le Worker n'est JAMAIS appelé quand un asset existe : la couche Assets répond
+    // directement, et les en-têtes de sécurité que workers/spa-fallback.ts pose (CSP,
+    // X-Frame-Options, HSTS, nosniff, Referrer-Policy) ne s'appliquaient qu'aux chemins SANS
+    // asset — les liens profonds. La page d'accueil `/` (index.html prérendu), la plus visitée
+    // et la seule page publique, était donc servie SANS CSP du tout : ni frame-ancestors, ni
+    // form-action, ni base-uri. Mesuré en local : `curl -D - http://localhost:3000/` ne renvoyait
+    // aucun de ces en-têtes, alors que `/mail/inbox` les portait tous. Le test unitaire
+    // « a direct HTML asset hit also gets CSP » passait au vert sur un binding simulé qui, lui,
+    // appelle toujours le Worker — un vert qui ne décrivait pas la plateforme.
+    //
+    // `true` (et non une liste de motifs) parce que le Worker pose délibérément les en-têtes de
+    // base sur TOUTES les réponses, assets compris : le commentaire de HSTS dans spa-fallback.ts
+    // explique qu'une seule requête en clair sur un asset suffit à rouvrir la fenêtre que cet
+    // en-tête ferme. Coût : le Worker s'interpose sur les défauts de cache seulement — les
+    // réponses d'assets restent `immutable, max-age=31536000` (règle _headers, préservée par
+    // ASSETS.fetch), donc le cache de bord continue de les servir sans invoquer le Worker.
+    "run_worker_first": true,
   },
   "env": {
     "local": {

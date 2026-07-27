@@ -62,7 +62,7 @@ Watch this helpful video tutorial on how to set up Zero locally:
 
 **Required Versions:**
 
-- [Node.js](https://nodejs.org/en/download) (v18 or higher)
+- [Node.js](https://nodejs.org/en/download) **v22** — la version épinglée par `.nvmrc` et utilisée par la CI (`.github/workflows/ci.yml`). Les versions antérieures ne sont pas testées.
 - [pnpm](https://pnpm.io) (v10 or higher)
 - [Docker](https://docs.docker.com/engine/install/) (v20 or higher)
 
@@ -92,7 +92,6 @@ You can set up Zero in two ways:
    ```
 
 2. **Set Up Environment**
-
    - Run `pnpm nizzy env` to setup your environment variables
    - Run `pnpm nizzy sync` to sync your environment variables and types
    - Start the database with the provided docker compose setup: `pnpm docker:db:up`
@@ -106,7 +105,7 @@ You can set up Zero in two ways:
 
 4. **Open in Browser**
 
-   Visit [http://localhost:3000](http://localhost:3000)
+   Visit [http://localhost:3001](http://localhost:3001) — `pnpm dev` sert l'application sur **3001** (`apps/mail/vite.config.ts`)
    </details>
 
 <details open>
@@ -132,7 +131,6 @@ You can set up Zero in two ways:
    ```
 
 2. **Set Up Environment**
-
    - Run `pnpm nizzy env` to setup your environment variables
    - Run `pnpm nizzy sync` to sync your environment variables and types
    - Start the database with the provided docker compose setup: `pnpm docker:db:up`
@@ -142,13 +140,12 @@ You can set up Zero in two ways:
    ```bash
    pnpm dev
    ```
-   Visit [http://localhost:3000](http://localhost:3000)
+   Visit [http://localhost:3001](http://localhost:3001) — `pnpm dev` sert l'application sur **3001** (`apps/mail/vite.config.ts`)
      </details>
 
 ### Environment Setup
 
 1. **Better Auth Setup**
-
    - Open the `.env` file and change the BETTER_AUTH_SECRET to a random string. (Use `openssl rand -hex 32` to generate a 32 character string)
 
      ```env
@@ -156,7 +153,6 @@ You can set up Zero in two ways:
      ```
 
 2. **Google OAuth Setup** (Required for Gmail integration)
-
    - Go to [Google Cloud Console](https://console.cloud.google.com)
    - Create a new project
    - Add the following APIs in your Google Cloud Project: [People API](https://console.cloud.google.com/apis/library/people.googleapis.com), [Gmail API](https://console.cloud.google.com/apis/library/gmail.googleapis.com)
@@ -178,7 +174,6 @@ You can set up Zero in two ways:
      ```
 
    - Add yourself as a test user:
-
      - Go to [`Audience`](https://console.cloud.google.com/auth/audience)
      - Under 'Test users' click 'Add Users'
      - Add your email and click 'Save'
@@ -187,7 +182,6 @@ You can set up Zero in two ways:
 > The authorized redirect URIs in Google Cloud Console must match **exactly** what you configure in the `.env`, including the protocol (http/https), domain, and path - these are provided above.
 
 3. **Autumn Setup** (Required for some encryption)
-
    - Go to [Autumn](https://useautumn.com/)
    - For Local Use, click [onboarding](https://app.useautumn.com/sandbox/onboarding) button and generate an Autumn Secret Key
    - For production, select the production mode from upper left corner and generate and fill the other fields. After that, generate an Autumn Secret Key
@@ -199,11 +193,9 @@ You can set up Zero in two ways:
    ```
 
 4. **Twilio Setup** (Required for SMS Integration)
-
    - Go to the [Twilio](https://www.twilio.com/)
    - Create a Twilio account if you don’t already have one
    - From the dashboard, locate your:
-
      - Account SID
      - Auth Token
      - Phone Number
@@ -234,11 +226,10 @@ Zero uses PostgreSQL for storing data. Here's how to set it up:
    ```
 
    This creates a database with:
-
    - Name: `zerodotemail`
    - Username: `postgres`
    - Password: `postgres`
-   - Port: `5432`
+   - Port: `5433` (publié par `docker-compose.db.yaml`, le conteneur écoute sur 5432 en interne)
 
 2. **Set Up Database Connection**
 
@@ -247,11 +238,27 @@ Zero uses PostgreSQL for storing data. Here's how to set it up:
    For local development use:
 
    ```
-   DATABASE_URL="postgresql://postgres:postgres@localhost:5432/zerodotemail"
+   DATABASE_URL="postgresql://postgres:postgres@localhost:5433/zerodotemail"
    ```
 
-3. **Database Commands**
+3. **JWT Secret**
 
+   `JWT_SECRET` est **requis au démarrage du serveur** (`apps/server/src/env-schema.ts`) : sans
+   lui, le worker refuse de booter. Générez-le et placez-le dans `.env` :
+
+   ```bash
+   openssl rand -hex 32
+   ```
+
+   ```
+   JWT_SECRET="<la valeur générée>"
+   ```
+
+   > Les variables propres au worker serveur sont listées dans
+   > [`apps/server/.dev.vars.example`](apps/server/.dev.vars.example) — à consulter en complément
+   > de `.env.example`.
+
+4. **Database Commands**
    - **Set up database tables**:
 
      ```bash

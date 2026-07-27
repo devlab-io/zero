@@ -1,11 +1,16 @@
-import { logger } from '../logger';
-import { BaseSubscriptionFactory, type SubscriptionData } from './base-subscription.factory';
+import {
+  BaseSubscriptionFactory,
+  type SubscriptionData,
+  type SubscriptionResult,
+} from './base-subscription.factory';
+import { resolvePubSubTokenPolicy, verifyPubSubToken } from '../pubsub-auth';
 import { c, getNotificationsUrl } from '../../lib/utils';
 import { resetConnection } from '../server-utils';
 import jwt from '@tsndr/cloudflare-worker-jwt';
-import { env } from '../../env';
 import { connection } from '../../db/schema';
 import { EProviders } from '../../types';
+import { logger } from '../logger';
+import { env } from '../../env';
 
 interface GoogleServiceAccount {
   type: string;
@@ -29,7 +34,15 @@ export const getServiceAccount = (): GoogleServiceAccount => {
   try {
     return JSON.parse(serviceAccountJson) as GoogleServiceAccount;
   } catch (error) {
-    logger.error('Invalid GOOGLE_S_ACCOUNT JSON format', serviceAccountJson, error);
+    // Ne JAMAIS journaliser `serviceAccountJson` : il porte `private_key`, la clé privée
+    // RSA du compte de service. Un JSON malformé n'est pas forcément un JSON illisible — un
+    // fragment valide suffit à faire échouer `JSON.parse` tout en gardant la clé entière
+    // dans la chaîne, qui partait alors vers `wrangler tail` et logpush. La redaction de
+    // lib/logger.ts est indexée sur les NOMS de clés : une chaîne nue lui échappe.
+    logger.error('Invalid GOOGLE_S_ACCOUNT JSON format', {
+      length: serviceAccountJson.length,
+      error,
+    });
     throw new Error('Invalid GOOGLE_S_ACCOUNT JSON format');
   }
 };
@@ -247,11 +260,11 @@ class GoogleSubscriptionFactory extends BaseSubscriptionFactory {
     }
   }
 
-  public async subscribe(data: { body: SubscriptionData }): Promise<Response> {
+  public async subscribe(data: { body: SubscriptionData }): Promise<SubscriptionResult> {
     const { connectionId } = data.body;
 
     if (!connectionId) {
-      return c.json({ error: 'connectionId is required' }, { status: 400 });
+      return { ok: false, status: 400, reason: 'connectionId is required' };
     }
 
     try {
@@ -259,7 +272,7 @@ class GoogleSubscriptionFactory extends BaseSubscriptionFactory {
       const connectionData = await this.getConnectionFromDb(connectionId);
       if (!connectionData) {
         logger.info(`[SUBSCRIPTION] Connection not found: ${connectionId}`);
-        return c.json({ error: 'connection not found' }, { status: 400 });
+        return { ok: false, status: 400, reason: 'connection not found' };
       }
 
       const pubSubName = `notifications__${connectionData.id}`;
@@ -292,7 +305,7 @@ class GoogleSubscriptionFactory extends BaseSubscriptionFactory {
         await this.initializeConnectionLabels(connectionId);
 
         logger.info(`[SUBSCRIPTION] Setup completed successfully for connection: ${connectionId}`);
-        return c.json({});
+        return { ok: true };
       } catch (error) {
         logger.error('[SUBSCRIPTION] Setup failed:', error);
 
@@ -301,7 +314,7 @@ class GoogleSubscriptionFactory extends BaseSubscriptionFactory {
 
         if (error instanceof Error && error.message.includes('Already Exists')) {
           logger.info('Resource already exists, continuing...');
-          return c.json({});
+          return { ok: true };
         }
 
         throw error;
@@ -312,7 +325,16 @@ class GoogleSubscriptionFactory extends BaseSubscriptionFactory {
       // Clean up on error using base class method
       //   await this.cleanupOnFailure(connectionId, env);
 
-      return c.json({ error: 'Internal server error' }, { status: 500 });
+      // Cette branche retournait `c.json({error:'Internal server error'}, {status:500})`.
+      // Aucun handler HTTP n'appelle `subscribe` : la seule conséquence était que
+      // `enableBrainFunction` recevait un objet et le jetait, donc qu'un watch Gmail non
+      // reposé se présentait comme un succès. L'échec est désormais porté par la valeur.
+      return {
+        ok: false,
+        status: 500,
+        reason: error instanceof Error ? error.message : String(error),
+        cause: error,
+      };
     }
   }
 
@@ -336,20 +358,18 @@ class GoogleSubscriptionFactory extends BaseSubscriptionFactory {
     return c.json({});
   }
 
+  /**
+   * Seconde implémentation du même contrôle que server-utils `verifyToken` — sans appelant
+   * aujourd'hui, mais imposée par `BaseSubscriptionFactory`. Elle portait exactement le même
+   * défaut : `tokeninfo` puis `!!data`, donc n'importe quel jeton ID Google accepté. Elle est
+   * ramenée sur la vérification locale commune plutôt que laissée en embuscade.
+   */
   public async verifyToken(token: string): Promise<boolean> {
-    try {
-      const response = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${token}`);
-
-      if (!response.ok) {
-        return false;
-      }
-
-      const data = await response.json();
-      return !!data;
-    } catch {
-      logger.debug('Google id_token verification failed');
-      return false;
+    const result = await verifyPubSubToken(token, resolvePubSubTokenPolicy());
+    if (!result.ok) {
+      logger.debug('Google id_token verification failed', { reason: result.reason });
     }
+    return result.ok;
   }
 }
 

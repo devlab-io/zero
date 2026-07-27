@@ -1,10 +1,11 @@
-import { logger } from '../../lib/logger';
 import { getCurrentDateContext, GmailSearchAssistantSystemPrompt } from '../../lib/prompts';
 import { getThread, getZeroAgent } from '../../lib/server-utils';
 import type { IGetThreadResponse } from '../../lib/driver/types';
-import { composeEmail } from '../../trpc/routes/ai/compose';
-import { perplexity } from '@ai-sdk/perplexity';
+import { composeEmail } from '../../services/compose-service';
+import { sanitizeMailField } from '../../lib/mail-sanitize';
 import { colors } from '../../lib/prompts';
+import { formatSender } from './mcp-tools';
+import { logger } from '../../lib/logger';
 import { openai } from '@ai-sdk/openai';
 import { generateText, tool } from 'ai';
 import { Tools } from '../../types';
@@ -152,14 +153,17 @@ const getThreadSummary = (connectionId: string) =>
         });
         return {
           short: shortResponse.summary,
-          subject: thread.latest?.subject,
-          sender: thread.latest?.sender,
+          // Sujet et expéditeur sont choisis par l'ATTAQUANT et repartent vers l'agent
+          // principal, qui conserve `webSearch` : le canal de sortie existe. Neutralisés
+          // ici (aplatissement, retrait de l'invisible, borne) ; l'UI n'est pas touchée.
+          subject: sanitizeMailField(thread.latest?.subject, '(no subject)'),
+          sender: formatSender(thread.latest?.sender),
           date: thread.latest?.receivedOn,
         };
       }
       return {
-        subject: thread.latest?.subject,
-        sender: thread.latest?.sender,
+        subject: sanitizeMailField(thread.latest?.subject, '(no subject)'),
+        sender: formatSender(thread.latest?.sender),
         date: thread.latest?.receivedOn,
       };
     },
@@ -364,32 +368,11 @@ const getCurrentDate = () =>
     },
   });
 
-export const webSearch = () =>
-  tool({
-    description: 'Search the web for information using Perplexity AI',
-    parameters: z.object({
-      query: z.string().describe('The query to search the web for'),
-    }),
-    execute: async ({ query }) => {
-      try {
-        const response = await generateText({
-          model: perplexity('sonar'),
-          messages: [
-            { role: 'system', content: 'Be precise and concise.' },
-            { role: 'system', content: 'Do not include sources in your response.' },
-            { role: 'system', content: 'Do not use markdown formatting in your response.' },
-            { role: 'user', content: query },
-          ],
-          maxTokens: 1024,
-        });
-
-        return response.text;
-      } catch (error) {
-        logger.error('Error searching the web:', error);
-        throw new Error('Failed to search the web');
-      }
-    },
-  });
+// `webSearch` vit désormais dans services/web-search-tool.ts (pitbull A8, axe 1) : le
+// service de composition ne dépend plus de ce module de routes, ce qui casse le cycle
+// services ↔ routes/agent. Réexporté pour ne rien changer aux consommateurs existants.
+export { webSearch } from '../../services/web-search-tool';
+import { webSearch } from '../../services/web-search-tool';
 
 export const tools = async (connectionId: string, ragEffect: boolean = false) => {
   const _tools = {

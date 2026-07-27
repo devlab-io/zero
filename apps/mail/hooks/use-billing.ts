@@ -1,7 +1,6 @@
 import { useAutumn, useCustomer } from 'autumn-js/react';
-import { signOut } from '@/lib/auth-client';
 import { isProCustomer } from '@/lib/utils';
-import { useEffect, useMemo } from 'react';
+import { useMemo } from 'react';
 
 type FeatureState = {
   total: number;
@@ -63,9 +62,13 @@ export const useBilling = () => {
   const { customer, refetch, isLoading, error } = useCustomer();
   const { attach, track, openBillingPortal } = useAutumn();
 
-  useEffect(() => {
-    if (error) signOut();
-  }, [error]);
+  // Ce hook portait `useEffect(() => { if (error) signOut(); }, [error])`. Il est monté par
+  // app-sidebar, donc sur CHAQUE page authentifiée : n'importe quelle erreur d'Autumn — un
+  // tiers de facturation, hors du chemin critique de la messagerie — éjectait l'utilisateur
+  // de sa boîte mail. Une panne fournisseur déconnectait ainsi tout le parc. La dégradation
+  // correcte est déjà là : `DEFAULT_FEATURES` (quotas à zéro, `enabled: false`) s'applique
+  // quand `customer` est absent, ce qui est exactement l'état produit par une erreur.
+  // L'erreur est relayée telle quelle aux appelants qui voudraient la signaler.
 
   const { isPro, ...customerFeatures } = useMemo(() => {
     const isPro = customer ? isProCustomer(customer) : false;
@@ -121,6 +124,7 @@ export const useBilling = () => {
 
   return {
     isLoading,
+    error,
     customer,
     refetch,
     attach,

@@ -342,6 +342,9 @@ export const draftOutbox = createTable(
         | 'sent'
         | 'cancelled'
         | 'failed'
+        // Envoi ÉMIS, issue INCONNUE : terminal et non rejouable. Colonne `text`, aucun
+        // type enum PostgreSQL en jeu — l'ajout de cette valeur n'exige pas de migration.
+        | 'unresolved'
       >()
       .notNull()
       .default('queued'),

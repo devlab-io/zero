@@ -1,8 +1,8 @@
-import { logger } from '../lib/logger';
 import type { IGetThreadResponse } from '../lib/driver/types';
-import { composeEmail } from '../trpc/routes/ai/compose';
+import { composeEmail } from '../services/compose-service';
 import { type ParsedMessage } from '../types';
 import { connection } from '../db/schema';
+import { logger } from '../lib/logger';
 
 const dontReplyTo = new Set([
   'no-reply@gmail.com',
@@ -125,6 +125,9 @@ const generateAutomaticDraft = async (
         'This email appears urgent. Generate a prompt acknowledgment response that addresses the urgency and provides next steps.';
     }
 
+    // Le corps est transmis BRUT à dessein : `composeEmail` (services/compose-service.ts) est
+    // le point d'entrée unique du courrier vers le modèle et y applique `sanitizeMailContent`.
+    // Neutraliser une seconde fois ici ne ferait qu'empiler deux en-têtes de mise en garde.
     const threadMessages = thread.messages.map((message) => ({
       from: message.sender?.name || message.sender?.email || 'Unknown',
       to: message.to?.map((r) => r.name || r.email) || [],

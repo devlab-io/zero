@@ -1,11 +1,12 @@
 import type { Attachment, ParsedMessage } from '@/types';
+import { escapeHtml } from '@/lib/escape-html';
 import { cleanHtml } from '@/lib/email-utils';
 import { formatDate } from '@/lib/date-utils';
 import { m } from '@/paraglide/messages';
 import { log } from '@/lib/log';
 import { toast } from 'sonner';
 
-import { PRINT_STYLES } from './print-styles';
+import { PRINT_IFRAME_SANDBOX, PRINT_STYLES } from './print-styles';
 
 // printMail — builds a print-ready HTML document for a single email and prints it
 // via a hidden iframe. Extracted verbatim from mail-display.tsx (behaviour
@@ -21,40 +22,41 @@ const cleanNameDisplay = (name?: string) => {
   return name.trim();
 };
 
-export function printMail(emailData: ParsedMessage, messageAttachments: Attachment[] | undefined) {
-  try {
-    // Create a hidden iframe for printing
-    const printFrame = document.createElement('iframe');
-    printFrame.style.position = 'absolute';
-    printFrame.style.top = '-9999px';
-    printFrame.style.left = '-9999px';
-    printFrame.style.width = '0px';
-    printFrame.style.height = '0px';
-    printFrame.style.border = 'none';
-
-    document.body.appendChild(printFrame);
-
-    // Generate clean, simple HTML content for printing
-    const printContent = `
+/**
+ * Construit le document d'impression. Exporté pour être éprouvé tel quel : c'est
+ * EXACTEMENT la chaîne que `printMail` remet à `iframeDoc.write` ci-dessous, pas une
+ * réplique de test.
+ *
+ * XSS STOCKÉ (corrigé) — toute valeur venant de l'e-mail (sujet, étiquettes, nom et
+ * adresse de l'expéditeur, destinataires To/CC/BCC, date, nom des pièces jointes) est
+ * échappée par `escapeHtml`. Seul le corps passe par `cleanHtml` (DOMPurify), qui doit
+ * rester du HTML.
+ */
+export function buildMailPrintDocument(
+  emailData: ParsedMessage,
+  messageAttachments: Attachment[] | undefined,
+): string {
+  const subject = escapeHtml(emailData.subject) || 'No Subject';
+  return `
       <!DOCTYPE html>
       <html>
         <head>
           <meta charset="utf-8">
-          <title>Print Email - ${emailData.subject || 'No Subject'}</title>
+          <title>Print Email - ${subject}</title>
           <style>${PRINT_STYLES}</style>
         </head>
         <body>
           <div class="email-container">
             <!-- Email Header -->
             <div class="email-header">
-              <h1 class="email-title">${emailData.subject || 'No Subject'}</h1>
+              <h1 class="email-title">${subject}</h1>
 
               ${
                 emailData?.tags && emailData.tags.length > 0
                   ? `
                 <div class="labels-section">
                   ${emailData.tags
-                    .map((tag) => `<span class="label-badge">${tag.name}</span>`)
+                    .map((tag) => `<span class="label-badge">${escapeHtml(tag.name)}</span>`)
                     .join('')}
                 </div>
               `
@@ -65,8 +67,8 @@ export function printMail(emailData: ParsedMessage, messageAttachments: Attachme
                 <div class="meta-row">
                   <span class="meta-label">From:</span>
                   <span class="meta-value">
-                    ${cleanNameDisplay(emailData.sender?.name)}
-                    ${emailData.sender?.email ? `&lt;${emailData.sender.email}&gt;` : ''}
+                    ${escapeHtml(cleanNameDisplay(emailData.sender?.name))}
+                    ${emailData.sender?.email ? `&lt;${escapeHtml(emailData.sender.email)}&gt;` : ''}
                   </span>
                 </div>
 
@@ -79,7 +81,7 @@ export function printMail(emailData: ParsedMessage, messageAttachments: Attachme
                       ${emailData.to
                         .map(
                           (recipient) =>
-                            `${cleanNameDisplay(recipient.name)} &lt;${recipient.email}&gt;`,
+                            `${escapeHtml(cleanNameDisplay(recipient.name))} &lt;${escapeHtml(recipient.email)}&gt;`,
                         )
                         .join(', ')}
                     </span>
@@ -97,7 +99,7 @@ export function printMail(emailData: ParsedMessage, messageAttachments: Attachme
                       ${emailData.cc
                         .map(
                           (recipient) =>
-                            `${cleanNameDisplay(recipient.name)} &lt;${recipient.email}&gt;`,
+                            `${escapeHtml(cleanNameDisplay(recipient.name))} &lt;${escapeHtml(recipient.email)}&gt;`,
                         )
                         .join(', ')}
                     </span>
@@ -115,7 +117,7 @@ export function printMail(emailData: ParsedMessage, messageAttachments: Attachme
                       ${emailData.bcc
                         .map(
                           (recipient) =>
-                            `${cleanNameDisplay(recipient.name)} &lt;${recipient.email}&gt;`,
+                            `${escapeHtml(cleanNameDisplay(recipient.name))} &lt;${escapeHtml(recipient.email)}&gt;`,
                         )
                         .join(', ')}
                     </span>
@@ -126,7 +128,7 @@ export function printMail(emailData: ParsedMessage, messageAttachments: Attachme
 
                 <div class="meta-row">
                   <span class="meta-label">Date:</span>
-                  <span class="meta-value">${formatDate(emailData.receivedOn)}</span>
+                  <span class="meta-value">${escapeHtml(formatDate(emailData.receivedOn))}</span>
                 </div>
               </div>
             </div>
@@ -150,8 +152,8 @@ export function printMail(emailData: ParsedMessage, messageAttachments: Attachme
                   .map(
                     (attachment) => `
                   <div class="attachment-item">
-                    <span class="attachment-name">${attachment.filename}</span>
-                    ${formatFileSize(attachment.size) ? ` - <span class="attachment-size">${formatFileSize(attachment.size)}</span>` : ''}
+                    <span class="attachment-name">${escapeHtml(attachment.filename)}</span>
+                    ${formatFileSize(attachment.size) ? ` - <span class="attachment-size">${escapeHtml(formatFileSize(attachment.size))}</span>` : ''}
                   </div>
                 `,
                   )
@@ -164,6 +166,25 @@ export function printMail(emailData: ParsedMessage, messageAttachments: Attachme
         </body>
       </html>
     `;
+}
+
+export function printMail(emailData: ParsedMessage, messageAttachments: Attachment[] | undefined) {
+  try {
+    // Create a hidden iframe for printing
+    const printFrame = document.createElement('iframe');
+    // Bac à sable SANS `allow-scripts` : voir PRINT_IFRAME_SANDBOX (print-styles.ts).
+    printFrame.setAttribute('sandbox', PRINT_IFRAME_SANDBOX);
+    printFrame.style.position = 'absolute';
+    printFrame.style.top = '-9999px';
+    printFrame.style.left = '-9999px';
+    printFrame.style.width = '0px';
+    printFrame.style.height = '0px';
+    printFrame.style.border = 'none';
+
+    document.body.appendChild(printFrame);
+
+    // Generate clean, simple HTML content for printing
+    const printContent = buildMailPrintDocument(emailData, messageAttachments);
 
     if (printFrame.contentWindow) {
       // Write content to the iframe

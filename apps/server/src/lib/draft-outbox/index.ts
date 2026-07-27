@@ -1,6 +1,3 @@
-import { connection, draftOutbox } from '../../db/schema';
-import { and, asc, desc, eq, lte } from 'drizzle-orm';
-import type { DB } from '../../db';
 import {
   approveDraftOutboxItem,
   beginGeneratingDraftOutboxItem,
@@ -10,9 +7,13 @@ import {
   markDraftOutboxItemReady,
   markDraftOutboxItemSent,
   retryDraftOutboxItem,
+  settleSendingDraftOutboxItem,
   type DraftOutboxItem,
   type DraftOutboxStatus,
 } from './state-machine';
+import { connection, draftOutbox } from '../../db/schema';
+import { and, asc, desc, eq, lte } from 'drizzle-orm';
+import type { DB } from '../../db';
 
 export type { DraftOutboxItem, DraftOutboxStatus };
 export {
@@ -24,8 +25,11 @@ export {
   draftOutboxStatuses,
   failDraftOutboxItem,
   markDraftOutboxItemReady,
+  classifyDraftOutboxSendFailure,
+  decideDraftOutboxSendSettlement,
   markDraftOutboxItemSent,
   retryDraftOutboxItem,
+  settleSendingDraftOutboxItem,
 } from './state-machine';
 
 export type EnqueueDraftJobInput = {
@@ -49,9 +53,7 @@ const normalizeNullable = (value: string | null | undefined) => {
 };
 
 const defaultSubject = (input: EnqueueDraftJobInput) =>
-  normalizeNullable(input.subject) ??
-  normalizeNullable(input.mission)?.slice(0, 120) ??
-  'Draft';
+  normalizeNullable(input.subject) ?? normalizeNullable(input.mission)?.slice(0, 120) ?? 'Draft';
 
 const defaultBody = (input: EnqueueDraftJobInput) =>
   input.body ?? normalizeNullable(input.mission) ?? '';
@@ -233,6 +235,16 @@ export const markDraftOutboxJobSent = async (db: DB, current: DraftOutboxItem) =
 export const failDraftOutboxJob = async (db: DB, current: DraftOutboxItem, error: string) =>
   persistDraftOutboxItemTransition(db, current, failDraftOutboxItem(current, error));
 
+/**
+ * Règle un item resté en `sending` selon le classement de l'échec : `failed` (rejouable)
+ * si la non-acceptation est prouvée, `unresolved` (terminal) si l'issue est inconnue.
+ */
+export const settleSendingDraftOutboxJob = async (
+  db: DB,
+  current: DraftOutboxItem,
+  outcome: Parameters<typeof settleSendingDraftOutboxItem>[1],
+) => persistDraftOutboxItemTransition(db, current, settleSendingDraftOutboxItem(current, outcome));
+
 export const findNextQueuedDraftOutboxItem = async (db: DB, connectionId: string) => {
   const [row] = await db
     .select()
@@ -275,4 +287,3 @@ export const findNextApprovedDraftOutboxSendAt = async (db: DB, connectionId: st
 
   return row?.scheduledSendAt ?? null;
 };
-

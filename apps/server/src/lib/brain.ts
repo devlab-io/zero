@@ -1,19 +1,63 @@
-import { logger } from './logger';
 import { ReSummarizeThread, SummarizeMessage, SummarizeThread } from './brain.fallback.prompts';
 import { getSubscriptionFactory } from './factories/subscription-factory.registry';
 import { AiChatPrompt, StyledEmailAssistantSystemPrompt } from './prompts';
 import { resetConnection } from './server-utils';
 import { EPrompts, EProviders } from '../types';
-import { getPromptName } from '../pipelines';
+import { getPromptName } from './prompt-names';
+import { logger } from './logger';
 import { env } from '../env';
 
+/**
+ * Erreur d'inscription au push, levée quand la factory rapporte un échec au lieu d'en
+ * lever un. Elle existe pour qu'un appelant puisse distinguer « le watch n'a pas été
+ * reposé » de « autre chose a cassé ».
+ */
+export class BrainSubscriptionError extends Error {
+  constructor(
+    readonly connectionId: string,
+    readonly status: number,
+    reason: string,
+    options?: { cause?: unknown },
+  ) {
+    super(`Failed to subscribe connection ${connectionId} (status ${status}): ${reason}`, options);
+    this.name = 'BrainSubscriptionError';
+  }
+}
+
+/**
+ * Repose le watch push du fournisseur pour une connexion, et LÈVE si ce n'est pas fait.
+ *
+ * Le `catch` précédent journalisait, appelait `resetConnection`, puis se RÉSOLVAIT
+ * normalement. Combiné à `GoogleSubscriptionFactory.subscribe`, qui RETOURNAIT un
+ * `Response` 500 au lieu de lever, cela rendait tout échec de renouvellement
+ * indistinguable d'un succès pour l'appelant — donc le `msg.retry()` du consommateur
+ * `subscribe-queue` (lib/subscribe-queue.ts) était du CODE MORT : la fonction qu'il
+ * protège ne pouvait pas rejeter. Le watch Gmail expirait à sept jours et la boîte
+ * cessait silencieusement de recevoir ses notifications push.
+ *
+ * `resetConnection` est un effet de nettoyage : son propre échec ne doit pas masquer la
+ * cause réelle, qui est celle que l'appelant doit voir.
+ */
 export const enableBrainFunction = async (connection: { id: string; providerId: EProviders }) => {
   try {
     const subscriptionFactory = getSubscriptionFactory(connection.providerId);
-    await subscriptionFactory.subscribe({ body: { connectionId: connection.id } });
+    const result = await subscriptionFactory.subscribe({ body: { connectionId: connection.id } });
+    if (!result.ok) {
+      throw new BrainSubscriptionError(connection.id, result.status, result.reason, {
+        cause: result.cause,
+      });
+    }
   } catch (error) {
     logger.error(`Failed to enable brain function: ${error}`);
-    await resetConnection(connection.id);
+    try {
+      await resetConnection(connection.id);
+    } catch (resetError) {
+      logger.error(
+        `Failed to reset connection ${connection.id} after subscribe failure:`,
+        resetError,
+      );
+    }
+    throw error;
   }
 };
 

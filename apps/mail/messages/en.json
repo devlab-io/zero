@@ -169,13 +169,8 @@
       "attachments": "Attachments",
       "attachmentCount": [
         {
-          "declarations": [
-            "input count",
-            "local countPlural = count: plural"
-          ],
-          "selectors": [
-            "countPlural"
-          ],
+          "declarations": ["input count", "local countPlural = count: plural"],
+          "selectors": ["countPlural"],
           "match": {
             "countPlural=0": "attachments",
             "countPlural=one": "attachment",
@@ -185,13 +180,8 @@
       ],
       "fileCount": [
         {
-          "declarations": [
-            "input count",
-            "local countPlural = count: plural"
-          ],
-          "selectors": [
-            "countPlural"
-          ],
+          "declarations": ["input count", "local countPlural = count: plural"],
+          "selectors": ["countPlural"],
           "match": {
             "countPlural=0": "files",
             "countPlural=one": "file",
@@ -267,13 +257,8 @@
       "search": "Search notes...",
       "noteCount": [
         {
-          "declarations": [
-            "input count",
-            "local countPlural = count: plural"
-          ],
-          "selectors": [
-            "countPlural"
-          ],
+          "declarations": ["input count", "local countPlural = count: plural"],
+          "selectors": ["countPlural"],
           "match": {
             "countPlural=0": "Add notes",
             "countPlural=one": "# note",
@@ -337,13 +322,8 @@
     "mail": {
       "replies": [
         {
-          "declarations": [
-            "input count",
-            "local countPlural = count: plural"
-          ],
-          "selectors": [
-            "countPlural"
-          ],
+          "declarations": ["input count", "local countPlural = count: plural"],
+          "selectors": ["countPlural"],
           "match": {
             "countPlural=0": "replies",
             "countPlural=one": "# reply",
@@ -409,13 +389,8 @@
       "selectAllConversations": "Select all conversations",
       "conversationsSelected": [
         {
-          "declarations": [
-            "input count",
-            "local countPlural = count: plural"
-          ],
-          "selectors": [
-            "countPlural"
-          ],
+          "declarations": ["input count", "local countPlural = count: plural"],
+          "selectors": ["countPlural"],
           "match": {
             "countPlural=one": "# conversation on this page selected.",
             "countPlural=other": "# conversations on this page selected."
@@ -477,6 +452,7 @@
       "emailSent": "Email sent",
       "sendCancelled": "Send cancelled",
       "failedToCancel": "Failed to cancel",
+      "tooLateToCancel": "Too late to cancel — the email has been sent",
       "undo": "Undo"
     },
     "setupPhone": {
@@ -532,7 +508,8 @@
       "failed": "Queue action failed",
       "cannotApprove": "Only ready drafts can be approved",
       "cannotReject": "This item can no longer be rejected",
-      "cannotOpen": "This item has no draft or thread to open"
+      "cannotOpen": "This item has no draft or thread to open",
+      "cannotRetry": "This item cannot be retried: the send outcome is unknown."
     },
     "status": {
       "queued": "Queued",
@@ -542,7 +519,8 @@
       "sending": "Sending",
       "sent": "Sent",
       "cancelled": "Cancelled",
-      "failed": "Failed"
+      "failed": "Failed",
+      "unresolved": "Unresolved"
     },
     "statusDescription": {
       "queued": "Waiting for the agent.",
@@ -552,7 +530,8 @@
       "sending": "Sending is in progress.",
       "sent": "Sent by the approved path.",
       "cancelled": "Cancelled before sending.",
-      "failed": "Needs a retry or manual follow-up."
+      "failed": "Needs a retry or manual follow-up.",
+      "unresolved": "Send was issued and its outcome is unknown. Not replayed, to avoid a duplicate — check the Sent folder."
     },
     "item": {
       "untitled": "Untitled draft",
@@ -608,7 +587,10 @@
         "error": "Error",
         "notFoundDetails": "The requested page could not be found.",
         "somethingWentWrong": "Something went wrong!",
-        "seeConsole": "See the console for more information."
+        "seeConsole": "See the console for more information.",
+        "description": "An unexpected error occurred. You can try again, or head back to safety.",
+        "goHome": "Return to home",
+        "signOutAndRetry": "Log out and try again"
       }
     },
     "settings": {

@@ -7,6 +7,13 @@ export const OUTBOX_STATUSES = [
   'sent',
   'cancelled',
   'failed',
+  /**
+   * Envoi ÉMIS, issue INCONNUE. Distinct de `failed` parce que `failed` est rejouable et
+   * qu'un rejeu après acceptation renverrait le mail. Aucun bouton d'action ne doit être
+   * proposé sur cet état : il est terminal côté serveur (`retry` le refuse), et l'afficher
+   * comme réparable serait mentir à l'utilisateur.
+   */
+  'unresolved',
 ] as const;
 
 export type OutboxStatus = (typeof OUTBOX_STATUSES)[number];
@@ -28,16 +35,20 @@ export const CANCELABLE_STATUSES = new Set<OutboxStatus>([
 
 export const APPROVABLE_STATUSES = new Set<OutboxStatus>(['draft_ready']);
 
+/**
+ * Seul `failed` est rejouable, et il ne l'est que parce que la non-acceptation y est
+ * PROUVÉE. `unresolved` en est exclu par construction : c'est la moitié cliente du verrou
+ * posé côté serveur, où `retryDraftOutboxItem` exige déjà le statut `failed`.
+ */
+export const RETRYABLE_STATUSES = new Set<OutboxStatus>(['failed']);
+
 export const groupOutboxItemsByStatus = <T extends OutboxItemLike>(
   items: readonly T[],
 ): OutboxItemsByStatus<T> => {
-  const grouped = OUTBOX_STATUSES.reduce(
-    (acc, status) => {
-      acc[status] = [];
-      return acc;
-    },
-    {} as OutboxItemsByStatus<T>,
-  );
+  const grouped = OUTBOX_STATUSES.reduce((acc, status) => {
+    acc[status] = [];
+    return acc;
+  }, {} as OutboxItemsByStatus<T>);
 
   for (const item of items) {
     grouped[item.status].push(item);
@@ -46,14 +57,10 @@ export const groupOutboxItemsByStatus = <T extends OutboxItemLike>(
   return grouped;
 };
 
-export const getReviewPendingCount = <T extends OutboxItemLike>(
-  grouped: OutboxItemsByStatus<T>,
-) => grouped.draft_ready.length;
+export const getReviewPendingCount = <T extends OutboxItemLike>(grouped: OutboxItemsByStatus<T>) =>
+  grouped.draft_ready.length;
 
-export const getUndoSecondsRemaining = (
-  item: OutboxItemLike,
-  now: Date = new Date(),
-): number => {
+export const getUndoSecondsRemaining = (item: OutboxItemLike, now: Date = new Date()): number => {
   if (item.status !== 'approved' || !item.scheduledSendAt) return 0;
 
   const scheduledSendAt =

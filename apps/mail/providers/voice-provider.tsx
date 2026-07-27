@@ -1,10 +1,9 @@
-import { log } from '@/lib/log';
-import { m } from '@/paraglide/messages';
 import { createContext, useContext, useState } from 'react';
 import { useConversation } from '@elevenlabs/react';
-// import { callServerTool } from '@/lib/server-tool';
 import { useSession } from '@/lib/auth-client';
+import { m } from '@/paraglide/messages';
 import type { ReactNode } from 'react';
+import { log } from '@/lib/log';
 import { toast } from 'sonner';
 
 interface VoiceContextType {
@@ -21,22 +20,11 @@ interface VoiceContextType {
   sendContext: (context: any) => void;
 }
 
-// const toolNames = [
-//   'listEmails',
-//   'getEmail',
-//   'sendEmail',
-//   'markAsRead',
-//   'markAsUnread',
-//   'archiveEmails',
-//   'deleteEmails',
-//   'deleteEmail',
-//   'createLabel',
-//   'applyLabel',
-//   'removeLabel',
-//   'searchEmails',
-//   'webSearch',
-//   'summarizeEmail',
-// ] as const;
+// Le bloc `clientTools` commenté qui vivait ici appelait `lib/server-tool.ts`, lequel lisait
+// `import.meta.env.VITE_PUBLIC_VOICE_SECRET` : le préfixe `VITE_PUBLIC_` fait entrer la valeur
+// dans le bundle NAVIGATEUR, alors que `VOICE_SECRET` est le secret partagé serveur-à-serveur
+// qui autorise `/api/ai/do/*` (routes/ai.ts). Code mort mais ressuscitable d'un décommentage —
+// module et bloc supprimés plutôt que laissés en embuscade.
 
 const VoiceContext = createContext<VoiceContextType | undefined>(undefined);
 
@@ -61,30 +49,6 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       toast.error(typeof error === 'string' ? error : error.message);
       setIsInitializing(false);
     },
-    // clientTools: toolNames.reduce(
-    //   (acc, name) => {
-    //     acc[name] = async (params: any) => {
-    //       setLastToolCall(`Executing: ${name}`);
-
-    //       try {
-    //         const result = await callServerTool(
-    //           name,
-    //           { ...params, _context: currentContext },
-    //           session?.user.phoneNumber ?? session?.user.email ?? '',
-    //         );
-
-    //         setLastToolCall(null);
-    //         return result;
-    //       } catch (err) {
-    //         setLastToolCall(null);
-    //         toast.error(`Tool "${name}" failed: ${(err as Error).message}`);
-    //         throw err;
-    //       }
-    //     };
-    //     return acc;
-    //   },
-    //   {} as Record<string, (params: any) => Promise<any>>,
-    // ),
   });
 
   const { status, isSpeaking } = conversation;

@@ -5,6 +5,8 @@ import { categoriesRouter } from './routes/categories';
 import { templatesRouter } from './routes/templates';
 import { shortcutRouter } from './routes/shortcut';
 import { settingsRouter } from './routes/settings';
+import { loggingRouter } from './routes/logging';
+import { outboxRouter } from './routes/outbox';
 import { draftsRouter } from './routes/drafts';
 import { labelsRouter } from './routes/label';
 import { notesRouter } from './routes/notes';
@@ -15,8 +17,6 @@ import { mailRouter } from './routes/mail';
 import { bimiRouter } from './routes/bimi';
 import { aiRouter } from './routes/ai';
 import { router } from './trpc';
-import { loggingRouter } from './routes/logging';
-import { outboxRouter } from './routes/outbox';
 
 export const appRouter = router({
   ai: aiRouter,
@@ -43,10 +43,9 @@ export type AppRouter = typeof appRouter;
 export type Inputs = inferRouterInputs<AppRouter>;
 export type Outputs = inferRouterOutputs<AppRouter>;
 
-// The server-only `serverTrpc` caller lives in `./server-caller` so THIS module's
-// declaration stays emittable to the apps/mail type boundary (issue devlab-io/zero#43):
-// `appRouter.createCaller(...)`'s inferred type references non-portable @trpc/server
-// internals (TS2742) and would block the declaration. Re-exported here so the public
-// `@zero/server/trpc` module contract is unchanged. The generator drops this single
-// re-export line from the boundary (apps/mail never calls it). See ADR 0006.
-export { serverTrpc } from './server-caller';
+// Note (pitbull A8, axe 1) : ce module réexportait `serverTrpc` depuis `./server-caller`,
+// qui lui-même importe `appRouter` d'ici — un cycle d'imports de valeur entre le routeur
+// applicatif et son caller. Le caller n'avait AUCUN consommateur dans tout le dépôt (grep
+// exécuté sur apps/ et packages/) : il a été supprimé plutôt que déplacé. Un appel
+// serveur-à-serveur reste à une ligne — `appRouter.createCaller(ctx)` — et ADR 0006 porte
+// la trace de cette décision.

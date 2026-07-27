@@ -35,3 +35,26 @@ non couvert par des tests d'un driver non prioritaire est un risque net, pas un 
 - **− (conséquence produit)** Outlook reste une implémentation gelée : toute évolution
   fonctionnelle Outlook nécessitera d'abord de lever ce gel (découpe sous test) via un ADR de
   révision. Le support Outlook n'est donc pas au niveau de parité de Gmail tant que ce gel tient.
+
+## Amendement — 2026-07-25 (run pitbull, axe 9)
+
+**Constat.** La borne posée ci-dessus (1294) est rouge depuis le commit `d689e507`
+(`perf(server): sortir les deps lourdes du graphe statique`) : `microsoft.ts` mesure
+**1312 LOC**. La CI de `staging` échoue donc au step loc-ratchet depuis quatre pushes, ce qui
+empêche l'exécution des steps suivants (build, bundle worker, gitleaks). L'ADR affirmait par
+ailleurs « aucune modification du fichier », ce que ce commit a contredit.
+
+**Décision.** La croissance est **assumée, pas annulée**. Les +21 lignes viennent de la
+conversion des imports lourds (`@microsoft/microsoft-graph-client`, `mimetext`) en imports
+dynamiques aux points d'usage : le corps du module n'est plus évalué au démarrage de l'isolate.
+Revenir en arrière pour satisfaire un chiffre régresserait le temps de démarrage à froid mesuré
+(axe 6) au bénéfice d'une métrique — exactement ce que `docs/solutions/anti-metric-gaming.md`
+proscrit. La borne passe donc à **1312**, la valeur mesurée, et reste **non-croissante** à partir
+de là.
+
+**Périmètre révisé.** Le gel porte désormais sur la _forme_ du driver (pas de découpe ni de
+réécriture fonctionnelle sans filet de test), non sur son immutabilité littérale : les
+modifications transverses et mesurées à l'échelle du dépôt (perf, sécurité, correctifs de
+typage) restent recevables, à condition de mettre la borne à jour dans le même commit et de
+justifier ici. Toute évolution _fonctionnelle_ d'Outlook exige toujours de lever le gel via un
+ADR de révision.

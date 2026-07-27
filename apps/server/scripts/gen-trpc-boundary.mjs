@@ -18,11 +18,20 @@
 //
 // Determinism: same sources -> byte-identical output. CI re-runs this and fails on drift.
 // Prerequisite: `wrangler types` must have generated worker-configuration.d.ts.
+//
+// FORMATAGE (constat pitbull) : ce générateur écrivait la sortie BRUTE de `tsc`, alors que
+// le fichier committé passe par prettier via le hook de pré-commit (lint-staged). Le step
+// CI « tRPC type boundary — pas de dérive » (`gen:trpc-boundary && git diff --exit-code`)
+// échouait donc de façon DÉTERMINISTE, sur ~1663 insertions de pure mise en forme — au
+// step 8 sur 20, de sorte que tests, ratchets, audit, gitleaks, build et bundles worker ne
+// s'exécutaient JAMAIS. La sortie traverse désormais prettier avec la configuration du
+// dépôt, exactement comme le hook : le générateur et le fichier committé convergent.
 
-import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync, rmSync, existsSync, mkdirSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import { execFileSync } from 'node:child_process';
+import { format, resolveConfig } from 'prettier';
 import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const serverDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const EMIT_DIR = resolve(serverDir, 'node_modules/.cache/trpc-boundary');
@@ -39,14 +48,13 @@ const HEADER = `// GENERATED — DO NOT EDIT BY HAND.
 // A CI check re-runs the generator and fails on drift. See docs/adr/0006-trpc-type-boundary.md.
 `;
 
-function main() {
+async function main() {
   rmSync(EMIT_DIR, { recursive: true, force: true });
   mkdirSync(EMIT_DIR, { recursive: true });
 
   // Declaration emit. Exit code is non-zero because non-portable server-only exports
-  // (serverTrpc in ./server-caller, createAuth via ctx) are in the program — but they do
-  // not block index.d.ts (serverTrpc is only re-exported here). We assert on the produced
-  // artifact instead of the exit code.
+  // (createAuth via ctx) are in the program — but they ne bloquent pas index.d.ts. On
+  // valide l'artefact produit plutôt que le code de sortie.
   try {
     execFileSync('pnpm', ['exec', 'tsc', '-p', 'tsconfig.boundary.json'], {
       cwd: serverDir,
@@ -64,16 +72,10 @@ function main() {
 
   let dts = readFileSync(EMITTED, 'utf8');
 
-  // Drop the server-only `serverTrpc` re-export: apps/mail never calls it, and following it
-  // would resolve `./server-caller` -> the real appRouter/ctx graph. Its absence is asserted
-  // (below) so a renamed/removed re-export is caught.
-  const SERVER_CALLER_REEXPORT = /^export \{ serverTrpc \} from ['"]\.\/server-caller['"];?\n/m;
-  if (!SERVER_CALLER_REEXPORT.test(dts)) {
-    console.error('[gen-trpc-boundary] FAILED: expected serverTrpc re-export not found.');
-    console.error('  The index module shape changed — review before regenerating.');
-    process.exit(1);
-  }
-  dts = dts.replace(SERVER_CALLER_REEXPORT, '');
+  // `serverTrpc` n'est plus réexporté par ./index (pitbull A8, axe 1 : ce re-export formait
+  // un cycle avec ./server-caller, dont plus aucun module ne dépendait). Il n'y a donc plus
+  // rien à retirer ici — le filet ci-dessous vérifie qu'aucune référence à server-caller ne
+  // réapparaît dans la frontière committée.
 
   // Neutralise the client-unused server context env (the sole graph-dragging reference).
   const ENV_REF = 'import("../env").ZeroEnv';
@@ -85,7 +87,8 @@ function main() {
   dts = dts.split(ENV_REF).join('Record<string, unknown>');
 
   // Safety net: no residual server-graph specifier may survive into the committed boundary.
-  const banned = /(import\("(\.\.\/(env|main|routes\/agent|pipelines|db)|\.\.\/\.\.\/)[^"]*"\)|server-caller)/;
+  const banned =
+    /(import\("(\.\.\/(env|main|routes\/agent|pipelines|db)|\.\.\/\.\.\/)[^"]*"\)|server-caller)/;
   const offending = dts.split('\n').find((l) => banned.test(l));
   if (offending) {
     console.error('[gen-trpc-boundary] FAILED: residual server-graph reference in boundary:');
@@ -93,9 +96,22 @@ function main() {
     process.exit(1);
   }
 
-  writeFileSync(OUT, HEADER + dts);
+  // Même chemin que le hook de pré-commit : configuration du dépôt résolue depuis le
+  // fichier de SORTIE, donc identique à ce que `prettier --write` appliquerait sur lui.
+  // `plugins: []` neutralise les plugins déclarés (tri d'imports, tailwind) : ils ne
+  // s'appliquent pas à une déclaration `.d.ts` et exiger leur résolution ici rendrait le
+  // générateur dépendant du contexte d'exécution.
+  const prettierConfig = (await resolveConfig(OUT)) ?? {};
+  const formatted = await format(HEADER + dts, {
+    ...prettierConfig,
+    plugins: [],
+    filepath: OUT,
+    parser: 'typescript',
+  });
+
+  writeFileSync(OUT, formatted);
   rmSync(EMIT_DIR, { recursive: true, force: true });
   console.log('[gen-trpc-boundary] wrote', OUT);
 }
 
-main();
+await main();
