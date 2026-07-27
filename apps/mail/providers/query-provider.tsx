@@ -3,6 +3,11 @@ import {
   type PersistedClient,
   type Persister,
 } from '@tanstack/react-query-persist-client';
+import {
+  readCacheOwnerHint,
+  writeCacheOwnerHint,
+  clearCacheOwnerHint,
+} from '@/lib/cache-owner-hint';
 import { QueryCache, QueryClient, hashKey, type InfiniteData } from '@tanstack/react-query';
 import { selectQueriesForPersistence, shouldPersistQuery } from '@/lib/query-persistence';
 import { readRetryDelay, shouldRetryRead } from '@/lib/query-retry';
@@ -150,12 +155,36 @@ export function QueryProvider({
   connectionId,
 }: PropsWithChildren<{ connectionId: string | null }>) {
   const { data: session, isPending: isSessionPending } = useSession();
-  const cacheOwner = `${session?.user.id ?? 'anonymous'}-${connectionId ?? 'default'}`;
+  const resolvedCacheOwner = `${session?.user.id ?? 'anonymous'}-${connectionId ?? 'default'}`;
+
+  // Devlab (perf) : pendant que useSession() résout, cacheOwner valait
+  // "anonymous-<connectionId>", ce qui recréait un QueryClient + persister
+  // IndexedDB neufs (getQueryClient) au moment où la session bascule vers le
+  // vrai user id — la première vague de requêtes est jetée et repart
+  // (régime établi 2,7 s, dont cette seconde vague). Le hint n'est utilisé
+  // que si son suffixe connectionId correspond au connectionId courant :
+  // sinon la clé de persister `zero-query-cache-${cacheOwner}` servirait le
+  // cache IndexedDB d'une autre connexion.
+  const currentConnectionSuffix = `-${connectionId ?? 'default'}`;
+  const cacheOwnerHint = isSessionPending ? readCacheOwnerHint() : null;
+  const cacheOwner =
+    cacheOwnerHint && cacheOwnerHint.endsWith(currentConnectionSuffix)
+      ? cacheOwnerHint
+      : resolvedCacheOwner;
+
   const persister = useMemo(
     () => createIDBPersister(`zero-query-cache-${cacheOwner}`),
     [cacheOwner],
   );
   const queryClient = useMemo(() => getQueryClient(cacheOwner), [cacheOwner]);
+
+  // Une fois la session résolue : garde le hint à jour (utilisateur connu)
+  // ou l'efface (déconnecté), pour la prochaine navigation/boot.
+  useEffect(() => {
+    if (isSessionPending) return;
+    if (session?.user.id) writeCacheOwnerHint(resolvedCacheOwner);
+    else clearCacheOwnerHint();
+  }, [isSessionPending, resolvedCacheOwner, session?.user.id]);
 
   // Purge other users'/accounts' persisted caches on switch, and all of them on
   // logout — but only once the session has resolved, so a cold load never wipes
