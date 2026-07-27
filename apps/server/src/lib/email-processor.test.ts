@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
+import * as cheerio from 'cheerio';
 
-import { applyEmailPreferences, preprocessEmailHtml, processEmailHtml } from './email-processor';
+import {
+  applyEmailPreferences,
+  filterStyleBlockCss,
+  preprocessEmailHtml,
+  processEmailHtml,
+} from './email-processor';
 
 // Audit CRITIQUE (axe Sécurité) : HTML d'email non fiable injecté dans le shadow root sans filtrage
 // de l'attribut `style`. Ces tests prouvent que le repli choisi (allowedStyles sanitize-html +
@@ -120,7 +126,129 @@ describe('processEmailHtml — pipeline complet (payload hostile combiné)', () 
   });
 });
 
+// --- Audit CRITIQUE : XSS stocké par évasion de commentaire HTML sur une image bloquée -------
+//
+// Le remplaçant d'image bloquée interpolait le `src` DÉCODÉ dans un commentaire HTML, APRÈS
+// toute sanitisation. Un `-->` dans l'URL fermait le commentaire et la suite repartait en
+// balisage ACTIF dans `shadowRoot.innerHTML` (apps/mail/components/mail/mail-content.tsx),
+// jusqu'à l'exécution d'un `<script>` lisant `document.cookie`.
+//
+// `assertInerte` reparse la sortie EXACTEMENT comme le puits client et vérifie qu'aucune balise
+// active ni aucun gestionnaire d'événement n'en ressort.
+const assertInerte = (processedHtml: string) => {
+  // Le préfixe `<style>` du conteneur est légitime et posé par nous ; on l'écarte pour ne
+  // regarder que le balisage issu du message.
+  const fromMessage = processedHtml.replace(/^\s*<style type="text\/css">[\s\S]*?<\/style>/, '');
+  const $ = cheerio.load(fromMessage);
+
+  expect($('script')).toHaveLength(0);
+  expect($('iframe, object, embed, svg, form, base, link, meta')).toHaveLength(0);
+  expect($('img')).toHaveLength(0);
+  expect(fromMessage).not.toMatch(/\son[a-z]+\s*=/i);
+  // Plus aucun commentaire HTML n'est émis par ce chemin : le remplaçant est une constante.
+  expect(fromMessage).not.toContain('<!--');
+};
+
+describe('processEmailHtml — image bloquée : évasion de commentaire HTML (XSS stocké)', () => {
+  it('un src portant `-->` suivi d’un <script> ne ressort en aucune balise active', () => {
+    const payload =
+      '<img src="https://evil.example/a.png#--><script>window.__PWN=document.location.hostname+&quot;|&quot;+document.cookie</script><!--">';
+
+    const { processedHtml, hasBlockedImages } = processEmailHtml({
+      html: payload,
+      shouldLoadImages: false,
+      theme: 'light',
+    });
+
+    assertInerte(processedHtml);
+    expect(processedHtml).not.toContain('document.cookie');
+    expect(processedHtml).not.toContain('__PWN');
+    expect(hasBlockedImages).toBe(true);
+  });
+
+  it('un src portant `-->` suivi d’un <img onerror> ne ressort en aucune balise active', () => {
+    const payload =
+      '<img src="https://evil.example/a.png?x=--><img src=x onerror=&quot;window.__PWN=1&quot;><!--">';
+
+    const { processedHtml } = processEmailHtml({
+      html: payload,
+      shouldLoadImages: false,
+      theme: 'light',
+    });
+
+    assertInerte(processedHtml);
+    expect(processedHtml).not.toContain('onerror');
+  });
+
+  it('les variantes de fermeture de commentaire (`--!>`, `-->` scindé) restent inertes', () => {
+    for (const src of [
+      'https://evil.example/a.png?x=--!><script>alert(1)</script>',
+      'https://evil.example/a.png?x=--%3E-->&lt;script&gt;',
+      'https://evil.example/a.png?x=-- ><svg onload=alert(1)>',
+      'https://evil.example/a.png?x="><svg onload=alert(1)>',
+    ]) {
+      const { processedHtml } = processEmailHtml({
+        html: `<img src="${src.replace(/"/g, '&quot;')}">`,
+        shouldLoadImages: false,
+        theme: 'light',
+      });
+
+      assertInerte(processedHtml);
+    }
+  });
+
+  it('aucune donnée d’expéditeur n’entre dans le balisage généré par ce chemin', () => {
+    const { processedHtml } = processEmailHtml({
+      html: '<img src="https://tracker.example/beacon.gif?uid=SECRET-ID">',
+      shouldLoadImages: false,
+      theme: 'light',
+    });
+
+    expect(processedHtml).not.toContain('tracker.example');
+    expect(processedHtml).not.toContain('SECRET-ID');
+  });
+
+  it('le comportement métier est préservé : image distante retirée, cid: conservée', () => {
+    const out = processEmailHtml({
+      html: '<img src="https://cdn.test/logo.png"><img src="cid:inline@zero"><p>corps</p>',
+      shouldLoadImages: false,
+      theme: 'light',
+    });
+
+    expect(out.hasBlockedImages).toBe(true);
+    expect(out.processedHtml).not.toContain('cdn.test');
+    expect(out.processedHtml).toContain('cid:inline@zero');
+    expect(out.processedHtml).toContain('corps');
+  });
+
+  it('images chargées : le remplaçant n’intervient pas', () => {
+    const out = processEmailHtml({
+      html: '<img src="https://cdn.test/logo.png">',
+      shouldLoadImages: true,
+      theme: 'light',
+    });
+
+    expect(out.hasBlockedImages).toBe(false);
+    expect(out.processedHtml).toContain('https://cdn.test/logo.png');
+  });
+});
+
 describe('blocs <style> — filtre maison (la dépendance ne sait pas restreindre)', () => {
+  it('ne réémet jamais < ni > depuis une VALEUR de déclaration', () => {
+    // Le bloc `<style>` reconstruit est un élément à texte BRUT : le sérialiseur n'y échappe
+    // rien. Le filtre ne nettoyait que le sélecteur ; une valeur suffisait à sortir de la
+    // balise. Non atteignable via `preprocessEmailHtml` (le tokeniseur termine le texte brut
+    // au premier `</style>`), mais c'est une propriété de l'appelant, pas de la fonction.
+    const out = filterStyleBlockCss('a{font-family:"</style><img src=x onerror=alert(1)>"}');
+
+    // La propriété de sécurité est l'impossibilité de SORTIR de l'élément à texte brut ; le
+    // reste de la valeur demeure un nom de police absurde, parfaitement inerte.
+    expect(out).not.toContain('<');
+    expect(out).not.toContain('>');
+    // Le filtre n'a pas simplement tout jeté : la déclaration légitime tient encore.
+    expect(filterStyleBlockCss('a{color:red}')).toContain('color: red');
+  });
+
   it('retire un overlay posé par une règle de feuille de style', () => {
     const out = processEmailHtml({
       html: '<style>.x{position:fixed;top:0;z-index:999999;color:red}</style><div class="x">hameçon</div>',

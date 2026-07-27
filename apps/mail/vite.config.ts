@@ -3,16 +3,17 @@ import { cloudflare } from '@cloudflare/vite-plugin';
 import { reactRouter } from '@react-router/dev/vite';
 import tsconfigPaths from 'vite-tsconfig-paths';
 import oxlintPlugin from 'vite-plugin-oxlint';
-import babel from 'vite-plugin-babel';
-import tailwindcss from "@tailwindcss/vite";
-import { defineConfig } from 'vite';
+import tailwindcss from '@tailwindcss/vite';
 import { createRequire } from 'node:module';
+import babel from 'vite-plugin-babel';
+import { defineConfig } from 'vite';
 import path from 'node:path';
 import dedent from 'dedent';
 
 const require = createRequire(import.meta.url);
-// Client code only uses renderToString/renderToStaticMarkup (lib/email-utils.client.tsx,
-// lib/sanitize-tip-tap-html.tsx). The 'react-dom/server' entry is CJS and statically
+// Client code only uses renderToString/renderToStaticMarkup (lib/sanitize-tip-tap-html.tsx —
+// lib/email-utils.client.tsx n'en fait plus partie depuis le retrait de son moteur de rendu
+// d'email mort, audit sécurité). The 'react-dom/server' entry is CJS and statically
 // requires BOTH the legacy renderer (renderToString) and the full streaming renderer
 // (renderToReadableStream, ~85 kB min) that nothing on the client uses and that CJS
 // interop cannot tree-shake. Point the bare 'react-dom/server' specifier at the legacy

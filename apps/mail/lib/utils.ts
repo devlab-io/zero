@@ -12,9 +12,14 @@ import { twMerge } from 'tailwind-merge';
 // including a real divergence: this client's constructReplyBody had silently
 // dropped the server's `quotedMessage` parameter. Re-exported here so every
 // existing `from '@/lib/utils'` import keeps working unchanged. `cn`, `getCookie`,
-// `convertJSONToHTML`, `getEmailLogo`, `withExponentialBackoff` and
-// `isProCustomer` stay local: DOM/Vite-only or (isProCustomer) would need a new
-// `autumn-js` dependency in packages/types to move, which is out of scope here.
+// `getEmailLogo`, `withExponentialBackoff` and `isProCustomer` stay local:
+// DOM/Vite-only or (isProCustomer) would need a new `autumn-js` dependency in
+// packages/types to move, which is out of scope here.
+//
+// Audit : `convertJSONToHTML` a été SUPPRIMÉ. Il construisait du balisage par concaténation
+// — `<a href="${json.url}">` et `<img src="${json.url}">` sans le moindre échappement — à
+// partir d'un JSON tiptap. Aucun appelant dans le dépôt ; un seul aurait suffi à en faire un
+// puits XSS. Retiré plutôt que corrigé : rien n'en dépend.
 export {
   FOLDERS,
   LABELS,
@@ -46,92 +51,6 @@ export const getCookie = (key: string): string | null => {
     document.cookie.split('; ').map((v) => v.split(/=(.*)/s).map(decodeURIComponent)),
   );
   return cookies?.[key] ?? null;
-};
-
-export const convertJSONToHTML = (json: any): string => {
-  if (!json) return '';
-
-  // Handle different types
-  if (typeof json === 'string') return json;
-  if (typeof json === 'number' || typeof json === 'boolean') return json.toString();
-  if (json === null) return '';
-
-  // Handle arrays
-  if (Array.isArray(json)) {
-    return json.map((item) => convertJSONToHTML(item)).join('');
-  }
-
-  // Handle objects (assuming they might have specific email content structure)
-  if (typeof json === 'object') {
-    // Check if it's a text node
-    if (json.type === 'text') {
-      let text = json.text || '';
-
-      // Apply formatting if present
-      if (json.bold) text = `<strong>${text}</strong>`;
-      if (json.italic) text = `<em>${text}</em>`;
-      if (json.underline) text = `<u>${text}</u>`;
-      if (json.code) text = `<code>${text}</code>`;
-
-      return text;
-    }
-
-    // Handle paragraph
-    if (json.type === 'paragraph') {
-      return `<p>${convertJSONToHTML(json.children)}</p>`;
-    }
-
-    // Handle headings
-    if (json.type?.startsWith('heading-')) {
-      const level = json.type.split('-')[1];
-      return `<h${level}>${convertJSONToHTML(json.children)}</h${level}>`;
-    }
-
-    // Handle lists
-    if (json.type === 'bulleted-list') {
-      return `<ul>${convertJSONToHTML(json.children)}</ul>`;
-    }
-
-    if (json.type === 'numbered-list') {
-      return `<ol>${convertJSONToHTML(json.children)}</ol>`;
-    }
-
-    if (json.type === 'list-item') {
-      return `<li>${convertJSONToHTML(json.children)}</li>`;
-    }
-
-    // Handle links
-    if (json.type === 'link') {
-      return `<a href="${json.url}">${convertJSONToHTML(json.children)}</a>`;
-    }
-
-    // Handle images
-    if (json.type === 'image') {
-      return `<img src="${json.url}" alt="${json.alt || ''}" />`;
-    }
-
-    // Handle blockquote
-    if (json.type === 'block-quote') {
-      return `<blockquote>${convertJSONToHTML(json.children)}</blockquote>`;
-    }
-
-    // Handle code blocks
-    if (json.type === 'code-block') {
-      return `<pre><code>${convertJSONToHTML(json.children)}</code></pre>`;
-    }
-
-    // If it has children property, process it
-    if (json.children) {
-      return convertJSONToHTML(json.children);
-    }
-
-    // Process all other properties
-    return Object.values(json)
-      .map((value) => convertJSONToHTML(value))
-      .join('');
-  }
-
-  return '';
 };
 
 export const getEmailLogo = (email: string) => {

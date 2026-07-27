@@ -143,7 +143,19 @@ export const filterStyleBlockCss = (css: string): string => {
         if (separator === -1) return null;
 
         const property = declaration.slice(0, separator).trim().toLowerCase();
-        const value = declaration.slice(separator + 1).trim();
+        // La VALEUR est elle aussi réémise telle quelle dans le bloc `<style>` reconstruit, qui
+        // est un élément à texte BRUT : le sérialiseur n'y échappe rien. `filterStyleBlockCss`
+        // ne défendait que le sélecteur. Sonde : l'entrée `a{font-family:"</style><img src=x
+        // onerror=alert(1)>"}` ressortait VERBATIM de cette fonction. Le vecteur n'est
+        // aujourd'hui pas atteignable via `preprocessEmailHtml` — le tokeniseur HTML termine
+        // l'élément à texte brut au premier `</style>`, donc le CSS reçu ne peut pas contenir
+        // cette séquence — mais c'est une propriété de l'APPELANT, pas de la fonction. Les
+        // deux chevrons sont retirés ici, comme pour le sélecteur : aucune valeur CSS
+        // légitime n'en a besoin.
+        const value = declaration
+          .slice(separator + 1)
+          .replace(/[<>]/g, '')
+          .trim();
         if (!SAFE_STYLE_PROPERTY_SET.has(property) || !value) return null;
 
         const allowed = property.startsWith('background')
@@ -297,6 +309,11 @@ export function preprocessEmailHtml(html: string): string {
 const REMOTE_BACKGROUND_URL_PATTERN =
   /background(?:-image)?\s*:\s*[^;]*url\(\s*['"]?(?!cid:)[^'")]+['"]?\s*\)[^;]*;?/gi;
 
+// Remplaçant d'une image distante bloquée. Littéral constant, sans aucune interpolation :
+// c'est ce qui garantit qu'aucune donnée d'expéditeur ne peut atteindre le balisage de sortie
+// par ce chemin.
+const BLOCKED_IMAGE_PLACEHOLDER = '<span style="display:none;" data-blocked-image="1"></span>';
+
 function stripRemoteBackgroundImages(styleValue: string): { style: string; blocked: boolean } {
   let blocked = false;
   const style = styleValue
@@ -328,7 +345,23 @@ export function applyEmailPreferences(
       // Allow CID images (inline attachments)
       if (src && !src.startsWith('cid:')) {
         hasBlockedImages = true;
-        $img.replaceWith(`<span style="display:none;"><!-- blocked image: ${src} --></span>`);
+        // XSS STOCKÉ (fermé) : ce remplacement interpolait le `src` DÉCODÉ dans un COMMENTAIRE
+        // HTML, et ce APRÈS la sanitisation — donc hors de toute protection. Un `-->` porté par
+        // l'URL fermait le commentaire et tout ce qui suivait repartait en balisage ACTIF chez
+        // le client, qui affecte cette chaîne à `shadowRoot.innerHTML`
+        // (apps/mail/components/mail/mail-content.tsx). Prouvé jusqu'à l'exécution d'un
+        // `<script>` lisant `document.cookie` — la CSP autorise `'unsafe-inline'` et un shadow
+        // root n'est pas une frontière de sécurité. Exposition permanente pour qui bloque les
+        // images distantes, transitoire pour TOUS au chargement (`useSettings` reste désactivé
+        // tant que la session n'est pas résolue, donc `shouldLoadImages === false`).
+        //
+        // Le marqueur est désormais une CONSTANTE : aucun octet contrôlé par l'expéditeur
+        // n'entre dans le balisage généré. L'URL n'avait aucun consommateur (aucune référence
+        // à « blocked image » ailleurs dans le dépôt) et le seul signal dont l'UI a besoin,
+        // `hasBlockedImages`, est retourné séparément. Un attribut échappé aurait aussi été
+        // correct ; la constante est structurellement sûre plutôt que dépendante d'un
+        // échappement, ce qui est le point qui a lâché ici.
+        $img.replaceWith(BLOCKED_IMAGE_PLACEHOLDER);
       }
     });
 
