@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
 
 import { assertMailEnv, requiredMailEnvSchema } from './env-schema';
+import cspScriptHashes from './csp-script-hashes.generated.json';
 import worker from './spa-fallback';
 
 // #44 (gate A8) — micro-harness for the SPA-fallback worker. A mocked ASSETS binding returns 404
@@ -136,6 +138,66 @@ describe('spa-fallback worker — security headers', () => {
     expect(res.headers.get('Content-Security-Policy')).toContain("form-action 'self'");
   });
 
+  // --- script-src sans 'unsafe-inline' ---------------------------------------------------
+  //
+  // Le corps des e-mails est rendu par innerHTML dans un shadow root de la page principale —
+  // pas une frontière de sécurité. Tant que script-src portait 'unsafe-inline', un `onerror=`
+  // survivant à l'assainisseur s'exécutait comme du script de première partie ; trois XSS
+  // stockés l'ont démontré dans ce dépôt. Ces assertions verrouillent la directive.
+  async function servedCsp() {
+    const res = await worker.fetch(navRequest(), makeEnv(200) as never);
+    return res.headers.get('Content-Security-Policy') ?? '';
+  }
+
+  function scriptSrcOf(csp: string) {
+    return (
+      csp
+        .split(';')
+        .map((directive) => directive.trim())
+        .find((directive) => directive.startsWith('script-src')) ?? ''
+    );
+  }
+
+  it("script-src ne porte plus 'unsafe-inline' — ni aucun autre laissez-passer inline", async () => {
+    const scriptSrc = scriptSrcOf(await servedCsp());
+
+    expect(scriptSrc).not.toBe('');
+    expect(scriptSrc).not.toContain("'unsafe-inline'");
+    // 'unsafe-hashes' ré-autoriserait les gestionnaires en attribut (`onerror=…`), c'est-à-dire
+    // exactement le vecteur que cette directive doit fermer.
+    expect(scriptSrc).not.toContain("'unsafe-hashes'");
+    expect(scriptSrc).not.toContain("'unsafe-eval'");
+    // Une CSP entière ne doit pas non plus rouvrir la porte par une autre directive de script.
+    expect(await servedCsp()).not.toContain("script-src-elem 'unsafe-inline'");
+  });
+
+  it("script-src garde 'self' et autorise les scripts inline du shell par EMPREINTE", async () => {
+    const scriptSrc = scriptSrcOf(await servedCsp());
+
+    expect(scriptSrc).toContain("'self'");
+    expect(cspScriptHashes.hashes.length).toBeGreaterThan(0);
+    for (const hash of cspScriptHashes.hashes) {
+      expect(scriptSrc).toContain(`'${hash}'`);
+    }
+    // Une empreinte est bien de la forme attendue par les navigateurs.
+    for (const hash of cspScriptHashes.hashes) {
+      expect(hash).toMatch(/^sha256-[A-Za-z0-9+/]+=*$/);
+    }
+  });
+
+  it("style-src garde 'unsafe-inline' : les e-mails portent des styles inline légitimes", async () => {
+    // Décision explicite, pas un oubli — voir le commentaire de CONTENT_SECURITY_POLICY.
+    // L'injection CSS reste une nuisance de mise en page, d'un ordre en dessous de
+    // l'exécution de code que script-src ferme désormais.
+    const csp = await servedCsp();
+    const styleSrc = csp
+      .split(';')
+      .map((directive) => directive.trim())
+      .find((directive) => directive.startsWith('style-src'));
+
+    expect(styleSrc).toContain("'unsafe-inline'");
+  });
+
   it('HSTS est posé sur le document ET sur les assets', async () => {
     const expected = 'max-age=31536000; includeSubDomains';
 
@@ -149,6 +211,46 @@ describe('spa-fallback worker — security headers', () => {
       makeEnvWithDirectHit(200, 'application/javascript; charset=utf-8') as never,
     );
     expect(asset.headers.get('Strict-Transport-Security')).toBe(expected);
+  });
+});
+
+// --- Le Worker doit RÉELLEMENT s'interposer -------------------------------------------------
+//
+// Tout ce qui précède s'appuie sur un binding ASSETS simulé, qui appelle toujours le Worker.
+// La plateforme, elle, ne l'appelle pas : quand un asset existe, la couche Assets répond
+// directement et le Worker n'est jamais exécuté. Mesuré en local avec `wrangler dev` :
+// `curl -D - http://localhost:3000/` ne portait NI CSP, NI X-Frame-Options, NI HSTS — la page
+// d'accueil, seule page publique, n'était couverte par aucun en-tête, tandis que `/mail/inbox`
+// (sans asset correspondant) les portait tous. Le test « a direct HTML asset hit also gets CSP »
+// ci-dessus était donc un vert qui ne décrivait pas la production.
+//
+// `assets.run_worker_first: true` referme cet écart. Comme aucun test unitaire ne peut observer
+// le routage de la plateforme, on verrouille ici la CONFIGURATION qui le gouverne.
+describe('wrangler.jsonc — le Worker est bien devant les assets', () => {
+  // Chemin relatif au cwd de vitest (apps/mail), comme thread-display.transition.test.ts :
+  // sous happy-dom, `new URL()` construit une URL DOM que readFileSync refuse.
+  // JSONC : on retire les commentaires de ligne et les virgules traînantes, comme build-env.mjs.
+  const config = JSON.parse(
+    readFileSync('wrangler.jsonc', 'utf8')
+      .replace(/^\s*\/\/.*$/gm, '')
+      .replace(/,(\s*[}\]])/g, '$1'),
+  );
+
+  it('run_worker_first est actif : sans lui, `/` est servi SANS aucun en-tête de sécurité', () => {
+    expect(config.assets.run_worker_first).toBe(true);
+  });
+
+  it('not_found_handling reste "none" : le 404 doit remonter au Worker, pas être masqué', () => {
+    expect(config.assets.not_found_handling).toBe('none');
+  });
+
+  it('les environnements déployés héritent de la config assets (aucun ne la redéfinit)', () => {
+    for (const [name, env] of Object.entries(config.env ?? {})) {
+      expect(
+        (env as { assets?: unknown }).assets,
+        `env.${name} redéfinit "assets" et perdrait run_worker_first`,
+      ).toBeUndefined();
+    }
   });
 });
 

@@ -122,6 +122,15 @@ jobs:
       - name: Build mail frontend (env staging, garde anti-URL locale)
         run: pnpm --filter @zero/mail build:staging
 
+      # `script-src` ne porte plus 'unsafe-inline' : les <script> inline du shell prerendu sont
+      # autorises nommement par empreinte sha256, regeneree par le build ci-dessus. Deux de ces
+      # scripts changent a chaque build (le bootstrap d'hydratation cite les noms de chunks, qui
+      # dependent de VITE_PUBLIC_BACKEND_URL). Ce controle echoue si un script inline present dans
+      # l'artefact n'est pas couvert par la CSP servie — sans lui, la desynchronisation ne se
+      # verrait qu'au premier chargement en production, hydratation cassee.
+      - name: CSP — empreintes des scripts inline a jour (script-src sans unsafe-inline)
+        run: node scripts/checks/csp-inline-scripts.mjs
+
       - name: Bundle Worker without deploying (server, env local)
         run: >-
           pnpm --filter @zero/server exec wrangler deploy --dry-run --env local

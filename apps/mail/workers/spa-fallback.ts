@@ -19,6 +19,7 @@
  * Requires `assets.not_found_handling: "none"` so ASSETS.fetch surfaces the 404 to this Worker
  * instead of substituting index.html at the asset layer.
  */
+import cspScriptHashes from './csp-script-hashes.generated.json';
 import { assertMailEnv } from './env-schema';
 
 interface Env {
@@ -48,20 +49,41 @@ function isHtmlNavigation(request: Request): boolean {
 
 // --- Security headers (audit: CSP/frame-ancestors gap on the SPA shell) --------------------
 //
-// script-src/style-src keep 'unsafe-inline': the prerendered shell (this build's index.html /
-// __spa-fallback.html) ships several un-nonced inline <script> tags baked in by the framework —
-// the dark/light theme flash-prevention snippet, React Router's hydration payload
-// (`window.__reactRouterContext`), scroll-restoration, and react-wrap-balancer. Dropping
-// 'unsafe-inline' would break hydration outright; doing so safely needs nonce-threading through
-// the prerender step, which is a build-pipeline change out of this fix's scope. connect-src/img-src
-// stay origin-broad (https:) because the backend origin differs per environment (staging/prod are
-// different Worker hostnames than the mail app) and optional third parties (Sentry, PostHog, the
-// image proxy) are configured via env vars not visible to this worker at header-authoring time —
-// hardcoding the wrong origin would silently break API calls or error reporting.
+// script-src NE PORTE PLUS 'unsafe-inline'. C'était le trou : le corps des e-mails est rendu par
+// `innerHTML` dans un shadow root de la page principale (mail-content.tsx) — un shadow root n'est
+// PAS une frontière de sécurité, tout ce qui s'y exécute est du script de première partie. Tant
+// que la CSP autorisait l'inline, un `onerror=` survivant à l'assainisseur s'exécutait ; mesuré en
+// navigateur : avec `script-src 'self' <empreintes>`, le même balisage est injecté mais reste
+// inerte. Les trois XSS stockés corrigés dans ce dépôt auraient tous été neutralisés par cette
+// seule directive.
+//
+// Les `<script>` inline du shell prérendu (anti-flash de thème next-themes, restauration de
+// défilement et bootstrap d'hydratation React Router, révélateur de Suspense de React DOM,
+// rééquilibrage react-wrap-balancer) sont autorisés NOMMÉMENT par leur empreinte sha256, calculée
+// À CHAQUE BUILD sur les octets réellement émis (apps/mail/scripts/csp-hashes.mjs, appelé en fin
+// de build) et vérifiée par scripts/checks/csp-inline-scripts.mjs. Un nonce par réponse aurait
+// exigé de réécrire chaque document au vol dans ce Worker (HTMLRewriter sur ~100 kB d'HTML à
+// chaque navigation) sans rien apporter de plus ici, le HTML étant un asset statique de confiance.
+//
+// Une empreinte ne peut PAS autoriser un gestionnaire d'événement en attribut (`onerror=…`) —
+// il faudrait 'unsafe-hashes', qu'on n'ajoute pas. C'est précisément l'effet recherché.
+//
+// style-src GARDE 'unsafe-inline', et c'est délibéré : le corps des e-mails porte légitimement des
+// `style="…"` et des `<style>` (assainis par sanitize-html), et les bibliothèques d'UI (radix,
+// vaul, sonner) injectent leurs feuilles au montage. Le retirer casserait le rendu du courrier
+// sans neutraliser d'exécution de script : l'injection CSS reste une nuisance de mise en page et
+// d'exfiltration par sélecteur, d'un ordre de gravité en dessous de l'exécution de code.
+//
+// connect-src/img-src stay origin-broad (https:) because the backend origin differs per environment
+// (staging/prod are different Worker hostnames than the mail app) and optional third parties
+// (Sentry, PostHog, the image proxy) are configured via env vars not visible to this worker at
+// header-authoring time — hardcoding the wrong origin would silently break API calls or error
+// reporting.
 //
 // frame-ancestors 'none' (+ the legacy X-Frame-Options: DENY) is the actual audit ask: the app must
-// never be embeddable in a third-party frame (clickjacking). That guarantee holds regardless of the
-// script-src/style-src trade-offs above.
+// never be embeddable in a third-party frame (clickjacking).
+const INLINE_SCRIPT_SOURCES = cspScriptHashes.hashes.map((hash) => `'${hash}'`).join(' ');
+
 const CONTENT_SECURITY_POLICY = [
   "default-src 'self'",
   "base-uri 'self'",
@@ -70,7 +92,7 @@ const CONTENT_SECURITY_POLICY = [
   // Un formulaire injecté ne peut plus poster ailleurs que sur cette origine : la
   // directive manquait, et `default-src` ne couvre PAS `form-action`.
   "form-action 'self'",
-  "script-src 'self' 'unsafe-inline'",
+  `script-src 'self' ${INLINE_SCRIPT_SOURCES}`,
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob: https:",
   "font-src 'self' data:",

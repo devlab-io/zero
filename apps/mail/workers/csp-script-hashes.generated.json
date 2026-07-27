@@ -1,0 +1,18 @@
+{
+  "_comment": "GÉNÉRÉ par apps/mail/scripts/csp-hashes.mjs à la fin de chaque build — ne pas éditer à la main. Empreintes des <script> inline du shell prérendu, injectées dans script-src pour retirer 'unsafe-inline'. Vérifié par scripts/checks/csp-inline-scripts.mjs.",
+  "hashes": [
+    "sha256-4dGlw0i3zCSRN7tV3cTuWT2blx+I38Yw6LVJnbVdSH4=",
+    "sha256-RBZNiG3Ztb26Xi/69+VRecU4BPhrfxcvspLXMRrrCNE=",
+    "sha256-TWKJpBGCg6787YVT32Nt9d/fVvIV5WlSXgLIeubmK6s=",
+    "sha256-UYw4n9hltInxo989D2bzws19BpKBCCjtFSBrehcbDHY=",
+    "sha256-Up3GlwG3RQN9YCksuUoHKxts8M9faS3EvF1qrz0l5uk=",
+    "sha256-dNy0y48tFd3Ueh+izbVssQPVSHSkZce1VpirT2wc1j4=",
+    "sha256-duhaxWNI+6QAukUMmlYrkl97X+e0pxobkwS+TpY5/CQ=",
+    "sha256-jxpmuzEyvVmGf1uu3rLnVb++ac4Q0kh49VFIlwUf6Q0=",
+    "sha256-p5u5vqrl6oECHfbGhn+siea5nXsZP9hgC68Lee/Vxm4=",
+    "sha256-w/LIJEMhw4JtJAcuTULFWDBHLcnqC3g71BMBYzkfa/Y=",
+    "sha256-xCAEd6HnTRaiv3PIKwn5aQ6TDMi4a3vJHp85z7mmcLs=",
+    "sha256-yEZMp+yK5EtOrg/OWhy/0mQ7GMx3Us7AnJMSUBDJlHg=",
+    "sha256-yYJq8IP5/WhJj6zxyTmujEqBFs/MufRufp2QKJFU76M="
+  ]
+}

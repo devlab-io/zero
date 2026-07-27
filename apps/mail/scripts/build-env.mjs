@@ -17,6 +17,8 @@ import { dirname, join, resolve } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
+import { generate as generateCspHashes } from './csp-hashes.mjs';
+
 const appDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const targetEnv = process.argv[2];
 
@@ -53,6 +55,14 @@ execFileSync('pnpm', ['exec', 'react-router', 'build'], {
     VITE_PUBLIC_APP_URL: vars.VITE_PUBLIC_APP_URL,
   },
 });
+
+// Empreintes CSP des scripts inline du shell prérendu. Elles dépendent des octets que CE build
+// vient d'émettre (le bootstrap d'hydratation cite les noms de chunks, qui dépendent de
+// VITE_PUBLIC_BACKEND_URL) : elles doivent donc être régénérées ICI, entre le build et le
+// `wrangler deploy` qui bundle le Worker. Sans cela, `script-src` porterait les empreintes d'un
+// autre environnement et l'hydratation casserait — silencieusement jusqu'au premier chargement.
+const { hashes } = generateCspHashes();
+console.log(`[build-env] ${hashes.length} empreintes CSP de scripts inline régénérées.`);
 
 if (targetEnv === 'local') process.exit(0);
 
