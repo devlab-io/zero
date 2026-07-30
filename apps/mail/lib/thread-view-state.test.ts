@@ -1,11 +1,17 @@
+import { selectThreadShellRow, selectThreadViewState } from './thread-view-state';
 import { describe, expect, it } from 'vitest';
-import { selectThreadViewState } from './thread-view-state';
 
 // Issue #34, check point 3 (barème A9): a failed thread fetch shows a FINITE
 // error (retry/back), never an endless skeleton.
 
 describe('selectThreadViewState', () => {
-  const base = { hasSelection: true, hasData: false, isLoading: false, isError: false, isOffline: false };
+  const base = {
+    hasSelection: true,
+    hasData: false,
+    isLoading: false,
+    isError: false,
+    isOffline: false,
+  };
 
   it('no selection → no-selection', () => {
     expect(selectThreadViewState({ ...base, hasSelection: false })).toBe('no-selection');
@@ -32,5 +38,23 @@ describe('selectThreadViewState', () => {
     // isLoading false + isError true is exactly the state that produced the old
     // perpetual skeleton; it must be a finite error now.
     expect(selectThreadViewState({ ...base, isLoading: false, isError: true })).not.toBe('loading');
+  });
+});
+
+describe('selectThreadShellRow — shell optimiste d’ouverture (CUA échecs 3-4)', () => {
+  const rich = { id: 't1', subject: 'Relevé BDT', sender: { email: 'a@b.pf' } };
+  const thin = { id: 't2' };
+
+  it('ligne riche trouvée → shell (sujet/expéditeur peints avant le corps)', () => {
+    expect(selectThreadShellRow([thin, rich], 't1')).toBe(rich);
+  });
+
+  it('ligne mince (recherche Gmail, pas de sujet) → pas de shell, squelette seul', () => {
+    expect(selectThreadShellRow([thin, rich], 't2')).toBeUndefined();
+  });
+
+  it('fil hors liste ou sans sélection → pas de shell', () => {
+    expect(selectThreadShellRow([rich], 'absent')).toBeUndefined();
+    expect(selectThreadShellRow([rich], null)).toBeUndefined();
   });
 });

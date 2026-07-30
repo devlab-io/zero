@@ -16,7 +16,53 @@ describe('selectSearchPreviewItems — préview projection pendant le vol Gmail'
     ).toBe(preview);
   });
 
-  it('préview vide → fallback (jamais de « aucun résultat » précoce)', () => {
+  it('littéral (« DHL ») : préview vide ou en vol → matches locaux seulement, jamais l’ancienne liste', () => {
+    // Projection sans le fil (hors horizon de sync / correspondance corps) :
+    // liste vide + bandeau, pas les résultats précédents sans rapport.
+    expect(
+      selectSearchPreviewItems({
+        isSearching: true,
+        authoritativeIsPlaceholder: true,
+        previewItems: [],
+        fallbackItems: fallback,
+        literalSearch: true,
+      }),
+    ).toEqual([]);
+    // Préview pas encore arrivée : idem, pas de vue précédente.
+    expect(
+      selectSearchPreviewItems({
+        isSearching: true,
+        authoritativeIsPlaceholder: true,
+        previewItems: undefined,
+        fallbackItems: fallback,
+        literalSearch: true,
+      }),
+    ).toEqual([]);
+    // Matches locaux présents : affichés (comportement inchangé).
+    expect(
+      selectSearchPreviewItems({
+        isSearching: true,
+        authoritativeIsPlaceholder: true,
+        previewItems: preview,
+        fallbackItems: fallback,
+        literalSearch: true,
+      }),
+    ).toBe(preview);
+  });
+
+  it('littéral : réponse authoritative arrivée → elle reprend la main', () => {
+    expect(
+      selectSearchPreviewItems({
+        isSearching: true,
+        authoritativeIsPlaceholder: false,
+        previewItems: [],
+        fallbackItems: fallback,
+        literalSearch: true,
+      }),
+    ).toBe(fallback);
+  });
+
+  it('préview vide (non littéral) → fallback (jamais de « aucun résultat » précoce)', () => {
     expect(
       selectSearchPreviewItems({
         isSearching: true,

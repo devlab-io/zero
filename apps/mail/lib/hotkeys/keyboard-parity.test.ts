@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 
-import { keyboardShortcuts, type Shortcut } from '@/config/shortcuts';
 import {
   GLOBAL_HANDLED_ACTIONS,
   NAV_SEQUENCE_ACTIONS,
@@ -10,6 +9,7 @@ import {
   LIST_IMPERATIVE_ACTIONS,
   COMPOSER_EXTERNAL_ACTIONS,
 } from './handler-manifest';
+import { keyboardShortcuts, type Shortcut } from '@/config/shortcuts';
 import { isTypingOrModalTarget } from './use-hotkey-utils';
 
 // Actions bound through the generic registry binder (useShortcuts), by scope.
@@ -51,7 +51,9 @@ describe('Shortwave keyboard parity — registry ↔ handler coverage (frozen ch
         continue;
       }
       if (!resolved.set.includes(shortcut.action)) {
-        unresolved.push(`${shortcut.action} — advertised in ${shortcut.scope} but absent from ${resolved.where}`);
+        unresolved.push(
+          `${shortcut.action} — advertised in ${shortcut.scope} but absent from ${resolved.where}`,
+        );
       }
     }
     expect(unresolved).toEqual([]);
@@ -92,8 +94,21 @@ describe('Shortwave keyboard parity — registry ↔ handler coverage (frozen ch
   // The frozen check #6 browser smoke exercises these; guard them against silent removal.
   it('the check #6 smoke keys are present and each resolves to a handler', () => {
     const SMOKE_COMBOS = [
-      '/', 'c', 'r', 'a', 'f', 'd', 'h', 's', 'j', 'k', 'x',
-      'g+i', 'mod+k', 'shift+?', 'escape',
+      '/',
+      'c',
+      'r',
+      'a',
+      'f',
+      'd',
+      'h',
+      's',
+      'j',
+      'k',
+      'x',
+      'g+i',
+      'mod+k',
+      'shift+?',
+      'escape',
     ];
     expectCombosWired(SMOKE_COMBOS);
   });
@@ -105,20 +120,64 @@ describe('Shortwave keyboard parity — registry ↔ handler coverage (frozen ch
   it('every in-scope frozen-table key combo is registered and wired', () => {
     const REQUIRED_TABLE_COMBOS = [
       // Compose
-      'c', 'r', 'a', 'f', 'mod+enter', 'mod+shift+enter',
+      'c',
+      'r',
+      'a',
+      'f',
+      'mod+enter',
+      'mod+shift+enter',
       // Global
-      '/', 'escape', 'shift+?', 'mod+/', 'mod+k', 'mod+shift+k', 'mod+shift+p', 'mod+,',
-      'mod+shift+l', 'mod+z',
+      '/',
+      'escape',
+      'shift+?',
+      'mod+/',
+      'mod+k',
+      'mod+shift+k',
+      'mod+shift+p',
+      'mod+,',
+      'mod+shift+l',
+      'mod+z',
       // Thread
-      'd', 'e', '[', ']', 'b', 'h', 's', 'l', 'v', '#', 'delete', 'mod+backspace',
-      'u', 'shift+u', 'shift+i', '+', '-',
+      'd',
+      'e',
+      '[',
+      ']',
+      'b',
+      'h',
+      's',
+      'l',
+      'v',
+      '#',
+      'delete',
+      'mod+backspace',
+      'u',
+      'shift+u',
+      'shift+i',
+      '+',
+      '-',
       // List
-      'j', 'arrowdown', 'k', 'arrowup', 'x', 'enter', 'arrowright', 'arrowleft',
-      'space', 'shift+space',
+      'j',
+      'arrowdown',
+      'k',
+      'arrowup',
+      'x',
+      'enter',
+      'arrowright',
+      'arrowleft',
+      'space',
+      'shift+space',
       // Layout
       'mod+\\',
       // Navigate (g …)
-      'g+i', 'g+s', 'g+b', 'g+h', 'g+e', 'g+t', 'g+d', 'g+!', 'g+#',
+      'g+i',
+      'g+s',
+      'g+b',
+      'g+h',
+      'g+e',
+      'g+t',
+      'g+d',
+      'g+!',
+      'g+#',
     ];
     expectCombosWired(REQUIRED_TABLE_COMBOS);
   });
@@ -174,5 +233,18 @@ describe('single-key exclusion — isTypingOrModalTarget (frozen check #4)', () 
   it('is false for a plain element and for a null target', () => {
     expect(isTypingOrModalTarget(document.createElement('div'))).toBe(false);
     expect(isTypingOrModalTarget(null)).toBe(false);
+  });
+});
+
+describe('pickers l/v — preventDefault (CUA 2026-07-30, échec 5)', () => {
+  it('les raccourcis openLabels/openMove annulent le keydown, sinon la lettre filtre le combo', () => {
+    // Le picker focuse son CommandInput pendant la frappe même : sans
+    // preventDefault, le `v` du raccourci s'insère dans l'input et filtre
+    // toutes les destinations (il fallait effacer pour voir Inbox).
+    const pickers = keyboardShortcuts.filter(
+      (s) => s.scope === 'thread-display' && (s.action === 'openLabels' || s.action === 'openMove'),
+    );
+    expect(pickers.map((s) => s.action).sort()).toEqual(['openLabels', 'openMove']);
+    for (const s of pickers) expect(s.preventDefault).toBe(true);
   });
 });

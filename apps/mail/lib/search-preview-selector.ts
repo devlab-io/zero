@@ -50,9 +50,23 @@ export function selectSearchPreviewItems<T>(params: {
   previewItems: T[] | undefined;
   /** Lignes actuellement affichables (vue précédente tenue par keepPreviousData). */
   fallbackItems: T[];
+  /**
+   * La requête est une phrase littérale simple (isSimpleLiteralSearch) : la
+   * préview projection est alors LA vue pertinente pendant le vol Gmail.
+   * CUA 2026-07-30 (échec « DHL ») : quand la projection n'a pas le fil (hors
+   * horizon de sync, correspondance corps de message), l'ancien fallback
+   * laissait la vue PRÉCÉDENTE — des résultats sans rapport lus comme des
+   * résultats de recherche — à l'écran pendant ~5 s. En littéral, on n'affiche
+   * QUE les matches locaux (même zéro, bandeau « Searching » visible), jamais
+   * l'ancienne liste. Les requêtes à opérateurs/IA gardent le fallback (la
+   * préview y est un sentinel vide, pas une réponse).
+   */
+  literalSearch?: boolean;
 }): T[] {
-  const { isSearching, authoritativeIsPlaceholder, previewItems, fallbackItems } = params;
+  const { isSearching, authoritativeIsPlaceholder, previewItems, fallbackItems, literalSearch } =
+    params;
   if (!isSearching || !authoritativeIsPlaceholder) return fallbackItems;
   if (previewItems && previewItems.length > 0) return previewItems;
+  if (literalSearch) return previewItems ?? [];
   return fallbackItems;
 }

@@ -1,8 +1,8 @@
-import { log } from '@/lib/log';
 import { addOptimisticActionAtom, removeOptimisticActionAtom } from '@/store/optimistic-updates';
 import { optimisticActionsManager, type PendingAction } from '@/lib/optimistic-actions-manager';
 import { buildOptimisticFailureToast, isLastPendingOfType } from '@/lib/optimistic-recovery';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { log } from '@/lib/log';
 
 import { backgroundQueueAtom } from '@/store/backgroundQueue';
 import type { ThreadDestination } from '@/lib/thread-actions';
@@ -293,6 +293,7 @@ export function useOptimisticActions() {
     threadIds: string[],
     currentFolder: string,
     destination: ThreadDestination,
+    options?: { keepThreadOpen?: boolean },
   ) {
     if (!threadIds.length || !destination) return;
 
@@ -309,7 +310,12 @@ export function useOptimisticActions() {
     });
 
     if (threadId && threadIds.includes(threadId)) {
-      setThreadId(null);
+      // CUA 2026-07-30 (échec 4) : fermer ici puis rouvrir via la commande de
+      // navigation = double transition d'URL + flash d'état vide. Quand
+      // l'appelant enchaîne immédiatement sur une navigation (archiveAndMove),
+      // il garde la vue ouverte — la navigation pose le threadId suivant, ou
+      // null en bout de liste.
+      if (!options?.keepThreadOpen) setThreadId(null);
       setActiveReplyId(null);
     }
     const successMessage =
@@ -347,7 +353,7 @@ export function useOptimisticActions() {
           setBackgroundQueue({ type: 'delete', threadId: `thread:${id}` });
         });
       },
-      retry: () => optimisticMoveThreadsTo(threadIds, currentFolder, destination),
+      retry: () => optimisticMoveThreadsTo(threadIds, currentFolder, destination, options),
       toastMessage: successMessage,
       folders: [currentFolder, destination],
     });

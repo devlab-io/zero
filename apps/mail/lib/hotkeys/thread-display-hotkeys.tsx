@@ -46,7 +46,9 @@ export function ThreadDisplayHotkeys() {
   // the PREVIOUS item (use-mail-navigation consumes the 'previous' command).
   const archiveAndMove = (command: 'next' | 'previous') => {
     if (!openThreadId) return;
-    optimisticMoveThreadsTo([openThreadId], folder, 'archive');
+    // keepThreadOpen : la commande de navigation ci-dessous pose le threadId
+    // suivant elle-même — pas de fermeture/réouverture (CUA échec 4).
+    optimisticMoveThreadsTo([openThreadId], folder, 'archive', { keepThreadOpen: true });
     setMailNavigationCommand(command);
   };
 

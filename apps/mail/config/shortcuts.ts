@@ -185,7 +185,10 @@ const mailListShortcuts: Shortcut[] = [
   shortcut(['+'], 'markAsImportant', 'Mark as important', 'mail-list'),
   shortcut(['-'], 'markAsNotImportant', 'Mark as not important', 'mail-list'),
   shortcut(['x'], 'toggleFocusedSelection', 'Select focused email', 'mail-list'),
-  shortcut(['#'], 'bulkDelete', 'Move to bin', 'mail-list', { type: 'single', preventDefault: true }),
+  shortcut(['#'], 'bulkDelete', 'Move to bin', 'mail-list', {
+    type: 'single',
+    preventDefault: true,
+  }),
   shortcut(['delete'], 'bulkDelete', 'Move to bin', 'mail-list', {
     type: 'single',
     preventDefault: true,
@@ -220,8 +223,16 @@ const threadDisplayShortcuts: Shortcut[] = [
   shortcut(['s'], 'toggleStar', 'Toggle star', 'thread-display'),
   // `l`/`v` open the label / move picker (components/mail/label-move-picker.tsx), driven
   // by the `picker` query-state the handler sets — see thread-display-hotkeys.tsx.
-  shortcut(['l'], 'openLabels', 'Open label picker', 'thread-display'),
-  shortcut(['v'], 'openMove', 'Open move picker', 'thread-display'),
+  // preventDefault : le picker focuse son CommandInput pendant le keydown même ;
+  // sans lui, la lettre du raccourci s'insère dans le combo et filtre tout (CUA échec 5).
+  shortcut(['l'], 'openLabels', 'Open label picker', 'thread-display', {
+    type: 'single',
+    preventDefault: true,
+  }),
+  shortcut(['v'], 'openMove', 'Open move picker', 'thread-display', {
+    type: 'single',
+    preventDefault: true,
+  }),
   shortcut(['u'], 'markAsUnread', 'Mark as unread', 'thread-display'),
   shortcut(['shift', 'u'], 'markAsUnread', 'Mark as unread', 'thread-display', {
     type: 'combination',
@@ -229,7 +240,10 @@ const threadDisplayShortcuts: Shortcut[] = [
   shortcut(['shift', 'i'], 'markAsRead', 'Mark as read', 'thread-display', { type: 'combination' }),
   shortcut(['+'], 'markAsImportant', 'Mark as important', 'thread-display'),
   shortcut(['-'], 'markAsNotImportant', 'Mark as not important', 'thread-display'),
-  shortcut(['#'], 'delete', 'Move to bin', 'thread-display', { type: 'single', preventDefault: true }),
+  shortcut(['#'], 'delete', 'Move to bin', 'thread-display', {
+    type: 'single',
+    preventDefault: true,
+  }),
   shortcut(['delete'], 'delete', 'Move to bin', 'thread-display', {
     type: 'single',
     preventDefault: true,
@@ -271,7 +285,10 @@ const listShortcuts: Shortcut[] = [
   shortcut(['j'], 'focusNext', 'Focus next', 'list', { type: 'single', ignore: true }),
   shortcut(['ArrowDown'], 'focusNext', 'Focus next', 'list', { type: 'single', ignore: true }),
   shortcut(['k'], 'focusPrevious', 'Focus previous', 'list', { type: 'single', ignore: true }),
-  shortcut(['ArrowUp'], 'focusPrevious', 'Focus previous', 'list', { type: 'single', ignore: true }),
+  shortcut(['ArrowUp'], 'focusPrevious', 'Focus previous', 'list', {
+    type: 'single',
+    ignore: true,
+  }),
   shortcut(['Enter'], 'openFocused', 'Open focused', 'list', { type: 'single', ignore: true }),
   shortcut(['ArrowRight'], 'openFocused', 'Open focused', 'list', { type: 'single', ignore: true }),
   shortcut(['ArrowLeft'], 'closeList', 'Close thread / clear selection', 'list', {

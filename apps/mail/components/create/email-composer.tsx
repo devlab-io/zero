@@ -1,20 +1,20 @@
-import { log } from '@/lib/log';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { resolveComposerEscape } from '@/lib/composer-escape';
+import { useEmailAliases } from '@/hooks/use-email-aliases';
 import { ScheduleSendPicker } from './schedule-send-picker';
 import { Command, Loader, Plus, Type } from 'lucide-react';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip';
-import { CurvedArrow, Sparkles } from '../icons/icons';
-import { useEmailAliases } from '@/hooks/use-email-aliases';
 import useComposeEditor from '@/hooks/use-compose-editor';
+import { CurvedArrow, Sparkles } from '../icons/icons';
 import { getGitHubEmojis } from '@/lib/emoji-data';
-import { AnimatePresence } from 'motion/react';
 import { zodResolver } from '@/lib/zod-resolver';
+import { AnimatePresence } from 'motion/react';
+import { log } from '@/lib/log';
 
 import { useTRPC } from '@/providers/query-provider';
 import { useMutation } from '@tanstack/react-query';
 import { useSettings } from '@/hooks/use-settings';
 
-import { cn } from '@/lib/utils';
 import { useThread } from '@/hooks/use-threads';
 import { serializeFiles } from '@/lib/schemas';
 import { Input } from '@/components/ui/input';
@@ -24,27 +24,28 @@ import { Button } from '../ui/button';
 import { useQueryState } from 'nuqs';
 import { Toolbar } from './toolbar';
 import pluralize from 'pluralize';
+import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { z } from 'zod';
 
-import { compressImages } from '@/lib/image-compression';
-import type { ImageQuality } from '@/lib/image-compression';
-import { TemplateButton } from './template-button';
-import { ComposerHeader } from './email-composer.fields';
-import { ComposerAttachments } from './email-composer.attachments';
-import { ComposerDialogs } from './email-composer.dialogs';
-import { ContentPreview } from './email-composer.content-preview';
 import {
   buildThreadContent,
   schema,
   type EmailComposerProps,
   type ThreadContent,
 } from './email-composer.types';
+import { useComposerDraftPersistence } from '@/hooks/use-composer-draft-persistence';
 // Issue #32 — send-and-archive (mod+shift+Enter): the editor has no Mod-Shift-Enter
 // keymap, so it is bound here with useHotkeys and archives the open thread after send.
 import { useOptimisticActions } from '@/hooks/use-optimistic-actions';
+import { ComposerAttachments } from './email-composer.attachments';
+import { ContentPreview } from './email-composer.content-preview';
 import { computeArchiveAfterSend } from './send-and-archive';
-import { useComposerDraftPersistence } from '@/hooks/use-composer-draft-persistence';
+import type { ImageQuality } from '@/lib/image-compression';
+import { ComposerDialogs } from './email-composer.dialogs';
+import { compressImages } from '@/lib/image-compression';
+import { ComposerHeader } from './email-composer.fields';
+import { TemplateButton } from './template-button';
 import { useHotkeys } from 'react-hotkeys-hook';
 import { useParams } from 'react-router';
 
@@ -73,6 +74,8 @@ export function EmailComposer({
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [messageLength, setMessageLength] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  /** Racine du composer — périmètre du Escape-ferme-un-reply-vide (CUA échec 6). */
+  const rootRef = useRef<HTMLDivElement>(null);
   const [threadId] = useQueryState('threadId');
   const [isComposeOpen, setIsComposeOpen] = useQueryState('isComposeOpen');
   const { data: emailData } = useThread(threadId ?? null);
@@ -286,18 +289,26 @@ export function EmailComposer({
 
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        const hasContent = editor?.getText()?.trim().length > 0;
-        if (hasContent && !draftId) {
-          e.preventDefault();
-          e.stopPropagation();
-          setShowLeaveConfirmation(true);
-        }
+        // CUA 2026-07-30 (échec 6) : reply inline vide — Escape restait sans
+        // effet (mode=replyAll conservé, Send visible). Décision extraite dans
+        // lib/composer-escape.ts : vide → fermeture sans brouillon (bornée au
+        // focus intérieur), non-vide → confirmation de sortie.
+        const decision = resolveComposerEscape({
+          hasContent: (editor?.getText()?.trim().length ?? 0) > 0,
+          hasDraftId: !!draftId,
+          targetInsideComposer: !!rootRef.current?.contains(e.target as Node),
+        });
+        if (decision === 'ignore') return;
+        e.preventDefault();
+        e.stopPropagation();
+        if (decision === 'confirm') setShowLeaveConfirmation(true);
+        else onClose?.();
       }
     };
 
     document.addEventListener('keydown', handleKeyDown, true); // Use capture phase
     return () => document.removeEventListener('keydown', handleKeyDown, true);
-  }, [editor, draftId]);
+  }, [editor, draftId, onClose]);
 
   const proceedWithSend = async () => {
     try {
@@ -555,7 +566,6 @@ export function EmailComposer({
   //   await handleAiGenerate();
   // });
 
-
   // keep fromEmail in sync when settings or aliases load afterwards
   useEffect(() => {
     const preferred =
@@ -593,6 +603,7 @@ export function EmailComposer({
 
   return (
     <div
+      ref={rootRef}
       className={cn(
         'flex max-h-[500px] w-full max-w-[750px] flex-col overflow-hidden rounded-2xl bg-[#FAFAFA] shadow-sm dark:bg-[#202020]',
         className,
@@ -648,7 +659,11 @@ export function EmailComposer({
         <div className="flex flex-col items-start justify-start gap-2">
           {toggleToolbar && <Toolbar editor={editor} />}
           <div className="flex items-center justify-start gap-2">
-            <Button size={'xs'} onClick={handleSend} disabled={isLoading || settingsLoading || !isScheduleValid}>
+            <Button
+              size={'xs'}
+              onClick={handleSend}
+              disabled={isLoading || settingsLoading || !isScheduleValid}
+            >
               <div className="flex items-center justify-center">
                 <div className="text-center text-sm leading-none text-white dark:text-black">
                   <span>Send </span>
@@ -664,7 +679,12 @@ export function EmailComposer({
               onChange={handleScheduleChange}
               onValidityChange={handleScheduleValidityChange}
             />
-            <Button variant={'secondary'} size={'xs'} onClick={() => fileInputRef.current?.click()} className="bg-background border hover:bg-gray-50 dark:hover:bg-[#404040] transition-colors cursor-pointer">
+            <Button
+              variant={'secondary'}
+              size={'xs'}
+              onClick={() => fileInputRef.current?.click()}
+              className="bg-background cursor-pointer border transition-colors hover:bg-gray-50 dark:hover:bg-[#404040]"
+            >
               <Plus className="h-3 w-3 fill-[#9A9A9A]" />
               <span className="hidden px-0.5 text-sm md:block">Add</span>
             </Button>
@@ -707,7 +727,7 @@ export function EmailComposer({
                     variant="ghost"
                     size="icon"
                     onClick={() => setToggleToolbar(!toggleToolbar)}
-                    className={`h-auto w-auto rounded p-1.5 ${toggleToolbar ? 'bg-muted' : 'bg-background'} border hover:bg-gray-50 dark:hover:bg-[#404040] transition-colors cursor-pointer`}
+                    className={`h-auto w-auto rounded p-1.5 ${toggleToolbar ? 'bg-muted' : 'bg-background'} cursor-pointer border transition-colors hover:bg-gray-50 dark:hover:bg-[#404040]`}
                   >
                     <Type className="h-4 w-4" />
                   </Button>
@@ -744,7 +764,7 @@ export function EmailComposer({
             <Button
               size={'xs'}
               variant={'ghost'}
-              className="border border-[#8B5CF6] cursor-pointer"
+              className="cursor-pointer border border-[#8B5CF6]"
               onClick={async () => {
                 if (!subjectInput.trim()) {
                   await handleGenerateSubject();

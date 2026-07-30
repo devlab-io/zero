@@ -23,6 +23,7 @@ import {
 import { backgroundQueueAtom, isThreadInBackgroundQueueAtom } from '@/store/backgroundQueue';
 import { emailContentQueryKey, resolveEmailContentTheme } from '@/lib/email-content-query';
 import { useTRPC, useTRPCClient } from '@/providers/query-provider';
+import { isSimpleLiteralSearch } from '@/lib/search-intent';
 import { useSearchValue } from '@/hooks/use-search-value';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import { useCallback, useEffect, useMemo } from 'react';
@@ -206,6 +207,9 @@ export const useThreads = () => {
         authoritativeIsPlaceholder: true,
         previewItems: previewThreads,
         fallbackItems: held,
+        // Littéral (« DHL ») : seuls les matches locaux s'affichent pendant le
+        // vol Gmail — jamais la vue précédente (voir search-preview-selector).
+        literalSearch: isSimpleLiteralSearch(searchValue.value),
       });
     }
     // Réponse Gmail atterrie : ses lignes minces récupèrent les champs riches
@@ -217,6 +221,7 @@ export const useThreads = () => {
     freshThreads,
     forceSyncSnapshotItems,
     isSearching,
+    searchValue.value,
     threadsQuery.isPlaceholderData,
     previewThreads,
   ]);
