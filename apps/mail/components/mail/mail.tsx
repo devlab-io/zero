@@ -10,6 +10,7 @@ import { Bell, Lightning, Mail, ScanEye, Tag, User, X, Search } from '../icons/i
 import { useCategorySettings, useDefaultCategoryId } from '@/hooks/use-categories';
 import { ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable';
 import { useCommandPalette } from '../context/command-palette-context';
+import { useWarmCoreMailFolders } from '@/hooks/use-folder-prefetch';
 import { useHotkeys, useHotkeysContext } from 'react-hotkeys-hook';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useActiveConnection } from '@/hooks/use-connections';
@@ -337,7 +338,9 @@ export function MailLayout() {
     }
   }, [session?.user, isPending]);
 
-  const [{ isFetching, refetch: refetchThreads }] = useThreads();
+  const [threadsQuery] = useThreads();
+  const { isFetching, refetch: refetchThreads } = threadsQuery;
+  useWarmCoreMailFolders(Boolean(session?.user), folder);
   const isDesktop = useMediaQuery('(min-width: 768px)');
   const [threadId] = useQueryState('threadId');
   const [pricingDialogOpen] = useQueryState('pricingDialog');

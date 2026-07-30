@@ -1,5 +1,3 @@
-import { useIsFetching } from '@tanstack/react-query';
-import { useTRPC } from '@/providers/query-provider';
 import { useThreads } from '@/hooks/use-threads';
 
 /**
@@ -33,8 +31,6 @@ export interface MailListData {
   isTransitionPending: boolean;
   /** Next-page fetch in flight. */
   isFetchingNextPage: boolean;
-  /** At least one individual thread body (`mail.get`) fetch in flight. */
-  isFetchingThreadBodies: boolean;
   /** List query resolved to an error — seam for #34 error states. */
   isError: boolean;
   /** The list query error, if any — seam for #34. */
@@ -66,8 +62,6 @@ export interface MailListData {
  */
 export function useMailListData(): MailListData {
   const [threadsQuery, items, isReachingEnd, loadMore, isForceSyncHold] = useThreads();
-  const trpc = useTRPC();
-  const isFetchingThreadBodies = useIsFetching({ queryKey: trpc.mail.get.queryKey() }) > 0;
 
   return {
     items,
@@ -75,7 +69,6 @@ export function useMailListData(): MailListData {
     isFetching: threadsQuery.isFetching,
     isTransitionPending: threadsQuery.isPlaceholderData && threadsQuery.isFetching,
     isFetchingNextPage: threadsQuery.isFetchingNextPage,
-    isFetchingThreadBodies,
     isError: threadsQuery.isError,
     error: threadsQuery.error,
     isStale: threadsQuery.isStale,

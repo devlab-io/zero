@@ -1,4 +1,5 @@
 import { SidebarGroup, SidebarMenu, SidebarMenuButton, SidebarMenuItem } from './sidebar';
+import { mailFolderFromHref, usePrefetchMailFolder } from '@/hooks/use-folder-prefetch';
 import { Collapsible, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { useCommandPalette } from '../context/command-palette-context.jsx';
 import { useActiveConnection } from '@/hooks/use-connections';
@@ -283,6 +284,7 @@ export function NavMain({ items }: NavMainProps) {
 
 function NavItem(item: NavItemProps & { href: string }) {
   const iconRef = useRef<IconRefType>(null);
+  const prefetchMailFolder = usePrefetchMailFolder();
   const { data: stats } = useStats();
   const { clearAllFilters } = useCommandPalette();
 
@@ -308,6 +310,11 @@ function NavItem(item: NavItemProps & { href: string }) {
     setOpenMobile(false);
   };
 
+  const handleNavigationIntent = () => {
+    const folder = mailFolderFromHref(item.href);
+    if (folder) void prefetchMailFolder(folder);
+  };
+
   return (
     <Collapsible defaultOpen={item.isActive}>
       <CollapsibleTrigger asChild>
@@ -320,7 +327,12 @@ function NavItem(item: NavItemProps & { href: string }) {
           )}
           onClick={handleClick}
         >
-          <Link target={item.target} to={item.href}>
+          <Link
+            target={item.target}
+            to={item.href}
+            onPointerEnter={handleNavigationIntent}
+            onFocus={handleNavigationIntent}
+          >
             {item.icon && <item.icon ref={iconRef} className="mr-2 shrink-0" />}
             <p className="relative bottom-px mt-0.5 min-w-0 flex-1 truncate text-[13px]">
               {item.title}

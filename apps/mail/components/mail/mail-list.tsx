@@ -1,6 +1,7 @@
 import { focusedIndexAtom, useMailNavigation } from '@/hooks/use-mail-navigation';
 import { useOptimisticActions } from '@/hooks/use-optimistic-actions';
 import { memo, useCallback, useEffect, useMemo, useRef } from 'react';
+import { shouldLoadNextMailPage } from '@/lib/mail-pagination';
 import { useMailSelection } from '@/hooks/use-mail-selection';
 import { useMailListData } from '@/hooks/use-mail-list-data';
 import { selectMailListState } from '@/lib/mail-list-state';
@@ -38,7 +39,6 @@ export const MailList = memo(
       isFetching,
       isTransitionPending,
       isFetchingNextPage,
-      isFetchingThreadBodies,
       isError,
       hasNextPage,
       loadMore,
@@ -167,8 +167,7 @@ export const MailList = memo(
               index={index}
               onClick={handleMailClick}
             />
-            {index === filteredItems.length - 1 &&
-            (isFetchingNextPage || isFetchingThreadBodies) ? (
+            {index === filteredItems.length - 1 && isFetchingNextPage ? (
               <div className="flex w-full justify-center py-4">
                 <div className="h-4 w-4 animate-spin rounded-full border-2 border-neutral-900 border-t-transparent dark:border-white dark:border-t-transparent" />
               </div>
@@ -183,7 +182,6 @@ export const MailList = memo(
         filteredItems,
         focusedIndex,
         keyboardActive,
-        isFetchingThreadBodies,
         isFetchingNextPage,
         handleMailClick,
         isLoading,
@@ -295,13 +293,14 @@ export const MailList = memo(
                     if (!vListRef.current) return;
                     const endIndex = vListRef.current.findEndIndex();
                     if (
-                      // Start the next lightweight list page early enough that a
-                      // fast scroll never reaches an unloaded boundary.
-                      Math.abs(filteredItems.length - 1 - endIndex) < 15 &&
-                      !isLoading &&
-                      !isFetchingNextPage &&
-                      !isFetchingThreadBodies &&
-                      hasNextPage
+                      shouldLoadNextMailPage({
+                        // Start the next lightweight list page early enough that
+                        // a fast scroll never reaches an unloaded boundary.
+                        remainingItems: Math.abs(filteredItems.length - 1 - endIndex),
+                        isLoading,
+                        isFetchingNextPage,
+                        hasNextPage,
+                      })
                     ) {
                       void loadMore();
                     }
