@@ -3,6 +3,7 @@ import { optimisticActionsManager, type PendingAction } from '@/lib/optimistic-a
 import { buildOptimisticFailureToast, isLastPendingOfType } from '@/lib/optimistic-recovery';
 import { pruneThreadFromListPages } from '@/lib/prune-thread-cache';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { FOLDERS } from '@/lib/utils';
 import { log } from '@/lib/log';
 
 import { backgroundQueueAtom } from '@/store/backgroundQueue';
@@ -550,8 +551,12 @@ export function useOptimisticActions() {
         // la ligne réapparaissait au retrait de l'action optimiste. On PURGE
         // la ligne des pages en cache (identifiant exact), et la vérité
         // canonique arrive ensuite par le broadcast serveur du dossier draft.
+        // Portée (revue Codex round 6) : UNIQUEMENT les infinite queries du
+        // dossier draft (toutes variantes q/labels via input partiel) — jamais
+        // inbox/sent : supprimer un reply draft ne doit pas retirer son fil
+        // des autres vues (WHOOP reste en Inbox).
         queryClient.setQueriesData(
-          { queryKey: trpc.mail.listThreads.queryKey() },
+          { queryKey: trpc.mail.listThreads.infiniteQueryKey({ folder: FOLDERS.DRAFT }) },
           (data: Parameters<typeof pruneThreadFromListPages>[0]) =>
             pruneThreadFromListPages(data, draftId),
         );

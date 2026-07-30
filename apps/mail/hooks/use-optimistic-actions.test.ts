@@ -66,6 +66,8 @@ function trpcProxy(path = ''): any {
     get(_t, prop) {
       if (prop === 'mutationOptions') return () => ({ __key: path.replace(/^\./, '') });
       if (prop === 'queryKey') return () => [path];
+      if (prop === 'infiniteQueryKey')
+        return (input?: unknown) => [path, { input, type: 'infinite' }];
       return trpcProxy(`${path}.${String(prop)}`);
     },
     apply: () => ({}),
@@ -298,8 +300,12 @@ describe('useOptimisticActions — variantes d’actions', () => {
     await flush();
     expect(h.mutationSpies['drafts.delete']).toHaveBeenCalledWith({ id: 'draft-1' });
     // CUA round 6 : la ligne est PURGÉE des pages en cache (identifiant exact) —
-    // pas de refetch immédiat de la vérité Gmail retardée.
+    // pas de refetch immédiat de la vérité Gmail retardée. Portée (round 6b) :
+    // uniquement les infinite queries du dossier draft — jamais inbox/sent.
     expect(h.setQueriesData).toHaveBeenCalledTimes(1);
+    expect(h.setQueriesData.mock.calls[0][0]).toEqual({
+      queryKey: ['.mail.listThreads', { input: { folder: 'draft' }, type: 'infinite' }],
+    });
     const updater = h.setQueriesData.mock.calls[0][1] as (
       data: { pages: { threads: { id: string }[] }[] } | undefined,
     ) => unknown;
