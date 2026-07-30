@@ -7,7 +7,6 @@ import { ScheduleSendPicker } from './schedule-send-picker';
 import { Command, Loader, Plus, Type } from 'lucide-react';
 import useComposeEditor from '@/hooks/use-compose-editor';
 import { CurvedArrow, Sparkles } from '../icons/icons';
-import { getGitHubEmojis } from '@/lib/emoji-data';
 import { zodResolver } from '@/lib/zod-resolver';
 import { AnimatePresence } from 'motion/react';
 import { log } from '@/lib/log';
@@ -35,6 +34,11 @@ import {
   type EmailComposerProps,
   type ThreadContent,
 } from './email-composer.types';
+import {
+  attachmentKeywords,
+  processComposerAttachments,
+  replaceEmojiShortcodes,
+} from './email-composer.helpers';
 import { useComposerDraftPersistence } from '@/hooks/use-composer-draft-persistence';
 // Issue #32 — send-and-archive (mod+shift+Enter): the editor has no Mod-Shift-Enter
 // keymap, so it is bound here with useHotkeys and archives the open thread after send.
@@ -44,13 +48,10 @@ import { ContentPreview } from './email-composer.content-preview';
 import { computeArchiveAfterSend } from './send-and-archive';
 import type { ImageQuality } from '@/lib/image-compression';
 import { ComposerDialogs } from './email-composer.dialogs';
-import { compressImages } from '@/lib/image-compression';
 import { ComposerHeader } from './email-composer.fields';
 import { TemplateButton } from './template-button';
 import { useHotkeys } from 'react-hotkeys-hook';
 import { useParams } from 'react-router';
-
-const shortcodeRegex = /:([a-zA-Z0-9_+-]+):/g;
 
 export function EmailComposer({
   initialTo = [],
@@ -120,76 +121,10 @@ export function EmailComposer({
     quality: ImageQuality,
     showToast: boolean = false,
   ) => {
-    if (filesToProcess.length === 0) {
-      setValue('attachments', [], { shouldDirty: true });
-      return;
-    }
-
-    try {
-      const compressedFiles = await compressImages(filesToProcess, {
-        quality,
-        maxWidth: 1920,
-        maxHeight: 1080,
-      });
-
-      if (compressedFiles.length !== filesToProcess.length) {
-        log.warn('Compressed files array length mismatch:', {
-          original: filesToProcess.length,
-          compressed: compressedFiles.length,
-        });
-        setValue('attachments', filesToProcess, { shouldDirty: true });
-        setHasUnsavedChanges(true);
-        if (showToast) {
-          toast.error('Image compression failed, using original files');
-        }
-        return;
-      }
-
-      setValue('attachments', compressedFiles, { shouldDirty: true });
-      setHasUnsavedChanges(true);
-
-      if (showToast && quality !== 'original') {
-        let totalOriginalSize = 0;
-        let totalCompressedSize = 0;
-
-        const imageFilesExist = filesToProcess.some((f) => f.type.startsWith('image/'));
-
-        if (imageFilesExist) {
-          filesToProcess.forEach((originalFile, index) => {
-            if (originalFile.type.startsWith('image/') && compressedFiles[index]) {
-              totalOriginalSize += originalFile.size;
-              totalCompressedSize += compressedFiles[index].size;
-            }
-          });
-
-          if (totalOriginalSize > totalCompressedSize) {
-            const savings = (
-              ((totalOriginalSize - totalCompressedSize) / totalOriginalSize) *
-              100
-            ).toFixed(1);
-            if (parseFloat(savings) > 0.1) {
-              toast.success(`Images compressed: ${savings}% smaller`);
-            }
-          }
-        }
-      }
-    } catch (error) {
-      log.error('Error compressing images:', error);
-      setValue('attachments', filesToProcess, { shouldDirty: true });
-      setHasUnsavedChanges(true);
-      if (showToast) {
-        toast.error('Image compression failed, using original files');
-      }
-    }
+    const processedFiles = await processComposerAttachments(filesToProcess, quality, showToast);
+    setValue('attachments', processedFiles, { shouldDirty: true });
+    if (filesToProcess.length > 0) setHasUnsavedChanges(true);
   };
-
-  const attachmentKeywords = [
-    'attachment',
-    'attached',
-    'attaching',
-    'see the file',
-    'see the files',
-  ];
 
   const trpc = useTRPC();
   const { mutateAsync: aiCompose } = useMutation(trpc.ai.compose.mutationOptions());
@@ -625,16 +560,6 @@ export function EmailComposer({
   const handleScheduleValidityChange = useCallback((valid: boolean) => {
     setIsScheduleValid(valid);
   }, []);
-
-  const replaceEmojiShortcodes = (text: string): string => {
-    if (!text.trim().length || !text.includes(':')) return text;
-    return text.replace(shortcodeRegex, (match, shortcode): string => {
-      const emoji = getGitHubEmojis().find(
-        (e) => e.shortcodes.includes(shortcode) || e.name === shortcode,
-      );
-      return emoji?.emoji ?? match;
-    });
-  };
 
   return (
     <div

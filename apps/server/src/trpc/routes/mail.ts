@@ -17,8 +17,6 @@ import { defaultPageSize, FOLDERS } from '../../lib/utils';
 import { toAttachmentFiles } from '../../lib/attachments';
 import { serializedFileSchema } from '../../lib/schemas';
 import { openThreadProcedure } from './open-thread';
-// V4.1 list-projection (issue #30) : la liste sert la projection riche (superset de
-// IGetThreadsResponse). Élargit le .output() pour ne PAS stripper subject/sender/date/labels/unread.
 import { ThreadsResponseSchema } from '@zero/types';
 import { getContext } from 'hono/context-storage';
 import { type HonoContext } from '../../ctx';
@@ -31,15 +29,6 @@ const senderSchema = z.object({
   name: z.string().optional(),
   email: z.string(),
 });
-
-// const getFolderLabelId = (folder: string) => {
-//   // Handle special cases first
-//   if (folder === 'bin') return 'TRASH';
-//   if (folder === 'archive') return ''; // Archive doesn't have a specific label
-
-//   // For other folders, convert to uppercase (same as database method)
-//   return folder.toUpperCase();
-// };
 
 export const mailRouter = router({
   suggestRecipients: activeDriverProcedure
@@ -112,9 +101,6 @@ export const mailRouter = router({
 
       let threadsResponse: IGetThreadsResponse;
 
-      // Apply folder-to-label mapping when no search query is provided
-      const effectiveLabelIds = labelIds;
-
       if (q && localPreview) {
         // Préview projection-first : LIKE sujet/expéditeur dans le DO, borné au
         // label du dossier (sous-ensemble strict de la sémantique Gmail — même
@@ -126,7 +112,7 @@ export const mailRouter = router({
               folder,
               q: previewText,
               maxResults,
-              labelIds: effectiveLabelIds,
+              labelIds,
               pageToken: cursor,
             })
           : { threads: [], nextPageToken: '' };
@@ -134,16 +120,15 @@ export const mailRouter = router({
         threadsResponse = await agent.rawListThreads({
           query: q,
           maxResults,
-          labelIds: effectiveLabelIds,
+          labelIds,
           pageToken: cursor,
           folder,
         });
       } else {
         threadsResponse = await getThreadsFromDB(activeConnection.id, {
           folder,
-          // query: q,
           maxResults,
-          labelIds: effectiveLabelIds,
+          labelIds,
           pageToken: cursor,
         });
       }
