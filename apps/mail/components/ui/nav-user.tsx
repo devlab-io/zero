@@ -17,6 +17,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { refreshActiveQueriesAfterAccountSwitch } from '@/lib/account-switch-cache';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useActiveConnection, useConnections } from '@/hooks/use-connections';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -173,9 +174,26 @@ export function NavUser() {
       setLoading(true, m['common.navUser.switchingAccounts']());
       setThreadId(null);
       await setDefaultConnection({ connectionId });
-      queryClient.clear();
-      await idbClear();
-      await queryClient.refetchQueries({ queryKey: trpc.mail.listThreads.infiniteQueryKey() });
+      // Do not clear the live QueryClient here. `clear()` detaches the mounted
+      // observers, so the following refetch used to match zero queries: the nav
+      // could show Thomas while Inbox still held admin's empty result until a
+      // later focus/websocket event. Keep the full-screen switch overlay visible
+      // while every mounted account-scoped read is invalidated and refetched.
+      await idbClear().catch((error) => log.warn('Failed to clear account cache:', error));
+      await refreshActiveQueriesAfterAccountSwitch(queryClient);
+
+      const activeConnectionKey = trpc.connections.getDefault.queryKey();
+      let confirmedConnection = queryClient.getQueryData<{ id: string } | null>(
+        activeConnectionKey,
+      );
+      if (confirmedConnection?.id !== connectionId) {
+        confirmedConnection = await queryClient.fetchQuery(
+          trpc.connections.getDefault.queryOptions(void 0, { staleTime: 0 }),
+        );
+      }
+      if (confirmedConnection?.id !== connectionId) {
+        throw new Error('The active account did not change after refreshing account data');
+      }
     } catch (error) {
       log.error('Error switching accounts:', error);
       toast.error(m['common.navUser.failedToSwitchAccount']());
