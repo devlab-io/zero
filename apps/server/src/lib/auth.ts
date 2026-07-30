@@ -5,6 +5,7 @@ import { APIError, createAuthMiddleware } from 'better-auth/api';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import { getZeroDB, resetConnection } from './server-utils';
 import { getSocialProviders } from './auth-providers';
+import { selectSecondaryStorage } from './auth-cache';
 import { redis, resend, twilio } from './services';
 import { defaultUserSettings } from './schemas';
 import { disableBrainFunction } from './brain';
@@ -342,29 +343,29 @@ export const createAuth = async () => {
 };
 
 const createAuthConfig = () => {
-  // Devlab self-host: Redis optionnel — sans REDIS_URL/TOKEN, better-auth
-  // retombe sur Postgres seul (pas de secondaryStorage).
-  const cache = env.REDIS_URL && env.REDIS_TOKEN ? redis() : null;
+  // Devlab self-host: cache d'auth par priorité — KV dédié (AUTH_CACHE), sinon
+  // Redis distant réel, sinon Postgres seul (pas de secondaryStorage).
+  const cache = selectSecondaryStorage(env, redis);
   const { db } = createDb(env.HYPERDRIVE.connectionString);
   return {
     database: drizzleAdapter(db, { provider: 'pg' }),
     ...(cache
       ? {
-          secondaryStorage: {
-            get: async (key: string) => {
-              const value = await cache.get(key);
-              return typeof value === 'string' ? value : value ? JSON.stringify(value) : null;
-            },
-            set: async (key: string, value: string, ttl?: number) => {
-              if (ttl) await cache.set(key, value, { ex: ttl });
-              else await cache.set(key, value);
-            },
-            delete: async (key: string) => {
-              await cache.del(key);
-            },
+          secondaryStorage: cache.storage,
+          // KV n'offre ni compteur atomique ni plus d'1 écriture/s par clé :
+          // le rate limiting reste en mémoire d'isolate quand le cache est KV.
+          rateLimit: {
+            storage: cache.kind === 'redis' ? ('secondary-storage' as const) : ('memory' as const),
           },
         }
       : {}),
+    // Le state OAuth (table verification) reste en Postgres même avec un
+    // secondaryStorage : KV est eventual-consistent (~60 s inter-colo) et le
+    // callback peut atterrir sur un autre colo que le /sign-in — un miss KV
+    // casserait le login. La consommation single-use est transactionnelle en DB.
+    verification: {
+      storeInDatabase: true,
+    },
     advanced: {
       ipAddress: {
         disableIpTracking: true,
@@ -392,6 +393,10 @@ const createAuthConfig = () => {
         // Bound the revocation window: cached sessions are revalidated every five minutes.
         maxAge: 60 * 5,
       },
+      // Postgres reste la source de vérité des sessions : le secondaryStorage est
+      // un read-through (miss KV juste après login → fallback DB dans
+      // findSession), jamais le seul dépositaire.
+      storeSessionInDatabase: true,
       expiresIn: 60 * 60 * 24 * 7,
       updateAge: 60 * 60 * 12,
     },

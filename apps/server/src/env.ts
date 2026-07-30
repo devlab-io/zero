@@ -33,6 +33,8 @@ export type ZeroEnv = {
   subscribed_accounts: KVNamespace;
   connection_labels: KVNamespace;
   prompts_storage: KVNamespace;
+  /** Devlab: cache better-auth (sessions/rate-limit) — optionnel, absent = Redis ou Postgres seul. */
+  AUTH_CACHE?: KVNamespace;
   NODE_ENV: 'local' | 'development' | 'production';
   JWT_SECRET: 'secret';
   ELEVENLABS_API_KEY: '1234567890';
@@ -126,7 +128,9 @@ export { env };
 let booted = false;
 
 /** Boot guard: validates the required env exactly once per isolate. Call at first request. */
-export function bootEnv(raw: Record<string, unknown> = env as unknown as Record<string, unknown>): void {
+export function bootEnv(
+  raw: Record<string, unknown> = env as unknown as Record<string, unknown>,
+): void {
   if (booted) return;
   assertServerEnv(raw);
   booted = true;

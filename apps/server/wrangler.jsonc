@@ -226,6 +226,12 @@
           "binding": "snoozed_emails",
           "id": "f3a30ed7198542d890db172536bade33",
         },
+        {
+          // Cache better-auth (sessions read-through, Postgres autoritatif).
+          // En dev local, miniflare simule le namespace : l'id n'est pas contacté.
+          "binding": "AUTH_CACHE",
+          "id": "auth-cache-local-simule",
+        },
       ],
     },
     "staging": {
@@ -421,6 +427,14 @@
         {
           "binding": "snoozed_emails",
           "id": "73ed5aa54daa451aaad292ee1809e2b7",
+        },
+        {
+          // Cache better-auth dédié — NE PAS réutiliser un KV Gmail.
+          // AVANT tout deploy staging : `wrangler kv namespace create auth-cache-staging`
+          // puis remplacer id/preview_id par l'identifiant retourné.
+          "binding": "AUTH_CACHE",
+          "id": "REMPLACER-PAR-ID-auth-cache-staging",
+          "preview_id": "REMPLACER-PAR-ID-auth-cache-staging",
         },
       ],
     },
