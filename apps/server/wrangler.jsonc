@@ -629,6 +629,11 @@
           "binding": "snoozed_emails",
           "id": "122652e6ab3c45169caf2c5823a99dd8",
         },
+        {
+          // Cache better-auth production dédié ; Postgres reste autoritatif.
+          "binding": "AUTH_CACHE",
+          "id": "c36a140caa1b472e83b2288a7ff48233",
+        },
       ],
     },
   },
