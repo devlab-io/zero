@@ -247,4 +247,21 @@ describe('pickers l/v — preventDefault (CUA 2026-07-30, échec 5)', () => {
     expect(pickers.map((s) => s.action).sort()).toEqual(['openLabels', 'openMove']);
     for (const s of pickers) expect(s.preventDefault).toBe(true);
   });
+
+  it('r/a/f (les deux scopes) annulent aussi le keydown — le composer TipTap monte de plus en plus tôt', () => {
+    const replyActions = new Set([
+      'reply',
+      'replyAll',
+      'forward',
+      'replyToThread',
+      'replyAllToThread',
+      'forwardThread',
+    ]);
+    const rows = keyboardShortcuts.filter(
+      (s) =>
+        (s.scope === 'thread-display' || s.scope === 'mail-list') && replyActions.has(s.action),
+    );
+    expect(rows).toHaveLength(6);
+    for (const s of rows) expect(s.preventDefault).toBe(true);
+  });
 });

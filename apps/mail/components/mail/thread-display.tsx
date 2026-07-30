@@ -78,9 +78,20 @@ let composerChunksWarmed = false;
 function warmComposerChunks() {
   if (composerChunksWarmed) return;
   composerChunksWarmed = true;
-  preloadComposeSurface();
-  void import('./reply-composer');
-  void import('./thread-display.animated-message-list');
+  // Réarmement sur échec (parité compose-surface, revue Codex) : un import qui
+  // rejette pendant une fenêtre réseau dégradée ne doit pas pin le warm à
+  // « fait » pour toute la session.
+  try {
+    preloadComposeSurface();
+    void Promise.all([
+      import('./reply-composer'),
+      import('./thread-display.animated-message-list'),
+    ]).catch(() => {
+      composerChunksWarmed = false;
+    });
+  } catch {
+    composerChunksWarmed = false;
+  }
 }
 
 const isFullscreen = false;

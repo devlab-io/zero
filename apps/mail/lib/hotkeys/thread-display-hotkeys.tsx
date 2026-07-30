@@ -10,16 +10,13 @@ import { useParams } from 'react-router';
 import { useQueryState } from 'nuqs';
 import { useSetAtom } from 'jotai';
 
-const closeView = (event: KeyboardEvent) => {
-  event.preventDefault();
-};
-
-// `openLabels`/`openMove` are absent by design (no picker surface reachable in #32's
-// may-touch — see shortcuts.ts).
+// `openLabels`/`openMove` open the label/move picker via the `picker` query-state
+// (label-move-picker.tsx) — wired below since #32.
 export function ThreadDisplayHotkeys() {
   const scope = 'thread-display';
   const [, setMode] = useQueryState('mode');
   const [, setActiveReplyId] = useQueryState('activeReplyId');
+  const [, setDraftId] = useQueryState('draftId');
   const [, setPicker] = useQueryState('picker');
   const [openThreadId] = useQueryState('threadId');
   const { data: thread } = useThread(openThreadId);
@@ -94,7 +91,16 @@ export function ThreadDisplayHotkeys() {
       if (!openThreadId) return;
       optimisticToggleImportant([openThreadId], false);
     },
-    closeView: () => closeView(new KeyboardEvent('keydown', { key: 'Escape' })),
+    // Escape hors focus composer : use-mail-navigation ferme le fil
+    // (setThreadId(null)) mais ne nettoie pas l'état reply — un mode résiduel
+    // réarmait activeReplyId au fil suivant, qui s'ouvrait en reply (CUA
+    // échec 6, seconde moitié). Ce handler porte le nettoyage.
+    closeView: () => {
+      setMode(null);
+      setActiveReplyId(null);
+      setDraftId(null);
+      setPicker(null);
+    },
     reply: () => {
       setMode('reply');
       setActiveReplyId(thread?.latest?.id ?? '');

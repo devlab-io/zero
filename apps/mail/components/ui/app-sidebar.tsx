@@ -6,19 +6,20 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog';
 import { Sidebar, SidebarContent, SidebarFooter, SidebarHeader } from '@/components/ui/sidebar';
-import { navigationConfig, bottomNavItems } from '@/config/navigation';
-import { useTRPC } from '@/providers/query-provider';
-import { useSidebar } from '@/components/ui/sidebar';
 // import { useMutation } from '@tanstack/react-query';
 import { ComposeSurface, preloadComposeSurface } from '../create/compose-surface';
+import { navigationConfig, bottomNavItems } from '@/config/navigation';
+import { preloadThreadReader } from '../mail/mail-lazy-surfaces';
+import React, { useEffect, useMemo, useState } from 'react';
+import { useTRPC } from '@/providers/query-provider';
+import { useSidebar } from '@/components/ui/sidebar';
+import { useAIFullScreen } from './use-ai-sidebar';
 import { PencilCompose, X } from '../icons/icons';
 import { useQuery } from '@tanstack/react-query';
 import { useBilling } from '@/hooks/use-billing';
 import { useIsMobile } from '@/hooks/use-mobile';
-import React, { useEffect, useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { useSession } from '@/lib/auth-client';
-import { useAIFullScreen } from './use-ai-sidebar';
 import { useStats } from '@/hooks/use-stats';
 import { useLocation } from 'react-router';
 import { cn, FOLDERS } from '@/lib/utils';
@@ -53,7 +54,13 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   // hotkey (no hover intent) opens without the Suspense spinner. Idle-time prefetch only.
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    const warm = () => preloadComposeSurface();
+    // CUA 2026-07-31 : le reader (thread-display) est aussi réchauffé — son
+    // chunk lazy portait le shell optimiste d'ouverture, inerte au premier fil
+    // de la session sans ce warm.
+    const warm = () => {
+      preloadComposeSurface();
+      preloadThreadReader();
+    };
     if (typeof window.requestIdleCallback === 'function') {
       const idleId = window.requestIdleCallback(warm, { timeout: 3000 });
       return () => window.cancelIdleCallback(idleId);
@@ -262,7 +269,7 @@ export function ComposeButton() {
           type="button"
           onPointerEnter={preloadCompose}
           onFocus={preloadCompose}
-          className="relative mb-1.5 inline-flex h-8 w-full items-center justify-center gap-1 self-stretch overflow-hidden rounded-lg border border-gray-200 bg-[#006FFE] text-black dark:border-none dark:text-white cursor-pointer hover:bg-[#0056CC] dark:hover:bg-[#0056CC] transition-colors"
+          className="relative mb-1.5 inline-flex h-8 w-full cursor-pointer items-center justify-center gap-1 self-stretch overflow-hidden rounded-lg border border-gray-200 bg-[#006FFE] text-black transition-colors hover:bg-[#0056CC] dark:border-none dark:text-white dark:hover:bg-[#0056CC]"
         >
           {state === 'collapsed' && !isMobile ? (
             <PencilCompose className="mt-0.5 fill-white text-black" />

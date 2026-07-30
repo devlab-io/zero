@@ -301,14 +301,21 @@ export function EmailComposer({
         if (decision === 'ignore') return;
         e.preventDefault();
         e.stopPropagation();
-        if (decision === 'confirm') setShowLeaveConfirmation(true);
-        else onClose?.();
+        if (decision === 'confirm') {
+          setShowLeaveConfirmation(true);
+        } else {
+          // Un reply a `to` prérempli : la persistance locale a donc déjà écrit
+          // un snapshot. Purge (comme confirmLeave), sinon il ressusciterait au
+          // prochain reply du même fil alors que l'intention était d'abandonner.
+          clearDraftSnapshot();
+          onClose?.();
+        }
       }
     };
 
     document.addEventListener('keydown', handleKeyDown, true); // Use capture phase
     return () => document.removeEventListener('keydown', handleKeyDown, true);
-  }, [editor, draftId, onClose]);
+  }, [editor, draftId, onClose, clearDraftSnapshot]);
 
   const proceedWithSend = async () => {
     try {

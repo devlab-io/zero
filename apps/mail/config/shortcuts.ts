@@ -171,9 +171,23 @@ const globalShortcuts: Shortcut[] = [
 ];
 
 const mailListShortcuts: Shortcut[] = [
-  shortcut(['r'], 'replyToThread', 'Reply to focused email', 'mail-list'),
-  shortcut(['a'], 'replyAllToThread', 'Reply all to focused email', 'mail-list'),
-  shortcut(['f'], 'forwardThread', 'Forward focused email', 'mail-list'),
+  // preventDefault : ces raccourcis montent le composer TipTap. Le focus éditeur
+  // est aujourd'hui différé (setTimeout), mais un mount plus rapide (chunks
+  // préchauffés) rapprocherait le focus du keydown — on annule le défaut pour
+  // que la lettre ne puisse jamais s'insérer dans le corps du mail (même classe
+  // que le bug picker v, CUA échec 5).
+  shortcut(['r'], 'replyToThread', 'Reply to focused email', 'mail-list', {
+    type: 'single',
+    preventDefault: true,
+  }),
+  shortcut(['a'], 'replyAllToThread', 'Reply all to focused email', 'mail-list', {
+    type: 'single',
+    preventDefault: true,
+  }),
+  shortcut(['f'], 'forwardThread', 'Forward focused email', 'mail-list', {
+    type: 'single',
+    preventDefault: true,
+  }),
   shortcut(['d'], 'archiveEmail', 'Done — archive', 'mail-list'),
   shortcut(['e'], 'archiveEmail', 'Done — archive', 'mail-list'),
   shortcut(['b'], 'remindThread', 'Snooze focused email', 'mail-list'),
@@ -211,9 +225,20 @@ const mailListShortcuts: Shortcut[] = [
 ];
 
 const threadDisplayShortcuts: Shortcut[] = [
-  shortcut(['r'], 'reply', 'Reply to email', 'thread-display'),
-  shortcut(['a'], 'replyAll', 'Reply all', 'thread-display'),
-  shortcut(['f'], 'forward', 'Forward email', 'thread-display'),
+  // preventDefault sur r/a/f : même garde anti-insertion que côté mail-list
+  // (le composer monte plus vite avec les chunks préchauffés).
+  shortcut(['r'], 'reply', 'Reply to email', 'thread-display', {
+    type: 'single',
+    preventDefault: true,
+  }),
+  shortcut(['a'], 'replyAll', 'Reply all', 'thread-display', {
+    type: 'single',
+    preventDefault: true,
+  }),
+  shortcut(['f'], 'forward', 'Forward email', 'thread-display', {
+    type: 'single',
+    preventDefault: true,
+  }),
   shortcut(['d'], 'archive', 'Done — archive and go next', 'thread-display'),
   shortcut(['e'], 'archive', 'Done — archive and go next', 'thread-display'),
   shortcut(['['], 'archiveNext', 'Done and open next', 'thread-display'),
