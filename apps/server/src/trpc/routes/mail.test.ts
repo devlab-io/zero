@@ -237,6 +237,50 @@ describe('mail router — listThreads (branchement dossiers)', () => {
     expect(getThreadsFromDB).not.toHaveBeenCalled();
   });
 
+  it('q + localPreview → projection DO (getThreadsFromDB avec q), jamais Gmail', async () => {
+    getThreadsFromDB.mockResolvedValueOnce({ threads: [{ id: 'p1' }], nextPageToken: null });
+    const r = await call('listThreads', {
+      folder: 'inbox',
+      q: '"Banque de Tahiti"',
+      localPreview: true,
+    });
+    expect(getThreadsFromDB).toHaveBeenCalledWith(
+      'conn-1',
+      expect.objectContaining({ folder: 'inbox', q: 'Banque de Tahiti' }),
+    );
+    expect(stub.rawListThreads).not.toHaveBeenCalled();
+    expect(r.threads[0].id).toBe('p1');
+  });
+
+  it('q à opérateurs + localPreview → page vide, aucun appel réseau', async () => {
+    const r = await call('listThreads', {
+      folder: 'inbox',
+      q: 'is:unread banque',
+      localPreview: true,
+    });
+    expect(r).toEqual({ threads: [], nextPageToken: '' });
+    expect(getThreadsFromDB).not.toHaveBeenCalled();
+    expect(stub.rawListThreads).not.toHaveBeenCalled();
+  });
+
+  it('q à jokers LIKE (`%`/`_`) + localPreview → page vide, la projection n’est jamais interrogée', async () => {
+    for (const q of ['%', 'remise 50%', 'rapport_final']) {
+      const r = await call('listThreads', { folder: 'inbox', q, localPreview: true });
+      expect(r).toEqual({ threads: [], nextPageToken: '' });
+    }
+    expect(getThreadsFromDB).not.toHaveBeenCalled();
+    expect(stub.rawListThreads).not.toHaveBeenCalled();
+  });
+
+  it('localPreview sans q → chemin dossier normal (projection sans filtre texte)', async () => {
+    getThreadsFromDB.mockResolvedValueOnce({ threads: [{ id: 't1' }] });
+    await call('listThreads', { folder: 'inbox', q: '', localPreview: true });
+    expect(getThreadsFromDB).toHaveBeenCalledWith(
+      'conn-1',
+      expect.not.objectContaining({ q: expect.any(String) }),
+    );
+  });
+
   it('inbox vide sans q → planifie une resync (cooldown KV posé)', async () => {
     getThreadsFromDB.mockResolvedValueOnce({ threads: [] });
     await call('listThreads', { folder: 'inbox', q: '' });

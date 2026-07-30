@@ -273,9 +273,11 @@ export const MailList = memo(
                   </div>
                 ) : isTransitionPending && isFiltering ? (
                   // CUA 2026-07-30 (obs 3) : recherche en vol — les lignes affichées
-                  // sont la vue précédente (placeholderData), la réponse serveur
-                  // (Gmail `q`, ~2 s mesurées) arrive en fond. Bandeau non bloquant,
-                  // même style que le hold forceSync.
+                  // sont la préview projection (correspondances sujet/expéditeur
+                  // servies par le DO) ou, à défaut, la vue précédente
+                  // (placeholderData) ; la réponse authoritative (Gmail `q`,
+                  // ~2 s mesurées) arrive en fond. Bandeau non bloquant, même
+                  // style que le hold forceSync.
                   <div className="flex items-center gap-2 border-b border-blue-200/60 bg-blue-50 px-3 py-1.5 text-xs text-blue-800 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-300">
                     <RefreshCcw className="h-3 w-3 animate-spin" />
                     <span>{m['states.mailList.searchingNotice']()}</span>

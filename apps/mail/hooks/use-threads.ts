@@ -1,4 +1,12 @@
 import {
+  hashKey,
+  keepPreviousData,
+  queryOptions,
+  useInfiniteQuery,
+  useQuery,
+  useQueryClient,
+} from '@tanstack/react-query';
+import {
   findForceSyncSnapshot,
   nextForceSyncHoldPhase,
   selectForceSyncHoldItems,
@@ -9,13 +17,9 @@ import {
   observeForceSyncPurgeAtom,
 } from '@/store/force-sync-hold';
 import {
-  hashKey,
-  keepPreviousData,
-  queryOptions,
-  useInfiniteQuery,
-  useQuery,
-  useQueryClient,
-} from '@tanstack/react-query';
+  enrichThinItemsWithPreview,
+  selectSearchPreviewItems,
+} from '@/lib/search-preview-selector';
 import { backgroundQueueAtom, isThreadInBackgroundQueueAtom } from '@/store/backgroundQueue';
 import { emailContentQueryKey, resolveEmailContentTheme } from '@/lib/email-content-query';
 import { useTRPC, useTRPCClient } from '@/providers/query-provider';
@@ -112,6 +116,21 @@ export const useThreads = () => {
   );
   const threadsQuery = useInfiniteQuery(listThreadsQueryOptions);
 
+  // CUA 2026-07-30 (obs 3, « premier résultat <1 s ») : préview projection-first.
+  // Pendant le vol de la recherche Gmail `q` (multi-secondes), la projection DO
+  // (LIKE sujet/expéditeur, même scope dossier) répond vite ; ses lignes — des
+  // correspondances réelles — remplacent la vue précédente tenue par
+  // keepPreviousData. La réponse Gmail reste authoritative et reprend
+  // l'affichage dès qu'elle atterrit (sélecteur ci-dessous). Une requête à
+  // opérateurs reçoit une page vide du serveur → fallback comportement actuel.
+  const isSearching = searchValue.value.trim().length > 0;
+  const previewQuery = useQuery(
+    trpc.mail.listThreads.queryOptions(
+      { q: searchValue.value, folder, labelIds: labels, cursor: '', localPreview: true },
+      { enabled: isSearching, staleTime: 60 * 1000 },
+    ),
+  );
+
   // Flatten threads from all pages and sort by receivedOn date (newest first)
 
   const freshThreads = useMemo(() => {
@@ -165,15 +184,42 @@ export const useThreads = () => {
     deactivateForceSyncHold,
   ]);
 
-  const threads = useMemo(
-    () =>
-      selectForceSyncHoldItems({
-        active: forceSyncHold.active,
-        freshItems: freshThreads,
-        snapshotItems: forceSyncSnapshotItems,
-      }),
-    [forceSyncHold.active, freshThreads, forceSyncSnapshotItems],
-  );
+  const previewThreads = useMemo(() => {
+    const rows = previewQuery.data?.threads;
+    if (!rows) return undefined;
+    return rows.filter(Boolean).filter((e) => !isInQueue(`thread:${e.id}`));
+  }, [previewQuery.data, isInQueue, backgroundQueue]);
+
+  const threads = useMemo(() => {
+    const held = selectForceSyncHoldItems({
+      active: forceSyncHold.active,
+      freshItems: freshThreads,
+      snapshotItems: forceSyncSnapshotItems,
+    });
+    // Hold forceSync prioritaire : pendant la fenêtre de resynchro, on tient le
+    // snapshot de la vue — pas de substitution préview par-dessus.
+    if (forceSyncHold.active) return held;
+    if (!isSearching) return held;
+    if (threadsQuery.isPlaceholderData) {
+      return selectSearchPreviewItems({
+        isSearching,
+        authoritativeIsPlaceholder: true,
+        previewItems: previewThreads,
+        fallbackItems: held,
+      });
+    }
+    // Réponse Gmail atterrie : ses lignes minces récupèrent les champs riches
+    // que la préview projection avait déjà servis (pas de flip vers un squelette
+    // pour les fils déjà affichés) ; ordre et composition restent Gmail.
+    return enrichThinItemsWithPreview(held, previewThreads);
+  }, [
+    forceSyncHold.active,
+    freshThreads,
+    forceSyncSnapshotItems,
+    isSearching,
+    threadsQuery.isPlaceholderData,
+    previewThreads,
+  ]);
 
   const isEmpty = useMemo(() => threads.length === 0, [threads]);
   const isReachingEnd =

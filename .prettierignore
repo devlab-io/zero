@@ -1,3 +1,6 @@
 bun.lockb
 node_modules
 .next
+# Généré par apps/server/scripts/gen-trpc-boundary.mjs (ADR-0006) — format brut tsc,
+# ne pas reformater (sinon flip-flop de 3 400 lignes à chaque régénération).
+apps/server/src/trpc/app-router.boundary.d.ts

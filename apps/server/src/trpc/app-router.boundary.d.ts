@@ -1005,6 +1005,7 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
                 maxResults?: number | undefined;
                 labelIds?: string[] | undefined;
                 cursor?: string | undefined;
+                localPreview?: boolean | undefined;
             };
             output: {
                 threads: {

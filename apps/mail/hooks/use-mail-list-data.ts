@@ -24,9 +24,11 @@ export interface MailListData {
   /** Any list fetch in flight (foreground or background revalidation). */
   isFetching: boolean;
   /**
-   * The rows on screen belong to the PREVIOUS view (placeholderData) while the new
-   * key (search/folder/labels change) is still fetching — CUA 2026-07-30 (obs 3):
-   * presentation shows a non-blocking notice instead of a full spinner.
+   * The authoritative list for the new key (search/folder/labels change) is still
+   * fetching — CUA 2026-07-30 (obs 3): presentation shows a non-blocking notice
+   * instead of a full spinner. The rows on screen are either the PREVIOUS view
+   * (placeholderData) or, during a search, the instant projection preview
+   * (subject/sender matches served by the DO while Gmail `q` is in flight).
    */
   isTransitionPending: boolean;
   /** Next-page fetch in flight. */
