@@ -1,15 +1,28 @@
+import { stripReplyStateFromSearch, wasReplyOpenedSince } from '@/lib/reply-search-params';
 import { parseAsString, useQueryStates } from 'nuqs';
 import { useCallback } from 'react';
 
+/** Cadence et borne de la boucle de vérification post-purge (~2,3 s au total). */
+const VERIFY_INTERVAL_MS = 300;
+const VERIFY_MAX_TICKS = 7;
+
 /**
- * Purge ATOMIQUE de l'état reply (CUA round 3, échec 3) : mode, activeReplyId,
- * draftId et picker tombent dans UNE seule écriture d'URL (useQueryStates).
- * Les setters séparés laissaient l'URL diverger de l'état client — composer
- * masqué mais `mode=replyAll&activeReplyId&draftId` conservés sur staging, et
- * le fil suivant s'ouvrait en reply.
+ * Purge ATOMIQUE de l'état reply (CUA rounds 3-5) : mode, activeReplyId,
+ * draftId et picker tombent ensemble.
  *
- * `threadId` peut être joint à la même écriture (avance post-archive) ; omis,
- * il reste intouché.
+ * - `useQueryStates` : état client + écriture d'URL canonique nuqs (une seule
+ *   écriture, plus de divergence entre setters séparés) ;
+ * - écriture DIRECTE `history.replaceState` : l'URL est propre IMMÉDIATEMENT —
+ *   l'écriture nuqs, routée par l'adaptateur React Router, a été mesurée ~3 s
+ *   en retard sur staging (round 5, échec A). nuqs v2 patche history et se
+ *   resynchronise sur cette écriture ;
+ * - boucle de vérification bornée : si une écriture retardataire ressuscite
+ *   les clés, elles sont re-nettoyées ; la boucle s'arrête immédiatement si
+ *   une NOUVELLE ouverture de reply survient (markReplyOpened, posé par les
+ *   handlers r/a/f) — jamais d'avalement d'une intention réelle.
+ *
+ * `threadId` peut être joint à la même écriture (avance post-archive, épinglage
+ * à la fermeture du reply) ; omis, il reste intouché.
  */
 export function useReplyStatePurge() {
   const [, setStates] = useQueryStates({
@@ -20,14 +33,37 @@ export function useReplyStatePurge() {
     picker: parseAsString,
   });
   return useCallback(
-    (opts?: { threadId: string | null }) =>
-      setStates({
+    (opts?: { threadId: string | null }) => {
+      const startedAt = Date.now();
+      const result = setStates({
         mode: null,
         activeReplyId: null,
         draftId: null,
         picker: null,
         ...(opts ? { threadId: opts.threadId } : {}),
-      }),
+      });
+
+      const stripNow = () => {
+        const stripped = stripReplyStateFromSearch(window.location.search);
+        if (stripped === null) return;
+        window.history.replaceState(
+          window.history.state,
+          '',
+          `${window.location.pathname}${stripped}${window.location.hash}`,
+        );
+      };
+      stripNow();
+
+      let ticks = 0;
+      const verify = () => {
+        if (wasReplyOpenedSince(startedAt)) return;
+        stripNow();
+        if (++ticks < VERIFY_MAX_TICKS) window.setTimeout(verify, VERIFY_INTERVAL_MS);
+      };
+      window.setTimeout(verify, VERIFY_INTERVAL_MS);
+
+      return result;
+    },
     [setStates],
   );
 }

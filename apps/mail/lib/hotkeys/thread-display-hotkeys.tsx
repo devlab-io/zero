@@ -4,6 +4,7 @@ import { THREAD_DISPLAY_HANDLED_ACTIONS } from './handler-manifest';
 import { useReplyStatePurge } from '@/hooks/use-reply-state-purge';
 import { selectArchiveAdvanceTarget } from '@/lib/archive-advance';
 import { enhancedKeyboardShortcuts } from '@/config/shortcuts';
+import { markReplyOpened } from '@/lib/reply-search-params';
 import { useThread, useThreads } from '@/hooks/use-threads';
 import { armOpeningKeyGuard } from './opening-key-guard';
 import useMoveTo from '@/hooks/driver/use-move-to';
@@ -86,11 +87,13 @@ export function ThreadDisplayHotkeys() {
     // filtrer le combo (défense en profondeur au-delà du preventDefault).
     openLabels: () => {
       if (!openThreadId) return;
+      markReplyOpened();
       armOpeningKeyGuard('l');
       setPicker('labels');
     },
     openMove: () => {
       if (!openThreadId) return;
+      markReplyOpened();
       armOpeningKeyGuard('v');
       setPicker('move');
     },
@@ -120,16 +123,19 @@ export function ThreadDisplayHotkeys() {
     // armOpeningKeyGuard : l'écho de la touche (a/r/f) atterrissait dans le
     // corps TipTap malgré le preventDefault du keydown (CUA round 3, échec 2).
     reply: () => {
+      markReplyOpened();
       armOpeningKeyGuard('r');
       setMode('reply');
       setActiveReplyId(thread?.latest?.id ?? '');
     },
     forward: () => {
+      markReplyOpened();
       armOpeningKeyGuard('f');
       setMode('forward');
       setActiveReplyId(thread?.latest?.id ?? '');
     },
     replyAll: () => {
+      markReplyOpened();
       armOpeningKeyGuard('a');
       setMode('replyAll');
       setActiveReplyId(thread?.latest?.id ?? '');

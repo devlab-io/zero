@@ -8,6 +8,7 @@ import {
   // useLocation,
   useParams,
 } from 'react-router';
+import { markReplyOpened } from '@/lib/reply-search-params';
 import { armOpeningKeyGuard } from './opening-key-guard';
 import { useMail } from '@/components/mail/use-mail';
 // import { Categories } from '@/components/mail/mail';
@@ -221,6 +222,7 @@ export function MailListHotkeys() {
         toast.info(m['common.mail.noEmailsToSelect']());
         return;
       }
+      markReplyOpened();
       setThreadId(targetId);
       setMode(mode);
     },

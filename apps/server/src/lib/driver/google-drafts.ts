@@ -1,3 +1,4 @@
+import { isDraftNotFoundError, resolveDraftForDeletion } from './draft-deletion';
 import { sanitizeTipTapHtml } from '../sanitize-tip-tap-html';
 import { parseMessage, parseOutgoing } from './google-parse';
 import type { GmailTransport } from './google-transport';
@@ -42,10 +43,38 @@ export class GmailDrafts {
     return this.t.withErrorHandler(
       'deleteDraft',
       async () => {
+        // CUA round 5 (échec B) : l'id fourni peut être un id de MESSAGE de
+        // brouillon ou un id de brouillon périmé — drafts.delete répondait 404
+        // en silence et la liste Drafts revenait après sync. Tentative directe,
+        // puis remapping exact via drafts.list (draft.id ou message.id
+        // uniquement — jamais un autre brouillon), et succès idempotent si le
+        // brouillon n'existe plus. Voir draft-deletion.ts.
+        try {
+          await this.t.execute((gmail) =>
+            gmail.users.drafts.delete({
+              userId: 'me',
+              id: draftId,
+              quotaUser: this.t.getQuotaUser(),
+            }),
+          );
+          return;
+        } catch (error) {
+          if (!isDraftNotFoundError(error)) throw error;
+        }
+
+        const res = await this.t.execute((gmail) =>
+          gmail.users.drafts.list({
+            userId: 'me',
+            maxResults: 100,
+          }),
+        );
+        const resolvedId = resolveDraftForDeletion(res.data.drafts ?? [], draftId);
+        if (!resolvedId) return; // déjà supprimé — idempotent
+
         await this.t.execute((gmail) =>
           gmail.users.drafts.delete({
             userId: 'me',
-            id: draftId,
+            id: resolvedId,
             quotaUser: this.t.getQuotaUser(),
           }),
         );

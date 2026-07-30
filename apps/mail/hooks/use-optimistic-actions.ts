@@ -544,7 +544,11 @@ export function useOptimisticActions() {
       optimisticId,
       execute: async () => {
         await deleteDraft({ id: draftId });
+        // La page /mail/draft est servie par mail.listThreads (folder=draft),
+        // PAS par drafts.list : sans cette invalidation, la vérité serveur
+        // n'arrivait qu'à la sync suivante (CUA round 5, échec B).
         await queryClient.invalidateQueries({ queryKey: trpc.drafts.list.queryKey() });
+        await queryClient.invalidateQueries({ queryKey: trpc.mail.listThreads.queryKey() });
       },
       undo: () => {
         removeOptimisticAction(optimisticId);
