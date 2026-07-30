@@ -7,7 +7,11 @@ import {
   EditorRoot,
   type JSONContent,
 } from 'novel';
-import { disarmOpeningKeyGuard, shouldSuppressOpeningKey } from '@/lib/hotkeys/opening-key-guard';
+import {
+  markGuardSurfaceFocused,
+  resolveGuardedKeydown,
+  shouldSuppressOpeningKey,
+} from '@/lib/hotkeys/opening-key-guard';
 import { OpeningKeyGuardExtension } from './opening-key-guard-extension';
 import { log } from '@/lib/log';
 
@@ -278,10 +282,15 @@ export default function Editor({
                 return false;
               },
               keydown: (view, event) => {
-                // Vraie frappe sur l'éditeur → la garde anti-écho se désarme
-                // (voir lib/hotkeys/opening-key-guard.ts) ; l'écho de la touche
-                // d'ouverture, lui, arrive sans keydown préalable.
-                disarmOpeningKeyGuard();
+                // Garde anti-écho (CUA round 7) : l'écho de la touche
+                // d'ouverture peut se réinjecter comme un VRAI keydown sur
+                // l'éditeur focusé — même touche dans la fenêtre de grâce
+                // post-focus → supprimé à la source ; toute vraie saisie
+                // désarme et passe (voir lib/hotkeys/opening-key-guard.ts).
+                if (resolveGuardedKeydown(event.key) === 'suppress') {
+                  event.preventDefault();
+                  return true;
+                }
                 if (readOnly) return false;
                 if (event.key === 'Tab' && !event.shiftKey) {
                   if (onTab && onTab()) {
@@ -299,6 +308,9 @@ export default function Editor({
                 return handleCommandNavigation(event);
               },
               focus: () => {
+                // Ancre la fenêtre de grâce anti-écho (premier focus après
+                // armement uniquement — un clic ultérieur ne re-piège pas).
+                markGuardSurfaceFocused();
                 if (!readOnly) onFocus?.();
                 return false;
               },
