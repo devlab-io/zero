@@ -17,6 +17,7 @@
 import type { IGetThreadResponse, IGetThreadsResponse, MailManager } from '../../lib/driver/types';
 import { countThreads, countThreadsByLabels, deleteSpamThreads, type DB } from './db';
 import { connectionToDriver, getZeroSocketAgent } from '../../lib/server-utils';
+import { planDraftProjectionCleanup } from '../../lib/driver/draft-deletion';
 import type { IOutgoingMessage, ISnoozeBatch, Sender } from '../../types';
 import { OutgoingMessageType, type OutgoingMessage } from './types';
 import type { UserTopic } from '../../lib/analyze/interests';
@@ -30,6 +31,7 @@ import type { ThreadSyncResult } from './errors';
 import type { ZeroAgent } from './chat-agent';
 import { connection } from '../../db/schema';
 import { logger } from '../../lib/logger';
+import { FOLDERS } from '../../lib/utils';
 import { type ZeroEnv } from '../../env';
 import * as schema from './db/schema';
 import { threads } from './db/schema';
@@ -337,9 +339,26 @@ export class ZeroDriver extends DurableObject<ZeroEnv> {
     if (!this.driver) {
       throw new Error('No driver available');
     }
-    await this.driver.deleteDraft(id);
-    // Broadcast drafts folder refresh
-    await this.reloadFolder('drafts');
+    // CUA round 6 : après le succès Gmail, la projection locale gardait le fil
+    // marqué DRAFT et le broadcast visait 'drafts' (non canonique — le client
+    // invalide par clé exacte de dossier, FOLDERS.DRAFT = 'draft' : no-op
+    // depuis toujours). Le driver rend les identifiants exacts + l'état du fil
+    // post-suppression ; le nettoyage est minimal et ne touche AUCUN autre
+    // brouillon (voir planDraftProjectionCleanup).
+    const outcome = await this.driver.deleteDraft(id);
+    const cleanup = planDraftProjectionCleanup({
+      threadId: outcome.threadId,
+      threadGone: outcome.threadGone,
+      hasOtherDrafts: outcome.hasOtherDrafts,
+    });
+    if (cleanup.action === 'delete-thread' && cleanup.threadId) {
+      const { deleteThreadById } = await import('./db');
+      await deleteThreadById(this.db, cleanup.threadId);
+    } else if (cleanup.action === 'remove-draft-label' && cleanup.threadId) {
+      const { removeThreadLabel } = await import('./db');
+      await removeThreadLabel(this.db, cleanup.threadId, 'DRAFT');
+    }
+    await this.reloadFolder(FOLDERS.DRAFT);
     return { success: true };
   }
 

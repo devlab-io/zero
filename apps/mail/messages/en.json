@@ -833,6 +833,7 @@
       "offlineNotice": "You're offline — showing your saved emails.",
       "staleNotice": "Couldn't refresh — showing your saved emails.",
       "forceSyncNotice": "Resyncing your inbox — showing your saved emails for now.",
+      "searchingNotice": "Searching your mail — previous results shown meanwhile.",
       "emptyTitle": "It's empty here",
       "emptyDescription": "Search for another email or",
       "clearFilters": "clear filters"

@@ -6,6 +6,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { RecipientAutosuggest } from '@/components/ui/recipient-autosuggest';
+import { m } from '@/paraglide/messages';
 import { Loader } from 'lucide-react';
 import { Sparkles, X } from '../icons/icons';
 import type { ComposerFormValues } from './email-composer.types';
@@ -130,9 +131,14 @@ export function ComposerHeader({
         {!activeReplyId ? (
           <div className="flex items-center gap-2 border-b p-3">
             <p className="text-sm font-medium text-[#8C8C8C]">Subject:</p>
+            {/* CUA 2026-07-30: the previous hardcoded placeholder ("Re: Design review
+                feedback", marketing copy shared with the landing feature cards) was read
+                back as the field VALUE by accessibility tooling on an empty subject —
+                reported as a state leak. Neutral localized placeholder + explicit label. */}
             <input
               className="h-4 w-full bg-transparent text-sm font-normal leading-normal text-black placeholder:text-[#797979] focus:outline-none dark:text-white/90"
-              placeholder="Re: Design review feedback"
+              placeholder={m['common.searchBar.subject']()}
+              aria-label={m['common.searchBar.subject']()}
               value={subjectInput}
               onChange={(e) => onSubjectInputChange(e.target.value)}
             />

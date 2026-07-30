@@ -1,8 +1,10 @@
-import { log } from '@/lib/log';
 import { addOptimisticActionAtom, removeOptimisticActionAtom } from '@/store/optimistic-updates';
 import { optimisticActionsManager, type PendingAction } from '@/lib/optimistic-actions-manager';
 import { buildOptimisticFailureToast, isLastPendingOfType } from '@/lib/optimistic-recovery';
+import { pruneThreadFromListPages } from '@/lib/prune-thread-cache';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { FOLDERS } from '@/lib/utils';
+import { log } from '@/lib/log';
 
 import { backgroundQueueAtom } from '@/store/backgroundQueue';
 import type { ThreadDestination } from '@/lib/thread-actions';
@@ -293,6 +295,7 @@ export function useOptimisticActions() {
     threadIds: string[],
     currentFolder: string,
     destination: ThreadDestination,
+    options?: { keepThreadOpen?: boolean },
   ) {
     if (!threadIds.length || !destination) return;
 
@@ -309,7 +312,12 @@ export function useOptimisticActions() {
     });
 
     if (threadId && threadIds.includes(threadId)) {
-      setThreadId(null);
+      // CUA 2026-07-30 (échec 4) : fermer ici puis rouvrir via la commande de
+      // navigation = double transition d'URL + flash d'état vide. Quand
+      // l'appelant enchaîne immédiatement sur une navigation (archiveAndMove),
+      // il garde la vue ouverte — la navigation pose le threadId suivant, ou
+      // null en bout de liste.
+      if (!options?.keepThreadOpen) setThreadId(null);
       setActiveReplyId(null);
     }
     const successMessage =
@@ -347,7 +355,7 @@ export function useOptimisticActions() {
           setBackgroundQueue({ type: 'delete', threadId: `thread:${id}` });
         });
       },
-      retry: () => optimisticMoveThreadsTo(threadIds, currentFolder, destination),
+      retry: () => optimisticMoveThreadsTo(threadIds, currentFolder, destination, options),
       toastMessage: successMessage,
       folders: [currentFolder, destination],
     });
@@ -538,6 +546,20 @@ export function useOptimisticActions() {
       optimisticId,
       execute: async () => {
         await deleteDraft({ id: draftId });
+        // CUA round 6 : invalider mail.listThreads refetchait la vérité Gmail
+        // encore retardée (le brouillon supprimé y figure quelques secondes) —
+        // la ligne réapparaissait au retrait de l'action optimiste. On PURGE
+        // la ligne des pages en cache (identifiant exact), et la vérité
+        // canonique arrive ensuite par le broadcast serveur du dossier draft.
+        // Portée (revue Codex round 6) : UNIQUEMENT les infinite queries du
+        // dossier draft (toutes variantes q/labels via input partiel) — jamais
+        // inbox/sent : supprimer un reply draft ne doit pas retirer son fil
+        // des autres vues (WHOOP reste en Inbox).
+        queryClient.setQueriesData(
+          { queryKey: trpc.mail.listThreads.infiniteQueryKey({ folder: FOLDERS.DRAFT }) },
+          (data: Parameters<typeof pruneThreadFromListPages>[0]) =>
+            pruneThreadFromListPages(data, draftId),
+        );
         await queryClient.invalidateQueries({ queryKey: trpc.drafts.list.queryKey() });
       },
       undo: () => {

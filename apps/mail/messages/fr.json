@@ -833,6 +833,7 @@
       "offlineNotice": "Vous êtes hors ligne — emails enregistrés affichés.",
       "staleNotice": "Actualisation impossible — emails enregistrés affichés.",
       "forceSyncNotice": "Resynchronisation de la boîte en cours — emails enregistrés affichés pour l'instant.",
+      "searchingNotice": "Recherche en cours — résultats précédents affichés en attendant.",
       "emptyTitle": "C'est vide ici",
       "emptyDescription": "Cherchez un autre email ou",
       "clearFilters": "réinitialisez les filtres"

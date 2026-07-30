@@ -12,12 +12,11 @@ import { IGetThreadResponseSchema, type IGetThreadsResponse } from '../../lib/dr
 import type { DeleteAllSpamResponse, IEmailSendBatch } from '../../types';
 import { activeDriverProcedure, router, privateProcedure } from '../trpc';
 import { processEmailHtml } from '../../lib/email-processor';
+import { previewSearchText } from '../../lib/search-preview';
 import { defaultPageSize, FOLDERS } from '../../lib/utils';
 import { toAttachmentFiles } from '../../lib/attachments';
 import { serializedFileSchema } from '../../lib/schemas';
 import { openThreadProcedure } from './open-thread';
-// V4.1 list-projection (issue #30) : la liste sert la projection riche (superset de
-// IGetThreadsResponse). Élargit le .output() pour ne PAS stripper subject/sender/date/labels/unread.
 import { ThreadsResponseSchema } from '@zero/types';
 import { getContext } from 'hono/context-storage';
 import { type HonoContext } from '../../ctx';
@@ -30,15 +29,6 @@ const senderSchema = z.object({
   name: z.string().optional(),
   email: z.string(),
 });
-
-// const getFolderLabelId = (folder: string) => {
-//   // Handle special cases first
-//   if (folder === 'bin') return 'TRASH';
-//   if (folder === 'archive') return ''; // Archive doesn't have a specific label
-
-//   // For other folders, convert to uppercase (same as database method)
-//   return folder.toUpperCase();
-// };
 
 export const mailRouter = router({
   suggestRecipients: activeDriverProcedure
@@ -80,11 +70,16 @@ export const mailRouter = router({
         maxResults: z.number().optional().default(defaultPageSize),
         cursor: z.string().optional().default(''),
         labelIds: z.array(z.string()).optional().default([]),
+        // CUA 2026-07-30 (obs 3, reliquat serveur) : préview projection-first.
+        // true → la recherche est servie par la projection DO (sujet/expéditeur,
+        // instantané) au lieu de Gmail `q` ; le client l'affiche PENDANT le vol
+        // Gmail, la réponse Gmail reste authoritative et la remplace.
+        localPreview: z.boolean().optional().default(false),
       }),
     )
     .output(ThreadsResponseSchema)
     .query(async ({ ctx, input }) => {
-      const { folder, maxResults, cursor, q, labelIds } = input;
+      const { folder, maxResults, cursor, q, labelIds, localPreview } = input;
       const { activeConnection } = ctx;
       const executionCtx = getContext<HonoContext>().executionCtx;
       const { stub: agent } = await getZeroAgent(activeConnection.id, executionCtx);
@@ -106,23 +101,34 @@ export const mailRouter = router({
 
       let threadsResponse: IGetThreadsResponse;
 
-      // Apply folder-to-label mapping when no search query is provided
-      const effectiveLabelIds = labelIds;
-
-      if (q) {
+      if (q && localPreview) {
+        // Préview projection-first : LIKE sujet/expéditeur dans le DO, borné au
+        // label du dossier (sous-ensemble strict de la sémantique Gmail — même
+        // scope que labelIds INBOX + q côté Gmail). Une requête à opérateurs
+        // dépasse cette sémantique → page vide, le client garde son fallback.
+        const previewText = previewSearchText(q);
+        threadsResponse = previewText
+          ? await getThreadsFromDB(activeConnection.id, {
+              folder,
+              q: previewText,
+              maxResults,
+              labelIds,
+              pageToken: cursor,
+            })
+          : { threads: [], nextPageToken: '' };
+      } else if (q) {
         threadsResponse = await agent.rawListThreads({
           query: q,
           maxResults,
-          labelIds: effectiveLabelIds,
+          labelIds,
           pageToken: cursor,
           folder,
         });
       } else {
         threadsResponse = await getThreadsFromDB(activeConnection.id, {
           folder,
-          // query: q,
           maxResults,
-          labelIds: effectiveLabelIds,
+          labelIds,
           pageToken: cursor,
         });
       }

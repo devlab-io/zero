@@ -7,6 +7,7 @@ import { env } from 'cloudflare:workers';
 import { logger } from '../lib/logger';
 import type { ZeroEnv } from '../env';
 
+import { hasRemoteRedis } from '../lib/auth-cache';
 import { redis } from '../lib/services';
 import type { Context } from 'hono';
 import superjson from 'superjson';
@@ -204,9 +205,10 @@ export const createRateLimiterMiddleware = (config: {
   generatePrefix: (ctx: TrpcContext, input: unknown) => string;
 }) =>
   t.middleware(async ({ next, ctx, input }) => {
-    // Devlab self-host: sans Redis, pas de rate limiting (no-op).
+    // Devlab self-host: sans Redis distant réel, pas de rate limiting (no-op).
+    // hasRemoteRedis rejette les URLs locales (incident staging 2026-07-30).
     const zenv = env as unknown as ZeroEnv;
-    if (!zenv.REDIS_URL || !zenv.REDIS_TOKEN) return next();
+    if (!hasRemoteRedis(zenv)) return next();
     const ratelimiter = new Ratelimit({
       redis: redis(),
       limiter: config.limiter,

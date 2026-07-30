@@ -226,6 +226,12 @@
           "binding": "snoozed_emails",
           "id": "f3a30ed7198542d890db172536bade33",
         },
+        {
+          // Cache better-auth (sessions read-through, Postgres autoritatif).
+          // En dev local, miniflare simule le namespace : l'id n'est pas contacté.
+          "binding": "AUTH_CACHE",
+          "id": "auth-cache-local-simule",
+        },
       ],
     },
     "staging": {
@@ -422,6 +428,13 @@
           "binding": "snoozed_emails",
           "id": "73ed5aa54daa451aaad292ee1809e2b7",
         },
+        {
+          // Cache better-auth dédié — NE PAS réutiliser un KV Gmail.
+          // Namespace staging dédié et preview distant séparé.
+          "binding": "AUTH_CACHE",
+          "id": "02141f3155a44783990d166c91e917c0",
+          "preview_id": "7631add107bc41268ad0959e9176b731",
+        },
       ],
     },
     "production": {
@@ -615,6 +628,11 @@
         {
           "binding": "snoozed_emails",
           "id": "122652e6ab3c45169caf2c5823a99dd8",
+        },
+        {
+          // Cache better-auth production dédié ; Postgres reste autoritatif.
+          "binding": "AUTH_CACHE",
+          "id": "c36a140caa1b472e83b2288a7ff48233",
         },
       ],
     },

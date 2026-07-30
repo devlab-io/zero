@@ -1,23 +1,25 @@
-import { log } from '@/lib/log';
-import { useUndoSend } from '@/hooks/use-undo-send';
+import { deriveReplyRecipients, deriveReplySubject } from './reply-recipients';
 import { constructReplyBody, constructForwardBody } from '@/lib/utils';
+import { useReplyStatePurge } from '@/hooks/use-reply-state-purge';
 import { useActiveConnection } from '@/hooks/use-connections';
 import { useEmailAliases } from '@/hooks/use-email-aliases';
+import { markDraftAbandoned } from '@/lib/abandoned-drafts';
+import { lazy, Suspense, useEffect, useMemo } from 'react';
 import { useHotkeysContext } from 'react-hotkeys-hook';
-import { loadGitHubEmojis } from '@/lib/emoji-data';
 import { useTRPC } from '@/providers/query-provider';
 import { useMutation } from '@tanstack/react-query';
+import { useUndoSend } from '@/hooks/use-undo-send';
+import { loadGitHubEmojis } from '@/lib/emoji-data';
 import { useSettings } from '@/hooks/use-settings';
 import { useThread } from '@/hooks/use-threads';
 import { useSession } from '@/lib/auth-client';
 import { serializeFiles } from '@/lib/schemas';
-import { deriveReplyRecipients, deriveReplySubject } from './reply-recipients';
 import { useDraft } from '@/hooks/use-drafts';
 import { m } from '@/paraglide/messages';
 import type { Sender } from '@/types';
 import { useQueryState } from 'nuqs';
-import { lazy, Suspense, useEffect, useMemo } from 'react';
 import posthog from 'posthog-js';
+import { log } from '@/lib/log';
 import { toast } from 'sonner';
 
 // Loaded lazily: the editor (tiptap/prosemirror) only downloads when the user actually
@@ -35,17 +37,18 @@ interface ReplyComposeProps {
 }
 
 export default function ReplyCompose({ messageId }: ReplyComposeProps) {
-  const [mode, setMode] = useQueryState('mode');
+  const [mode] = useQueryState('mode');
   const { enableScope, disableScope } = useHotkeysContext();
   const { data: aliases } = useEmailAliases();
+  const purgeReplyState = useReplyStatePurge();
 
-  const [draftId, setDraftId] = useQueryState('draftId');
+  const [draftId] = useQueryState('draftId');
   const [threadId] = useQueryState('threadId');
-  const [, setActiveReplyId] = useQueryState('activeReplyId');
   const { data: emailData, refetch, latestDraft } = useThread(threadId);
   const { data: draft } = useDraft(draftId ?? null);
   const trpc = useTRPC();
   const { mutateAsync: sendEmail } = useMutation(trpc.mail.send.mutationOptions());
+  const { mutateAsync: deleteDraft } = useMutation(trpc.drafts.delete.mutationOptions());
   const { data: activeConnection } = useActiveConnection();
   const { data: settings, isLoading: settingsLoading } = useSettings();
   const { data: session } = useSession();
@@ -189,9 +192,9 @@ export default function ReplyCompose({ messageId }: ReplyComposeProps) {
 
       // Close the composer immediately; reconcile the thread in the BACKGROUND.
       // The blocking `await refetch()` was the measured cold-path stall (W2-H) —
-      // it is now fire-and-forget so the send feels instant.
-      setMode(null);
-      setActiveReplyId(null);
+      // it is now fire-and-forget so the send feels instant. Purge atomique :
+      // même écriture d'URL pour mode/activeReplyId/draftId (CUA round 3).
+      void purgeReplyState();
       void refetch();
 
       handleUndoSend(result, settings, {
@@ -239,7 +242,7 @@ export default function ReplyCompose({ messageId }: ReplyComposeProps) {
   if (!mode || !emailData) return null;
 
   return (
-    <div className="w-full rounded-2xl overflow-visible border">
+    <div className="w-full overflow-visible rounded-2xl border">
       <Suspense
         fallback={
           <div className="flex h-[120px] w-full items-center justify-center">
@@ -247,24 +250,47 @@ export default function ReplyCompose({ messageId }: ReplyComposeProps) {
           </div>
         }
       >
-      <EmailComposer
-        editorClassName="min-h-[50px]"
-        className="w-full max-w-none! pb-1 overflow-visible"
-        onSendEmail={handleSendEmail}
-        onClose={async () => {
-          setMode(null);
-          setDraftId(null);
-          setActiveReplyId(null);
-        }}
-        initialMessage={draft?.content ?? latestDraft?.decodedBody}
-        initialTo={draft ? ensureEmailArray(draft.to) : replyDefaults.to}
-        initialCc={draft ? ensureEmailArray(draft.cc) : replyDefaults.cc}
-        initialBcc={ensureEmailArray(draft?.bcc)}
-        initialSubject={draft?.subject ?? replyDefaults.subject}
-        autofocus={true}
-        settingsLoading={settingsLoading}
-        replyingTo={replyToMessage?.sender.email}
-      />
+        <EmailComposer
+          editorClassName="min-h-[50px]"
+          className="max-w-none! w-full overflow-visible pb-1"
+          onSendEmail={handleSendEmail}
+          onClose={async () => {
+            // Purge ATOMIQUE (une seule écriture d'URL) : trois setters séparés
+            // laissaient l'URL conserver mode/activeReplyId/draftId alors que le
+            // composer était masqué (CUA round 3, échec 3). threadId est ÉPINGLÉ
+            // explicitement dans la même écriture (CUA round 4) : fermer le
+            // reply ne doit ni perdre ni laisser ressusciter le fil ouvert.
+            await purgeReplyState({ threadId });
+          }}
+          onAbandonEmpty={() => {
+            // Composer vidé puis fermé : le brouillon serveur correspondant est
+            // un abandon — supprimé en best-effort (par draftId quand il est
+            // connu) et marqué localement (trace + défense en profondeur).
+            if (latestDraft?.id) markDraftAbandoned(latestDraft.id);
+            const abandonedId = draftId;
+            if (!abandonedId) return;
+            void deleteDraft({ id: abandonedId })
+              .then(() => void refetch())
+              .catch(() => {
+                // Suppression best-effort : un échec ne doit pas bloquer la
+                // fermeture ; le brouillon restera visible dans Drafts.
+              });
+          }}
+          // CUA round 4 (échec 1) : le « a » vu à l'ouverture était le brouillon
+          // serveur abandonné au round 3, resservi par latestDraft?.decodedBody.
+          // Un reply ouvert au raccourci démarre VIDE : la reprise d'un travail
+          // en cours est portée par le snapshot local (restauration issue #34),
+          // celle d'un brouillon par un draftId EXPLICITE (ouverture depuis
+          // Drafts). Aucun contenu serveur n'est ressemé implicitement.
+          initialMessage={draft?.content ?? undefined}
+          initialTo={draft ? ensureEmailArray(draft.to) : replyDefaults.to}
+          initialCc={draft ? ensureEmailArray(draft.cc) : replyDefaults.cc}
+          initialBcc={ensureEmailArray(draft?.bcc)}
+          initialSubject={draft?.subject ?? replyDefaults.subject}
+          autofocus={true}
+          settingsLoading={settingsLoading}
+          replyingTo={replyToMessage?.sender.email}
+        />
       </Suspense>
     </div>
   );

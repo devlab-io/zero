@@ -19,9 +19,11 @@ const h = vi.hoisted(() => {
     removeOptimisticAction: vi.fn(),
     threadId: null as string | null,
     setThreadId: vi.fn(),
+    setActiveReplyId: vi.fn(),
     mutationSpies: {} as Record<string, ReturnType<typeof vi.fn>>,
     refetchQueries: vi.fn(() => Promise.resolve(undefined)),
     invalidateQueries: vi.fn(() => Promise.resolve(undefined)),
+    setQueriesData: vi.fn(),
     toast,
     capture: vi.fn(),
     moveThreadsTo: vi.fn(() => Promise.resolve(undefined)),
@@ -45,8 +47,11 @@ vi.mock('jotai', async (orig) => ({
 }));
 vi.mock('@/store/backgroundQueue', () => ({ backgroundQueueAtom: { __bg: true } }));
 vi.mock('nuqs', () => ({
-  useQueryState: (key: string) =>
-    key === 'threadId' ? [h.threadId, h.setThreadId] : [null, () => {}],
+  useQueryState: (key: string) => {
+    if (key === 'threadId') return [h.threadId, h.setThreadId];
+    if (key === 'activeReplyId') return [null, h.setActiveReplyId];
+    return [null, () => {}];
+  },
 }));
 vi.mock('@/components/mail/use-mail', () => ({
   useMail: () => [{ bulkSelected: [] }, h.setMail],
@@ -61,6 +66,8 @@ function trpcProxy(path = ''): any {
     get(_t, prop) {
       if (prop === 'mutationOptions') return () => ({ __key: path.replace(/^\./, '') });
       if (prop === 'queryKey') return () => [path];
+      if (prop === 'infiniteQueryKey')
+        return (input?: unknown) => [path, { input, type: 'infinite' }];
       return trpcProxy(`${path}.${String(prop)}`);
     },
     apply: () => ({}),
@@ -76,6 +83,7 @@ vi.mock('@tanstack/react-query', () => ({
   useQueryClient: () => ({
     refetchQueries: h.refetchQueries,
     invalidateQueries: h.invalidateQueries,
+    setQueriesData: h.setQueriesData,
   }),
 }));
 
@@ -164,7 +172,11 @@ describe('useOptimisticActions — markAsRead (silent = exécution directe)', ()
     // Retry ré-applique l'intention → une nouvelle action optimiste READ est créée
     h.addOptimisticAction.mockClear();
     opts.action.onClick();
-    expect(h.addOptimisticAction).toHaveBeenCalledWith({ type: 'READ', threadIds: ['t1'], read: true });
+    expect(h.addOptimisticAction).toHaveBeenCalledWith({
+      type: 'READ',
+      threadIds: ['t1'],
+      read: true,
+    });
     await flush(); // laisse retomber le doAction de la nouvelle tentative (échoue aussi)
   });
 });
@@ -282,11 +294,24 @@ describe('useOptimisticActions — variantes d’actions', () => {
     expect(h.capture).toHaveBeenCalledWith('email_unsnoozed');
   });
 
-  it('deleteDraft → drafts.delete + invalidation', async () => {
+  it('deleteDraft → drafts.delete + prune du cache listThreads + invalidation', async () => {
     hook().optimisticDeleteDraft('draft-1');
     await lastToastOpts().onAutoClose();
     await flush();
     expect(h.mutationSpies['drafts.delete']).toHaveBeenCalledWith({ id: 'draft-1' });
+    // CUA round 6 : la ligne est PURGÉE des pages en cache (identifiant exact) —
+    // pas de refetch immédiat de la vérité Gmail retardée. Portée (round 6b) :
+    // uniquement les infinite queries du dossier draft — jamais inbox/sent.
+    expect(h.setQueriesData).toHaveBeenCalledTimes(1);
+    expect(h.setQueriesData.mock.calls[0][0]).toEqual({
+      queryKey: ['.mail.listThreads', { input: { folder: 'draft' }, type: 'infinite' }],
+    });
+    const updater = h.setQueriesData.mock.calls[0][1] as (
+      data: { pages: { threads: { id: string }[] }[] } | undefined,
+    ) => unknown;
+    expect(updater({ pages: [{ threads: [{ id: 'draft-1' }, { id: 'autre' }] }] })).toEqual({
+      pages: [{ threads: [{ id: 'autre' }] }],
+    });
     expect(h.invalidateQueries).toHaveBeenCalled();
     expect(h.capture).toHaveBeenCalledWith('draft_deleted');
   });
@@ -307,5 +332,32 @@ describe('useOptimisticActions — undoLastAction', () => {
 
   it('no-op quand il n’y a aucune dernière action', () => {
     expect(() => hook().undoLastAction()).not.toThrow();
+  });
+});
+
+describe('optimisticMoveThreadsTo — keepThreadOpen (CUA 2026-07-30, échec 4)', () => {
+  it('fil ouvert archivé sans option → la vue se ferme (comportement historique)', () => {
+    h.threadId = 't1';
+    const a = hook();
+    a.optimisticMoveThreadsTo(['t1'], 'inbox', 'archive');
+    expect(h.setThreadId).toHaveBeenCalledWith(null);
+    expect(h.setActiveReplyId).toHaveBeenCalledWith(null);
+  });
+
+  it('keepThreadOpen : pas de fermeture — la navigation pose le threadId suivant elle-même', () => {
+    h.threadId = 't1';
+    const a = hook();
+    a.optimisticMoveThreadsTo(['t1'], 'inbox', 'archive', { keepThreadOpen: true });
+    expect(h.setThreadId).not.toHaveBeenCalled();
+    // Le reply inline du fil archivé est bien nettoyé malgré la vue tenue ouverte.
+    expect(h.setActiveReplyId).toHaveBeenCalledWith(null);
+  });
+
+  it('fil ouvert non concerné par le move → la vue reste intacte', () => {
+    h.threadId = 'autre';
+    const a = hook();
+    a.optimisticMoveThreadsTo(['t1'], 'inbox', 'archive');
+    expect(h.setThreadId).not.toHaveBeenCalled();
+    expect(h.setActiveReplyId).not.toHaveBeenCalled();
   });
 });

@@ -1,5 +1,6 @@
-import { lazy, Suspense } from 'react';
+import { memoizedImport } from '@/lib/memoized-import';
 import { Loader2 } from 'lucide-react';
+import { lazy, Suspense } from 'react';
 
 import { ThreadEmptyState } from './thread-display.empty-state';
 
@@ -7,9 +8,17 @@ import { ThreadEmptyState } from './thread-display.empty-state';
 // mail.tsx (which keeps only the calls, staying under its LOC ratchet budget). Both are
 // dynamic-imported and only rendered when their query/thread state is truthy (a thread is open /
 // pricing is open). Network behaviour (no fetch until interaction) is verified separately.
-const ThreadDisplay = lazy(() =>
-  import('@/components/mail/thread-display').then((m) => ({ default: m.ThreadDisplay })),
-);
+const loadThreadDisplay = memoizedImport(() => import('@/components/mail/thread-display'));
+const ThreadDisplay = lazy(() => loadThreadDisplay().then((m) => ({ default: m.ThreadDisplay })));
+
+// CUA 2026-07-31 : le shell optimiste d'ouverture (selectThreadShellRow) vit DANS
+// ce chunk lazy — au premier fil de la session, sans warm, l'écran n'a que le
+// spinner du fallback pendant le téléchargement du reader. Réchauffé à l'idle
+// depuis app-sidebar (même cadence que preloadComposeSurface). memoizedImport
+// se réarme sur rejet : un échec réseau transitoire ne pin pas le warm.
+export function preloadThreadReader() {
+  void loadThreadDisplay();
+}
 
 const PricingDialog = lazy(() =>
   import('../ui/pricing-dialog').then((m) => ({ default: m.PricingDialog })),
@@ -68,4 +77,3 @@ export function PricingDialogSurface({ open }: { open: boolean }) {
     </Suspense>
   );
 }
-

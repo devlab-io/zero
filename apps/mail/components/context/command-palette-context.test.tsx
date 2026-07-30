@@ -135,16 +135,30 @@ describe('CommandPaletteProvider — split contracts (#44)', () => {
     expect(h.dialogMounts).toBe(0); // cold: palette dialog chunk not rendered
 
     pressKey('k', { metaKey: true });
-    await act(async () => {}); // flush the lazy import + suspense
-    expect(h.dialogMounts).toBeGreaterThan(0); // opened → child rendered
+    // Same contract, robust flush: the ⌘K keystroke now ALSO warms the real views/filter
+    // chunks (CUA 2026-07-30), and vitest serializes their (slow, ~800 ms) on-demand
+    // transforms with the mocked dialog import — one microtask round is no longer enough.
+    // Production fetches are parallel; only the test needs to wait deterministically.
+    await vi.waitFor(
+      async () => {
+        await act(async () => {});
+        expect(h.dialogMounts).toBeGreaterThan(0); // opened → child rendered
+      },
+      { timeout: 5000 },
+    );
 
     // Ctrl+K also works (toggle back closed → dialog unmounts, no new mount required)
     pressKey('k', { ctrlKey: true });
     await act(async () => {});
     // reopening mounts again
     pressKey('k', { ctrlKey: true });
-    await act(async () => {});
-    expect(h.dialogMounts).toBeGreaterThanOrEqual(2);
+    await vi.waitFor(
+      async () => {
+        await act(async () => {});
+        expect(h.dialogMounts).toBeGreaterThanOrEqual(2);
+      },
+      { timeout: 5000 },
+    );
   });
 
   it('contract: storage-init restores persisted filters into context + search value', () => {

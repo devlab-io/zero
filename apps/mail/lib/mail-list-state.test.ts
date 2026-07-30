@@ -50,4 +50,16 @@ describe('selectMailListState', () => {
     });
     expect(state).not.toBe('empty');
   });
+
+  // CUA 2026-07-30 (obs 3) : pendant une recherche, la query passe sur une nouvelle
+  // clé avec placeholderData (lignes de la vue précédente, isLoading=false côté
+  // react-query). Le vécu observé avant correctif était un écran-spinner bloquant de
+  // 2,24 s ; le contrat est désormais : lignes placeholder présentes → JAMAIS
+  // 'loading' — la vue reste rendue, le bandeau non bloquant de mail-list porte
+  // l'état « recherche en cours » (isTransitionPending && isFiltering).
+  it('search-in-flight with previous rows as placeholder stays ready (no blocking spinner)', () => {
+    expect(
+      selectMailListState({ itemCount: 15, isLoading: false, isError: false, isOffline: false }),
+    ).toBe('ready');
+  });
 });

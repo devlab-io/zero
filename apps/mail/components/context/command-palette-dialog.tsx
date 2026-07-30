@@ -1,10 +1,20 @@
-import { log } from '@/lib/log';
-import { Clock, Loader2, Mail, Paperclip, Star } from 'lucide-react';
+import {
+  PALETTE_COMMANDS,
+  type ActiveFilter,
+  type CommandGroupData,
+  type CommandItem,
+  type CommandView,
+  type PaletteCommandTarget,
+} from './command-registry';
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
-import { CommandDialog } from '@/components/ui/command';
+import { getRecentSearches, saveRecentSearch } from './command-palette-storage';
 import { getMainSearchTerm, parseNaturalLanguageSearch } from '@/lib/utils';
 import { DialogDescription, DialogTitle } from '@/components/ui/dialog';
+import { type CommandPaletteViewProps } from './command-palette-views';
+import { Clock, Loader2, Mail, Paperclip, Star } from 'lucide-react';
+import { isSimpleLiteralSearch } from '@/lib/search-intent';
 import { useSearchValue } from '@/hooks/use-search-value';
+import { CommandDialog } from '@/components/ui/command';
 import { useLocation, useNavigate } from 'react-router';
 import { navigationConfig } from '@/config/navigation';
 import { useTRPC } from '@/providers/query-provider';
@@ -15,17 +25,8 @@ import { format, subDays } from 'date-fns';
 import { VisuallyHidden } from 'radix-ui';
 import { m } from '@/paraglide/messages';
 import { useQueryState } from 'nuqs';
+import { log } from '@/lib/log';
 import { toast } from 'sonner';
-import {
-  PALETTE_COMMANDS,
-  type ActiveFilter,
-  type CommandGroupData,
-  type CommandItem,
-  type CommandView,
-  type PaletteCommandTarget,
-} from './command-registry';
-import { getRecentSearches, saveRecentSearch } from './command-palette-storage';
-import { type CommandPaletteViewProps } from './command-palette-views';
 
 // #44 (gate A8): the heavy command-palette body — its state, command/search logic, cmdk
 // CommandDialog and views (with the react-day-picker calendar) — lives here and is dynamic-imported
@@ -258,12 +259,20 @@ export function CommandPaletteDialog({
   const handleSearch = useCallback(
     async (query: string, useNaturalLanguage = true) => {
       if (isProcessing) return;
+
+      // CUA 2026-07-30 : coût amont mesuré — ce chemin appelait TOUJOURS
+      // ai.generateSearchQuery (aller-retour OpenAI) avant setSearchValue, même
+      // pour une phrase littérale comme « Banque de Tahiti ». Bypass
+      // déterministe : une requête littérale simple part immédiatement en
+      // recherche exacte (préview projection + Gmail authoritatif) ; l'IA reste
+      // en place pour la vraie intention naturelle, les dates et les opérateurs.
+      const effectiveNaturalLanguage = useNaturalLanguage && !isSimpleLiteralSearch(query);
       setIsProcessing(true);
 
       try {
         let finalQuery = query;
 
-        if (useNaturalLanguage) {
+        if (effectiveNaturalLanguage) {
           const result = await generateSearchQuery({ query });
           finalQuery = result.query;
 
@@ -313,7 +322,7 @@ export function CommandPaletteDialog({
           value: finalQuery,
           highlight: getMainSearchTerm(query),
           folder: searchValue.folder,
-          isAISearching: useNaturalLanguage,
+          isAISearching: effectiveNaturalLanguage,
           isLoading: true,
         });
 
@@ -329,7 +338,15 @@ export function CommandPaletteDialog({
         setIsProcessing(false);
       }
     },
-    [activeFilters, searchValue.folder, isProcessing, addFilter, generateSearchQuery, setOpen, setSearchValue],
+    [
+      activeFilters,
+      searchValue.folder,
+      isProcessing,
+      addFilter,
+      generateSearchQuery,
+      setOpen,
+      setSearchValue,
+    ],
   );
 
   const quickSearchResults = useMemo(() => {

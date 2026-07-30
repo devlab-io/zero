@@ -1,3 +1,8 @@
+import {
+  isDraftNotFoundError,
+  resolveDraftForDeletion,
+  threadHasOtherDrafts,
+} from './draft-deletion';
 import { sanitizeTipTapHtml } from '../sanitize-tip-tap-html';
 import { parseMessage, parseOutgoing } from './google-parse';
 import type { GmailTransport } from './google-transport';
@@ -41,14 +46,82 @@ export class GmailDrafts {
   public deleteDraft(draftId: string) {
     return this.t.withErrorHandler(
       'deleteDraft',
-      async () => {
+      async (): Promise<{
+        messageId: string | null;
+        threadId: string | null;
+        threadGone: boolean;
+        hasOtherDrafts: boolean;
+      }> => {
+        // CUA rounds 5-6 (échec B) : l'id fourni peut être un id de MESSAGE de
+        // brouillon ou un id de brouillon périmé — drafts.delete répondait 404
+        // en silence. Résolution d'identifiants AVANT suppression (drafts.get,
+        // puis remapping exact draft.id/message.id via drafts.list — jamais un
+        // autre brouillon), succès idempotent si le brouillon n'existe plus,
+        // puis relevé de l'état du fil pour que l'appelant (ZeroDriver) nettoie
+        // la projection locale avec des identifiants exacts.
+        let resolvedId: string | null = draftId;
+        let messageId: string | null = null;
+        let threadId: string | null = null;
+
+        try {
+          const got = await this.t.execute((gmail) =>
+            gmail.users.drafts.get({
+              userId: 'me',
+              id: draftId,
+              format: 'minimal',
+              quotaUser: this.t.getQuotaUser(),
+            }),
+          );
+          messageId = got.data.message?.id ?? null;
+          threadId = got.data.message?.threadId ?? null;
+        } catch (error) {
+          if (!isDraftNotFoundError(error)) throw error;
+          const res = await this.t.execute((gmail) =>
+            gmail.users.drafts.list({
+              userId: 'me',
+              maxResults: 100,
+            }),
+          );
+          resolvedId = resolveDraftForDeletion(res.data.drafts ?? [], draftId);
+          if (!resolvedId) {
+            // déjà supprimé — idempotent
+            return { messageId: null, threadId: null, threadGone: false, hasOtherDrafts: false };
+          }
+          const entry = (res.data.drafts ?? []).find((d) => d.id === resolvedId);
+          messageId = entry?.message?.id ?? null;
+          threadId = (entry?.message as { threadId?: string } | undefined)?.threadId ?? null;
+        }
+
         await this.t.execute((gmail) =>
           gmail.users.drafts.delete({
             userId: 'me',
-            id: draftId,
+            id: resolvedId,
             quotaUser: this.t.getQuotaUser(),
           }),
         );
+
+        if (!threadId) return { messageId, threadId, threadGone: false, hasOtherDrafts: false };
+
+        try {
+          const thread = await this.t.execute((gmail) =>
+            gmail.users.threads.get({
+              userId: 'me',
+              id: threadId,
+              format: 'minimal',
+              quotaUser: this.t.getQuotaUser(),
+            }),
+          );
+          return {
+            messageId,
+            threadId,
+            threadGone: false,
+            hasOtherDrafts: threadHasOtherDrafts(thread.data.messages ?? [], messageId),
+          };
+        } catch (error) {
+          if (!isDraftNotFoundError(error)) throw error;
+          // Le fil n'existe plus : le brouillon supprimé était son seul message.
+          return { messageId, threadId, threadGone: true, hasOtherDrafts: false };
+        }
       },
       { draftId },
     );

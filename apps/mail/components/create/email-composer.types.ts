@@ -31,6 +31,12 @@ export interface EmailComposerProps {
     scheduleAt?: string;
   }) => Promise<void>;
   onClose?: () => void;
+  /**
+   * Fermeture d'un composer VIDE (Escape / croix) : le brouillon serveur
+   * correspondant est un abandon — l'hôte peut le supprimer (CUA round 4,
+   * résurrection du « a » via latestDraft). Appelé AVANT onClose.
+   */
+  onAbandonEmpty?: () => void;
   className?: string;
   autofocus?: boolean;
   settingsLoading?: boolean;

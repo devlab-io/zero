@@ -22,8 +22,6 @@ import { logger } from '../logger';
 import * as he from 'he';
 
 export class OutlookMailManager implements MailManager {
-  // Kept as a promise: the graph client SDK is loaded lazily so it stays out of the
-  // isolate's static import graph (Outlook connections only).
   private graphClient: Promise<Client>;
 
   constructor(public config: ManagerConfig) {
@@ -33,7 +31,6 @@ export class OutlookMailManager implements MailManager {
         body: {
           providerId: 'microsoft',
           userId: config.auth.userId,
-          // accountId: config.auth.accountId,
         },
         headers: c.req.raw.headers,
       });
@@ -79,7 +76,6 @@ export class OutlookMailManager implements MailManager {
       { messageId, attachmentId },
     );
   }
-  // MailManager methods the Gmail driver implements but the Outlook driver does not (yet).
   public getRawEmail(_id: string): Promise<string> {
     return Promise.reject(new Error('getRawEmail not implemented for Outlook driver'));
   }
@@ -585,6 +581,10 @@ export class OutlookMailManager implements MailManager {
       'deleteDraft',
       async () => {
         await (await this.graphClient).api(`/me/messages/${draftId}`).delete();
+        // Outlook : les brouillons sont des messages, l'id fourni est déjà le
+        // bon — pas d'état de fil à relever pour la projection (contrat CUA
+        // round 6 porté par le driver Gmail).
+        return { messageId: draftId, threadId: null, threadGone: false, hasOtherDrafts: false };
       },
       { draftId },
     );

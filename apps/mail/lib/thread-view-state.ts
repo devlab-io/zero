@@ -8,6 +8,22 @@
 
 export type ThreadViewState = 'no-selection' | 'loading' | 'error' | 'ready';
 
+/**
+ * Shell optimiste d'ouverture de fil (CUA 2026-07-30, échecs 3-4) : pendant le
+ * fetch `openThread` (~900 ms à froid), la ligne de LISTE porte déjà
+ * sujet/expéditeur/date (projection). Ce sélecteur choisit la ligne à peindre
+ * au-dessus du squelette — uniquement si elle est riche (un sujet présent) :
+ * une ligne mince (recherche Gmail) n'apporte rien → squelette seul, comme avant.
+ */
+export function selectThreadShellRow<T extends { id: string; subject?: string }>(
+  items: T[],
+  threadId: string | null,
+): T | undefined {
+  if (!threadId) return undefined;
+  const row = items.find((item) => item.id === threadId);
+  return row?.subject ? row : undefined;
+}
+
 export interface ThreadViewStateInput {
   /** A thread is selected (threadId present). */
   hasSelection: boolean;

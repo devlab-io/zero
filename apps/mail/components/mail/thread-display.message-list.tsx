@@ -39,9 +39,18 @@ export const MessageList = ({
         const isReplyingToThisMessage = mode && activeReplyId === message.id;
 
         return (
+          // CUA 2026-07-30 (obs 6) : le clic sur un fil coûtait ~426 ms de frame de
+          // présentation (layout/paint, 1 ms de JS). content-visibility:auto laisse le
+          // navigateur sauter layout+paint des messages hors viewport au premier rendu
+          // du fil ; contain-intrinsic-size réserve une hauteur stable pour éviter les
+          // sauts d'ancre de scroll. Les corps de mail sont sanitisés/isolés — pas de
+          // descendant `position:fixed` à repositionner.
           <div
             key={message.id}
-            className={cn('duration-200', index > 0 && 'border-border border-t')}
+            className={cn(
+              'duration-200 [contain-intrinsic-size:auto_500px] [content-visibility:auto]',
+              index > 0 && 'border-border border-t',
+            )}
           >
             <MailDisplay
               emailData={message}

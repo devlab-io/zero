@@ -1,20 +1,20 @@
-import { log } from '@/lib/log';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createDraftSaveLifecycle } from '@/lib/draft-save-lifecycle';
+import { resolveComposerEscape } from '@/lib/composer-escape';
+import { useEmailAliases } from '@/hooks/use-email-aliases';
 import { ScheduleSendPicker } from './schedule-send-picker';
 import { Command, Loader, Plus, Type } from 'lucide-react';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip';
-import { CurvedArrow, Sparkles } from '../icons/icons';
-import { useEmailAliases } from '@/hooks/use-email-aliases';
 import useComposeEditor from '@/hooks/use-compose-editor';
-import { getGitHubEmojis } from '@/lib/emoji-data';
-import { AnimatePresence } from 'motion/react';
+import { CurvedArrow, Sparkles } from '../icons/icons';
 import { zodResolver } from '@/lib/zod-resolver';
+import { AnimatePresence } from 'motion/react';
+import { log } from '@/lib/log';
 
 import { useTRPC } from '@/providers/query-provider';
 import { useMutation } from '@tanstack/react-query';
 import { useSettings } from '@/hooks/use-settings';
 
-import { cn } from '@/lib/utils';
 import { useThread } from '@/hooks/use-threads';
 import { serializeFiles } from '@/lib/schemas';
 import { Input } from '@/components/ui/input';
@@ -24,31 +24,34 @@ import { Button } from '../ui/button';
 import { useQueryState } from 'nuqs';
 import { Toolbar } from './toolbar';
 import pluralize from 'pluralize';
+import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { z } from 'zod';
 
-import { compressImages } from '@/lib/image-compression';
-import type { ImageQuality } from '@/lib/image-compression';
-import { TemplateButton } from './template-button';
-import { ComposerHeader } from './email-composer.fields';
-import { ComposerAttachments } from './email-composer.attachments';
-import { ComposerDialogs } from './email-composer.dialogs';
-import { ContentPreview } from './email-composer.content-preview';
 import {
   buildThreadContent,
   schema,
   type EmailComposerProps,
   type ThreadContent,
 } from './email-composer.types';
+import {
+  attachmentKeywords,
+  processComposerAttachments,
+  replaceEmojiShortcodes,
+} from './email-composer.helpers';
+import { useComposerDraftPersistence } from '@/hooks/use-composer-draft-persistence';
 // Issue #32 — send-and-archive (mod+shift+Enter): the editor has no Mod-Shift-Enter
 // keymap, so it is bound here with useHotkeys and archives the open thread after send.
 import { useOptimisticActions } from '@/hooks/use-optimistic-actions';
+import { ComposerAttachments } from './email-composer.attachments';
+import { ContentPreview } from './email-composer.content-preview';
 import { computeArchiveAfterSend } from './send-and-archive';
-import { useComposerDraftPersistence } from '@/hooks/use-composer-draft-persistence';
+import type { ImageQuality } from '@/lib/image-compression';
+import { ComposerDialogs } from './email-composer.dialogs';
+import { ComposerHeader } from './email-composer.fields';
+import { TemplateButton } from './template-button';
 import { useHotkeys } from 'react-hotkeys-hook';
 import { useParams } from 'react-router';
-
-const shortcodeRegex = /:([a-zA-Z0-9_+-]+):/g;
 
 export function EmailComposer({
   initialTo = [],
@@ -59,6 +62,7 @@ export function EmailComposer({
   initialAttachments = [],
   onSendEmail,
   onClose,
+  onAbandonEmpty,
   className,
   autofocus = false,
   settingsLoading = false,
@@ -73,6 +77,12 @@ export function EmailComposer({
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [messageLength, setMessageLength] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  /** Racine du composer — périmètre du Escape-ferme-un-reply-vide (CUA échec 6). */
+  const rootRef = useRef<HTMLDivElement>(null);
+  // Course sauvegarde/fermeture (CUA round 4, échec 2) : après fermeture, plus
+  // aucun démarrage de sauvegarde ni application de résultat en vol (setDraftId
+  // réécrivait l'URL purgée). Une instance par montage du composer.
+  const saveLifecycle = useRef(createDraftSaveLifecycle()).current;
   const [threadId] = useQueryState('threadId');
   const [isComposeOpen, setIsComposeOpen] = useQueryState('isComposeOpen');
   const { data: emailData } = useThread(threadId ?? null);
@@ -111,80 +121,15 @@ export function EmailComposer({
     quality: ImageQuality,
     showToast: boolean = false,
   ) => {
-    if (filesToProcess.length === 0) {
-      setValue('attachments', [], { shouldDirty: true });
-      return;
-    }
-
-    try {
-      const compressedFiles = await compressImages(filesToProcess, {
-        quality,
-        maxWidth: 1920,
-        maxHeight: 1080,
-      });
-
-      if (compressedFiles.length !== filesToProcess.length) {
-        log.warn('Compressed files array length mismatch:', {
-          original: filesToProcess.length,
-          compressed: compressedFiles.length,
-        });
-        setValue('attachments', filesToProcess, { shouldDirty: true });
-        setHasUnsavedChanges(true);
-        if (showToast) {
-          toast.error('Image compression failed, using original files');
-        }
-        return;
-      }
-
-      setValue('attachments', compressedFiles, { shouldDirty: true });
-      setHasUnsavedChanges(true);
-
-      if (showToast && quality !== 'original') {
-        let totalOriginalSize = 0;
-        let totalCompressedSize = 0;
-
-        const imageFilesExist = filesToProcess.some((f) => f.type.startsWith('image/'));
-
-        if (imageFilesExist) {
-          filesToProcess.forEach((originalFile, index) => {
-            if (originalFile.type.startsWith('image/') && compressedFiles[index]) {
-              totalOriginalSize += originalFile.size;
-              totalCompressedSize += compressedFiles[index].size;
-            }
-          });
-
-          if (totalOriginalSize > totalCompressedSize) {
-            const savings = (
-              ((totalOriginalSize - totalCompressedSize) / totalOriginalSize) *
-              100
-            ).toFixed(1);
-            if (parseFloat(savings) > 0.1) {
-              toast.success(`Images compressed: ${savings}% smaller`);
-            }
-          }
-        }
-      }
-    } catch (error) {
-      log.error('Error compressing images:', error);
-      setValue('attachments', filesToProcess, { shouldDirty: true });
-      setHasUnsavedChanges(true);
-      if (showToast) {
-        toast.error('Image compression failed, using original files');
-      }
-    }
+    const processedFiles = await processComposerAttachments(filesToProcess, quality, showToast);
+    setValue('attachments', processedFiles, { shouldDirty: true });
+    if (filesToProcess.length > 0) setHasUnsavedChanges(true);
   };
-
-  const attachmentKeywords = [
-    'attachment',
-    'attached',
-    'attaching',
-    'see the file',
-    'see the files',
-  ];
 
   const trpc = useTRPC();
   const { mutateAsync: aiCompose } = useMutation(trpc.ai.compose.mutationOptions());
   const { mutateAsync: createDraft } = useMutation(trpc.drafts.create.mutationOptions());
+  const { mutateAsync: deleteDraftById } = useMutation(trpc.drafts.delete.mutationOptions());
   const { mutateAsync: generateEmailSubject } = useMutation(
     trpc.ai.generateEmailSubject.mutationOptions(),
   );
@@ -286,18 +231,35 @@ export function EmailComposer({
 
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        const hasContent = editor?.getText()?.trim().length > 0;
-        if (hasContent && !draftId) {
-          e.preventDefault();
-          e.stopPropagation();
+        // CUA 2026-07-30 (échec 6) : reply inline vide — Escape restait sans
+        // effet (mode=replyAll conservé, Send visible). Décision extraite dans
+        // lib/composer-escape.ts : vide → fermeture sans brouillon (bornée au
+        // focus intérieur), non-vide → confirmation de sortie.
+        const decision = resolveComposerEscape({
+          hasContent: (editor?.getText()?.trim().length ?? 0) > 0,
+          hasDraftId: !!draftId,
+          targetInsideComposer: !!rootRef.current?.contains(e.target as Node),
+        });
+        if (decision === 'ignore') return;
+        e.preventDefault();
+        e.stopPropagation();
+        if (decision === 'confirm') {
           setShowLeaveConfirmation(true);
+        } else {
+          // Un reply a `to` prérempli : la persistance locale a donc déjà écrit
+          // un snapshot. Purge (comme confirmLeave), sinon il ressusciterait au
+          // prochain reply du même fil alors que l'intention était d'abandonner.
+          saveLifecycle.markClosed({ abandonedEmpty: true });
+          clearDraftSnapshot();
+          onAbandonEmpty?.();
+          onClose?.();
         }
       }
     };
 
     document.addEventListener('keydown', handleKeyDown, true); // Use capture phase
     return () => document.removeEventListener('keydown', handleKeyDown, true);
-  }, [editor, draftId]);
+  }, [editor, draftId, onClose, onAbandonEmpty, clearDraftSnapshot, saveLifecycle]);
 
   const proceedWithSend = async () => {
     try {
@@ -415,6 +377,7 @@ export function EmailComposer({
   const saveDraft = async () => {
     const values = getValues();
 
+    if (!saveLifecycle.canStartSave()) return;
     if (!hasUnsavedChanges) return;
     const messageText = editor.getText();
 
@@ -439,6 +402,16 @@ export function EmailComposer({
 
       const response = await createDraft(draftData);
 
+      // Résultat arrivé après la fermeture : ignoré — ne réécrit jamais l'URL
+      // purgée (résurrection mesurée en CUA round 4). Si la fermeture était
+      // l'abandon d'un composer vide, le brouillon créé en vol est supprimé
+      // (compensation) : aucun orphelin ne ressème le prochain reply.
+      if (!saveLifecycle.canApplySaveResult()) {
+        if (saveLifecycle.wasAbandonedEmpty() && response?.id) {
+          void deleteDraftById({ id: response.id }).catch(() => {});
+        }
+        return;
+      }
       if (response?.id && response.id !== draftId) {
         setDraftId(response.id);
       }
@@ -479,12 +452,20 @@ export function EmailComposer({
     if (hasContent) {
       setShowLeaveConfirmation(true);
     } else {
+      // Parité avec la branche Escape-close : un composer vide abandonné purge
+      // aussi son snapshot local (`to` prérempli suffisait à le faire écrire).
+      saveLifecycle.markClosed({ abandonedEmpty: true });
+      clearDraftSnapshot();
+      onAbandonEmpty?.();
       onClose?.();
     }
   };
 
   const confirmLeave = () => {
     setShowLeaveConfirmation(false);
+    // Le brouillon serveur déjà créé est conservé (l'utilisateur part avec du
+    // contenu), mais aucune sauvegarde tardive ne doit réécrire l'URL purgée.
+    saveLifecycle.markClosed();
     clearDraftSnapshot();
     onClose?.();
   };
@@ -555,7 +536,6 @@ export function EmailComposer({
   //   await handleAiGenerate();
   // });
 
-
   // keep fromEmail in sync when settings or aliases load afterwards
   useEffect(() => {
     const preferred =
@@ -581,18 +561,9 @@ export function EmailComposer({
     setIsScheduleValid(valid);
   }, []);
 
-  const replaceEmojiShortcodes = (text: string): string => {
-    if (!text.trim().length || !text.includes(':')) return text;
-    return text.replace(shortcodeRegex, (match, shortcode): string => {
-      const emoji = getGitHubEmojis().find(
-        (e) => e.shortcodes.includes(shortcode) || e.name === shortcode,
-      );
-      return emoji?.emoji ?? match;
-    });
-  };
-
   return (
     <div
+      ref={rootRef}
       className={cn(
         'flex max-h-[500px] w-full max-w-[750px] flex-col overflow-hidden rounded-2xl bg-[#FAFAFA] shadow-sm dark:bg-[#202020]',
         className,
@@ -648,7 +619,11 @@ export function EmailComposer({
         <div className="flex flex-col items-start justify-start gap-2">
           {toggleToolbar && <Toolbar editor={editor} />}
           <div className="flex items-center justify-start gap-2">
-            <Button size={'xs'} onClick={handleSend} disabled={isLoading || settingsLoading || !isScheduleValid}>
+            <Button
+              size={'xs'}
+              onClick={handleSend}
+              disabled={isLoading || settingsLoading || !isScheduleValid}
+            >
               <div className="flex items-center justify-center">
                 <div className="text-center text-sm leading-none text-white dark:text-black">
                   <span>Send </span>
@@ -664,7 +639,12 @@ export function EmailComposer({
               onChange={handleScheduleChange}
               onValidityChange={handleScheduleValidityChange}
             />
-            <Button variant={'secondary'} size={'xs'} onClick={() => fileInputRef.current?.click()} className="bg-background border hover:bg-gray-50 dark:hover:bg-[#404040] transition-colors cursor-pointer">
+            <Button
+              variant={'secondary'}
+              size={'xs'}
+              onClick={() => fileInputRef.current?.click()}
+              className="bg-background cursor-pointer border transition-colors hover:bg-gray-50 dark:hover:bg-[#404040]"
+            >
               <Plus className="h-3 w-3 fill-[#9A9A9A]" />
               <span className="hidden px-0.5 text-sm md:block">Add</span>
             </Button>
@@ -707,7 +687,7 @@ export function EmailComposer({
                     variant="ghost"
                     size="icon"
                     onClick={() => setToggleToolbar(!toggleToolbar)}
-                    className={`h-auto w-auto rounded p-1.5 ${toggleToolbar ? 'bg-muted' : 'bg-background'} border hover:bg-gray-50 dark:hover:bg-[#404040] transition-colors cursor-pointer`}
+                    className={`h-auto w-auto rounded p-1.5 ${toggleToolbar ? 'bg-muted' : 'bg-background'} cursor-pointer border transition-colors hover:bg-gray-50 dark:hover:bg-[#404040]`}
                   >
                     <Type className="h-4 w-4" />
                   </Button>
@@ -744,7 +724,7 @@ export function EmailComposer({
             <Button
               size={'xs'}
               variant={'ghost'}
-              className="border border-[#8B5CF6] cursor-pointer"
+              className="cursor-pointer border border-[#8B5CF6]"
               onClick={async () => {
                 if (!subjectInput.trim()) {
                   await handleGenerateSubject();
