@@ -64,13 +64,11 @@ bornée ~6 min au pire (équivalente à l'existant cookie-cache seul).
 ## Configuration Cloudflare à appliquer (Codex)
 
 ```sh
-# 1. Créer le namespace dédié (compte devlab-tahiti)
-wrangler kv namespace create auth-cache-staging
+# Déjà créés le 2026-07-30 (compte devlab-tahiti) :
+# - staging-auth-cache-staging         → id 02141f3155a44783990d166c91e917c0
+# - staging-auth-cache-staging_preview → preview_id 7631add107bc41268ad0959e9176b731
 
-# 2. Reporter l'id retourné dans apps/server/wrangler.jsonc, env "staging",
-#    binding AUTH_CACHE (remplacer les deux placeholders id/preview_id).
-
-# 3. Déployer zero-server en staging. Aucun secret à créer : le binding suffit.
+# Déployer zero-server en staging. Aucun secret à créer : le binding suffit.
 ```
 
 - L'env `local` a déjà son binding (miniflare simule, id non contacté).
