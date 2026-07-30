@@ -6,14 +6,15 @@ import {
   CommandItem,
   CommandList,
 } from '@/components/ui/command';
+import { disarmOpeningKeyGuard, shouldSuppressOpeningKey } from '@/lib/hotkeys/opening-key-guard';
 import { availableMoveDestinations, isLabelOnThread } from './label-move-picker.logic';
 import { useOptimisticActions } from '@/hooks/use-optimistic-actions';
 import useMoveTo from '@/hooks/driver/use-move-to';
-import { useLabels } from '@/hooks/use-labels';
 import { useThread } from '@/hooks/use-threads';
+import { useLabels } from '@/hooks/use-labels';
 import { useParams } from 'react-router';
-import { useQueryState } from 'nuqs';
 import { Check } from 'lucide-react';
+import { useQueryState } from 'nuqs';
 import { useMemo } from 'react';
 
 /**
@@ -42,17 +43,28 @@ export function LabelMovePicker() {
   const isOpen = (picker === 'labels' || picker === 'move') && !!threadId;
   const close = () => setPicker(null);
 
+  // CUA round 3 : défense en profondeur contre l'écho de la touche d'ouverture
+  // (l/v) dans le combo — une vraie frappe émet son keydown ici et désarme la
+  // garde ; l'écho arrive sans keydown et est absorbé au beforeinput.
+  const guardProps = {
+    onKeyDownCapture: () => disarmOpeningKeyGuard(),
+    onBeforeInputCapture: (event: React.FormEvent) => {
+      const data = (event.nativeEvent as InputEvent).data;
+      if (data && shouldSuppressOpeningKey(data)) event.preventDefault();
+    },
+  };
+
   if (!isOpen || !threadId) return null;
 
   if (picker === 'move') {
     return (
       <CommandDialog open onOpenChange={(next) => !next && close()}>
-        <CommandInput placeholder="Move to…" />
-        <CommandList>
-          <CommandEmpty>No destinations.</CommandEmpty>
-          <CommandGroup heading="Move to">
-            {availableMoveDestinations(folder).map(
-              (destination) => (
+        <div {...guardProps}>
+          <CommandInput placeholder="Move to…" />
+          <CommandList>
+            <CommandEmpty>No destinations.</CommandEmpty>
+            <CommandGroup heading="Move to">
+              {availableMoveDestinations(folder).map((destination) => (
                 <CommandItem
                   key={destination.id}
                   value={destination.label}
@@ -67,35 +79,37 @@ export function LabelMovePicker() {
                 >
                   {destination.label}
                 </CommandItem>
-              ),
-            )}
-          </CommandGroup>
-        </CommandList>
+              ))}
+            </CommandGroup>
+          </CommandList>
+        </div>
       </CommandDialog>
     );
   }
 
   return (
     <CommandDialog open onOpenChange={(next) => !next && close()}>
-      <CommandInput placeholder="Toggle a label…" />
-      <CommandList>
-        <CommandEmpty>No labels.</CommandEmpty>
-        <CommandGroup heading="Labels">
-          {userLabels.map((label) => {
-            const isOn = isLabelOnThread(threadLabelIds, label.id);
-            return (
-              <CommandItem
-                key={label.id}
-                value={label.name}
-                onSelect={() => optimisticToggleLabel([threadId], label.id, !isOn)}
-              >
-                <Check className={`mr-2 h-4 w-4 ${isOn ? 'opacity-100' : 'opacity-0'}`} />
-                {label.name}
-              </CommandItem>
-            );
-          })}
-        </CommandGroup>
-      </CommandList>
+      <div {...guardProps}>
+        <CommandInput placeholder="Toggle a label…" />
+        <CommandList>
+          <CommandEmpty>No labels.</CommandEmpty>
+          <CommandGroup heading="Labels">
+            {userLabels.map((label) => {
+              const isOn = isLabelOnThread(threadLabelIds, label.id);
+              return (
+                <CommandItem
+                  key={label.id}
+                  value={label.name}
+                  onSelect={() => optimisticToggleLabel([threadId], label.id, !isOn)}
+                >
+                  <Check className={`mr-2 h-4 w-4 ${isOn ? 'opacity-100' : 'opacity-0'}`} />
+                  {label.name}
+                </CommandItem>
+              );
+            })}
+          </CommandGroup>
+        </CommandList>
+      </div>
     </CommandDialog>
   );
 }

@@ -1,21 +1,22 @@
 import { useOptimisticActions } from '@/hooks/use-optimistic-actions';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { focusedIndexAtom } from '@/hooks/use-mail-navigation';
-import { MAILLIST_HANDLED_ACTIONS } from './handler-manifest';
 import { enhancedKeyboardShortcuts } from '@/config/shortcuts';
+import { MAILLIST_HANDLED_ACTIONS } from './handler-manifest';
 // import { useSearchValue } from '@/hooks/use-search-value';
 import {
   // useLocation,
   useParams,
 } from 'react-router';
-import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { armOpeningKeyGuard } from './opening-key-guard';
 import { useMail } from '@/components/mail/use-mail';
 // import { Categories } from '@/components/mail/mail';
 import { useShortcuts } from './use-hotkey-utils';
 import { useThreads } from '@/hooks/use-threads';
 // import { cleanSearchValue } from '@/lib/utils';
 import { m } from '@/paraglide/messages';
-import { useQueryState } from 'nuqs';
 import { useAtomValue } from 'jotai';
+import { useQueryState } from 'nuqs';
 import { toast } from 'sonner';
 
 // Space/shift+Space paging is NOT in this scope — it is imperative in the `list` scope
@@ -226,9 +227,20 @@ export function MailListHotkeys() {
     [getTargetIds, setMode, setThreadId],
   );
 
-  const replyToThread = useCallback(() => openTargetInMode('reply'), [openTargetInMode]);
-  const replyAllToThread = useCallback(() => openTargetInMode('replyAll'), [openTargetInMode]);
-  const forwardThread = useCallback(() => openTargetInMode('forward'), [openTargetInMode]);
+  // armOpeningKeyGuard : l'écho de la touche d'ouverture (r/a/f) ne doit pas
+  // atterrir dans le corps TipTap (CUA round 3, échec 2 — voir opening-key-guard).
+  const replyToThread = useCallback(() => {
+    armOpeningKeyGuard('r');
+    openTargetInMode('reply');
+  }, [openTargetInMode]);
+  const replyAllToThread = useCallback(() => {
+    armOpeningKeyGuard('a');
+    openTargetInMode('replyAll');
+  }, [openTargetInMode]);
+  const forwardThread = useCallback(() => {
+    armOpeningKeyGuard('f');
+    openTargetInMode('forward');
+  }, [openTargetInMode]);
 
   // Devlab: h = remind — snooze to tomorrow 08:00 (undo with mod+z, toast confirms).
   const remindThread = useCallback(() => {

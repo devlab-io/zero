@@ -497,6 +497,9 @@ export function EmailComposer({
     if (hasContent) {
       setShowLeaveConfirmation(true);
     } else {
+      // Parité avec la branche Escape-close : un composer vide abandonné purge
+      // aussi son snapshot local (`to` prérempli suffisait à le faire écrire).
+      clearDraftSnapshot();
       onClose?.();
     }
   };

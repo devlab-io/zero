@@ -1,4 +1,3 @@
-import { log } from '@/lib/log';
 import {
   EditorCommand,
   EditorCommandEmpty,
@@ -8,6 +7,8 @@ import {
   EditorRoot,
   type JSONContent,
 } from 'novel';
+import { disarmOpeningKeyGuard, shouldSuppressOpeningKey } from '@/lib/hotkeys/opening-key-guard';
+import { log } from '@/lib/log';
 
 import { suggestionItems } from '@/components/create/slash-command';
 import { defaultExtensions } from '@/components/create/extensions';
@@ -262,6 +263,10 @@ export default function Editor({
                 return false;
               },
               keydown: (view, event) => {
+                // Vraie frappe sur l'éditeur → la garde anti-écho se désarme
+                // (voir lib/hotkeys/opening-key-guard.ts) ; l'écho de la touche
+                // d'ouverture, lui, arrive sans keydown préalable.
+                disarmOpeningKeyGuard();
                 if (readOnly) return false;
                 if (event.key === 'Tab' && !event.shiftKey) {
                   if (onTab && onTab()) {
@@ -287,6 +292,12 @@ export default function Editor({
                 return false;
               },
             },
+            // CUA round 3 (échec 2) : l'écho de la touche d'ouverture (a/r/f)
+            // atterrissait dans le corps malgré le preventDefault du keydown.
+            // ProseMirror route toute insertion par ici — l'écho (même clé,
+            // fenêtre courte, aucun keydown éditeur préalable) est absorbé,
+            // la vraie saisie passe intacte.
+            handleTextInput: (_view, _from, _to, text) => shouldSuppressOpeningKey(text),
             handleDrop: (view, event, _slice, moved) => {
               if (readOnly) return false;
               return handleImageDrop(view, event, moved, (file) => {
