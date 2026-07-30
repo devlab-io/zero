@@ -1,5 +1,7 @@
 import { focusedIndexAtom, mailNavigationCommandAtom } from '@/hooks/use-mail-navigation';
+import { isTypingOrModalTarget, useShortcuts } from './use-hotkey-utils';
 import { useOptimisticActions } from '@/hooks/use-optimistic-actions';
+import { selectAdjacentThreadTarget } from '@/lib/thread-navigation';
 import { THREAD_DISPLAY_HANDLED_ACTIONS } from './handler-manifest';
 import { useReplyStatePurge } from '@/hooks/use-reply-state-purge';
 import { selectArchiveAdvanceTarget } from '@/lib/archive-advance';
@@ -9,10 +11,10 @@ import { useThread, useThreads } from '@/hooks/use-threads';
 import { armOpeningKeyGuard } from './opening-key-guard';
 import useMoveTo from '@/hooks/driver/use-move-to';
 import useDelete from '@/hooks/driver/use-delete';
-import { useShortcuts } from './use-hotkey-utils';
+import { useAtomValue, useSetAtom } from 'jotai';
+import { useCallback, useEffect } from 'react';
 import { useParams } from 'react-router';
 import { useQueryState } from 'nuqs';
-import { useSetAtom } from 'jotai';
 
 // `openLabels`/`openMove` open the label/move picker via the `picker` query-state
 // (label-move-picker.tsx) — wired below since #32.
@@ -31,6 +33,7 @@ export function ThreadDisplayHotkeys() {
   const { mutate: moveTo } = useMoveTo();
   const setMailNavigationCommand = useSetAtom(mailNavigationCommandAtom);
   const setFocusedIndex = useSetAtom(focusedIndexAtom);
+  const focusedIndex = useAtomValue(focusedIndexAtom);
   const purgeReplyState = useReplyStatePurge();
   const {
     optimisticMoveThreadsTo,
@@ -44,6 +47,50 @@ export function ThreadDisplayHotkeys() {
   const folder = params.folder ?? 'inbox';
   const tags = thread?.latest?.tags;
   const isStarred = tags?.some((tag) => tag.name === 'STARRED') ?? false;
+
+  const openAdjacentThread = useCallback(
+    (direction: 'next' | 'previous') => {
+      if (!openThreadId) return;
+      const target = selectAdjacentThreadTarget(items, openThreadId, direction, focusedIndex);
+      if (!target) return;
+
+      void purgeReplyState({ threadId: target.targetId });
+      setFocusedIndex(target.index);
+      optimisticMarkAsRead([target.targetId], true);
+    },
+    [focusedIndex, items, openThreadId, optimisticMarkAsRead, purgeReplyState, setFocusedIndex],
+  );
+
+  // Arrow navigation must work even when focus sits inside the isolated mail
+  // content tree. Capture before the generic scoped binder, then stop propagation
+  // so the list handler cannot consume the same key and jump twice.
+  useEffect(() => {
+    if (!openThreadId) return;
+
+    const handleArrowNavigation = (event: KeyboardEvent) => {
+      if (
+        event.repeat ||
+        event.metaKey ||
+        event.ctrlKey ||
+        event.altKey ||
+        event.shiftKey ||
+        isTypingOrModalTarget(event.target)
+      ) {
+        return;
+      }
+
+      const direction =
+        event.key === 'ArrowDown' ? 'next' : event.key === 'ArrowUp' ? 'previous' : null;
+      if (!direction) return;
+
+      event.preventDefault();
+      event.stopPropagation();
+      openAdjacentThread(direction);
+    };
+
+    window.addEventListener('keydown', handleArrowNavigation, true);
+    return () => window.removeEventListener('keydown', handleArrowNavigation, true);
+  }, [openAdjacentThread, openThreadId]);
 
   // Devlab: d/e/[ = done — archive the open thread and move on; `]` archives and
   // opens the PREVIOUS item.
@@ -66,6 +113,8 @@ export function ThreadDisplayHotkeys() {
   };
 
   const handlers: Record<(typeof THREAD_DISPLAY_HANDLED_ACTIONS)[number], () => void> = {
+    openNext: () => openAdjacentThread('next'),
+    openPrevious: () => openAdjacentThread('previous'),
     archive: () => archiveAndMove('next'),
     archiveNext: () => archiveAndMove('next'),
     archivePrevious: () => archiveAndMove('previous'),

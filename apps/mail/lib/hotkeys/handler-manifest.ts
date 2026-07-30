@@ -36,6 +36,8 @@ export const NAV_SEQUENCE_ACTIONS = [
 
 /** `thread-display` scope — bound by ThreadDisplayHotkeys via useShortcuts. */
 export const THREAD_DISPLAY_HANDLED_ACTIONS = [
+  'openNext',
+  'openPrevious',
   'reply',
   'replyAll',
   'forward',

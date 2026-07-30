@@ -225,6 +225,14 @@ const mailListShortcuts: Shortcut[] = [
 ];
 
 const threadDisplayShortcuts: Shortcut[] = [
+  shortcut(['ArrowDown'], 'openNext', 'Open next email', 'thread-display', {
+    type: 'single',
+    preventDefault: true,
+  }),
+  shortcut(['ArrowUp'], 'openPrevious', 'Open previous email', 'thread-display', {
+    type: 'single',
+    preventDefault: true,
+  }),
   // preventDefault sur r/a/f : même garde anti-insertion que côté mail-list
   // (le composer monte plus vite avec les chunks préchauffés).
   shortcut(['r'], 'reply', 'Reply to email', 'thread-display', {

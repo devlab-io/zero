@@ -1,7 +1,6 @@
-
 import { isTypingOrModalTarget } from '@/lib/hotkeys/use-hotkey-utils';
-import { useCallback, useEffect, useRef } from 'react';
 import { useOptimisticActions } from './use-optimistic-actions';
+import { useCallback, useEffect, useRef } from 'react';
 import { useMail } from '@/components/mail/use-mail';
 import { useHotkeys } from 'react-hotkeys-hook';
 import { atom, useAtom } from 'jotai';
@@ -35,6 +34,7 @@ export function useMailNavigation({ items, containerRef, onNavigate }: UseMailNa
   onNavigateRef.current = onNavigate;
   const [threadId] = useQueryState('threadId');
   const [isCommandPaletteOpen] = useQueryState('isCommandPaletteOpen');
+  const listNavigationEnabled = !isCommandPaletteOpen && !threadId;
 
   const hoveredMailRef = useRef<string | null>(null);
   const keyboardActiveRef = useRef(false);
@@ -270,18 +270,21 @@ export function useMailNavigation({ items, containerRef, onNavigate }: UseMailNa
     [pageFocus],
   );
 
-  useHotkeys('ArrowUp', handleArrowUp, { preventDefault: true, enabled: !isCommandPaletteOpen });
+  useHotkeys('ArrowUp', handleArrowUp, { preventDefault: true, enabled: listNavigationEnabled });
   useHotkeys('ArrowDown', handleArrowDown, {
     preventDefault: true,
-    enabled: !isCommandPaletteOpen,
+    enabled: listNavigationEnabled,
   });
-  useHotkeys('j', handleArrowDown, { enabled: !isCommandPaletteOpen });
-  useHotkeys('k', handleArrowUp, { enabled: !isCommandPaletteOpen });
-  useHotkeys('Enter', handleEnter, { preventDefault: true, enabled: !isCommandPaletteOpen });
-  useHotkeys('Escape', handleEscape, { preventDefault: true, enabled: !isCommandPaletteOpen });
-  useHotkeys('ArrowLeft', handleCloseLeft, { preventDefault: true, enabled: !isCommandPaletteOpen });
-  useHotkeys('space', handlePageDown, { preventDefault: true, enabled: !isCommandPaletteOpen });
-  useHotkeys('shift+space', handlePageUp, { preventDefault: true, enabled: !isCommandPaletteOpen });
+  useHotkeys('j', handleArrowDown, { enabled: listNavigationEnabled });
+  useHotkeys('k', handleArrowUp, { enabled: listNavigationEnabled });
+  useHotkeys('Enter', handleEnter, { preventDefault: true, enabled: listNavigationEnabled });
+  useHotkeys('Escape', handleEscape, { preventDefault: true, enabled: listNavigationEnabled });
+  useHotkeys('ArrowLeft', handleCloseLeft, {
+    preventDefault: true,
+    enabled: listNavigationEnabled,
+  });
+  useHotkeys('space', handlePageDown, { preventDefault: true, enabled: listNavigationEnabled });
+  useHotkeys('shift+space', handlePageUp, { preventDefault: true, enabled: listNavigationEnabled });
 
   const handleMouseEnter = useCallback(
     (threadId: string) => {
@@ -322,7 +325,7 @@ export function useMailNavigation({ items, containerRef, onNavigate }: UseMailNa
     const MOVE_DELAY = 100;
 
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (isCommandPaletteOpen) return;
+      if (!listNavigationEnabled) return;
       if (!event.repeat) return;
       if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
 
@@ -350,7 +353,7 @@ export function useMailNavigation({ items, containerRef, onNavigate }: UseMailNa
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [fastScroll, isCommandPaletteOpen]);
+  }, [fastScroll, listNavigationEnabled]);
 
   useEffect(() => {
     if (isCommandPaletteOpen) {

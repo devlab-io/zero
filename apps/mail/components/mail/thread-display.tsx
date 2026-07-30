@@ -23,6 +23,7 @@ import { useOptimisticThreadState } from '@/components/mail/optimistic-thread-st
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { preloadComposeSurface } from '@/components/create/compose-surface';
 import { useOptimisticActions } from '@/hooks/use-optimistic-actions';
+import { useNextThreadPrefetch } from '@/hooks/use-thread-prefetch';
 import { focusedIndexAtom } from '@/hooks/use-mail-navigation';
 import { type ThreadDestination } from '@/lib/thread-actions';
 import { handleUnsubscribe } from '@/lib/email-utils.client';
@@ -102,6 +103,8 @@ export function ThreadDisplay() {
   const { data: emailData, isLoading, isError, refetch: refetchThread } = useThread(id ?? null);
   const isOffline = useIsOffline();
   const [, items] = useThreads();
+  const [focusedIndex, setFocusedIndex] = useAtom(focusedIndexAtom);
+  useNextThreadPrefetch(items, id, Boolean(emailData), focusedIndex);
   const [isStarred, setIsStarred] = useState(false);
   const [isImportant, setIsImportant] = useState(false);
 
@@ -143,7 +146,6 @@ export function ThreadDisplay() {
     }
   }, [mode, activeReplyId, emailData?.messages, setActiveReplyId]);
 
-  const [focusedIndex, setFocusedIndex] = useAtom(focusedIndexAtom);
   const trpc = useTRPC();
   const { mutateAsync: toggleImportant } = useMutation(trpc.mail.toggleImportant.mutationOptions());
   const [, setIsComposeOpen] = useQueryState('isComposeOpen');
