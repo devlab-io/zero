@@ -10,12 +10,12 @@ import { navigationConfig, bottomNavItems } from '@/config/navigation';
 import { useTRPC } from '@/providers/query-provider';
 import { useSidebar } from '@/components/ui/sidebar';
 // import { useMutation } from '@tanstack/react-query';
-import { ComposeSurface } from '../create/compose-surface';
+import { ComposeSurface, preloadComposeSurface } from '../create/compose-surface';
 import { PencilCompose, X } from '../icons/icons';
 import { useQuery } from '@tanstack/react-query';
 import { useBilling } from '@/hooks/use-billing';
 import { useIsMobile } from '@/hooks/use-mobile';
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { useSession } from '@/lib/auth-client';
 import { useAIFullScreen } from './use-ai-sidebar';
@@ -31,11 +31,11 @@ import { useQueryState } from 'nuqs';
 
 // #44 (gate A8): the compose surface (CreateEmail, which statically pulled posthog-js) is
 // dynamic-imported via ComposeSurface (mail-lazy-surfaces) and only rendered inside the compose
-// DialogContent, which Radix mounts when the dialog opens. It is warmed by explicit user intent —
-// hover/focus of the compose button (see preloadCompose) — never on mount. create-email is unchanged.
-const preloadCompose = () => {
-  void import('../create/create-email');
-};
+// DialogContent, which Radix mounts when the dialog opens. Warmed by user intent (hover/focus of
+// the compose button) and, since CUA 2026-07-30, once on post-boot idle: the `c` hotkey carries no
+// hover intent and paid the cold waterfall as a 0.84 s spinner. Runtime prefetch only — the static
+// graph (chunk composition) is untouched. create-email is unchanged.
+const preloadCompose = preloadComposeSurface;
 
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const { isPro, isLoading } = useBilling();
@@ -49,6 +49,18 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   });
   const { isFullScreen } = useAIFullScreen();
   const { data: stats } = useStats();
+  // CUA 2026-07-30: warm the compose waterfall once the boot path is idle, so the `c`
+  // hotkey (no hover intent) opens without the Suspense spinner. Idle-time prefetch only.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const warm = () => preloadComposeSurface();
+    if (typeof window.requestIdleCallback === 'function') {
+      const idleId = window.requestIdleCallback(warm, { timeout: 3000 });
+      return () => window.cancelIdleCallback(idleId);
+    }
+    const timerId = window.setTimeout(warm, 1500);
+    return () => window.clearTimeout(timerId);
+  }, []);
   const location = useLocation();
   const { data: session } = useSession();
   const trpc = useTRPC();

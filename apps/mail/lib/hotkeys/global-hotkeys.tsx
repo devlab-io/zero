@@ -1,4 +1,8 @@
-import { useCommandPalette } from '@/components/context/command-palette-context';
+import {
+  useCommandPalette,
+  preloadCommandPalette,
+} from '@/components/context/command-palette-context';
+import { preloadComposeSurface } from '@/components/create/compose-surface';
 import { useSidebar } from '@/components/context/sidebar-context';
 import { useOptimisticActions } from '@/hooks/use-optimistic-actions';
 import { GLOBAL_HANDLED_ACTIONS } from './handler-manifest';
@@ -19,11 +23,23 @@ export function GlobalHotkeys() {
   const scope = 'global';
 
   const handlers: Record<(typeof GLOBAL_HANDLED_ACTIONS)[number], () => void> = {
-    newEmail: () => setComposeOpen('true'),
+    // CUA 2026-07-30: fire the chunk warm at the very keydown — a no-op when the idle
+    // warm already ran, the earliest possible fetch start when it has not.
+    newEmail: () => {
+      preloadComposeSurface();
+      setComposeOpen('true');
+    },
     // `/` opens the command palette — Zero's fast lexical search surface (its dialog
     // auto-focuses the search input). There is no standalone /mail/search route.
-    search: () => setIsCommandPaletteOpen('true'),
-    commandPalette: () => setIsCommandPaletteOpen('true'),
+    // CUA 2026-07-30: both openers fire the chunk warm at the keystroke (no-op once warm).
+    search: () => {
+      preloadCommandPalette();
+      setIsCommandPaletteOpen('true');
+    },
+    commandPalette: () => {
+      preloadCommandPalette();
+      setIsCommandPaletteOpen('true');
+    },
     helpWithShortcuts: () => navigate('/settings/shortcuts'),
     goToSettings: () => navigate('/settings'),
     toggleTheme: () => setTheme(theme === 'dark' ? 'light' : 'dark'),

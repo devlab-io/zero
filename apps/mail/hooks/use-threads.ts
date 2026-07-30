@@ -10,6 +10,7 @@ import {
 } from '@/store/force-sync-hold';
 import {
   hashKey,
+  keepPreviousData,
   queryOptions,
   useInfiniteQuery,
   useQuery,
@@ -102,6 +103,11 @@ export const useThreads = () => {
       staleTime: 60 * 1000 * 1, // 1 minute
       refetchOnMount: true,
       refetchIntervalInBackground: true,
+      // CUA 2026-07-30 (obs 3) : quand la clé change (recherche tapée, retour de
+      // recherche, changement de labels), la vue précédente reste affichée pendant
+      // que la nouvelle réponse arrive — plus d'écran-spinner bloquant de 2+ s. La
+      // présentation lit isPlaceholderData pour le bandeau « recherche en cours ».
+      placeholderData: keepPreviousData,
     },
   );
   const threadsQuery = useInfiniteQuery(listThreadsQueryOptions);

@@ -37,6 +37,7 @@ export const MailList = memo(
       items,
       isLoading,
       isFetching,
+      isTransitionPending,
       isFetchingNextPage,
       isFetchingThreadBodies,
       isError,
@@ -269,6 +270,15 @@ export const MailList = memo(
                   <div className="flex items-center gap-2 border-b border-blue-200/60 bg-blue-50 px-3 py-1.5 text-xs text-blue-800 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-300">
                     <RefreshCcw className="h-3 w-3 animate-spin" />
                     <span>{m['states.mailList.forceSyncNotice']()}</span>
+                  </div>
+                ) : isTransitionPending && isFiltering ? (
+                  // CUA 2026-07-30 (obs 3) : recherche en vol — les lignes affichées
+                  // sont la vue précédente (placeholderData), la réponse serveur
+                  // (Gmail `q`, ~2 s mesurées) arrive en fond. Bandeau non bloquant,
+                  // même style que le hold forceSync.
+                  <div className="flex items-center gap-2 border-b border-blue-200/60 bg-blue-50 px-3 py-1.5 text-xs text-blue-800 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-300">
+                    <RefreshCcw className="h-3 w-3 animate-spin" />
+                    <span>{m['states.mailList.searchingNotice']()}</span>
                   </div>
                 ) : viewState === 'stale' ? (
                   <div className="flex items-center justify-between gap-2 border-b border-amber-200/60 bg-amber-50 px-3 py-1.5 text-xs text-amber-800 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-300">

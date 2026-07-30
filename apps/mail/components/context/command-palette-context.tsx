@@ -1,4 +1,5 @@
 import { createContext, lazy, Suspense, useCallback, useContext, useEffect, useState } from 'react';
+import { memoizedImport } from '@/lib/memoized-import';
 import { getMainSearchTerm } from '@/lib/utils';
 import { useSearchValue } from '@/hooks/use-search-value';
 import { useLocation } from 'react-router';
@@ -17,9 +18,40 @@ import {
 // activeFilters + clearAllFilters (read by mail/nav-main via context), addFilter/removeFilter, the
 // persisted-filter restore on mount, the clear-on-route-change, and the ⌘/Ctrl+K open toggle (which
 // therefore works before the dialog chunk has loaded).
+// Single dynamic-import invocation, shared by React.lazy and the warm below: the memoized
+// promise guarantees the dialog module is only ever requested once, whichever of the warm
+// or the lazy render fires first (concurrent first-time imports of the same module also
+// race vitest's mock interception — one invocation removes the race everywhere). The
+// memoizer resets on rejection, so a transient warm failure never pins a dead promise
+// onto a later lazy render (revue Codex 2026-07-30).
+const loadPaletteDialog = memoizedImport(() => import('./command-palette-dialog'));
 const CommandPaletteDialog = lazy(() =>
-  import('./command-palette-dialog').then((mod) => ({ default: mod.CommandPaletteDialog })),
+  loadPaletteDialog().then((mod) => ({ default: mod.CommandPaletteDialog })),
 );
+
+// CUA 2026-07-30: ⌘K paid the cold two-layer waterfall (dialog chunk, then the views chunk
+// with cmdk + react-day-picker) as a 0.62–1.41 s spinner. Warm both layers with a runtime
+// prefetch — fired on post-boot idle and again at the opening keystroke (no-op once loaded).
+// Chunk composition (gate A8) is untouched: these stay dynamic imports.
+let paletteWarmed = false;
+export function preloadCommandPalette() {
+  if (paletteWarmed) return;
+  paletteWarmed = true;
+  // Best-effort warm: it must never break its caller (the ⌘K open path). A failed fetch
+  // rejects the promise; some environments (vitest module runner) can even throw the
+  // dynamic import synchronously — both are swallowed and the warm re-armed for retry.
+  try {
+    void Promise.all([
+      loadPaletteDialog(),
+      import('./command-palette-views'),
+      import('./command-palette-filter-view'),
+    ]).catch(() => {
+      paletteWarmed = false;
+    });
+  } catch {
+    paletteWarmed = false;
+  }
+}
 
 type CommandPaletteContext = {
   activeFilters: ActiveFilter[];
@@ -129,11 +161,13 @@ export function CommandPaletteProvider({ children }: { children: React.ReactNode
   }, [pathname]);
 
   // ⌘/Ctrl+K toggles the palette open. Eager (functional setter, no `open` dependency) so it works
-  // before the dialog chunk is loaded.
+  // before the dialog chunk is loaded. The keystroke also fires the chunk warm — the earliest
+  // possible fetch start when the idle warm has not run yet, a no-op otherwise.
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
+        preloadCommandPalette();
         setOpen((prevOpen) => (prevOpen ? null : 'true'));
       }
     };
@@ -141,6 +175,19 @@ export function CommandPaletteProvider({ children }: { children: React.ReactNode
     document.addEventListener('keydown', down, { capture: true });
     return () => document.removeEventListener('keydown', down, { capture: true });
   }, [setOpen]);
+
+  // CUA 2026-07-30: warm the palette chunks once the boot path is idle so the first ⌘K
+  // opens without any visible spinner. Idle-time network prefetch only.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const warm = () => preloadCommandPalette();
+    if (typeof window.requestIdleCallback === 'function') {
+      const idleId = window.requestIdleCallback(warm, { timeout: 3000 });
+      return () => window.cancelIdleCallback(idleId);
+    }
+    const timerId = window.setTimeout(warm, 1500);
+    return () => window.clearTimeout(timerId);
+  }, []);
 
   return (
     <CommandPaletteContext.Provider

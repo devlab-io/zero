@@ -23,6 +23,12 @@ export interface MailListData {
   isLoading: boolean;
   /** Any list fetch in flight (foreground or background revalidation). */
   isFetching: boolean;
+  /**
+   * The rows on screen belong to the PREVIOUS view (placeholderData) while the new
+   * key (search/folder/labels change) is still fetching — CUA 2026-07-30 (obs 3):
+   * presentation shows a non-blocking notice instead of a full spinner.
+   */
+  isTransitionPending: boolean;
   /** Next-page fetch in flight. */
   isFetchingNextPage: boolean;
   /** At least one individual thread body (`mail.get`) fetch in flight. */
@@ -65,6 +71,7 @@ export function useMailListData(): MailListData {
     items,
     isLoading: threadsQuery.isLoading,
     isFetching: threadsQuery.isFetching,
+    isTransitionPending: threadsQuery.isPlaceholderData && threadsQuery.isFetching,
     isFetchingNextPage: threadsQuery.isFetchingNextPage,
     isFetchingThreadBodies,
     isError: threadsQuery.isError,
