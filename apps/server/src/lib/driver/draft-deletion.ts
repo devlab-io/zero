@@ -28,6 +28,40 @@ export function resolveDraftForDeletion(
   return null;
 }
 
+/**
+ * État du fil APRÈS suppression d'un brouillon (CUA round 6) : la projection DO
+ * locale garde le fil marqué DRAFT tant qu'on ne l'informe pas. `messages` est
+ * le fil Gmail post-suppression (format minimal : id + labelIds).
+ */
+export function threadHasOtherDrafts(
+  messages: readonly { id?: string | null; labelIds?: string[] | null }[],
+  deletedMessageId: string | null,
+): boolean {
+  return messages.some(
+    (message) => message.id !== deletedMessageId && (message.labelIds ?? []).includes('DRAFT'),
+  );
+}
+
+/**
+ * Décision de nettoyage de la projection locale, exacte et minimale — aucun
+ * autre brouillon ne doit être touché :
+ * - fil disparu de Gmail (le brouillon était son seul message) → retirer le
+ *   fil entier de la projection ;
+ * - fil encore là sans AUCUN autre brouillon → retirer le label DRAFT du fil ;
+ * - d'autres brouillons subsistent (les deux WHOOP restants) → ne rien toucher.
+ */
+export function planDraftProjectionCleanup(params: {
+  threadId: string | null;
+  threadGone: boolean;
+  hasOtherDrafts: boolean;
+}): { action: 'delete-thread' | 'remove-draft-label' | 'none'; threadId: string | null } {
+  const { threadId, threadGone, hasOtherDrafts } = params;
+  if (!threadId) return { action: 'none', threadId: null };
+  if (threadGone) return { action: 'delete-thread', threadId };
+  if (!hasOtherDrafts) return { action: 'remove-draft-label', threadId };
+  return { action: 'none', threadId };
+}
+
 /** true ⇔ l'erreur Gmail est un « not found » (id inconnu/périmé) — candidate au remapping. */
 export function isDraftNotFoundError(error: unknown): boolean {
   if (!error || typeof error !== 'object') return false;

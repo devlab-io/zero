@@ -1,4 +1,9 @@
-import { isDraftNotFoundError, resolveDraftForDeletion } from './draft-deletion';
+import {
+  isDraftNotFoundError,
+  planDraftProjectionCleanup,
+  resolveDraftForDeletion,
+  threadHasOtherDrafts,
+} from './draft-deletion';
 import { describe, expect, it } from 'vitest';
 
 /**
@@ -52,5 +57,58 @@ describe('isDraftNotFoundError', () => {
     expect(isDraftNotFoundError({ code: 429, message: 'rate limit' })).toBe(false);
     expect(isDraftNotFoundError(new Error('socket hang up'))).toBe(false);
     expect(isDraftNotFoundError(null)).toBe(false);
+  });
+});
+
+describe('threadHasOtherDrafts — état du fil après suppression', () => {
+  it('un autre message DRAFT subsiste → true (ne pas dé-labelliser le fil)', () => {
+    expect(
+      threadHasOtherDrafts(
+        [
+          { id: 'm-keep', labelIds: ['DRAFT'] },
+          { id: 'm-real', labelIds: ['INBOX'] },
+        ],
+        'm-deleted',
+      ),
+    ).toBe(true);
+  });
+
+  it('seul le message supprimé portait DRAFT → false', () => {
+    expect(
+      threadHasOtherDrafts(
+        [
+          { id: 'm-deleted', labelIds: ['DRAFT'] },
+          { id: 'm-real', labelIds: ['INBOX'] },
+        ],
+        'm-deleted',
+      ),
+    ).toBe(false);
+    expect(threadHasOtherDrafts([], 'm-deleted')).toBe(false);
+  });
+});
+
+describe('planDraftProjectionCleanup — nettoyage minimal et exact', () => {
+  it('fil disparu de Gmail → retirer le fil de la projection', () => {
+    expect(
+      planDraftProjectionCleanup({ threadId: 't1', threadGone: true, hasOtherDrafts: false }),
+    ).toEqual({ action: 'delete-thread', threadId: 't1' });
+  });
+
+  it('fil présent, plus aucun brouillon → retirer le label DRAFT du fil', () => {
+    expect(
+      planDraftProjectionCleanup({ threadId: 't1', threadGone: false, hasOtherDrafts: false }),
+    ).toEqual({ action: 'remove-draft-label', threadId: 't1' });
+  });
+
+  it('d’autres brouillons subsistent (les 2 WHOOP restants) → NE RIEN toucher', () => {
+    expect(
+      planDraftProjectionCleanup({ threadId: 't1', threadGone: false, hasOtherDrafts: true }),
+    ).toEqual({ action: 'none', threadId: 't1' });
+  });
+
+  it('identifiants inconnus (déjà supprimé) → aucun nettoyage', () => {
+    expect(
+      planDraftProjectionCleanup({ threadId: null, threadGone: false, hasOtherDrafts: false }),
+    ).toEqual({ action: 'none', threadId: null });
   });
 });

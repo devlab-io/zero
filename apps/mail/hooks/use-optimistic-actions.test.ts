@@ -23,6 +23,7 @@ const h = vi.hoisted(() => {
     mutationSpies: {} as Record<string, ReturnType<typeof vi.fn>>,
     refetchQueries: vi.fn(() => Promise.resolve(undefined)),
     invalidateQueries: vi.fn(() => Promise.resolve(undefined)),
+    setQueriesData: vi.fn(),
     toast,
     capture: vi.fn(),
     moveThreadsTo: vi.fn(() => Promise.resolve(undefined)),
@@ -80,6 +81,7 @@ vi.mock('@tanstack/react-query', () => ({
   useQueryClient: () => ({
     refetchQueries: h.refetchQueries,
     invalidateQueries: h.invalidateQueries,
+    setQueriesData: h.setQueriesData,
   }),
 }));
 
@@ -290,11 +292,20 @@ describe('useOptimisticActions — variantes d’actions', () => {
     expect(h.capture).toHaveBeenCalledWith('email_unsnoozed');
   });
 
-  it('deleteDraft → drafts.delete + invalidation', async () => {
+  it('deleteDraft → drafts.delete + prune du cache listThreads + invalidation', async () => {
     hook().optimisticDeleteDraft('draft-1');
     await lastToastOpts().onAutoClose();
     await flush();
     expect(h.mutationSpies['drafts.delete']).toHaveBeenCalledWith({ id: 'draft-1' });
+    // CUA round 6 : la ligne est PURGÉE des pages en cache (identifiant exact) —
+    // pas de refetch immédiat de la vérité Gmail retardée.
+    expect(h.setQueriesData).toHaveBeenCalledTimes(1);
+    const updater = h.setQueriesData.mock.calls[0][1] as (
+      data: { pages: { threads: { id: string }[] }[] } | undefined,
+    ) => unknown;
+    expect(updater({ pages: [{ threads: [{ id: 'draft-1' }, { id: 'autre' }] }] })).toEqual({
+      pages: [{ threads: [{ id: 'autre' }] }],
+    });
     expect(h.invalidateQueries).toHaveBeenCalled();
     expect(h.capture).toHaveBeenCalledWith('draft_deleted');
   });

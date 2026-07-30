@@ -504,3 +504,20 @@ export async function findThreadsByFolderWithPagination(
 
   return { threads: threadResults, nextPageToken };
 }
+
+/**
+ * Nettoyage projection après suppression d'un brouillon Gmail (CUA round 6) :
+ * retire le label DRAFT d'un fil précis — jamais d'un autre — quand Gmail
+ * confirme qu'il n'a plus aucun brouillon.
+ */
+export async function removeThreadLabel(db: DB, threadId: string, labelId: string): Promise<void> {
+  await db
+    .delete(threadLabels)
+    .where(and(eq(threadLabels.threadId, threadId), eq(threadLabels.labelId, labelId)));
+}
+
+/** Retire un fil entier de la projection (fil disparu de Gmail — le brouillon était son seul message). */
+export async function deleteThreadById(db: DB, threadId: string): Promise<void> {
+  await db.delete(threadLabels).where(eq(threadLabels.threadId, threadId));
+  await db.delete(threads).where(eq(threads.id, threadId));
+}

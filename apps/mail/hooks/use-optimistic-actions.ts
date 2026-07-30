@@ -1,6 +1,7 @@
 import { addOptimisticActionAtom, removeOptimisticActionAtom } from '@/store/optimistic-updates';
 import { optimisticActionsManager, type PendingAction } from '@/lib/optimistic-actions-manager';
 import { buildOptimisticFailureToast, isLastPendingOfType } from '@/lib/optimistic-recovery';
+import { pruneThreadFromListPages } from '@/lib/prune-thread-cache';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { log } from '@/lib/log';
 
@@ -544,11 +545,17 @@ export function useOptimisticActions() {
       optimisticId,
       execute: async () => {
         await deleteDraft({ id: draftId });
-        // La page /mail/draft est servie par mail.listThreads (folder=draft),
-        // PAS par drafts.list : sans cette invalidation, la vérité serveur
-        // n'arrivait qu'à la sync suivante (CUA round 5, échec B).
+        // CUA round 6 : invalider mail.listThreads refetchait la vérité Gmail
+        // encore retardée (le brouillon supprimé y figure quelques secondes) —
+        // la ligne réapparaissait au retrait de l'action optimiste. On PURGE
+        // la ligne des pages en cache (identifiant exact), et la vérité
+        // canonique arrive ensuite par le broadcast serveur du dossier draft.
+        queryClient.setQueriesData(
+          { queryKey: trpc.mail.listThreads.queryKey() },
+          (data: Parameters<typeof pruneThreadFromListPages>[0]) =>
+            pruneThreadFromListPages(data, draftId),
+        );
         await queryClient.invalidateQueries({ queryKey: trpc.drafts.list.queryKey() });
-        await queryClient.invalidateQueries({ queryKey: trpc.mail.listThreads.queryKey() });
       },
       undo: () => {
         removeOptimisticAction(optimisticId);

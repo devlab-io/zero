@@ -585,6 +585,10 @@ export class OutlookMailManager implements MailManager {
       'deleteDraft',
       async () => {
         await (await this.graphClient).api(`/me/messages/${draftId}`).delete();
+        // Outlook : les brouillons sont des messages, l'id fourni est déjà le
+        // bon — pas d'état de fil à relever pour la projection (contrat CUA
+        // round 6 porté par le driver Gmail).
+        return { messageId: draftId, threadId: null, threadGone: false, hasOtherDrafts: false };
       },
       { draftId },
     );
