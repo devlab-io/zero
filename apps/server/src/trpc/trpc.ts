@@ -48,6 +48,20 @@ type TrpcContext = {
   sessionUser?: BoundarySessionUser;
 };
 
+type ActiveConnection = Awaited<ReturnType<typeof getActiveConnection>>;
+const activeConnectionByRequest = new WeakMap<object, Promise<ActiveConnection>>();
+
+/** Collapse every active-connection lookup in one batched HTTP request to one DO RPC. */
+function getRequestActiveConnection(requestContext: object): Promise<ActiveConnection> {
+  const existing = activeConnectionByRequest.get(requestContext);
+  if (existing) return existing;
+
+  const pending = getActiveConnection();
+  activeConnectionByRequest.set(requestContext, pending);
+  void pending.catch(() => activeConnectionByRequest.delete(requestContext));
+  return pending;
+}
+
 const t = initTRPC.context<TrpcContext>().create({ transformer: superjson });
 
 const loggingMiddleware = createLoggingMiddleware();
@@ -115,7 +129,7 @@ export const activeConnectionProcedure = privateProcedure.use(async ({ ctx, next
   );
 
   try {
-    const activeConnection = await getActiveConnection();
+    const activeConnection = await getRequestActiveConnection(ctx.c);
 
     if (connectionSpan) {
       completeRequestSpan(ctx.c, connectionSpan.id, {

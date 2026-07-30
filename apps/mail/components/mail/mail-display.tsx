@@ -4,12 +4,11 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '../ui/dropdown-menu';
-import { Forward, Printer, Reply, ReplyAll, ThreeDots } from '../icons/icons';
 import { formatDate, formatTime, shouldShowSeparateTime } from '@/lib/date-utils';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Forward, Printer, Reply, ReplyAll, ThreeDots } from '../icons/icons';
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
 import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover';
-import { EmailVerificationBadge } from './email-verification-badge';
 import { CopyIcon, HardDriveDownload, Lock } from 'lucide-react';
 import type { Sender, ParsedMessage, Attachment } from '@/types';
 import { useActiveConnection } from '@/hooks/use-connections';
@@ -35,8 +34,8 @@ import {
   openAttachment,
 } from './mail-display.attachments';
 import { MoreAboutPerson, MoreAboutQuery } from './mail-display.research';
-import { ActionButton, AiSummary } from './mail-display.parts';
 import { MailDisplayLabels } from './mail-display.labels';
+import { ActionButton } from './mail-display.parts';
 import { printMail } from './mail-display.print';
 
 type Props = {
@@ -340,7 +339,6 @@ const MailDisplay = ({ emailData, index, totalEmails, demo, threadAttachments }:
                     })()}
                   </div>
                 </div>
-                <AiSummary />
                 {threadAttachments && threadAttachments.length > 0 && (
                   <ThreadAttachments attachments={threadAttachments} />
                 )}
@@ -376,7 +374,6 @@ const MailDisplay = ({ emailData, index, totalEmails, demo, threadAttachments }:
                             >
                               {cleanNameDisplay(emailData?.sender?.name)}
                             </span>
-                            <EmailVerificationBadge messageId={emailData?.id} />
                           </div>
 
                           <Popover open={openDetailsPopover} onOpenChange={handlePopoverChange}>

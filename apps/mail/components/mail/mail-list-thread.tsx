@@ -7,7 +7,6 @@ import { useOptimisticThreadState } from '@/components/mail/optimistic-thread-st
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { ThreadContextMenu } from '@/components/context/thread-context';
 import { useOptimisticActions } from '@/hooks/use-optimistic-actions';
-import { memo, useCallback, useEffect, useMemo, useRef } from 'react';
 import { highlightText } from '@/lib/email-utils-highlight.client';
 import { useMail, type Config } from '@/components/mail/use-mail';
 import { ThreadHoverActions } from './mail-list-thread-actions';
@@ -18,6 +17,7 @@ import { GroupPeople, PencilCompose } from '../icons/icons';
 import { useSearchValue } from '@/hooks/use-search-value';
 import { useThreadLabels } from '@/hooks/use-labels';
 import { cleanNameDisplay } from './mail-list-utils';
+import { memo, useCallback, useMemo } from 'react';
 import { MailLabels } from './mail-list-labels';
 import { BimiAvatar } from '../ui/bimi-avatar';
 import { RenderLabels } from './render-labels';
@@ -43,16 +43,10 @@ export const Thread = memo(function Thread({
   // #30: rich-projection rows render from `message` and DO NOT fetch the body
   // (enabled:false → no per-row mail.get, no processEmailContent). Thin rows (search,
   // via rawListThreads) fall back to the per-thread fetch so search keeps working.
-  // Sent is excluded: its row shows recipients (latestMessage.to), which the threads
-  // projection does not carry — keep fetching there to preserve that display.
-  const isProjected = message.unread !== undefined && folder !== FOLDERS.SENT;
+  // Every folder renders from the lightweight projection. Fetching full bodies for
+  // Sent created one openThread request per visible row (20+ requests per page).
+  const isProjected = message.unread !== undefined;
   const thread = useThread(message.id, { enabled: !isProjected });
-  const prefetchThread = thread.prefetch;
-  // #30 (suite M2): préchargement délibéré du corps au survol (pattern Superhuman, ruling
-  // w2a). Alimente le cache pour l'ouverture du fil (froid mesuré 4,2 s serveur) et pour
-  // ThreadContextMenu (enabled:false). 120 ms de garde: un balayage du pointeur sur la
-  // liste ne déclenche aucun fetch; staleTime 1 h aligné sur useThread (déduplication).
-  const hoverPrefetchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const projectedData = useMemo(
     () => (isProjected ? buildProjectedThreadData(message) : undefined),
     [isProjected, message],
@@ -213,10 +207,6 @@ export const Thread = memo(function Thread({
     return !!latestDraft;
   }, [latestDraft]);
 
-  useEffect(() => {
-    if (isKeyboardFocused && idToUse) void prefetchThread();
-  }, [idToUse, isKeyboardFocused, prefetchThread]);
-
   const content = useMemo(() => {
     if (!latestMessage || !getThreadData) return null;
 
@@ -224,21 +214,13 @@ export const Thread = memo(function Thread({
       <div
         className={cn('select-none border-b md:my-1 md:border-none')}
         onClick={onClick ? onClick(latestMessage) : undefined}
-        onPointerDown={() => {
-          if (idToUse) void prefetchThread();
-        }}
         // Devlab: hover targeting restored — required for Superhuman-style
         // single-key actions (d/r/a/f/h) on the thread under the cursor.
         onMouseEnter={() => {
           window.dispatchEvent(new CustomEvent('emailHover', { detail: { id: idToUse } }));
-          if (hoverPrefetchTimer.current) clearTimeout(hoverPrefetchTimer.current);
-          hoverPrefetchTimer.current = setTimeout(() => {
-            if (idToUse) void prefetchThread();
-          }, 120);
         }}
         onMouseLeave={() => {
           window.dispatchEvent(new CustomEvent('emailHover', { detail: { id: null } }));
-          if (hoverPrefetchTimer.current) clearTimeout(hoverPrefetchTimer.current);
         }}
       >
         <div
@@ -402,7 +384,9 @@ export const Thread = memo(function Thread({
                         'mt-1 line-clamp-1 max-w-[50ch] overflow-hidden text-sm text-[#8C8C8C] md:max-w-[25ch]',
                       )}
                     >
-                      {latestMessage.to.map((e) => e.email).join(', ')}
+                      {latestMessage.to.length
+                        ? latestMessage.to.map((recipient) => recipient.email).join(', ')
+                        : 'Sent'}
                     </p>
                   ) : (
                     <p
@@ -459,7 +443,6 @@ export const Thread = memo(function Thread({
     threadLabels,
     optimisticLabels,
     emailContent,
-    prefetchThread,
   ]);
 
   return latestMessage ? (

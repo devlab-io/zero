@@ -8,10 +8,10 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { ThreadReaderSurface, PricingDialogSurface } from '@/components/mail/mail-lazy-surfaces';
 import { Bell, Lightning, Mail, ScanEye, Tag, User, X, Search } from '../icons/icons';
 import { useCategorySettings, useDefaultCategoryId } from '@/hooks/use-categories';
-import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable';
 import { useCommandPalette } from '../context/command-palette-context';
 import { useHotkeys, useHotkeysContext } from 'react-hotkeys-hook';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useActiveConnection } from '@/hooks/use-connections';
 import { Check, ChevronDown, RefreshCcw } from 'lucide-react';
 import { useMediaQuery } from '../../hooks/use-media-query';
@@ -20,22 +20,10 @@ import { MailList } from '@/components/mail/mail-list';
 import { useNavigate, useParams } from 'react-router';
 import { useMail } from '@/components/mail/use-mail';
 import { SidebarToggle } from '../ui/sidebar-toggle';
-import { loadGitHubEmojis } from '@/lib/emoji-data';
 import { clearBulkSelectionAtom } from './use-mail';
 import { log } from '@/lib/log';
-// Loaded lazily so the AI sidebar bundle (AIChat, livekit/elevenlabs, agents) is only
-// fetched when the mail surface renders it, not as part of the initial route chunk.
-// The AI chat embeds a compose editor, so the emoji dataset (static JSON asset) is
-// awaited too — the Emoji extension needs it at editor creation.
-const AISidebar = lazy(() =>
-  Promise.all([import('@/components/ui/ai-sidebar'), loadGitHubEmojis()]).then(([mod]) => ({
-    default: mod.default,
-  })),
-);
 
-import { useRecentThreadPrefetch } from '@/hooks/use-thread-prefetch';
 import { useThreads } from '@/hooks/use-threads';
-import AIToggleButton from '../ai-toggle-button';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { Button } from '@/components/ui/button';
 import { useSession } from '@/lib/auth-client';
@@ -349,8 +337,7 @@ export function MailLayout() {
     }
   }, [session?.user, isPending]);
 
-  const [{ isFetching, refetch: refetchThreads }, threads] = useThreads();
-  useRecentThreadPrefetch(threads);
+  const [{ isFetching, refetch: refetchThreads }] = useThreads();
   const isDesktop = useMediaQuery('(min-width: 768px)');
   const [threadId] = useQueryState('threadId');
   const [pricingDialogOpen] = useQueryState('pricingDialog');
@@ -575,13 +562,6 @@ export function MailLayout() {
               </div>
             </div>
           )}
-
-          {activeConnection?.id ? (
-            <Suspense fallback={null}>
-              <AISidebar />
-            </Suspense>
-          ) : null}
-          {activeConnection?.id ? <AIToggleButton /> : null}
         </ResizablePanelGroup>
       </div>
     </TooltipProvider>

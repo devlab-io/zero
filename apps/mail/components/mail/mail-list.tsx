@@ -7,7 +7,6 @@ import { selectMailListState } from '@/lib/mail-list-state';
 import { useSearchValue } from '@/hooks/use-search-value';
 import { EmptyStateIcon } from '../icons/empty-state-svg';
 import { useIsOffline } from '@/hooks/use-online-status';
-import { usePrefetchThread } from '@/hooks/use-threads';
 import { useSettings } from '@/hooks/use-settings';
 import { VList, type VListHandle } from 'virtua';
 import type { ParsedMessage } from '@/types';
@@ -81,8 +80,6 @@ export const MailList = memo(
       onNavigate: handleNavigateToThread,
     });
 
-    const prefetchThread = usePrefetchThread();
-
     const { getSelectMode, handleSelectMail, setAnchorIndex } = useMailSelection(itemsRef);
 
     const [, setActiveReplyId] = useQueryState('activeReplyId');
@@ -146,17 +143,6 @@ export const MailList = memo(
     };
 
     const filteredItems = useMemo(() => items.filter((item) => item.id), [items]);
-
-    // Smart prefetch: when the keyboard focus moves, warm the focused thread's
-    // neighborhood (2 ahead, 1 behind — the most likely next opens). Hover and
-    // focus prefetch of the row itself already live in mail-list-thread.
-    useEffect(() => {
-      if (!keyboardActive || focusedIndex == null || focusedIndex < 0) return;
-      for (const neighborIndex of [focusedIndex - 1, focusedIndex + 1, focusedIndex + 2]) {
-        const neighbor = filteredItems[neighborIndex];
-        if (neighbor?.id) void prefetchThread(neighbor.id);
-      }
-    }, [focusedIndex, keyboardActive, filteredItems, prefetchThread]);
 
     // Honest network/state selection (issue #34): a failed read never renders as
     // "empty" and cached rows survive a failed refresh.
@@ -309,8 +295,9 @@ export const MailList = memo(
                     if (!vListRef.current) return;
                     const endIndex = vListRef.current.findEndIndex();
                     if (
-                      // if the shown items are last 5 items, load more
-                      Math.abs(filteredItems.length - 1 - endIndex) < 7 &&
+                      // Start the next lightweight list page early enough that a
+                      // fast scroll never reaches an unloaded boundary.
+                      Math.abs(filteredItems.length - 1 - endIndex) < 15 &&
                       !isLoading &&
                       !isFetchingNextPage &&
                       !isFetchingThreadBodies &&

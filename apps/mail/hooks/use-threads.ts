@@ -69,10 +69,9 @@ function useOpenThreadQueryOptions() {
         },
         enabled,
         staleTime: THREAD_STALE_MS,
-        // Instant-from-IndexedDB, then silent background refresh: cached thread
-        // renders immediately on open (persisted cache), and react-query refetches
-        // in the background on every mount without blanking the view.
-        refetchOnMount: 'always',
+        // Websocket invalidations keep cached threads fresh. Refetching on every
+        // mount duplicated openThread during navigation and flooded the user DO.
+        refetchOnMount: false,
       }),
     [queryClient, shouldLoadImages, theme, trpc, trpcClient],
   );
@@ -105,8 +104,11 @@ export const useThreads = () => {
     {
       initialCursor: '',
       getNextPageParam: (lastPage) => lastPage?.nextPageToken ?? null,
-      staleTime: 60 * 1000 * 1, // 1 minute
-      refetchOnMount: true,
+      // Lists are maintained by websocket invalidations. Keep visited folders hot
+      // so returning to Inbox is an immediate cache read, not another blocking trip.
+      staleTime: 5 * 60 * 1000,
+      refetchOnMount: false,
+      refetchOnWindowFocus: false,
       refetchIntervalInBackground: true,
       // CUA 2026-07-30 (obs 3) : quand la clé change (recherche tapée, retour de
       // recherche, changement de labels), la vue précédente reste affichée pendant
