@@ -3,6 +3,7 @@ import { constructReplyBody, constructForwardBody } from '@/lib/utils';
 import { useReplyStatePurge } from '@/hooks/use-reply-state-purge';
 import { useActiveConnection } from '@/hooks/use-connections';
 import { useEmailAliases } from '@/hooks/use-email-aliases';
+import { markDraftAbandoned } from '@/lib/abandoned-drafts';
 import { lazy, Suspense, useEffect, useMemo } from 'react';
 import { useHotkeysContext } from 'react-hotkeys-hook';
 import { useTRPC } from '@/providers/query-provider';
@@ -47,6 +48,7 @@ export default function ReplyCompose({ messageId }: ReplyComposeProps) {
   const { data: draft } = useDraft(draftId ?? null);
   const trpc = useTRPC();
   const { mutateAsync: sendEmail } = useMutation(trpc.mail.send.mutationOptions());
+  const { mutateAsync: deleteDraft } = useMutation(trpc.drafts.delete.mutationOptions());
   const { data: activeConnection } = useActiveConnection();
   const { data: settings, isLoading: settingsLoading } = useSettings();
   const { data: session } = useSession();
@@ -255,10 +257,32 @@ export default function ReplyCompose({ messageId }: ReplyComposeProps) {
           onClose={async () => {
             // Purge ATOMIQUE (une seule écriture d'URL) : trois setters séparés
             // laissaient l'URL conserver mode/activeReplyId/draftId alors que le
-            // composer était masqué (CUA round 3, échec 3).
-            await purgeReplyState();
+            // composer était masqué (CUA round 3, échec 3). threadId est ÉPINGLÉ
+            // explicitement dans la même écriture (CUA round 4) : fermer le
+            // reply ne doit ni perdre ni laisser ressusciter le fil ouvert.
+            await purgeReplyState({ threadId });
           }}
-          initialMessage={draft?.content ?? latestDraft?.decodedBody}
+          onAbandonEmpty={() => {
+            // Composer vidé puis fermé : le brouillon serveur correspondant est
+            // un abandon — supprimé en best-effort (par draftId quand il est
+            // connu) et marqué localement (trace + défense en profondeur).
+            if (latestDraft?.id) markDraftAbandoned(latestDraft.id);
+            const abandonedId = draftId;
+            if (!abandonedId) return;
+            void deleteDraft({ id: abandonedId })
+              .then(() => void refetch())
+              .catch(() => {
+                // Suppression best-effort : un échec ne doit pas bloquer la
+                // fermeture ; le brouillon restera visible dans Drafts.
+              });
+          }}
+          // CUA round 4 (échec 1) : le « a » vu à l'ouverture était le brouillon
+          // serveur abandonné au round 3, resservi par latestDraft?.decodedBody.
+          // Un reply ouvert au raccourci démarre VIDE : la reprise d'un travail
+          // en cours est portée par le snapshot local (restauration issue #34),
+          // celle d'un brouillon par un draftId EXPLICITE (ouverture depuis
+          // Drafts). Aucun contenu serveur n'est ressemé implicitement.
+          initialMessage={draft?.content ?? undefined}
           initialTo={draft ? ensureEmailArray(draft.to) : replyDefaults.to}
           initialCc={draft ? ensureEmailArray(draft.cc) : replyDefaults.cc}
           initialBcc={ensureEmailArray(draft?.bcc)}

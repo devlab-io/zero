@@ -1,5 +1,6 @@
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createDraftSaveLifecycle } from '@/lib/draft-save-lifecycle';
 import { resolveComposerEscape } from '@/lib/composer-escape';
 import { useEmailAliases } from '@/hooks/use-email-aliases';
 import { ScheduleSendPicker } from './schedule-send-picker';
@@ -60,6 +61,7 @@ export function EmailComposer({
   initialAttachments = [],
   onSendEmail,
   onClose,
+  onAbandonEmpty,
   className,
   autofocus = false,
   settingsLoading = false,
@@ -76,6 +78,10 @@ export function EmailComposer({
   const fileInputRef = useRef<HTMLInputElement>(null);
   /** Racine du composer — périmètre du Escape-ferme-un-reply-vide (CUA échec 6). */
   const rootRef = useRef<HTMLDivElement>(null);
+  // Course sauvegarde/fermeture (CUA round 4, échec 2) : après fermeture, plus
+  // aucun démarrage de sauvegarde ni application de résultat en vol (setDraftId
+  // réécrivait l'URL purgée). Une instance par montage du composer.
+  const saveLifecycle = useRef(createDraftSaveLifecycle()).current;
   const [threadId] = useQueryState('threadId');
   const [isComposeOpen, setIsComposeOpen] = useQueryState('isComposeOpen');
   const { data: emailData } = useThread(threadId ?? null);
@@ -188,6 +194,7 @@ export function EmailComposer({
   const trpc = useTRPC();
   const { mutateAsync: aiCompose } = useMutation(trpc.ai.compose.mutationOptions());
   const { mutateAsync: createDraft } = useMutation(trpc.drafts.create.mutationOptions());
+  const { mutateAsync: deleteDraftById } = useMutation(trpc.drafts.delete.mutationOptions());
   const { mutateAsync: generateEmailSubject } = useMutation(
     trpc.ai.generateEmailSubject.mutationOptions(),
   );
@@ -307,7 +314,9 @@ export function EmailComposer({
           // Un reply a `to` prérempli : la persistance locale a donc déjà écrit
           // un snapshot. Purge (comme confirmLeave), sinon il ressusciterait au
           // prochain reply du même fil alors que l'intention était d'abandonner.
+          saveLifecycle.markClosed({ abandonedEmpty: true });
           clearDraftSnapshot();
+          onAbandonEmpty?.();
           onClose?.();
         }
       }
@@ -315,7 +324,7 @@ export function EmailComposer({
 
     document.addEventListener('keydown', handleKeyDown, true); // Use capture phase
     return () => document.removeEventListener('keydown', handleKeyDown, true);
-  }, [editor, draftId, onClose, clearDraftSnapshot]);
+  }, [editor, draftId, onClose, onAbandonEmpty, clearDraftSnapshot, saveLifecycle]);
 
   const proceedWithSend = async () => {
     try {
@@ -433,6 +442,7 @@ export function EmailComposer({
   const saveDraft = async () => {
     const values = getValues();
 
+    if (!saveLifecycle.canStartSave()) return;
     if (!hasUnsavedChanges) return;
     const messageText = editor.getText();
 
@@ -457,6 +467,16 @@ export function EmailComposer({
 
       const response = await createDraft(draftData);
 
+      // Résultat arrivé après la fermeture : ignoré — ne réécrit jamais l'URL
+      // purgée (résurrection mesurée en CUA round 4). Si la fermeture était
+      // l'abandon d'un composer vide, le brouillon créé en vol est supprimé
+      // (compensation) : aucun orphelin ne ressème le prochain reply.
+      if (!saveLifecycle.canApplySaveResult()) {
+        if (saveLifecycle.wasAbandonedEmpty() && response?.id) {
+          void deleteDraftById({ id: response.id }).catch(() => {});
+        }
+        return;
+      }
       if (response?.id && response.id !== draftId) {
         setDraftId(response.id);
       }
@@ -499,13 +519,18 @@ export function EmailComposer({
     } else {
       // Parité avec la branche Escape-close : un composer vide abandonné purge
       // aussi son snapshot local (`to` prérempli suffisait à le faire écrire).
+      saveLifecycle.markClosed({ abandonedEmpty: true });
       clearDraftSnapshot();
+      onAbandonEmpty?.();
       onClose?.();
     }
   };
 
   const confirmLeave = () => {
     setShowLeaveConfirmation(false);
+    // Le brouillon serveur déjà créé est conservé (l'utilisateur part avec du
+    // contenu), mais aucune sauvegarde tardive ne doit réécrire l'URL purgée.
+    saveLifecycle.markClosed();
     clearDraftSnapshot();
     onClose?.();
   };

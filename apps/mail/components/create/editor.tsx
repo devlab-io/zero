@@ -8,6 +8,7 @@ import {
   type JSONContent,
 } from 'novel';
 import { disarmOpeningKeyGuard, shouldSuppressOpeningKey } from '@/lib/hotkeys/opening-key-guard';
+import { OpeningKeyGuardExtension } from './opening-key-guard-extension';
 import { log } from '@/lib/log';
 
 import { suggestionItems } from '@/components/create/slash-command';
@@ -208,6 +209,7 @@ export default function Editor({
           initialContent={initialValue || defaultEditorContent}
           extensions={[
             ...defaultExtensions,
+            OpeningKeyGuardExtension,
             Markdown,
             AutoComplete.configure({
               suggestions: {
@@ -243,6 +245,19 @@ export default function Editor({
           editorProps={{
             editable: () => !readOnly,
             handleDOMEvents: {
+              // CUA round 4 : couche DOM de la garde anti-écho — certains
+              // moteurs d'événements insèrent l'écho sans passer par
+              // handleTextInput ; beforeinput est annulé à la source quand il
+              // porte exactement le caractère gardé (le filet transactionnel
+              // de OpeningKeyGuardExtension couvre les chemins restants).
+              beforeinput: (_view, event) => {
+                const data = event.data;
+                if (data && shouldSuppressOpeningKey(data)) {
+                  event.preventDefault();
+                  return true;
+                }
+                return false;
+              },
               mousedown: (view, event) => {
                 if (readOnly) return false;
                 focusEditor();
