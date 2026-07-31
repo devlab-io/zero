@@ -13,9 +13,10 @@
 const MEASURE_FROM: Record<string, string> = {
   'search:results-settled': 'search:applied',
   'thread:body-ready': 'thread:open',
-  // `send:dispatched` = l'UI est libérée (composer fermé, envoi en fond) ;
-  // `send:confirmed` = le serveur a accepté/enfilé. L'écart mesure la latence
-  // réseau que l'outbox optimiste retire du chemin perçu.
+  // `send:dispatched` = la requête quitte le composer verrouillé ;
+  // `send:confirmed` = le serveur a accepté/enfilé. L'écart mesure exactement
+  // la round-trip qui bloque encore la fermeture tant qu'aucune outbox durable
+  // n'est branchée sur compose/reply.
   'send:confirmed': 'send:dispatched',
 };
 

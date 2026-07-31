@@ -1,4 +1,4 @@
-import { interpretSendOutcome } from './send-outbox';
+import { interpretSendOutcome } from './send-outcome';
 import { describe, expect, it } from 'vitest';
 
 describe('interpretSendOutcome', () => {

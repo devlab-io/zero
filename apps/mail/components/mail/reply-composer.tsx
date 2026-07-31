@@ -5,7 +5,7 @@ import { useActiveConnection } from '@/hooks/use-connections';
 import { useEmailAliases } from '@/hooks/use-email-aliases';
 import { markDraftAbandoned } from '@/lib/abandoned-drafts';
 import { lazy, Suspense, useEffect, useMemo } from 'react';
-import { interpretSendOutcome } from '@/lib/send-outbox';
+import { interpretSendOutcome } from '@/lib/send-outcome';
 import { useHotkeysContext } from 'react-hotkeys-hook';
 import { useTRPC } from '@/providers/query-provider';
 import { useMutation } from '@tanstack/react-query';
@@ -88,7 +88,9 @@ export default function ReplyCompose({ messageId }: ReplyComposeProps) {
     attachments: File[];
     scheduleAt?: string;
   }) => {
-    if (!replyToMessage || !activeConnection?.email) return;
+    if (!replyToMessage || !activeConnection?.email) {
+      throw new Error('Cannot send a reply without an active message and account');
+    }
 
     // Optimistic send (W2-H): show an immediate "Sending…" state and close the
     // composer as soon as the send resolves — no blocking refetch in the close

@@ -3,7 +3,7 @@ import { cleanEmailAddresses, isSendResult } from '@/lib/email-utils';
 import { useActiveConnection } from '@/hooks/use-connections';
 import { Dialog, DialogClose } from '@/components/ui/dialog';
 import { useEmailAliases } from '@/hooks/use-email-aliases';
-import { interpretSendOutcome } from '@/lib/send-outbox';
+import { interpretSendOutcome } from '@/lib/send-outcome';
 import { loadGitHubEmojis } from '@/lib/emoji-data';
 import { markStage } from '@/lib/perf-stages';
 import { m } from '@/paraglide/messages';
