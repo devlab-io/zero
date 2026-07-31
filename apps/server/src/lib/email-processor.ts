@@ -459,8 +459,14 @@ export function applyEmailPreferences(
         display: block;
         line-height: 1.5;
         color-scheme: only light;
-        background-color: #ffffff;
-        color: #1a1a1a;
+        /* r17b : !important — dans la cascade shadow, les déclarations
+           IMPORTANTES du contexte shadow battent celles du document extérieur
+           sur l'hôte. Sans cela, une classe posée sur le div hôte (l'ancien
+           dark:text-white) renverse silencieusement le canevas : les emails
+           text/plain, sans aucune couleur propre, héritaient du blanc du
+           thème sombre sur ce fond blanc (prod + staging, mail Kura réel). */
+        background-color: #ffffff !important;
+        color: #1a1a1a !important;
       }
 
       *, *::before, *::after {

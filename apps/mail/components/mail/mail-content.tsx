@@ -229,11 +229,16 @@ export function MailContent({ id, html, senderEmail, onContentPainted }: MailCon
           </button>
         </div>
       )}
+      {/* r17b : AUCUNE classe de couleur de texte sur l'hôte. Les règles du
+          document extérieur sur l'élément hôte BATTENT les règles :host du
+          shadow (CSS Scoping, déclarations normales) : l'ancienne classe de
+          texte blanc du thème sombre faisait hériter du blanc à tout contenu
+          sans couleur propre — les emails text/plain (driver : texte + <br>,
+          zéro style) devenaient blanc-sur-blanc. Le canevas est la propriété
+          du shadow root (:host !important, email-processor). */}
       <div
         ref={hostRef}
-        className={cn(
-          'mail-content no-scrollbar w-full flex-1 overflow-scroll px-4 text-black dark:text-white',
-        )}
+        className={cn('mail-content no-scrollbar w-full flex-1 overflow-scroll px-4')}
       />
     </>
   );

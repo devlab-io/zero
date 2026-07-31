@@ -16,8 +16,9 @@ describe('processEmailHtml email canvas', () => {
     });
 
     expect(result.processedHtml).toContain('color-scheme: only light');
-    expect(result.processedHtml).toContain('background-color: #ffffff');
-    expect(result.processedHtml).toContain('color: #1a1a1a');
+    // r17b : le canevas est verrouillé !important — voir le test dédié.
+    expect(result.processedHtml).toContain('background-color: #ffffff !important');
+    expect(result.processedHtml).toContain('color: #1a1a1a !important');
     expect(result.processedHtml).toContain('style="color:#242424"');
     expect(result.processedHtml).toContain('color: #2563eb');
   });
@@ -160,5 +161,37 @@ describe('processEmailHtml — réparation de contraste contextuelle (r17)', () 
     expect(processed).toContain(
       '<div style="background-color:#ffffff;color:#1a1a1a">hérité blanc sur blanc</div>',
     );
+  });
+});
+
+// r17b : POURQUOI staging restait blanc malgré r17. Le mail Kura réel
+// (19fb4a042f3a4c70, vérifié via Gmail) est TEXT/PLAIN : le driver Gmail le
+// convertit en texte + <br>, sans AUCUNE couleur — la passe r17 n'a donc rien
+// à réparer, et c'est correct. Le blanc venait du CLIENT : le div hôte du
+// shadow DOM portait `dark:text-white`, et les règles du document extérieur
+// sur l'hôte battent les règles :host normales du shadow (CSS Scoping) — tout
+// texte sans couleur propre héritait du blanc du thème sombre sur le canevas
+// blanc. Garde serveur : les déclarations :host du canevas sont !important
+// (dans la cascade shadow, l'important du contexte shadow bat le document
+// extérieur) — plus aucune classe hôte ne peut renverser le canevas.
+describe('processEmailHtml — canevas verrouillé pour les emails text/plain (r17b)', () => {
+  it('email text/plain (forme réelle du driver : texte + <br>) : contenu inchangé, canevas !important', () => {
+    const plainTextAsHtml =
+      'Run quotidien factures fournisseurs vers Kura — 31/07/2026.<br><br>Envoyé vers Kura: 0 facture.<br><br>Comptes scannés:<br>- thomas@devlab.io: profil vérifié.';
+    const result = processEmailHtml({
+      html: plainTextAsHtml,
+      shouldLoadImages: true,
+      theme: 'dark',
+    });
+
+    // Aucune couleur dans le contenu : la passe r17 ne réécrit RIEN…
+    expect(result.processedHtml).toContain(
+      'Run quotidien factures fournisseurs vers Kura — 31/07/2026.<br><br>Envoyé vers Kura: 0 facture.',
+    );
+    expect(result.processedHtml).not.toContain('style="color');
+    // …et la lisibilité repose entièrement sur le canevas :host, verrouillé
+    // !important pour battre toute classe posée sur l'élément hôte.
+    expect(result.processedHtml).toContain('background-color: #ffffff !important');
+    expect(result.processedHtml).toContain('color: #1a1a1a !important');
   });
 });
