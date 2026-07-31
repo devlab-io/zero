@@ -1,5 +1,6 @@
 import { useSnoozePicker } from '@/components/context/snooze-picker-context';
 import { useOptimisticActions } from '@/hooks/use-optimistic-actions';
+import { optimisticActionsAtom } from '@/store/optimistic-updates';
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { focusedIndexAtom } from '@/hooks/use-mail-navigation';
 import { enhancedKeyboardShortcuts } from '@/config/shortcuts';
@@ -10,6 +11,7 @@ import {
   useParams,
 } from 'react-router';
 import { markReplyOpened } from '@/lib/reply-search-params';
+import { resolveNextStarredState } from '@/lib/star-toggle';
 import { armOpeningKeyGuard } from './opening-key-guard';
 import { useMail } from '@/components/mail/use-mail';
 // import { Categories } from '@/components/mail/mail';
@@ -35,6 +37,7 @@ export function MailListHotkeys() {
   const folder = params?.folder ?? 'inbox';
   const shouldUseHover = mail.bulkSelected.length === 0;
   const focusedIndex = useAtomValue(focusedIndexAtom);
+  const optimisticActions = useAtomValue(optimisticActionsAtom);
   const [, setThreadId] = useQueryState('threadId');
   const [, setMode] = useQueryState('mode');
 
@@ -178,19 +181,22 @@ export function MailListHotkeys() {
   }, [mail.bulkSelected, folder, optimisticDeleteThreads, shouldUseHover]);
 
   const bulkStar = useCallback(() => {
-    if (shouldUseHover && hoveredEmailId.current) {
-      optimisticToggleStar([hoveredEmailId.current], true);
-      return;
-    }
-
-    const idsToStar = mail.bulkSelected;
+    const idsToStar = getTargetIds();
     if (idsToStar.length === 0) {
       toast.info(m['common.mail.noEmailsToSelect']());
       return;
     }
 
-    optimisticToggleStar(idsToStar, true);
-  }, [mail.bulkSelected, optimisticToggleStar, shouldUseHover]);
+    const baseStarredByThread = Object.fromEntries(
+      idsToStar.map((threadId) => {
+        const item = items.find((thread) => thread.id === threadId);
+        const isStarred = item?.labels?.some((label) => label.name === 'STARRED') ?? false;
+        return [threadId, isStarred];
+      }),
+    );
+    const nextStarred = resolveNextStarredState(idsToStar, baseStarredByThread, optimisticActions);
+    optimisticToggleStar(idsToStar, nextStarred);
+  }, [getTargetIds, items, optimisticActions, optimisticToggleStar]);
 
   const exitSelectionMode = useCallback(() => {
     setMail((prev) => ({

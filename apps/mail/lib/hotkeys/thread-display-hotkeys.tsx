@@ -10,11 +10,13 @@ import { isTypingOrModalTarget, useShortcuts } from './use-hotkey-utils';
 import { useOptimisticActions } from '@/hooks/use-optimistic-actions';
 import { THREAD_DISPLAY_HANDLED_ACTIONS } from './handler-manifest';
 import { useReplyStatePurge } from '@/hooks/use-reply-state-purge';
+import { optimisticActionsAtom } from '@/store/optimistic-updates';
 import { selectArchiveAdvanceTarget } from '@/lib/archive-advance';
 import { enhancedKeyboardShortcuts } from '@/config/shortcuts';
 import { markReplyOpened } from '@/lib/reply-search-params';
 import { useThread, useThreads } from '@/hooks/use-threads';
 import { armOpeningKeyGuard } from './opening-key-guard';
+import { resolveStarredState } from '@/lib/star-toggle';
 import useMoveTo from '@/hooks/driver/use-move-to';
 import useDelete from '@/hooks/driver/use-delete';
 import { useAtomValue, useSetAtom } from 'jotai';
@@ -42,6 +44,7 @@ export function ThreadDisplayHotkeys() {
   const setMailNavigationCommand = useSetAtom(mailNavigationCommandAtom);
   const setFocusedIndex = useSetAtom(focusedIndexAtom);
   const focusedIndex = useAtomValue(focusedIndexAtom);
+  const optimisticActions = useAtomValue(optimisticActionsAtom);
   const purgeReplyState = useReplyStatePurge();
   const {
     optimisticMoveThreadsTo,
@@ -54,7 +57,11 @@ export function ThreadDisplayHotkeys() {
 
   const folder = params.folder ?? 'inbox';
   const tags = thread?.latest?.tags;
-  const isStarred = tags?.some((tag) => tag.name === 'STARRED') ?? false;
+  const isStarred = resolveStarredState(
+    openThreadId ?? '',
+    tags?.some((tag) => tag.name === 'STARRED') ?? false,
+    optimisticActions,
+  );
 
   const openAdjacentThread = useCallback(
     (direction: 'next' | 'previous') => {
