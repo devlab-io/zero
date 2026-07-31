@@ -26,9 +26,9 @@ import {
 } from 'lucide-react';
 import { useMemo, type ReactNode, useState, useCallback, lazy, Suspense } from 'react';
 import { useOptimisticThreadState } from '@/components/mail/optimistic-thread-state';
+import { useSnoozePicker } from '@/components/context/snooze-picker-context';
 import { useOptimisticActions } from '@/hooks/use-optimistic-actions';
 import { ExclamationCircle, Mail, Clock } from '../icons/icons';
-import { SnoozeDialog } from '@/components/mail/snooze-dialog';
 import { type ThreadDestination } from '@/lib/thread-actions';
 import { useThread, useThreads } from '@/hooks/use-threads';
 import { useTRPC } from '@/providers/query-provider';
@@ -190,9 +190,9 @@ export function ThreadContextMenu({
     optimisticMarkAsRead,
     optimisticMarkAsUnread,
     // optimisticDeleteThreads,
-    optimisticSnooze,
     optimisticUnsnooze,
   } = useOptimisticActions();
+  const { openSnoozePicker } = useSnoozePicker();
   const { mutateAsync: deleteThread } = useMutation(trpc.mail.delete.mutationOptions());
   const { mutateAsync: createLabel } = useMutation(trpc.labels.create.mutationOptions());
 
@@ -491,18 +491,16 @@ export function ThreadContextMenu({
     ];
   }, [isSpam, isBin, isArchiveFolder, isInbox, isSent, handleMove, handleDelete]);
 
-  const [snoozeOpen, setSnoozeOpen] = useState(false);
   const [createLabelOpen, setCreateLabelOpen] = useState(false);
 
   const handleOpenCreateLabel = useCallback(() => {
     setCreateLabelOpen(true);
   }, []);
 
-  const handleSnoozeConfirm = (wakeAt: Date) => {
+  const handleOpenSnooze = useCallback(() => {
     const targets = mail.bulkSelected.length ? mail.bulkSelected : [threadId];
-    optimisticSnooze(targets, currentFolder, wakeAt);
-    setSnoozeOpen(false);
-  };
+    openSnoozePicker({ threadIds: targets, folder: currentFolder });
+  }, [currentFolder, mail.bulkSelected, openSnoozePicker, threadId]);
 
   const handleCreateLabel = async (data: LabelType) => {
     const labelData = {
@@ -568,13 +566,21 @@ export function ThreadContextMenu({
         id: 'snooze',
         label: 'Snooze',
         icon: <Clock className="mr-2.5 h-4 w-4 opacity-60" />,
-        action: () => setSnoozeOpen(true),
+        action: handleOpenSnooze,
         disabled: false,
       },
     ],
     // `m` is a module-level constant namespace; using it as a runtime value here retained
     // the whole paraglide catalog in the bundle (kills tree-shaking of unused messages).
-    [isUnread, isImportant, isStarred, handleReadUnread, handleToggleImportant, handleFavorites],
+    [
+      isUnread,
+      isImportant,
+      isStarred,
+      handleReadUnread,
+      handleToggleImportant,
+      handleFavorites,
+      handleOpenSnooze,
+    ],
   );
 
   const renderAction = (action: EmailAction) => {
@@ -638,11 +644,6 @@ export function ThreadContextMenu({
           {otherActions.map(renderAction)}
         </ContextMenuContent>
       </ContextMenu>
-      <SnoozeDialog
-        open={snoozeOpen}
-        onOpenChange={setSnoozeOpen}
-        onConfirm={handleSnoozeConfirm}
-      />
     </>
   );
 }

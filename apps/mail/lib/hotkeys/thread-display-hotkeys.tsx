@@ -4,6 +4,7 @@ import {
   shouldMarkAdjacentThreadRead,
 } from '@/lib/thread-navigation';
 import { focusedIndexAtom, mailNavigationCommandAtom } from '@/hooks/use-mail-navigation';
+import { useSnoozePicker } from '@/components/context/snooze-picker-context';
 import { buildThreadLink, shouldCopyThreadLink } from './copy-thread-link';
 import { isTypingOrModalTarget, useShortcuts } from './use-hotkey-utils';
 import { useOptimisticActions } from '@/hooks/use-optimistic-actions';
@@ -44,12 +45,12 @@ export function ThreadDisplayHotkeys() {
   const purgeReplyState = useReplyStatePurge();
   const {
     optimisticMoveThreadsTo,
-    optimisticSnooze,
     optimisticMarkAsRead,
     optimisticMarkAsUnread,
     optimisticToggleImportant,
     optimisticToggleStar,
   } = useOptimisticActions();
+  const { openSnoozePicker } = useSnoozePicker();
 
   const folder = params.folder ?? 'inbox';
   const tags = thread?.latest?.tags;
@@ -133,14 +134,15 @@ export function ThreadDisplayHotkeys() {
     archive: () => archiveAndMove('next'),
     archiveNext: () => archiveAndMove('next'),
     archivePrevious: () => archiveAndMove('previous'),
-    // Devlab: h/b = remind — snooze to tomorrow 08:00 and move on (undo: mod+z).
+    // `h` / `b` opens the shared picker. The next thread only opens after the
+    // user confirms a time, so Escape is always a safe no-op.
     remind: () => {
       if (!openThreadId) return;
-      const wakeAt = new Date();
-      wakeAt.setDate(wakeAt.getDate() + 1);
-      wakeAt.setHours(8, 0, 0, 0);
-      optimisticSnooze([openThreadId], folder, wakeAt);
-      setMailNavigationCommand('next');
+      openSnoozePicker({
+        threadIds: [openThreadId],
+        folder,
+        afterConfirm: () => setMailNavigationCommand('next'),
+      });
     },
     toggleStar: () => {
       if (!openThreadId) return;

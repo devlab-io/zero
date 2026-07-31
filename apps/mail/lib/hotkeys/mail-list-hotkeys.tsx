@@ -1,3 +1,4 @@
+import { useSnoozePicker } from '@/components/context/snooze-picker-context';
 import { useOptimisticActions } from '@/hooks/use-optimistic-actions';
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { focusedIndexAtom } from '@/hooks/use-mail-navigation';
@@ -44,8 +45,8 @@ export function MailListHotkeys() {
     optimisticToggleImportant,
     optimisticDeleteThreads,
     optimisticToggleStar,
-    optimisticSnooze,
   } = useOptimisticActions();
+  const { openSnoozePicker } = useSnoozePicker();
 
   // Devlab: hover listener restored (upstream shipped it commented out, leaving
   // single-key list actions dead unless a bulk selection existed).
@@ -244,18 +245,16 @@ export function MailListHotkeys() {
     openTargetInMode('forward');
   }, [openTargetInMode]);
 
-  // Devlab: h = remind — snooze to tomorrow 08:00 (undo with mod+z, toast confirms).
+  // `h` / `b` opens the shared keyboard-first snooze picker for the hovered,
+  // focused or selected threads. The picker owns date parsing and confirmation.
   const remindThread = useCallback(() => {
     const ids = getTargetIds();
     if (!ids.length) {
       toast.info(m['common.mail.noEmailsToSelect']());
       return;
     }
-    const wakeAt = new Date();
-    wakeAt.setDate(wakeAt.getDate() + 1);
-    wakeAt.setHours(8, 0, 0, 0);
-    optimisticSnooze(ids, folder, wakeAt);
-  }, [getTargetIds, folder, optimisticSnooze]);
+    openSnoozePicker({ threadIds: ids, folder });
+  }, [getTargetIds, folder, openSnoozePicker]);
 
   // const switchMailListCategory = useCallback(
   //   (category: string | null) => {

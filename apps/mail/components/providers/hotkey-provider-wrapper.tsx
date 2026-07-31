@@ -1,3 +1,4 @@
+import { SnoozePickerProvider } from '@/components/context/snooze-picker-context';
 import { ThreadDisplayHotkeys } from '@/lib/hotkeys/thread-display-hotkeys';
 import { NavigationHotkeys } from '@/lib/hotkeys/navigation-hotkeys';
 import { MailListHotkeys } from '@/lib/hotkeys/mail-list-hotkeys';
@@ -12,13 +13,15 @@ interface HotkeyProviderWrapperProps {
 
 export function HotkeyProviderWrapper({ children }: HotkeyProviderWrapperProps) {
   return (
-    <HotkeysProvider initiallyActiveScopes={['global', 'navigation']}>
-      <NavigationHotkeys />
-      <GlobalHotkeys />
-      <MailListHotkeys />
-      <ThreadDisplayHotkeys />
-      <ComposeHotkeys />
-      {children}
-    </HotkeysProvider>
+    <SnoozePickerProvider>
+      <HotkeysProvider initiallyActiveScopes={['global', 'navigation']}>
+        <NavigationHotkeys />
+        <GlobalHotkeys />
+        <MailListHotkeys />
+        <ThreadDisplayHotkeys />
+        <ComposeHotkeys />
+        {children}
+      </HotkeysProvider>
+    </SnoozePickerProvider>
   );
 }
