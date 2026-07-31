@@ -10,12 +10,14 @@ describe('email content query key', () => {
   it('uses the same normalized dimensions for prefetch and rendering', () => {
     expect(emailContentQueryKey('m1', undefined, 'system')).toEqual([
       'email-content',
+      3,
       'm1',
       false,
       'light',
     ]);
     expect(emailContentQueryKey('m1', false, 'light')).toEqual([
       'email-content',
+      3,
       'm1',
       false,
       'light',

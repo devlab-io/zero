@@ -1,4 +1,4 @@
-// @ts-ignore
+// @ts-expect-error -- @barkleapp/css-sanitizer does not publish TypeScript declarations.
 import { CssSanitizer } from '@barkleapp/css-sanitizer';
 import sanitizeHtml from 'sanitize-html';
 import * as cheerio from 'cheerio';
@@ -137,11 +137,10 @@ export function preprocessEmailHtml(html: string): string {
 // Client-side: Light styling + image preferences
 export function applyEmailPreferences(
   preprocessedHtml: string,
-  theme: 'light' | 'dark',
+  _theme: 'light' | 'dark',
   shouldLoadImages: boolean,
 ): { processedHtml: string; hasBlockedImages: boolean } {
   let hasBlockedImages = false;
-  const isDarkTheme = theme === 'dark';
 
   const $ = cheerio.load(preprocessedHtml);
 
@@ -161,14 +160,19 @@ export function applyEmailPreferences(
 
   const html = $.html();
 
-  // Apply theme-specific styles
+  // Email HTML is authored against a light default canvas unless it declares
+  // its own background. Making the implicit canvas dark leaves sender-defined
+  // colors such as Microsoft's #242424 almost black on black. Keep the neutral
+  // email canvas light in both app themes; genuinely dark emails retain their
+  // explicit backgrounds and text colors.
   const themeStyles = `
     <style type="text/css">
       :host {
         display: block;
         line-height: 1.5;
-        background-color: ${isDarkTheme ? '#1A1A1A' : '#ffffff'};
-        color: ${isDarkTheme ? '#ffffff' : '#000000'};
+        color-scheme: only light;
+        background-color: #ffffff;
+        color: #1a1a1a;
       }
 
       *, *::before, *::after {
@@ -182,7 +186,7 @@ export function applyEmailPreferences(
 
       a {
         cursor: pointer;
-        color: ${isDarkTheme ? '#60a5fa' : '#2563eb'};
+        color: #2563eb;
         text-decoration: underline;
       }
 
@@ -197,14 +201,14 @@ export function applyEmailPreferences(
 
       /* Styling for collapsed quoted text */
       details.quoted-toggle {
-        border-left: 2px solid ${isDarkTheme ? '#374151' : '#d1d5db'};
+        border-left: 2px solid #d1d5db;
         padding-left: 8px;
         margin-top: 0.75rem;
       }
 
       details.quoted-toggle summary {
         cursor: pointer;
-        color: ${isDarkTheme ? '#9CA3AF' : '#6B7280'};
+        color: #6B7280;
         list-style: none;
         user-select: none;
       }
@@ -214,7 +218,7 @@ export function applyEmailPreferences(
       }
 
       [data-theme-color="muted"] {
-        color: ${isDarkTheme ? '#9CA3AF' : '#6B7280'};
+        color: #6B7280;
       }
     </style>
   `;

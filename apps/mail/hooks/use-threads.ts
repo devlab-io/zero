@@ -24,6 +24,7 @@ import { backgroundQueueAtom, isThreadInBackgroundQueueAtom } from '@/store/back
 import { emailContentQueryKey, resolveEmailContentTheme } from '@/lib/email-content-query';
 import { canReuseMailListPlaceholder } from '@/lib/mail-list-placeholder';
 import { useTRPC, useTRPCClient } from '@/providers/query-provider';
+import { hasCompleteThreadBodies } from '@/lib/thread-detail-cache';
 import { isSimpleLiteralSearch } from '@/lib/search-intent';
 import { useSearchValue } from '@/hooks/use-search-value';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
@@ -69,10 +70,12 @@ function useOpenThreadQueryOptions() {
           return result.thread;
         },
         enabled,
-        staleTime: THREAD_STALE_MS,
+        staleTime: (query) => (hasCompleteThreadBodies(query.state.data) ? THREAD_STALE_MS : 0),
         // Websocket invalidations keep cached threads fresh. Refetching on every
         // mount duplicated openThread during navigation and flooded the user DO.
-        refetchOnMount: false,
+        // A projected/legacy cache entry without decoded bodies is the exception:
+        // the active reader must repair it instead of showing an empty panel forever.
+        refetchOnMount: (query) => enabled && !hasCompleteThreadBodies(query.state.data),
       }),
     [queryClient, shouldLoadImages, theme, trpc, trpcClient],
   );
