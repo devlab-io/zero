@@ -1,6 +1,6 @@
 import { invalidateSessionCache } from '@/lib/session-invalidation';
+import { purgeClientIdentityHints } from '@/lib/cache-owner-hint';
 import { phoneNumberClient } from 'better-auth/client/plugins';
-import { clearCacheOwnerHint } from '@/lib/cache-owner-hint';
 import { createAuthClient } from 'better-auth/react';
 import type { Auth } from '@zero/server/auth';
 
@@ -83,9 +83,10 @@ const { signIn, signUp, signOut: nativeSignOut, useSession, getSession, $fetch }
 /**
  * Devlab (perf) : wrapper autour du signOut natif qui vide, dans tous les cas
  * (succès ou échec), les caches de session en mémoire (dédup transport +
- * cache authProxy + hint cacheOwner) — sans quoi un signOut suivi d'un
- * nouveau login réutiliserait la session ou le cacheOwner du compte
- * précédent pendant leur fenêtre de TTL/dédup respective.
+ * cache authProxy) ET les hints d'identité (cacheOwner + connexion active) —
+ * sans quoi un signOut suivi d'un nouveau login réutiliserait la session, le
+ * cacheOwner ou la connexion du compte précédent pendant leur fenêtre de
+ * TTL/dédup respective.
  */
 export const signOut: typeof nativeSignOut = (async (...args: Parameters<typeof nativeSignOut>) => {
   try {
@@ -93,7 +94,7 @@ export const signOut: typeof nativeSignOut = (async (...args: Parameters<typeof 
   } finally {
     invalidateSessionCache();
     invalidateGetSessionDedup();
-    clearCacheOwnerHint();
+    purgeClientIdentityHints();
   }
 }) as typeof nativeSignOut;
 

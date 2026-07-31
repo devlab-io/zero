@@ -465,6 +465,11 @@ export const getThreadsFromDB = async (
     return response;
   };
 
+  // Contre-revue r6 : le raccourci « shard actif seul » n'est PAS étendu aux
+  // pages de 50 — le shard actif est choisi par plus petite taille DB, pas par
+  // récence globale ; sans test d'intégration 2 shards (top-50 global, page 2
+  // sans omission ni doublon), les pages de 50 du client passent par le chemin
+  // agrégé multi-shard existant, le même que toute pagination.
   if (maxResults === defaultPageSize && !params.pageToken && !params.q) {
     const response = await Effect.promise(async () => {
       const agent = await getZeroAgent(connectionId);

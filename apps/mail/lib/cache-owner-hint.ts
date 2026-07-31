@@ -1,3 +1,5 @@
+import { setActiveConnectionId } from './active-connection-store';
+
 const CACHE_OWNER_HINT_KEY = 'zero-cache-owner-hint';
 
 /**
@@ -10,6 +12,33 @@ const CACHE_OWNER_HINT_KEY = 'zero-cache-owner-hint';
  * dernier cacheOwner connu en localStorage pour l'utiliser dès le rendu
  * initial, tant qu'il correspond au connectionId courant.
  */
+
+/**
+ * Résolution PURE de l'identité du cache (QueryClient + persister IndexedDB) :
+ * `user-connexion`. Règle P0 (audit r6) : tant que la session n'a pas CONFIRMÉ
+ * l'utilisateur, l'identité est anonyme — le hint localStorage n'est JAMAIS
+ * consulté, car il n'est pas vérifiable côté client (crash navigateur, vieux
+ * build ou storage périmé peuvent le laisser en place sans passer par
+ * signOut ; la purge au logout est une hygiène nécessaire, PAS une preuve).
+ * Une identité anonyme ne correspond à aucun persister user-scopé : rien d'un
+ * ancien compte ne peut être restauré ni peint avant confirmation. Dès que la
+ * session résout, l'identité stricte user-connexion sélectionne le cache
+ * chaud du compte — même identité → cache conservé, autre identité → autre
+ * persister, jamais celui d'un tiers.
+ */
+export function resolveCacheOwner(input: {
+  sessionUserId: string | null | undefined;
+  isSessionPending: boolean;
+  connectionId: string | null;
+  /** Ignoré tant que la session n'est pas résolue — conservé dans la signature
+   * pour que les tests prouvent qu'un hint injecté n'a AUCUN effet. */
+  hint: string | null;
+}): string {
+  if (input.isSessionPending || !input.sessionUserId) {
+    return `anonymous-${input.connectionId ?? 'default'}`;
+  }
+  return `${input.sessionUserId}-${input.connectionId ?? 'default'}`;
+}
 
 export function readCacheOwnerHint(): string | null {
   if (typeof window === 'undefined') return null;
@@ -38,4 +67,17 @@ export function clearCacheOwnerHint(): void {
   } catch {
     // idem
   }
+}
+
+/**
+ * Purge ATOMIQUE des hints d'identité client (cacheOwner legacy + connexion
+ * active), appelée par le wrapper signOut sur CHAQUE chemin de déconnexion
+ * (menu utilisateur, error boundary de root.tsx, signout forcé du QueryCache).
+ * HYGIÈNE, pas preuve : la garantie zéro-fuite ne repose pas sur elle mais sur
+ * resolveCacheOwner, qui refuse toute identité user-scopée avant confirmation
+ * de session — même si un hint périmé survit (crash, vieux build).
+ */
+export function purgeClientIdentityHints(): void {
+  clearCacheOwnerHint();
+  setActiveConnectionId(null);
 }

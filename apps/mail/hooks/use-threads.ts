@@ -26,7 +26,9 @@ import { emailContentQueryKey, resolveEmailContentTheme } from '@/lib/email-cont
 import { canReuseMailListPlaceholder } from '@/lib/mail-list-placeholder';
 import { useTRPC, useTRPCClient } from '@/providers/query-provider';
 import { hasCompleteThreadBodies } from '@/lib/thread-detail-cache';
+import { MAIL_LIST_QUERY_BEHAVIOR } from '@/lib/mail-list-query';
 import { isSimpleLiteralSearch } from '@/lib/search-intent';
+import { mailListMaxResults } from '@/lib/mail-pagination';
 import { useSearchValue } from '@/hooks/use-search-value';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import { useCallback, useEffect, useMemo } from 'react';
@@ -99,22 +101,32 @@ export const useThreads = () => {
   const isInQueue = useAtomValue(isThreadInBackgroundQueueAtom);
   const trpc = useTRPC();
   const { labels } = useSearchLabels();
+  // Gating session (P0 r6) : tant que l'identité n'est pas confirmée, la liste
+  // ne DOIT ni requêter ni peindre — le shell neutre du QueryProvider est
+  // mémoire-seule et aucune donnée mailbox ne doit y entrer (elle serait
+  // servie par cookie avant confirmation de l'utilisateur).
+  const { data: session } = useSession();
 
+  const isSearchingList = searchValue.value.trim().length > 0;
   const listThreadsQueryOptions = trpc.mail.listThreads.infiniteQueryOptions(
     {
       q: searchValue.value,
       folder,
       labelIds: labels,
+      // Pages de 50 sur le chemin projection (perf r6 : le scroll profond
+      // sérialise les round-trips de pages). Recherche et Drafts gardent le
+      // défaut serveur — voir mailListMaxResults.
+      maxResults: mailListMaxResults(folder, isSearchingList),
     },
     {
       initialCursor: '',
       getNextPageParam: (lastPage) => lastPage?.nextPageToken ?? null,
-      // Lists are maintained by websocket invalidations. Keep visited folders hot
-      // so returning to Inbox is an immediate cache read, not another blocking trip.
-      staleTime: 5 * 60 * 1000,
-      refetchOnMount: false,
-      refetchOnWindowFocus: false,
-      refetchIntervalInBackground: true,
+      enabled: Boolean(session?.user?.id),
+      // Snapshot d'abord, réconciliation stale-only en arrière-plan — contrat
+      // partagé avec la chauffe des dossiers, prouvé par mail-list-query.test.ts.
+      // Les websockets restent la voie chaude ; ceci couvre le dossier COURANT
+      // resté ouvert au-delà du staleTime (audit r6).
+      ...MAIL_LIST_QUERY_BEHAVIOR,
       // CUA 2026-07-30 (obs 3) : quand la clé change (recherche tapée, retour de
       // recherche, changement de labels), la vue précédente reste affichée pendant
       // que la nouvelle réponse arrive — plus d'écran-spinner bloquant de 2+ s. La
@@ -136,7 +148,7 @@ export const useThreads = () => {
   const previewQuery = useQuery(
     trpc.mail.listThreads.queryOptions(
       { q: searchValue.value, folder, labelIds: labels, cursor: '', localPreview: true },
-      { enabled: isSearching, staleTime: 60 * 1000 },
+      { enabled: isSearching && Boolean(session?.user?.id), staleTime: 60 * 1000 },
     ),
   );
 

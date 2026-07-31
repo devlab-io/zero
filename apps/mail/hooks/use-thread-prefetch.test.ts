@@ -1,4 +1,5 @@
 import {
+  planVisibleThreadPrefetch,
   prefetchThreadIdsInBatches,
   resolveActiveThreadIndex,
   selectAdjacentThreadIds,
@@ -67,12 +68,36 @@ describe('targeted thread prefetch', () => {
       'f',
       'g',
     ]);
+    // Overscan clamps to the loaded end of the list.
+    expect(selectVisibleThreadIds(['a', 'b', 'c', 'd'], 2, 4)).toEqual(['c', 'd']);
   });
 
   it('clamps stale virtual ranges and removes duplicate thread ids', () => {
     expect(selectVisibleThreadIds(['a', 'a', 'b', 'c'], -2, 1)).toEqual(['a', 'b', 'c']);
     expect(selectVisibleThreadIds(['a', 'b'], 5, 7)).toEqual([]);
     expect(selectVisibleThreadIds([], 0, 0)).toEqual([]);
+  });
+
+  it('plans visible+overscan warming once per range: same range → skip, no redundant queue', () => {
+    const ids = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j'];
+    const first = planVisibleThreadPrefetch(ids, 0, 2, '');
+    expect(first.skip).toBe(false);
+    expect(first.ids).toEqual(['a', 'b', 'c', 'd', 'e']);
+
+    // Même plage re-signalée (scroll immobile, re-render) : AUCUNE nouvelle
+    // file de requêtes tant que la clé achevée n'a pas changé.
+    const repeat = planVisibleThreadPrefetch(ids, 0, 2, first.key);
+    expect(repeat.skip).toBe(true);
+
+    // La plage bouge d'une ligne → nouvelle clé, nouveau réchauffage.
+    const moved = planVisibleThreadPrefetch(ids, 1, 3, first.key);
+    expect(moved.skip).toBe(false);
+    expect(moved.ids).toEqual(['b', 'c', 'd', 'e', 'f']);
+  });
+
+  it('plans nothing for an empty or unresolved virtual range', () => {
+    expect(planVisibleThreadPrefetch([], 0, 0, '').skip).toBe(true);
+    expect(planVisibleThreadPrefetch(['a'], 5, 7, '').skip).toBe(true);
   });
 
   it('limits visible body reads to batches of two', async () => {

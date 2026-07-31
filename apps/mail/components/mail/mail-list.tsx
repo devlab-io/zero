@@ -1,7 +1,7 @@
 import {
+  planVisibleThreadPrefetch,
   prefetchThreadIdsInBatches,
   selectNextThreadIds,
-  selectVisibleThreadIds,
   shouldPrefetchThreadBodies,
   useInitialThreadPrefetch,
 } from '@/hooks/use-thread-prefetch';
@@ -225,26 +225,26 @@ export const MailList = memo(
           return;
         }
 
-        const ids = selectVisibleThreadIds(
+        const plan = planVisibleThreadPrefetch(
           filteredItems.map((item) => item.id),
           list.findStartIndex(),
           list.findEndIndex(),
+          lastVisiblePrefetchKeyRef.current,
         );
-        const rangeKey = ids.join(':');
-        if (!rangeKey || rangeKey === lastVisiblePrefetchKeyRef.current) return;
+        if (plan.skip) return;
 
         // Keep at most two body reads in flight. Production showed that warming
         // an entire tall viewport at once could monopolise the mailbox Durable
         // Object and make list pagination feel frozen. A newer scroll generation
         // or an active page fetch cancels the remaining speculative batches.
         const completed = await prefetchThreadIdsInBatches(
-          ids,
+          plan.ids,
           (id) => prefetchThread(id).catch(() => undefined),
           () => generation === visiblePrefetchGenerationRef.current && !listPageBusyRef.current,
         );
 
         if (completed) {
-          lastVisiblePrefetchKeyRef.current = rangeKey;
+          lastVisiblePrefetchKeyRef.current = plan.key;
         }
       },
       [filteredItems, folder, isFiltering, prefetchThread],

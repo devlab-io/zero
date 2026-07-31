@@ -12,13 +12,16 @@ import {
   type Persister,
 } from '@tanstack/react-query-persist-client';
 import {
-  readCacheOwnerHint,
-  writeCacheOwnerHint,
-  clearCacheOwnerHint,
-} from '@/lib/cache-owner-hint';
-import { QueryCache, QueryClient, hashKey, type InfiniteData } from '@tanstack/react-query';
+  QueryCache,
+  QueryClient,
+  QueryClientProvider,
+  hashKey,
+  type InfiniteData,
+} from '@tanstack/react-query';
 import { selectQueriesForPersistence, shouldPersistQuery } from '@/lib/query-persistence';
 import { useEffect, useMemo, useSyncExternalStore, type PropsWithChildren } from 'react';
+import { seedMailListPageSizeMigration } from '@/lib/mail-list-cache-migration';
+import { readCacheOwnerHint, resolveCacheOwner } from '@/lib/cache-owner-hint';
 import { readRetryDelay, shouldRetryRead } from '@/lib/query-retry';
 import { createTRPCContext } from '@trpc/tanstack-react-query';
 import { createTRPCClient, httpBatchLink } from '@trpc/client';
@@ -193,36 +196,25 @@ export function QueryProvider({ children }: PropsWithChildren) {
     getActiveConnectionId,
     () => null,
   );
-  const resolvedCacheOwner = `${session?.user.id ?? 'anonymous'}-${connectionId ?? 'default'}`;
-
-  // Devlab (perf) : pendant que useSession() résout, cacheOwner valait
-  // "anonymous-<connectionId>", ce qui recréait un QueryClient + persister
-  // IndexedDB neufs (getQueryClient) au moment où la session bascule vers le
-  // vrai user id — la première vague de requêtes est jetée et repart
-  // (régime établi 2,7 s, dont cette seconde vague). Le hint n'est utilisé
-  // que si son suffixe connectionId correspond au connectionId courant :
-  // sinon la clé de persister `zero-query-cache-${cacheOwner}` servirait le
-  // cache IndexedDB d'une autre connexion.
-  const currentConnectionSuffix = `-${connectionId ?? 'default'}`;
-  const cacheOwnerHint = isSessionPending ? readCacheOwnerHint() : null;
-  const cacheOwner =
-    cacheOwnerHint && cacheOwnerHint.endsWith(currentConnectionSuffix)
-      ? cacheOwnerHint
-      : resolvedCacheOwner;
+  // Barrière d'isolation P0 (r6, testée dans lib/cache-owner-hint.test.ts) :
+  // tant que userId+connexion ne sont pas CONFIRMÉS par la session, l'identité
+  // résolue est anonyme — aucun hint localStorage (non vérifiable : crash,
+  // vieux build, storage périmé) ne peut sélectionner le persister d'un autre
+  // compte. À la résolution, la clé bascule vers user-connexion et le
+  // persister par compte restaure le cache chaud immédiatement.
+  const cacheOwner = resolveCacheOwner({
+    sessionUserId: session?.user.id ?? null,
+    isSessionPending,
+    connectionId,
+    hint: isSessionPending ? readCacheOwnerHint() : null,
+  });
+  const isConfirmedIdentity = Boolean(session?.user.id) && !isSessionPending;
 
   const persister = useMemo(
     () => createIDBPersister(`zero-query-cache-${cacheOwner}`),
     [cacheOwner],
   );
   const queryClient = useMemo(() => getQueryClient(cacheOwner), [cacheOwner]);
-
-  // Une fois la session résolue : garde le hint à jour (utilisateur connu)
-  // ou l'efface (déconnecté), pour la prochaine navigation/boot.
-  useEffect(() => {
-    if (isSessionPending) return;
-    if (session?.user.id) writeCacheOwnerHint(resolvedCacheOwner);
-    else clearCacheOwnerHint();
-  }, [isSessionPending, resolvedCacheOwner, session?.user.id]);
 
   // Purge des caches persistés des AUTRES utilisateurs (tous sur logout). Les
   // caches des autres connexions du même utilisateur sont conservés : c'est ce
@@ -235,6 +227,35 @@ export function QueryProvider({ children }: PropsWithChildren) {
     );
   }, [isSessionPending, session?.user.id]);
 
+  if (isSessionPending) {
+    // Shell NEUTRE structurel (P0 r6) : tant que l'identité n'est pas
+    // confirmée, les children ne montent PAS — aucune requête (même servie
+    // par cookie) ne peut partir, aucune mailbox ne peut peindre, aucun
+    // persister n'est restauré ni écrit. Coût assumé : la première peinture
+    // attend la résolution de session ; le persister par compte restaure le
+    // cache chaud juste après.
+    return (
+      <div
+        data-testid="identity-pending-shell"
+        className="flex h-screen w-full items-center justify-center"
+      >
+        <div className="h-5 w-5 animate-spin rounded-full border-2 border-neutral-900 border-t-transparent dark:border-white dark:border-t-transparent" />
+      </div>
+    );
+  }
+
+  if (!isConfirmedIdentity) {
+    // Session résolue SANS utilisateur (déconnecté : login, pages publiques) :
+    // client mémoire-seule, aucun persister user-scopé restauré ni écrit.
+    return (
+      <QueryClientProvider client={queryClient}>
+        <TRPCProvider trpcClient={trpcClient} queryClient={queryClient}>
+          {children}
+        </TRPCProvider>
+      </QueryClientProvider>
+    );
+  }
+
   return (
     <PersistQueryClientProvider
       key={cacheOwner}
@@ -246,6 +267,10 @@ export function QueryProvider({ children }: PropsWithChildren) {
         dehydrateOptions: { shouldDehydrateQuery: shouldPersistQuery },
       }}
       onSuccess={() => {
+        // r6 : recopie les listes persistées sous l'ancienne clé (20 lignes)
+        // vers la clé pages-de-50 — le premier boot post-déploiement peint le
+        // snapshot existant au lieu d'être artificiellement froid.
+        seedMailListPageSizeMigration(queryClient);
         const threadQueryKey = [['mail', 'listThreads'], { type: 'infinite' }];
         queryClient.setQueriesData(
           { queryKey: threadQueryKey },

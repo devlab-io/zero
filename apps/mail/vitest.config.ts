@@ -1,5 +1,5 @@
-import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vitest/config';
+import { fileURLToPath } from 'node:url';
 
 // Mail is a browser app; unit tests run under happy-dom so DOM-dependent tests
 // (queue/optimistic UI, keyboard registry — added in later waves) have an
@@ -21,6 +21,6 @@ export default defineConfig({
   },
   test: {
     environment: 'happy-dom',
-    include: ['{app,components,lib,hooks,store,workers}/**/*.test.{ts,tsx}'],
+    include: ['{app,components,lib,hooks,providers,store,workers}/**/*.test.{ts,tsx}'],
   },
 });

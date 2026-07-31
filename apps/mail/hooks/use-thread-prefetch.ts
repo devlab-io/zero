@@ -4,6 +4,10 @@ import { useEffect, useMemo } from 'react';
 const PREFETCH_COUNT = 2;
 const PREVIOUS_PREFETCH_COUNT = 1;
 const INITIAL_PREFETCH_COUNT = 3;
+// Deux lignes d'avance sous le viewport, pas plus : ces openThread spéculatifs
+// partagent le DO avec la pagination de liste — l'élargir concurrencerait
+// précisément ce que le scroll attend (contre-revue r6), et ArrowDown est déjà
+// couvert par le prefetch lecteur (précédent + deux suivants).
 const VISIBLE_PREFETCH_AHEAD_COUNT = 2;
 const VISIBLE_PREFETCH_BATCH_SIZE = 2;
 
@@ -104,6 +108,32 @@ export function selectVisibleThreadIds(
   );
 
   return [...new Set(ids.slice(start, end + 1).filter(Boolean))];
+}
+
+export type VisiblePrefetchPlan = {
+  /** Corps à réchauffer, du haut du viewport vers l'overscan bas. */
+  ids: string[];
+  /** Clé de plage — mémorisée par l'appelant une fois la file achevée. */
+  key: string;
+  /** true : plage vide ou identique à la dernière achevée — zéro requête. */
+  skip: boolean;
+};
+
+/**
+ * Décision compléte du réchauffage visible : plage (visible + overscan), clé
+ * de dédup et verdict skip. Pure pour prouver en test le préchargement des
+ * lignes visibles/overscan ET l'absence de requêtes redondantes quand la
+ * plage n'a pas bougé (mêmes bornes → skip, aucune file relancée).
+ */
+export function planVisibleThreadPrefetch(
+  ids: readonly string[],
+  startIndex: number,
+  endIndex: number,
+  lastCompletedKey: string,
+): VisiblePrefetchPlan {
+  const selected = selectVisibleThreadIds(ids, startIndex, endIndex);
+  const key = selected.join(':');
+  return { ids: selected, key, skip: key === '' || key === lastCompletedKey };
 }
 
 export async function prefetchThreadIdsInBatches(
