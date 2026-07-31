@@ -3,6 +3,7 @@ import { useEffect, useMemo } from 'react';
 
 const PREFETCH_COUNT = 2;
 const INITIAL_PREFETCH_COUNT = 3;
+const VISIBLE_PREFETCH_AHEAD_COUNT = 2;
 
 export type NetworkInformation = {
   saveData?: boolean;
@@ -34,6 +35,36 @@ export function selectNextThreadIds(
 
 export function selectInitialThreadIds(ids: readonly string[]): string[] {
   return [...new Set(ids.filter(Boolean))].slice(0, INITIAL_PREFETCH_COUNT);
+}
+
+/**
+ * Select every thread the virtual list says is visible, plus the next two rows.
+ * The bounds are clamped because Virtua can briefly report the previous range
+ * while a page is appended. Keeping this selector pure makes the scroll-driven
+ * prefetch policy deterministic and cheap to test.
+ */
+export function selectVisibleThreadIds(
+  ids: readonly string[],
+  startIndex: number,
+  endIndex: number,
+): string[] {
+  if (
+    ids.length === 0 ||
+    !Number.isFinite(startIndex) ||
+    !Number.isFinite(endIndex) ||
+    endIndex < 0 ||
+    startIndex >= ids.length
+  ) {
+    return [];
+  }
+
+  const start = Math.max(0, Math.floor(startIndex));
+  const end = Math.min(
+    ids.length - 1,
+    Math.max(start, Math.floor(endIndex)) + VISIBLE_PREFETCH_AHEAD_COUNT,
+  );
+
+  return [...new Set(ids.slice(start, end + 1).filter(Boolean))];
 }
 
 /**

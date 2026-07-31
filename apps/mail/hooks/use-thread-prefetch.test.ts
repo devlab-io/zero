@@ -1,6 +1,7 @@
 import {
   selectInitialThreadIds,
   selectNextThreadIds,
+  selectVisibleThreadIds,
   shouldPrefetchThreadBodies,
 } from './use-thread-prefetch';
 import { describe, expect, it } from 'vitest';
@@ -30,5 +31,21 @@ describe('targeted thread prefetch', () => {
 
   it('uses the focused row when the open thread uses another projection id', () => {
     expect(selectNextThreadIds(['a', 'b', 'c', 'd'], 'message-id', 1)).toEqual(['c', 'd']);
+  });
+
+  it('warms the full visible window and the next two rows after a scroll', () => {
+    expect(selectVisibleThreadIds(['a', 'b', 'c', 'd', 'e', 'f', 'g'], 2, 4)).toEqual([
+      'c',
+      'd',
+      'e',
+      'f',
+      'g',
+    ]);
+  });
+
+  it('clamps stale virtual ranges and removes duplicate thread ids', () => {
+    expect(selectVisibleThreadIds(['a', 'a', 'b', 'c'], -2, 1)).toEqual(['a', 'b', 'c']);
+    expect(selectVisibleThreadIds(['a', 'b'], 5, 7)).toEqual([]);
+    expect(selectVisibleThreadIds([], 0, 0)).toEqual([]);
   });
 });

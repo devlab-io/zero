@@ -1,8 +1,13 @@
 import {
+  selectNextThreadIds,
+  selectVisibleThreadIds,
+  shouldPrefetchThreadBodies,
+  useInitialThreadPrefetch,
+} from '@/hooks/use-thread-prefetch';
+import {
   pendingFolderNavigationAtom,
   shouldMaskPendingMailFolder,
 } from '@/store/folder-navigation';
-import { selectNextThreadIds, useInitialThreadPrefetch } from '@/hooks/use-thread-prefetch';
 import { useMailSelection, type MailSelectionModifiers } from '@/hooks/use-mail-selection';
 import { focusedIndexAtom, useMailNavigation } from '@/hooks/use-mail-navigation';
 import { useOptimisticActions } from '@/hooks/use-optimistic-actions';
@@ -59,6 +64,8 @@ export const MailList = memo(
     const itemsRef = useRef(items);
     const parentRef = useRef<HTMLDivElement>(null);
     const vListRef = useRef<VListHandle>(null);
+    const visiblePrefetchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const lastVisiblePrefetchKeyRef = useRef('');
 
     useEffect(() => {
       itemsRef.current = items;
@@ -171,6 +178,59 @@ export const MailList = memo(
 
     const filteredItems = useMemo(() => items.filter((item) => item.id), [items]);
     const isFolderTransitionMasked = shouldMaskPendingMailFolder(pendingFolder, folder);
+
+    const prefetchVisibleThreads = useCallback(() => {
+      const list = vListRef.current;
+      const connection = (
+        navigator as Navigator & { connection?: { saveData?: boolean; effectiveType?: string } }
+      ).connection;
+      if (
+        !list ||
+        folder === FOLDERS.DRAFT ||
+        isLoading ||
+        isRestoring ||
+        isFiltering ||
+        !shouldPrefetchThreadBodies(connection)
+      ) {
+        return;
+      }
+
+      const ids = selectVisibleThreadIds(
+        filteredItems.map((item) => item.id),
+        list.findStartIndex(),
+        list.findEndIndex(),
+      );
+      const rangeKey = ids.join(':');
+      if (!rangeKey || rangeKey === lastVisiblePrefetchKeyRef.current) return;
+
+      lastVisiblePrefetchKeyRef.current = rangeKey;
+      void Promise.all(ids.map((id) => prefetchThread(id).catch(() => undefined)));
+    }, [filteredItems, folder, isFiltering, isLoading, isRestoring, prefetchThread]);
+
+    const scheduleVisibleThreadPrefetch = useCallback(() => {
+      if (visiblePrefetchTimerRef.current !== null) {
+        clearTimeout(visiblePrefetchTimerRef.current);
+      }
+
+      // Wait only long enough to collapse a stream of scroll events. Starting
+      // one batch for the final viewport avoids warming every row raced past by
+      // a fast scroll while still getting the displayed bodies into cache before
+      // the user chooses one.
+      visiblePrefetchTimerRef.current = setTimeout(() => {
+        visiblePrefetchTimerRef.current = null;
+        prefetchVisibleThreads();
+      }, 40);
+    }, [prefetchVisibleThreads]);
+
+    useEffect(() => {
+      lastVisiblePrefetchKeyRef.current = '';
+      return () => {
+        if (visiblePrefetchTimerRef.current !== null) {
+          clearTimeout(visiblePrefetchTimerRef.current);
+          visiblePrefetchTimerRef.current = null;
+        }
+      };
+    }, [folder, searchValue.value]);
 
     useEffect(() => {
       if (pendingFolder === folder) setPendingFolder(null);
@@ -316,6 +376,7 @@ export const MailList = memo(
                   className="scrollbar-none flex-1 overflow-x-hidden"
                   onScroll={() => {
                     if (!vListRef.current) return;
+                    scheduleVisibleThreadPrefetch();
                     const endIndex = vListRef.current.findEndIndex();
                     if (
                       shouldLoadNextMailPage({
