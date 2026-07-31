@@ -1,8 +1,8 @@
 import {
   cancelSendJob,
   createSendJob,
-  deleteUnqueuedSendJob,
   getSendJobForConnection,
+  getSendJobForUser,
   listSendJobsForUser,
   markSendJobEnqueued,
   retrySendJob,
@@ -560,13 +560,57 @@ export const mailRouter = router({
         }
 
         if (deduped) {
-          // Double clic / retry réseau : le job existe déjà, ne pas ré-enqueue.
-          // Son état réel (failed/cancelled inclus) est visible via getSendStatus.
+          // Double clic / retry réseau : le job existe déjà. La réponse dépend
+          // de son état réel — jamais un succès aveugle.
+          if (job.status === 'cancelled') {
+            return { success: false, error: 'Send was cancelled' } as const;
+          }
+          if (job.status === 'failed') {
+            // Le job reste failed + payload conservé : rejouable via retrySend
+            // ou la page Queue, mais la soumission dupliquée n'est PAS un succès.
+            return { success: false, error: job.error ?? 'Send failed' } as const;
+          }
+          if (job.status === 'sent' || job.status === 'sending' || job.enqueuedAt) {
+            // Déjà parti ou déjà dans la Queue : dédup normale.
+            return {
+              success: true,
+              queued: true,
+              messageId: job.id,
+              sendAt: job.scheduledSendAt?.getTime(),
+              duplicate: true,
+            } as const;
+          }
+          // queued sans marqueur d'enqueue : la remise à la Queue avait échoué
+          // (ou n'a pas encore eu lieu) — ce retry HTTP republie CE job.
+          const dueAt = job.scheduledSendAt?.getTime() ?? Date.now();
+          const dedupeDelaySeconds = Math.max(0, Math.floor((dueAt - Date.now()) / 1000));
+          if (dedupeDelaySeconds > maxQueueDelay) {
+            // Planifié long terme : c'est le territoire du sweep cron.
+            return {
+              success: true,
+              scheduled: true,
+              messageId: job.id,
+              sendAt: dueAt,
+              duplicate: true,
+            } as const;
+          }
+          try {
+            await send_email_queue.send(
+              { messageId: job.id, jobId: job.id, connectionId: activeConnection.id },
+              { delaySeconds: dedupeDelaySeconds },
+            );
+          } catch (error) {
+            logger.error(`Failed to re-enqueue deduped send job ${job.id}`, error);
+            // Job intact (queued, enqueuedAt null) : nouvelle tentative même
+            // clé possible, et le sweep cron le rattrape de toute façon.
+            return { success: false, error: 'Failed to enqueue email send' } as const;
+          }
+          await markSendJobEnqueued(db, job.id).catch(() => {});
           return {
             success: true,
             queued: true,
             messageId: job.id,
-            sendAt: job.scheduledSendAt?.getTime(),
+            sendAt: dueAt,
             duplicate: true,
           } as const;
         }
@@ -589,9 +633,10 @@ export const mailRouter = router({
           );
         } catch (error) {
           logger.error(`Failed to enqueue send job ${job.id}`, error);
-          // La ligne n'a jamais été visible d'un consumer : la supprimer libère
-          // la clé de soumission pour que le retry client reparte proprement.
-          await deleteUnqueuedSendJob(db, job.id);
+          // Le job est CONSERVÉ (queued, enqueuedAt null) : le composer reste
+          // ouvert avec la même clé de soumission, dont le retry HTTP republie
+          // ce même job (chemin dedupe ci-dessus) ; le sweep cron couvre
+          // l'abandon. Aucune suppression — la ligne DB est l'autorité durable.
           return { success: false, error: 'Failed to enqueue email send' } as const;
         }
 
@@ -652,8 +697,13 @@ export const mailRouter = router({
     .mutation(async ({ input, ctx }) => {
       const { send_email_queue } = env;
       return withSendDb(async (db) => {
-        const connectionId = ctx.activeConnection.id;
-        const job = await getSendJobForConnection(db, { id: input.messageId, connectionId });
+        // Scope utilisateur (pas connexion active) : la page Queue doit pouvoir
+        // rejouer un échec même après un changement de compte ; le consumer
+        // enverra via la connexion propriétaire du job.
+        const job = await getSendJobForUser(db, {
+          id: input.messageId,
+          userId: ctx.sessionUser.id,
+        });
         if (!job) return { success: false, error: 'Send job not found' } as const;
         if (job.status === 'cancelled') {
           return { success: false, error: 'Send was cancelled' } as const;
@@ -663,14 +713,14 @@ export const mailRouter = router({
           return { success: true, queued: true, messageId: job.id } as const;
         }
 
-        const revived = await retrySendJob(db, { id: job.id, connectionId });
+        const revived = await retrySendJob(db, { id: job.id, connectionId: job.connectionId });
         if (!revived) {
           return { success: false, error: 'Send job changed state; refresh and retry' } as const;
         }
 
         try {
           await send_email_queue.send(
-            { messageId: job.id, jobId: job.id, connectionId },
+            { messageId: job.id, jobId: job.id, connectionId: job.connectionId },
             { delaySeconds: 0 },
           );
           await markSendJobEnqueued(db, job.id).catch(() => {});

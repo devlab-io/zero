@@ -476,6 +476,14 @@
   "queue": {
     "title": "File de brouillons",
     "subtitle": "Relisez les brouillons générés par statut avant tout armement d'envoi.",
+    "sendJobs": {
+      "title": "Envois d'emails",
+      "description": "Vos envois encore en file, en cours ou en échec. Un envoi en échec garde son contenu et peut être relancé.",
+      "to": "À",
+      "noRecipients": "Aucun destinataire",
+      "retried": "Envoi remis en file",
+      "retryFailed": "Impossible de relancer cet envoi"
+    },
     "filterAll": "Tous les statuts",
     "pendingForReview": "{count} à relire",
     "loading": "Chargement de la file...",

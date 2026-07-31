@@ -76,12 +76,27 @@ export const markSendJobEnqueued = async (db: DB, id: string) => {
 };
 
 /**
- * Rollback d'un enqueue refusé par la Queue : la ligne n'a jamais été visible
- * d'un consumer, la supprimer rend la clé de soumission réutilisable pour le
- * retry client (sinon la dédup renverrait un job mort).
+ * Rollback CAS du marqueur d'enqueue (sweep ou route) : ne ré-arme le job pour
+ * une prochaine tentative que si le marqueur est encore EXACTEMENT celui posé
+ * par l'appelant — jamais d'écrasement d'une transition plus récente (claim,
+ * retry, nouvel enqueue). Le job reste queued/enqueuedAt null, donc durable.
  */
-export const deleteUnqueuedSendJob = async (db: DB, id: string) => {
-  await db.delete(sendJob).where(and(eq(sendJob.id, id), eq(sendJob.status, 'queued')));
+export const clearSendJobEnqueueMark = async (
+  db: DB,
+  input: { id: string; enqueuedAt: Date },
+): Promise<{ id: string } | null> => {
+  const [updated] = await db
+    .update(sendJob)
+    .set({ enqueuedAt: null })
+    .where(
+      and(
+        eq(sendJob.id, input.id),
+        eq(sendJob.status, 'queued'),
+        eq(sendJob.enqueuedAt, input.enqueuedAt),
+      ),
+    )
+    .returning({ id: sendJob.id });
+  return updated ?? null;
 };
 
 /**
@@ -189,6 +204,23 @@ export const getSendJobForConnection = async (
     .where(and(eq(sendJob.id, input.id), eq(sendJob.connectionId, input.connectionId)))
     .limit(1);
   return row ?? null;
+};
+
+/**
+ * Scope utilisateur (toutes ses connexions) : la page Queue liste et rejoue
+ * les envois même après un changement de compte actif.
+ */
+export const getSendJobForUser = async (
+  db: DB,
+  input: { id: string; userId: string },
+): Promise<SendJobRow | null> => {
+  const [row] = await db
+    .select({ item: sendJob })
+    .from(sendJob)
+    .innerJoin(connection, eq(sendJob.connectionId, connection.id))
+    .where(and(eq(sendJob.id, input.id), eq(connection.userId, input.userId)))
+    .limit(1);
+  return row?.item ?? null;
 };
 
 export const listSendJobsForUser = async (

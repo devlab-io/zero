@@ -1157,7 +1157,7 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
             };
             output: {
                 readonly success: false;
-                readonly error: "Failed to queue email send";
+                readonly error: string;
                 readonly queued?: undefined;
                 readonly messageId?: undefined;
                 readonly sendAt?: undefined;
@@ -1176,17 +1176,17 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
                 readonly scheduled: true;
                 readonly messageId: string;
                 readonly sendAt: number;
+                readonly duplicate: true;
+                error?: undefined;
+                readonly queued?: undefined;
+            } | {
+                readonly success: true;
+                readonly scheduled: true;
+                readonly messageId: string;
+                readonly sendAt: number;
                 error?: undefined;
                 readonly queued?: undefined;
                 readonly duplicate?: undefined;
-            } | {
-                readonly success: false;
-                readonly error: "Failed to enqueue email send";
-                readonly queued?: undefined;
-                readonly messageId?: undefined;
-                readonly sendAt?: undefined;
-                readonly duplicate?: undefined;
-                readonly scheduled?: undefined;
             } | {
                 readonly success: true;
                 readonly queued: true;
@@ -1195,12 +1195,6 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
                 error?: undefined;
                 readonly duplicate?: undefined;
                 readonly scheduled?: undefined;
-            } | {
-                readonly success: false;
-                readonly error: "Invalid schedule date format";
-            } | {
-                readonly success: false;
-                readonly error: "Schedule time must be in the future";
             };
             meta: object;
         }>;

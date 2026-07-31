@@ -476,6 +476,14 @@
   "queue": {
     "title": "Draft queue",
     "subtitle": "Review generated drafts by status before any send is armed.",
+    "sendJobs": {
+      "title": "Email sends",
+      "description": "Emails you sent that are still queued, sending, or failed. Failed sends keep their content and can be retried.",
+      "to": "To",
+      "noRecipients": "No recipients",
+      "retried": "Send re-queued",
+      "retryFailed": "Could not retry this send"
+    },
     "filterAll": "All statuses",
     "pendingForReview": "{count} pending review",
     "loading": "Loading queue...",

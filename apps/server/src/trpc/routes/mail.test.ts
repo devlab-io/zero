@@ -80,10 +80,6 @@ const sendOutbox = {
     const job = sendJobs.get(id);
     if (job) job.enqueuedAt = new Date();
   }),
-  deleteUnqueuedSendJob: vi.fn(async (_db: unknown, id: string) => {
-    const job = sendJobs.get(id);
-    if (job?.status === 'queued') sendJobs.delete(id);
-  }),
   cancelSendJob: vi.fn(async (_db: unknown, input: { id: string; connectionId: string }) => {
     const job = sendJobs.get(input.id);
     if (!job || job.connectionId !== input.connectionId) return null;
@@ -104,6 +100,11 @@ const sendOutbox = {
       return job && job.connectionId === input.connectionId ? job : null;
     },
   ),
+  // Scope utilisateur : dans les tests, tout job appartient à user-1.
+  getSendJobForUser: vi.fn(async (_db: unknown, input: { id: string; userId: string }) => {
+    if (input.userId !== 'user-1') return null;
+    return sendJobs.get(input.id) ?? null;
+  }),
   listSendJobsForUser: vi.fn(async () => [] as any[]),
 };
 vi.mock('../../lib/send-outbox', () => sendOutbox);
@@ -495,8 +496,9 @@ describe('mail router — send (enqueue durable, jamais Gmail dans la requête)'
     expect(stub.create).not.toHaveBeenCalled();
   });
 
-  it('idempotence : même clientSendId → un seul job, un seul enqueue, duplicate:true', async () => {
+  it('idempotence : même clientSendId, job déjà enqueued → un seul enqueue, duplicate:true', async () => {
     const first = await call('send', { ...base, clientSendId: 'submit-22222222' });
+    expect(sendJobs.get('job-1')?.enqueuedAt).toBeInstanceOf(Date);
     const second = await call('send', { ...base, clientSendId: 'submit-22222222' });
     expect(first).toMatchObject({ success: true, queued: true, messageId: 'job-1' });
     expect(second).toMatchObject({
@@ -507,6 +509,38 @@ describe('mail router — send (enqueue durable, jamais Gmail dans la requête)'
     });
     expect(send_email_queue.send).toHaveBeenCalledTimes(1);
     expect(sendJobs.size).toBe(1);
+  });
+
+  it('dedupe sent/sending → duplicate success sans republication', async () => {
+    await call('send', { ...base, clientSendId: 'submit-aaaaaaaa' });
+    send_email_queue.send.mockClear();
+    for (const status of ['sending', 'sent'] as const) {
+      sendJobs.get('job-1').status = status;
+      const r = await call('send', { ...base, clientSendId: 'submit-aaaaaaaa' });
+      expect(r).toMatchObject({ success: true, queued: true, duplicate: true });
+    }
+    expect(send_email_queue.send).not.toHaveBeenCalled();
+  });
+
+  it('dedupe cancelled → échec explicite, jamais un succès aveugle', async () => {
+    await call('send', { ...base, clientSendId: 'submit-bbbbbbbb' });
+    sendJobs.get('job-1').status = 'cancelled';
+    const r = await call('send', { ...base, clientSendId: 'submit-bbbbbbbb' });
+    expect(r).toEqual({ success: false, error: 'Send was cancelled' });
+  });
+
+  it('dedupe failed → échec avec l’erreur du job, qui reste failed et rejouable', async () => {
+    await call('send', { ...base, clientSendId: 'submit-cccccccc' });
+    sendJobs.get('job-1').status = 'failed';
+    sendJobs.get('job-1').error = 'gmail down';
+    send_email_queue.send.mockClear();
+    const r = await call('send', { ...base, clientSendId: 'submit-cccccccc' });
+    expect(r).toEqual({ success: false, error: 'gmail down' });
+    expect(sendJobs.get('job-1')?.status).toBe('failed');
+    expect(send_email_queue.send).not.toHaveBeenCalled();
+    // Toujours rejouable via retrySend.
+    const retried = await call('retrySend', { messageId: 'job-1' });
+    expect(retried).toMatchObject({ success: true, queued: true });
   });
 
   it('scheduleAt invalide → erreur', async () => {
@@ -541,15 +575,33 @@ describe('mail router — send (enqueue durable, jamais Gmail dans la requête)'
     expect(sendJobs.get('job-1')?.scheduledSendAt).toBeInstanceOf(Date);
   });
 
-  it('échec d’enqueue Queue → job supprimé (clé réutilisable) + success:false', async () => {
+  it('échec d’enqueue Queue → job CONSERVÉ (queued, enqueuedAt null) + success:false', async () => {
     send_email_queue.send.mockRejectedValueOnce(new Error('queue down'));
     const r = await call('send', { ...base, clientSendId: 'submit-33333333' });
-    expect(sendOutbox.deleteUnqueuedSendJob).toHaveBeenCalledWith(expect.anything(), 'job-1');
-    expect(sendJobs.size).toBe(0);
     expect(r).toEqual({ success: false, error: 'Failed to enqueue email send' });
-    // La même clé doit pouvoir repartir proprement après l'échec.
+    // Jamais de suppression : la ligne DB reste l'autorité durable.
+    expect(sendJobs.size).toBe(1);
+    expect(sendJobs.get('job-1')).toMatchObject({ status: 'queued', enqueuedAt: null });
+    // Le retry HTTP même clé republie CE MÊME job dans la Queue.
     const retry = await call('send', { ...base, clientSendId: 'submit-33333333' });
-    expect(retry).toMatchObject({ success: true, queued: true });
+    expect(retry).toMatchObject({
+      success: true,
+      queued: true,
+      messageId: 'job-1',
+      duplicate: true,
+    });
+    expect(send_email_queue.send).toHaveBeenCalledTimes(2);
+    expect(sendJobs.get('job-1')?.enqueuedAt).toBeInstanceOf(Date);
+    expect(sendJobs.size).toBe(1);
+  });
+
+  it('échec d’enqueue répété sur le retry dedupe → job toujours intact, success:false', async () => {
+    send_email_queue.send.mockRejectedValueOnce(new Error('queue down'));
+    await call('send', { ...base, clientSendId: 'submit-dddddddd' });
+    send_email_queue.send.mockRejectedValueOnce(new Error('queue still down'));
+    const retry = await call('send', { ...base, clientSendId: 'submit-dddddddd' });
+    expect(retry).toEqual({ success: false, error: 'Failed to enqueue email send' });
+    expect(sendJobs.get('job-1')).toMatchObject({ status: 'queued', enqueuedAt: null });
   });
 
   it('plus aucune écriture writing-style/IA sur le hot path d’envoi', async () => {
@@ -593,6 +645,24 @@ describe('mail router — getSendStatus / retrySend', () => {
       success: false,
       error: 'Send job not found',
     });
+  });
+
+  it('retrySend après changement de compte actif → scope utilisateur, envoi via la connexion du job', async () => {
+    await call('send', { ...base, clientSendId: 'submit-eeeeeeee' });
+    sendJobs.get('job-1').status = 'failed';
+    send_email_queue.send.mockClear();
+    // Compte actif différent (conn-2), même utilisateur : le retry doit passer
+    // et republier avec la connexion PROPRIÉTAIRE du job (conn-1).
+    const otherConnectionCtx = makeCtx({
+      activeConnection: { id: 'conn-2', providerId: 'google' },
+    });
+    const r = await call('retrySend', { messageId: 'job-1' }, otherConnectionCtx);
+    expect(r).toMatchObject({ success: true, queued: true, messageId: 'job-1' });
+    expect(sendJobs.get('job-1')?.status).toBe('queued');
+    expect(send_email_queue.send).toHaveBeenCalledWith(
+      expect.objectContaining({ jobId: 'job-1', connectionId: 'conn-1' }),
+      { delaySeconds: 0 },
+    );
   });
 });
 

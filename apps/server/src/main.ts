@@ -5,10 +5,10 @@ import { ShardRegistry, ZeroAgent, ZeroDriver } from './routes/agent';
 import { getZeroAgent, reSyncThread } from './lib/server-utils';
 import { ThreadSyncWorker } from './routes/agent/sync-worker';
 import { EProviders, type IEmailSendBatch } from './types';
+import { runSendJobSweep } from './lib/send-outbox/sweep';
 import { ThinkingMCP } from './lib/sequential-thinking';
 import { WorkerEntrypoint } from 'cloudflare:workers';
 import { captureServerException } from './lib/sentry';
-import { sweepDueSendJobs } from './lib/send-outbox';
 import { bootEnv, env, type ZeroEnv } from './env';
 import { enableBrainFunction } from './lib/brain';
 import { ZeroMCP } from './routes/agent/mcp';
@@ -204,23 +204,7 @@ export default class Entry extends WorkerEntrypoint<ZeroEnv> {
   private async sweepSendJobs(send_email_queue: Queue<IEmailSendBatch>) {
     const { db, conn } = createDb(this.env.HYPERDRIVE.connectionString);
     try {
-      const now = Date.now();
-      const due = await sweepDueSendJobs(db, { horizonMs: 12 * 60 * 60 * 1000 });
-      for (const job of due) {
-        const delaySeconds = Math.max(
-          0,
-          Math.floor(((job.scheduledSendAt?.getTime() ?? now) - now) / 1000),
-        );
-        try {
-          await send_email_queue.send(
-            { messageId: job.id, jobId: job.id, connectionId: job.connectionId },
-            { delaySeconds },
-          );
-          logger.info(`[SCHEDULED] Re-enqueued send job ${job.id} (delay ${delaySeconds}s)`);
-        } catch (error) {
-          logger.error(`[SCHEDULED] Failed to re-enqueue send job ${job.id}`, error);
-        }
-      }
+      await runSendJobSweep(db, send_email_queue, { horizonMs: 12 * 60 * 60 * 1000 });
     } catch (error) {
       logger.error('[SCHEDULED] Send job sweep failed:', error);
     } finally {
