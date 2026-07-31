@@ -1,4 +1,5 @@
 import {
+  createSpeculativeFlightTracker,
   planVisibleThreadPrefetch,
   prefetchThreadIdsInBatches,
   resolveActiveThreadIndex,
@@ -101,7 +102,9 @@ describe('targeted thread prefetch', () => {
     expect(planVisibleThreadPrefetch(['a'], 5, 7, '').skip).toBe(true);
   });
 
-  it('limits visible body reads to batches of two', async () => {
+  it('borne la file visible à UN SEUL vol spéculatif (abort serveur non garanti)', async () => {
+    // r15b : l'abort client n'arrête pas le travail déjà engagé côté DO — la
+    // contention résiduelle au clic doit donc être d'au plus une requête.
     let active = 0;
     let maxActive = 0;
     const completed = await prefetchThreadIdsInBatches(
@@ -116,7 +119,7 @@ describe('targeted thread prefetch', () => {
     );
 
     expect(completed).toBe(true);
-    expect(maxActive).toBe(2);
+    expect(maxActive).toBe(1);
   });
 
   it('stops speculative batches when list pagination takes priority', async () => {
@@ -131,7 +134,52 @@ describe('targeted thread prefetch', () => {
     );
 
     expect(completed).toBe(false);
-    expect(prefetched).toEqual(['a', 'b']);
+    expect(prefetched).toEqual(['a']);
+  });
+});
+
+// r15b : r15a annulait timer et lots futurs, mais les 1-2 openThread déjà en
+// vol continuaient de disputer le DO au fil cliqué. Le registre trace les vols
+// du batch visible et permet leur annulation exacte — jamais le fil courant.
+describe('createSpeculativeFlightTracker — annulation des vols en cours', () => {
+  it('annule tous les vols SAUF le fil cliqué, avec les ids exacts', () => {
+    const tracker = createSpeculativeFlightTracker();
+    const cancelled: string[] = [];
+    void tracker.track('a', () => new Promise(() => {})).catch(() => undefined);
+    void tracker.track('current', () => new Promise(() => {})).catch(() => undefined);
+    void tracker.track('b', () => new Promise(() => {})).catch(() => undefined);
+
+    const result = tracker.cancelAllExcept('current', (id) => cancelled.push(id));
+
+    expect(result).toEqual(['a', 'b']);
+    expect(cancelled).toEqual(['a', 'b']);
+    // Le fil cliqué reste tracé (il retombera par son propre settle) ; les
+    // annulés sont retirés immédiatement — un second clic ne les re-annule pas.
+    expect(tracker.activeIds()).toEqual(['current']);
+    expect(tracker.cancelAllExcept('current', (id) => cancelled.push(id))).toEqual([]);
+    expect(cancelled).toEqual(['a', 'b']);
+  });
+
+  it('nettoie le registre à la retombée de chaque vol — succès comme échec', async () => {
+    const tracker = createSpeculativeFlightTracker();
+    const ok = tracker.track('ok', () => Promise.resolve('done'));
+    const ko = tracker
+      .track('ko', () => Promise.reject(new Error('aborted')))
+      .catch(() => 'caught');
+
+    expect(tracker.activeIds()).toEqual(['ok', 'ko']);
+    await expect(ok).resolves.toBe('done');
+    await expect(ko).resolves.toBe('caught');
+    expect(tracker.activeIds()).toEqual([]);
+  });
+
+  it('un vol retombé n’est jamais annulé après coup', async () => {
+    const tracker = createSpeculativeFlightTracker();
+    await tracker.track('settled', () => Promise.resolve());
+
+    const cancelled: string[] = [];
+    expect(tracker.cancelAllExcept('other', (id) => cancelled.push(id))).toEqual([]);
+    expect(cancelled).toEqual([]);
   });
 });
 

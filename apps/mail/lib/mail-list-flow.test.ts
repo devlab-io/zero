@@ -7,7 +7,8 @@ import { describe, expect, it } from 'vitest';
  * produit pas d'événement scroll — le re-contrôle post-append doit chaîner la
  * page suivante quand la réserve est courte, puis, une fois la réserve
  * suffisante, réchauffer les corps des lignes nouvellement révélées, dans
- * l'ordre et par lots de deux (pas de rafale, pas de waterfall par ligne).
+ * l'ordre et UN vol à la fois (r15b : l'abort serveur n'étant pas garanti, la
+ * contention résiduelle au clic est bornée à une seule requête spéculative).
  */
 describe('append → re-check → prefetch of the newly revealed rows', () => {
   const pageOf = (start: number, count: number) =>
@@ -56,7 +57,7 @@ describe('append → re-check → prefetch of the newly revealed rows', () => {
     ).toBe(false);
 
     // The same re-check now warms the viewport plus the two revealed rows of
-    // page 2, in list order, at most two bodies in flight.
+    // page 2, in list order, at most ONE body in flight (r15b).
     const visible = selectVisibleThreadIds(ids, 15, endIndex);
     expect(visible).toEqual(['t15', 't16', 't17', 't18', 't19', 't20', 't21']);
 
@@ -77,6 +78,6 @@ describe('append → re-check → prefetch of the newly revealed rows', () => {
 
     expect(completed).toBe(true);
     expect(prefetched).toEqual(visible);
-    expect(maxActive).toBe(2);
+    expect(maxActive).toBe(1);
   });
 });

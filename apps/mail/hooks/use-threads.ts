@@ -94,6 +94,24 @@ export function usePrefetchThread() {
   );
 }
 
+/**
+ * Annulation EXACTE d'un openThread spéculatif en vol (r15b). La clé est celle
+ * de usePrefetchThread (mail.get historique) et le queryFn propage déjà
+ * l'AbortSignal jusqu'au fetch tRPC : cancelQueries aborte réellement la
+ * requête côté client. Réservé aux vols du batch visible tracés par le
+ * registre — le fil courant et les fetches du lecteur ne passent jamais ici.
+ */
+export function useCancelThreadPrefetch() {
+  const queryClient = useQueryClient();
+  const trpc = useTRPC();
+
+  return useCallback(
+    (id: string) =>
+      queryClient.cancelQueries({ queryKey: trpc.mail.get.queryKey({ id }), exact: true }),
+    [queryClient, trpc],
+  );
+}
+
 export const useThreads = () => {
   const { folder } = useParams<{ folder: string }>();
   const [searchValue] = useSearchValue();

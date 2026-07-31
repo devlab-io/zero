@@ -3,6 +3,7 @@ import { useOptimisticActions } from './use-optimistic-actions';
 import { useCallback, useEffect, useRef } from 'react';
 import { useMail } from '@/components/mail/use-mail';
 import { useHotkeys } from 'react-hotkeys-hook';
+import { markStage } from '@/lib/perf-stages';
 import { atom, useAtom } from 'jotai';
 import { useQueryState } from 'nuqs';
 
@@ -81,6 +82,17 @@ export function useMailNavigation({ items, containerRef, onNavigate }: UseMailNa
     [containerRef, getThreadElement],
   );
 
+  // r15b (CUA : mesures absurdes de 56 s) : chaque navigation lecteur —
+  // flèches/j/k, Enter, actions suivant/précédent — est une OUVERTURE de fil.
+  // Le jalon thread:open se pose juste AVANT le changement de threadId, sinon
+  // data-ready/content-painted du fil suivant se mesurent depuis le clic
+  // liste initial. Point de passage unique : toute navigation portant un id
+  // passe ici ; la fermeture (null) ne marque jamais.
+  const openThreadFromList = useCallback((nextThreadId: string) => {
+    markStage('thread:open');
+    onNavigateRef.current(nextThreadId);
+  }, []);
+
   const navigateToThread = useCallback(
     (index: number) => {
       if (index === null || !itemsRef.current[index]) return;
@@ -89,7 +101,7 @@ export function useMailNavigation({ items, containerRef, onNavigate }: UseMailNa
       const threadId = message.id;
 
       if (threadId) {
-        onNavigateRef.current(threadId);
+        openThreadFromList(threadId);
         optimisticMarkAsRead([threadId], true);
       }
 
@@ -107,7 +119,7 @@ export function useMailNavigation({ items, containerRef, onNavigate }: UseMailNa
         if (itemsRef.current.length > 0) {
           const firstItem = itemsRef.current[0];
           if (firstItem) {
-            onNavigateRef.current(firstItem.id);
+            openThreadFromList(firstItem.id);
           }
           scrollIntoView(0, 'auto');
           return 0;
@@ -120,7 +132,7 @@ export function useMailNavigation({ items, containerRef, onNavigate }: UseMailNa
         const newIndex = prevIndex;
         const nextItem = itemsRef.current[prevIndex + 1];
         if (nextItem) {
-          onNavigateRef.current(nextItem.id);
+          openThreadFromList(nextItem.id);
         }
         scrollIntoView(newIndex, 'auto');
         return newIndex;
@@ -130,7 +142,7 @@ export function useMailNavigation({ items, containerRef, onNavigate }: UseMailNa
         if (newIndex !== null) {
           const nextItem = itemsRef.current[newIndex];
           if (nextItem) {
-            onNavigateRef.current(nextItem.id);
+            openThreadFromList(nextItem.id);
           }
           scrollIntoView(newIndex, 'auto');
           return newIndex;
@@ -151,7 +163,7 @@ export function useMailNavigation({ items, containerRef, onNavigate }: UseMailNa
       }
       const newIndex = prevIndex === null ? 0 : Math.max(0, prevIndex - 1);
       const target = itemsRef.current[newIndex];
-      if (target) onNavigateRef.current(target.id);
+      if (target) openThreadFromList(target.id);
       scrollIntoView(newIndex, 'auto');
       return newIndex;
     });
@@ -214,7 +226,7 @@ export function useMailNavigation({ items, containerRef, onNavigate }: UseMailNa
     if (focusedIndex === null) return;
 
     const message = itemsRef.current[focusedIndex];
-    if (message) onNavigateRef.current(message.id);
+    if (message) openThreadFromList(message.id);
   }, [focusedIndex]);
 
   const handleEscape = useCallback(() => {

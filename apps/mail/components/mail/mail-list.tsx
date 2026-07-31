@@ -1,4 +1,5 @@
 import {
+  createSpeculativeFlightTracker,
   planVisibleThreadPrefetch,
   prefetchThreadIdsInBatches,
   runClickPrefetchPlan,
@@ -14,6 +15,7 @@ import { useMailSelection, type MailSelectionModifiers } from '@/hooks/use-mail-
 import { mailListReserveRows, shouldLoadNextMailPage } from '@/lib/mail-pagination';
 import { focusedIndexAtom, useMailNavigation } from '@/hooks/use-mail-navigation';
 import { markStage, markStageAfterPaint, markStageOnce } from '@/lib/perf-stages';
+import { useCancelThreadPrefetch, usePrefetchThread } from '@/hooks/use-threads';
 import { useOptimisticActions } from '@/hooks/use-optimistic-actions';
 import { memo, useCallback, useEffect, useMemo, useRef } from 'react';
 import { useMailListData } from '@/hooks/use-mail-list-data';
@@ -21,7 +23,6 @@ import { selectMailListState } from '@/lib/mail-list-state';
 import { useSearchValue } from '@/hooks/use-search-value';
 import { EmptyStateIcon } from '../icons/empty-state-svg';
 import { useIsOffline } from '@/hooks/use-online-status';
-import { usePrefetchThread } from '@/hooks/use-threads';
 import { useSettings } from '@/hooks/use-settings';
 import { VList, type VListHandle } from 'virtua';
 import type { ParsedMessage } from '@/types';
@@ -63,6 +64,11 @@ export const MailList = memo(
 
     const isOffline = useIsOffline();
     const prefetchThread = usePrefetchThread();
+    const cancelThreadPrefetch = useCancelThreadPrefetch();
+    // r15b : registre des openThread spéculatifs en vol (batch visible
+    // uniquement) — voir createSpeculativeFlightTracker. Les vols se retirent
+    // seuls à la retombée ; le clic annule tous SAUF le fil ouvert.
+    const speculativeFlightsRef = useRef(createSpeculativeFlightTracker());
 
     const itemsRef = useRef(items);
     const parentRef = useRef<HTMLDivElement>(null);
@@ -154,6 +160,12 @@ export const MailList = memo(
               clearTimeout(visiblePrefetchTimerRef.current);
               visiblePrefetchTimerRef.current = null;
             }
+            // r15b : la génération n'arrête que les lots FUTURS — les vols
+            // déjà partis sont abortés un à un (clé mail.get exacte, signal
+            // propagé), fil cliqué exclu.
+            speculativeFlightsRef.current.cancelAllExcept(messageThreadId, (id) =>
+              cancelThreadPrefetch(id),
+            );
           },
         });
         setFocusedIndex(clickedIndex);
@@ -173,6 +185,7 @@ export const MailList = memo(
         setThreadId,
         setDraftId,
         prefetchThread,
+        cancelThreadPrefetch,
         settingsData,
       ],
     );
@@ -267,7 +280,10 @@ export const MailList = memo(
         // font prendre de l'avance à la requête du fil cliqué.
         const completed = await prefetchThreadIdsInBatches(
           plan.ids,
-          (id) => prefetchThread(id).catch(() => undefined),
+          (id) =>
+            speculativeFlightsRef.current
+              .track(id, () => prefetchThread(id))
+              .catch(() => undefined),
           () => generation === visiblePrefetchGenerationRef.current && !listPageBusyRef.current,
         );
 

@@ -9,7 +9,12 @@ const INITIAL_PREFETCH_COUNT = 3;
 // précisément ce que le scroll attend (contre-revue r6), et ArrowDown est déjà
 // couvert par le prefetch lecteur (précédent + deux suivants).
 const VISIBLE_PREFETCH_AHEAD_COUNT = 2;
-const VISIBLE_PREFETCH_BATCH_SIZE = 2;
+// r15b : 1 seul openThread spéculatif en vol. L'abort client (cancelQueries →
+// AbortSignal) ne garantit PAS l'arrêt du travail côté Durable Object : une
+// requête partie sera servie jusqu'au bout. Borner la file visible à un vol
+// unique borne donc la contention résiduelle au clic à AU PLUS une requête
+// non-annulable — sans renoncer au réchauffage des lignes affichées.
+const VISIBLE_PREFETCH_BATCH_SIZE = 1;
 
 export type NetworkInformation = {
   saveData?: boolean;
@@ -134,6 +139,42 @@ export function planVisibleThreadPrefetch(
   const selected = selectVisibleThreadIds(ids, startIndex, endIndex);
   const key = selected.join(':');
   return { ids: selected, key, skip: key === '' || key === lastCompletedKey };
+}
+
+/**
+ * Registre des openThread SPÉCULATIFS en vol (r15b). r15a annulait le timer et
+ * les lots futurs de la file visible, mais pas les 1-2 requêtes déjà parties —
+ * elles continuaient de disputer le DO au fil cliqué. Le registre trace chaque
+ * vol du batch visible ; au clic, `cancelAllExcept` annule EXACTEMENT ceux-là
+ * (jamais le fil courant, jamais un fetch lecteur) via le cancel fourni par
+ * l'appelant (QueryClient.cancelQueries sur la clé mail.get exacte — le signal
+ * est déjà propagé jusqu'au fetch tRPC). Les refs se nettoient à la retombée
+ * de chaque vol (succès, échec ou abort).
+ */
+export function createSpeculativeFlightTracker() {
+  const inFlight = new Set<string>();
+
+  return {
+    track<T>(id: string, run: () => Promise<T>): Promise<T> {
+      inFlight.add(id);
+      return run().finally(() => inFlight.delete(id));
+    },
+    activeIds(): string[] {
+      return [...inFlight];
+    },
+    cancelAllExcept(currentId: string, cancel: (id: string) => unknown): string[] {
+      const cancelled: string[] = [];
+      // Supprimer l'entrée VISITÉE pendant l'itération d'un Set est sûr par
+      // spécification ; `cancel` ne re-rentre jamais dans le registre.
+      for (const id of inFlight) {
+        if (id === currentId) continue;
+        inFlight.delete(id);
+        cancelled.push(id);
+        cancel(id);
+      }
+      return cancelled;
+    },
+  };
 }
 
 /**

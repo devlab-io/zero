@@ -88,3 +88,55 @@ describe('priorité clic r15a — câblage mail-list', () => {
     expect(mailList).not.toContain('[messageThreadId, ...adjacentThreadIds]');
   });
 });
+
+// r15b : annulation réelle des vols spéculatifs déjà partis + jalon
+// thread:open sur TOUTE navigation lecteur (le comportement du registre et du
+// helper est prouvé unitairement ; ici on fige les branchements).
+describe('annulation des vols spéculatifs r15b — câblage', () => {
+  const useThreadsSource = read('hooks/use-threads.ts');
+
+  it('le cancel vise la clé mail.get EXACTE, signal déjà propagé au fetch', () => {
+    expect(useThreadsSource).toContain(
+      'queryClient.cancelQueries({ queryKey: trpc.mail.get.queryKey({ id }), exact: true })',
+    );
+    // Sans propagation du signal dans le queryFn, cancelQueries n'aborterait
+    // rien : openThread doit transmettre { signal } au client tRPC.
+    expect(useThreadsSource).toContain('queryFn: async ({ signal }) => {');
+    expect(useThreadsSource).toContain('{ signal },');
+  });
+
+  it('la file visible trace chaque vol dans le registre', () => {
+    expect(mailList).toContain('.track(id, () => prefetchThread(id))');
+  });
+
+  it('le clic annule les vols en cours SAUF le fil ouvert', () => {
+    const cancelBlock = mailList.slice(mailList.indexOf('cancelSpeculative: () => {'));
+    expect(cancelBlock).toContain('speculativeFlightsRef.current.cancelAllExcept(messageThreadId,');
+  });
+});
+
+describe('jalon thread:open sur navigation lecteur r15b — câblage', () => {
+  const navigationSource = read('hooks/use-mail-navigation.ts');
+
+  it('le jalon se pose juste AVANT le changement de fil, dans le point de passage unique', () => {
+    const helperIndex = navigationSource.indexOf('const openThreadFromList = useCallback(');
+    const markIndex = navigationSource.indexOf("markStage('thread:open');", helperIndex);
+    const navigateIndex = navigationSource.indexOf(
+      'onNavigateRef.current(nextThreadId);',
+      helperIndex,
+    );
+    expect(helperIndex).toBeGreaterThan(-1);
+    expect(markIndex).toBeGreaterThan(helperIndex);
+    expect(navigateIndex).toBeGreaterThan(markIndex);
+  });
+
+  it('aucune navigation portant un id ne contourne le point de passage', () => {
+    // Flèches/j/k (navigateToThread), Enter, actions suivant/précédent : tout
+    // appel direct restant est une fermeture (null) ou le corps du helper.
+    const directCalls = [...navigationSource.matchAll(/onNavigateRef\.current\(([^)]*)\)/g)].map(
+      (match) => match[1],
+    );
+    const idBearing = directCalls.filter((argument) => argument !== 'null');
+    expect(idBearing).toEqual(['nextThreadId']);
+  });
+});
