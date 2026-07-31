@@ -1,4 +1,8 @@
-import { emailContentQueryKey, resolveEmailContentTheme } from './email-content-query';
+import {
+  emailContentQueryKey,
+  resolveEmailContentTheme,
+  EMAIL_CONTENT_RENDER_VERSION,
+} from './email-content-query';
 import { describe, expect, it } from 'vitest';
 
 describe('email content query key', () => {
@@ -10,14 +14,14 @@ describe('email content query key', () => {
   it('uses the same normalized dimensions for prefetch and rendering', () => {
     expect(emailContentQueryKey('m1', undefined, 'system')).toEqual([
       'email-content',
-      3,
+      EMAIL_CONTENT_RENDER_VERSION,
       'm1',
       false,
       'light',
     ]);
     expect(emailContentQueryKey('m1', false, 'light')).toEqual([
       'email-content',
-      3,
+      EMAIL_CONTENT_RENDER_VERSION,
       'm1',
       false,
       'light',
