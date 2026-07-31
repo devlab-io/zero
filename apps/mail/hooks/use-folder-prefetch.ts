@@ -5,6 +5,15 @@ import { FOLDERS } from '@/lib/utils';
 
 const FOLDER_LIST_STALE_MS = 5 * 60 * 1000;
 
+export const CORE_MAIL_FOLDER_PREFETCH_ORDER = [
+  FOLDERS.BIN,
+  FOLDERS.SENT,
+  FOLDERS.ARCHIVE,
+  FOLDERS.SNOOZED,
+  FOLDERS.SPAM,
+  FOLDERS.DRAFT,
+] as const;
+
 export function mailFolderFromHref(href: string): string | null {
   const match = /^\/mail\/([^/?#]+)/.exec(href);
   return match?.[1] ?? null;
@@ -30,26 +39,24 @@ export function usePrefetchMailFolder() {
   );
 }
 
-/** Warm the two most common destinations without delaying their first human click. */
+/** Warm every sidebar destination without delaying the authenticated Inbox. */
 export function useWarmCoreMailFolders(enabled: boolean, currentFolder: string) {
   const prefetchFolder = usePrefetchMailFolder();
 
   useEffect(() => {
     if (!enabled || currentFolder !== FOLDERS.INBOX || typeof window === 'undefined') return;
 
-    // Drafts fans one Gmail list call out into detail reads. Kick it off as soon
-    // as the authenticated shell commits so the network work overlaps Inbox;
-    // even a 500 ms idle delay still produced a visible ~200 ms skeleton flash.
-    void prefetchFolder(FOLDERS.DRAFT);
-
-    const warmSent = () => void prefetchFolder(FOLDERS.SENT);
-
-    if (typeof window.requestIdleCallback === 'function') {
-      const idleId = window.requestIdleCallback(warmSent, { timeout: 500 });
-      return () => window.cancelIdleCallback(idleId);
-    }
-
-    const timerId = window.setTimeout(warmSent, 0);
-    return () => window.clearTimeout(timerId);
+    // Projection-backed folders are cheap and must all be hot before a rapid
+    // Drafts → Sent (or any sidebar) sequence. Start them together immediately;
+    // the server resolves the batch in one DO wake-up. Draft fans a Gmail list
+    // call out into detail reads, so start it in the next macrotask and never
+    // put that slower path on the projection batch's response path.
+    void Promise.all(
+      CORE_MAIL_FOLDER_PREFETCH_ORDER.slice(0, -1).map((folder) =>
+        prefetchFolder(folder).catch(() => undefined),
+      ),
+    );
+    const draftTimerId = window.setTimeout(() => void prefetchFolder(FOLDERS.DRAFT), 0);
+    return () => window.clearTimeout(draftTimerId);
   }, [currentFolder, enabled, prefetchFolder]);
 }

@@ -2,6 +2,7 @@ import { SidebarGroup, SidebarMenu, SidebarMenuButton, SidebarMenuItem } from '.
 import { mailFolderFromHref, usePrefetchMailFolder } from '@/hooks/use-folder-prefetch';
 import { Collapsible, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { useCommandPalette } from '../context/command-palette-context.jsx';
+import { pendingFolderNavigationAtom } from '@/store/folder-navigation';
 import { useActiveConnection } from '@/hooks/use-connections';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import Intercom, { show } from '@intercom/messenger-js-sdk';
@@ -13,6 +14,8 @@ import type { Label as LabelType } from '@/types';
 import { Link, useLocation } from 'react-router';
 import { m } from '../../paraglide/messages.js';
 import { lazy, Suspense } from 'react';
+import { flushSync } from 'react-dom';
+import { useSetAtom } from 'jotai';
 import { log } from '@/lib/log';
 
 // w2cd (client weight): the label creation dialog pulls in react-hook-form.
@@ -58,6 +61,8 @@ type IconRefType = SVGSVGElement & {
   startAnimation?: () => void;
   stopAnimation?: () => void;
 };
+
+let folderNavigationSequence = 0;
 
 export function NavMain({ items }: NavMainProps) {
   const location = useLocation();
@@ -285,6 +290,8 @@ export function NavMain({ items }: NavMainProps) {
 function NavItem(item: NavItemProps & { href: string }) {
   const iconRef = useRef<IconRefType>(null);
   const prefetchMailFolder = usePrefetchMailFolder();
+  const setPendingFolder = useSetAtom(pendingFolderNavigationAtom);
+  const currentLocation = useLocation();
   const { data: stats } = useStats();
   const { clearAllFilters } = useCommandPalette();
 
@@ -315,6 +322,22 @@ function NavItem(item: NavItemProps & { href: string }) {
     if (folder) void prefetchMailFolder(folder);
   };
 
+  const handleFolderNavigationStart = () => {
+    const targetFolder = mailFolderFromHref(item.href);
+    const currentFolder = mailFolderFromHref(currentLocation.pathname);
+    if (!targetFolder || targetFolder === currentFolder) return;
+
+    // Pointer/key intent happens before React Router's click navigation. Mask
+    // the current list synchronously so even a sub-frame screenshot can never
+    // show Inbox rows below a Bin/Archive/Snoozed/Spam route selection.
+    flushSync(() => setPendingFolder(targetFolder));
+    const sequence = ++folderNavigationSequence;
+    window.setTimeout(() => {
+      if (sequence !== folderNavigationSequence) return;
+      setPendingFolder((pending) => (pending === targetFolder ? null : pending));
+    }, 2_000);
+  };
+
   return (
     <Collapsible defaultOpen={item.isActive}>
       <CollapsibleTrigger asChild>
@@ -331,6 +354,10 @@ function NavItem(item: NavItemProps & { href: string }) {
             target={item.target}
             to={item.href}
             onPointerEnter={handleNavigationIntent}
+            onPointerDown={handleFolderNavigationStart}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' || event.key === ' ') handleFolderNavigationStart();
+            }}
             onFocus={handleNavigationIntent}
           >
             {item.icon && <item.icon ref={iconRef} className="mr-2 shrink-0" />}

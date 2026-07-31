@@ -1,4 +1,8 @@
-import { selectAdjacentThreadTarget, shouldMarkAdjacentThreadRead } from '@/lib/thread-navigation';
+import {
+  resolveThreadDisplayCaptureAction,
+  selectAdjacentThreadTarget,
+  shouldMarkAdjacentThreadRead,
+} from '@/lib/thread-navigation';
 import { focusedIndexAtom, mailNavigationCommandAtom } from '@/hooks/use-mail-navigation';
 import { isTypingOrModalTarget, useShortcuts } from './use-hotkey-utils';
 import { useOptimisticActions } from '@/hooks/use-optimistic-actions';
@@ -14,6 +18,7 @@ import useDelete from '@/hooks/driver/use-delete';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { useCallback, useEffect } from 'react';
 import { useParams } from 'react-router';
+import { flushSync } from 'react-dom';
 import { useQueryState } from 'nuqs';
 
 // `openLabels`/`openMove` open the label/move picker via the `picker` query-state
@@ -63,35 +68,42 @@ export function ThreadDisplayHotkeys() {
     [focusedIndex, items, openThreadId, optimisticMarkAsRead, purgeReplyState, setFocusedIndex],
   );
 
-  // Arrow navigation must work even when focus sits inside the isolated mail
-  // content tree. Capture before the generic scoped binder, then stop propagation
-  // so the list handler cannot consume the same key and jump twice.
+  const closeOpenThread = useCallback(() => {
+    // This capture handler runs outside React's synthetic event pipeline.
+    // Flush the nuqs state write before returning so the reader disappears in
+    // the same perceptual frame instead of one scheduler tick later.
+    flushSync(() => {
+      void purgeReplyState({ threadId: null });
+    });
+  }, [purgeReplyState]);
+
+  // Reader navigation must work even when focus sits inside the isolated mail
+  // content tree or the generic `thread-display` scope is inactive. Capture
+  // before the scoped binder, then stop propagation so list handlers cannot
+  // consume the same key. Composer/dialog focus keeps ownership of Escape.
   useEffect(() => {
     if (!openThreadId) return;
 
-    const handleArrowNavigation = (event: KeyboardEvent) => {
-      if (
-        event.metaKey ||
-        event.ctrlKey ||
-        event.altKey ||
-        event.shiftKey ||
-        isTypingOrModalTarget(event.target)
-      ) {
-        return;
-      }
-
-      const direction =
-        event.key === 'ArrowDown' ? 'next' : event.key === 'ArrowUp' ? 'previous' : null;
-      if (!direction) return;
+    const handleReaderNavigation = (event: KeyboardEvent) => {
+      const action = resolveThreadDisplayCaptureAction({
+        key: event.key,
+        hasModifier: event.metaKey || event.ctrlKey || event.altKey || event.shiftKey,
+        isTypingOrModal: isTypingOrModalTarget(event.target),
+      });
+      if (!action) return;
 
       event.preventDefault();
       event.stopPropagation();
-      openAdjacentThread(direction);
+      if (action === 'close') {
+        closeOpenThread();
+        return;
+      }
+      openAdjacentThread(action);
     };
 
-    window.addEventListener('keydown', handleArrowNavigation, true);
-    return () => window.removeEventListener('keydown', handleArrowNavigation, true);
-  }, [openAdjacentThread, openThreadId]);
+    window.addEventListener('keydown', handleReaderNavigation, true);
+    return () => window.removeEventListener('keydown', handleReaderNavigation, true);
+  }, [closeOpenThread, openAdjacentThread, openThreadId]);
 
   // Devlab: d/e/[ = done — archive the open thread and move on; `]` archives and
   // opens the PREVIOUS item.
@@ -163,12 +175,11 @@ export function ThreadDisplayHotkeys() {
       if (!openThreadId) return;
       optimisticToggleImportant([openThreadId], false);
     },
-    // Escape hors focus composer : use-mail-navigation ferme le fil
-    // (setThreadId(null)) mais ne nettoie pas l'état reply — un mode résiduel
-    // réarmait activeReplyId au fil suivant, qui s'ouvrait en reply. Purge
-    // ATOMIQUE (une écriture d'URL) — voir use-reply-state-purge.
+    // Escape hors focus composer ferme le fil ET nettoie l'état reply. Passer
+    // explicitement `threadId: null` est indispensable : sans option, la purge
+    // préserve volontairement le fil courant pour les changements de mode.
     closeView: () => {
-      void purgeReplyState();
+      closeOpenThread();
     },
     // armOpeningKeyGuard : l'écho de la touche (a/r/f) atterrissait dans le
     // corps TipTap malgré le preventDefault du keydown (CUA round 3, échec 2).

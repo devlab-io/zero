@@ -1,11 +1,8 @@
 import {
-  hashKey,
-  keepPreviousData,
-  queryOptions,
-  useInfiniteQuery,
-  useQuery,
-  useQueryClient,
-} from '@tanstack/react-query';
+  enrichThinItemsWithPreview,
+  filterLiteralSearchPreviewItems,
+  selectSearchPreviewItems,
+} from '@/lib/search-preview-selector';
 import {
   findForceSyncSnapshot,
   nextForceSyncHoldPhase,
@@ -17,11 +14,15 @@ import {
   observeForceSyncPurgeAtom,
 } from '@/store/force-sync-hold';
 import {
-  enrichThinItemsWithPreview,
-  selectSearchPreviewItems,
-} from '@/lib/search-preview-selector';
+  hashKey,
+  queryOptions,
+  useInfiniteQuery,
+  useQuery,
+  useQueryClient,
+} from '@tanstack/react-query';
 import { backgroundQueueAtom, isThreadInBackgroundQueueAtom } from '@/store/backgroundQueue';
 import { emailContentQueryKey, resolveEmailContentTheme } from '@/lib/email-content-query';
+import { canReuseMailListPlaceholder } from '@/lib/mail-list-placeholder';
 import { useTRPC, useTRPCClient } from '@/providers/query-provider';
 import { isSimpleLiteralSearch } from '@/lib/search-intent';
 import { useSearchValue } from '@/hooks/use-search-value';
@@ -114,7 +115,8 @@ export const useThreads = () => {
       // recherche, changement de labels), la vue précédente reste affichée pendant
       // que la nouvelle réponse arrive — plus d'écran-spinner bloquant de 2+ s. La
       // présentation lit isPlaceholderData pour le bandeau « recherche en cours ».
-      placeholderData: keepPreviousData,
+      placeholderData: (previousData, previousQuery) =>
+        canReuseMailListPlaceholder(previousQuery?.queryKey, folder) ? previousData : undefined,
     },
   );
   const threadsQuery = useInfiniteQuery(listThreadsQueryOptions);
@@ -193,6 +195,24 @@ export const useThreads = () => {
     return rows.filter(Boolean).filter((e) => !isInQueue(`thread:${e.id}`));
   }, [previewQuery.data, isInQueue, backgroundQueue]);
 
+  const literalPreviewThreads = useMemo(() => {
+    if (!isSearching || !isSimpleLiteralSearch(searchValue.value)) return previewThreads;
+    if (previewThreads?.length) return previewThreads;
+    // During placeholderData, `freshThreads` is the rich page from the same
+    // folder before q changed. Filter it synchronously so a known DHL-style
+    // match paints in the first frame instead of waiting on a DO round-trip.
+    if (threadsQuery.isPlaceholderData) {
+      return filterLiteralSearchPreviewItems(freshThreads, searchValue.value);
+    }
+    return previewThreads;
+  }, [
+    freshThreads,
+    isSearching,
+    previewThreads,
+    searchValue.value,
+    threadsQuery.isPlaceholderData,
+  ]);
+
   const threads = useMemo(() => {
     const held = selectForceSyncHoldItems({
       active: forceSyncHold.active,
@@ -207,7 +227,7 @@ export const useThreads = () => {
       return selectSearchPreviewItems({
         isSearching,
         authoritativeIsPlaceholder: true,
-        previewItems: previewThreads,
+        previewItems: literalPreviewThreads,
         fallbackItems: held,
         // Littéral (« DHL ») : seuls les matches locaux s'affichent pendant le
         // vol Gmail — jamais la vue précédente (voir search-preview-selector).
@@ -226,6 +246,7 @@ export const useThreads = () => {
     searchValue.value,
     threadsQuery.isPlaceholderData,
     previewThreads,
+    literalPreviewThreads,
   ]);
 
   const isEmpty = useMemo(() => threads.length === 0, [threads]);

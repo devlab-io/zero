@@ -1,4 +1,4 @@
-import { mailFolderFromHref } from './use-folder-prefetch';
+import { CORE_MAIL_FOLDER_PREFETCH_ORDER, mailFolderFromHref } from './use-folder-prefetch';
 import { describe, expect, it } from 'vitest';
 
 describe('mailFolderFromHref', () => {
@@ -17,4 +17,20 @@ describe('mailFolderFromHref', () => {
       expect(mailFolderFromHref(href)).toBeNull();
     },
   );
+});
+
+describe('core folder warming', () => {
+  it('covers every sidebar destination exactly once', () => {
+    expect(CORE_MAIL_FOLDER_PREFETCH_ORDER).toEqual([
+      'bin',
+      'sent',
+      'archive',
+      'snoozed',
+      'spam',
+      'draft',
+    ]);
+    expect(new Set(CORE_MAIL_FOLDER_PREFETCH_ORDER).size).toBe(
+      CORE_MAIL_FOLDER_PREFETCH_ORDER.length,
+    );
+  });
 });

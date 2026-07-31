@@ -1,3 +1,4 @@
+import type { MailSelectionModifiers } from '@/hooks/use-mail-selection';
 import type { IGetThreadResponse, ParsedMessage } from '@zero/types';
 import type { MailListItem } from '@/hooks/use-mail-list-data';
 
@@ -43,7 +44,7 @@ export function buildProjectedThreadData(message: MailListItem): IGetThreadRespo
 
 export type ThreadRowProps = {
   message: MailListItem;
-  onClick?: (message: ParsedMessage) => () => void;
+  onClick?: (message: ParsedMessage, modifiers?: MailSelectionModifiers) => void;
   isKeyboardFocused?: boolean;
   index?: number;
 };

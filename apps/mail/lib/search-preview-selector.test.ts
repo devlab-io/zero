@@ -1,8 +1,46 @@
-import { enrichThinItemsWithPreview, selectSearchPreviewItems } from './search-preview-selector';
+import {
+  enrichThinItemsWithPreview,
+  filterLiteralSearchPreviewItems,
+  selectSearchPreviewItems,
+} from './search-preview-selector';
 import { describe, expect, it } from 'vitest';
 
 const preview = [{ id: 'p1' }, { id: 'p2' }];
 const fallback = [{ id: 'f1' }];
+
+describe('filterLiteralSearchPreviewItems — premier paint sans réseau', () => {
+  const rows = [
+    {
+      id: 'dhl-subject',
+      subject: 'DHL On Demand Delivery',
+      sender: { name: 'Notifications', email: 'noreply@example.com' },
+    },
+    {
+      id: 'dhl-sender',
+      subject: 'Shipment update',
+      sender: { name: 'DHL Express', email: 'support@dhl.com' },
+    },
+    {
+      id: 'other',
+      subject: 'Invoice',
+      sender: { name: 'Hertz', email: 'billing@example.com' },
+    },
+  ];
+
+  it('matches subject/sender case-insensitively and never returns unrelated rows', () => {
+    expect(filterLiteralSearchPreviewItems(rows, 'DHL').map((row) => row.id)).toEqual([
+      'dhl-subject',
+      'dhl-sender',
+    ]);
+  });
+
+  it('accepts an exact phrase wrapper and returns no row for an empty query', () => {
+    expect(filterLiteralSearchPreviewItems(rows, '"Shipment update"').map((row) => row.id)).toEqual(
+      ['dhl-sender'],
+    );
+    expect(filterLiteralSearchPreviewItems(rows, '   ')).toEqual([]);
+  });
+});
 
 describe('selectSearchPreviewItems — préview projection pendant le vol Gmail', () => {
   it('recherche en vol + préview non vide → la préview (résultats réels)', () => {

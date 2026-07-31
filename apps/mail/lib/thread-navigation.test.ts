@@ -1,4 +1,8 @@
-import { selectAdjacentThreadTarget, shouldMarkAdjacentThreadRead } from './thread-navigation';
+import {
+  resolveThreadDisplayCaptureAction,
+  selectAdjacentThreadTarget,
+  shouldMarkAdjacentThreadRead,
+} from './thread-navigation';
 import { describe, expect, it } from 'vitest';
 
 describe('selectAdjacentThreadTarget', () => {
@@ -35,5 +39,48 @@ describe('shouldMarkAdjacentThreadRead', () => {
     expect(shouldMarkAdjacentThreadRead({ unread: false })).toBe(false);
     expect(shouldMarkAdjacentThreadRead({})).toBe(false);
     expect(shouldMarkAdjacentThreadRead()).toBe(false);
+  });
+});
+
+describe('resolveThreadDisplayCaptureAction', () => {
+  it('owns reader arrows and Escape without relying on an active hotkey scope', () => {
+    expect(
+      resolveThreadDisplayCaptureAction({
+        key: 'ArrowDown',
+        hasModifier: false,
+        isTypingOrModal: false,
+      }),
+    ).toBe('next');
+    expect(
+      resolveThreadDisplayCaptureAction({
+        key: 'ArrowUp',
+        hasModifier: false,
+        isTypingOrModal: false,
+      }),
+    ).toBe('previous');
+    expect(
+      resolveThreadDisplayCaptureAction({
+        key: 'Escape',
+        hasModifier: false,
+        isTypingOrModal: false,
+      }),
+    ).toBe('close');
+  });
+
+  it('leaves modified and composer keys alone', () => {
+    expect(
+      resolveThreadDisplayCaptureAction({
+        key: 'Escape',
+        hasModifier: true,
+        isTypingOrModal: false,
+      }),
+    ).toBeNull();
+    expect(
+      resolveThreadDisplayCaptureAction({
+        key: 'Escape',
+        hasModifier: false,
+        isTypingOrModal: true,
+      }),
+    ).toBeNull();
   });
 });

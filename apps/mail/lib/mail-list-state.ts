@@ -17,6 +17,8 @@ export interface MailListStateInput {
   isRestoring?: boolean;
   /** A new search/folder key is still resolving from placeholder data. */
   isTransitionPending?: boolean;
+  /** A background refresh is running, including over a cached empty page. */
+  isFetching?: boolean;
   /** The list query resolved to an error (500, network, offline fetch reject). */
   isError: boolean;
   /** The browser reports no connectivity. */
@@ -36,13 +38,14 @@ export function selectMailListState(input: MailListStateInput): MailListViewStat
     isLoading,
     isRestoring = false,
     isTransitionPending = false,
+    isFetching = false,
     isError,
     isOffline,
   } = input;
   if (itemCount > 0) {
     return isError || isOffline ? 'stale' : 'ready';
   }
-  if (isLoading || isRestoring || isTransitionPending) return 'loading';
+  if (isLoading || isRestoring || isTransitionPending || isFetching) return 'loading';
   if (isError || isOffline) return 'error';
   return 'empty';
 }

@@ -22,3 +22,22 @@ export function selectAdjacentThreadTarget<T extends { id: string }>(
 export function shouldMarkAdjacentThreadRead(item?: { unread?: boolean }): boolean {
   return item?.unread === true;
 }
+
+export type ThreadDisplayCaptureAction = 'next' | 'previous' | 'close' | null;
+
+/**
+ * Resolve the reader-level keys that must keep working even when focus sits in
+ * the isolated message content tree. Typing surfaces and modifier chords keep
+ * ownership of their keys, especially Escape inside a reply composer.
+ */
+export function resolveThreadDisplayCaptureAction(input: {
+  key: string;
+  hasModifier: boolean;
+  isTypingOrModal: boolean;
+}): ThreadDisplayCaptureAction {
+  if (input.hasModifier || input.isTypingOrModal) return null;
+  if (input.key === 'ArrowDown') return 'next';
+  if (input.key === 'ArrowUp') return 'previous';
+  if (input.key === 'Escape') return 'close';
+  return null;
+}

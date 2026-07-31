@@ -218,8 +218,17 @@ export function QueryProvider({
             };
           },
         );
-        // invalidate the query, it will refetch when the data is it is being accessed
-        queryClient.invalidateQueries({ queryKey: threadQueryKey });
+        // Refresh only the folder that is already on screen. Invalidating every
+        // restored folder made inactive Inbox/Draft/Bin caches stale at boot;
+        // the first later click then discarded the warm list and paid another
+        // network/DO trip. Websocket invalidations still keep inactive folders
+        // coherent while the app is open, and their own staleTime bounds a cache
+        // restored after a longer absence.
+        queryClient.invalidateQueries({
+          queryKey: threadQueryKey,
+          type: 'active',
+          refetchType: 'active',
+        });
       }}
     >
       <TRPCProvider trpcClient={trpcClient} queryClient={queryClient}>

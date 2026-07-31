@@ -53,6 +53,18 @@ describe('selectMailListState', () => {
     ).toBe('loading');
   });
 
+  it('cached empty page being refreshed → loading (never a false empty)', () => {
+    expect(
+      selectMailListState({
+        itemCount: 0,
+        isLoading: false,
+        isFetching: true,
+        isError: false,
+        isOffline: false,
+      }),
+    ).toBe('loading');
+  });
+
   it('resolved healthy with no rows → the only honest empty', () => {
     expect(
       selectMailListState({ itemCount: 0, isLoading: false, isError: false, isOffline: false }),

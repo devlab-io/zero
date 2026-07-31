@@ -213,7 +213,15 @@ export const Thread = memo(function Thread({
     return (
       <div
         className={cn('select-none border-b md:my-1 md:border-none')}
-        onClick={onClick ? onClick(latestMessage) : undefined}
+        role="button"
+        tabIndex={0}
+        aria-label={`Open email: ${latestMessage.subject || '(no subject)'}`}
+        onClick={(event) => onClick?.(latestMessage, event.nativeEvent)}
+        onKeyDown={(event) => {
+          if (event.currentTarget !== event.target || event.key !== 'Enter') return;
+          event.preventDefault();
+          onClick?.(latestMessage, event.nativeEvent);
+        }}
         // Devlab: hover targeting restored — required for Superhuman-style
         // single-key actions (d/r/a/f/h) on the thread under the cursor.
         onMouseEnter={() => {

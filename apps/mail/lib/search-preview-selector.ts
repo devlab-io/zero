@@ -41,6 +41,37 @@ export function enrichThinItemsWithPreview<T extends { id: string; unread?: bool
   return changed ? enriched : items;
 }
 
+type LiteralSearchPreviewItem = {
+  subject?: string | null;
+  sender?: { name?: string | null; email?: string | null } | null;
+};
+
+/**
+ * Return only real subject/sender matches from the list page already in memory.
+ * This is the zero-round-trip first paint for a literal search; the projection
+ * and Gmail queries still replace/complete it as soon as they resolve.
+ */
+export function filterLiteralSearchPreviewItems<T extends LiteralSearchPreviewItem>(
+  items: T[],
+  query: string,
+): T[] {
+  const trimmed = query.trim();
+  const quoted =
+    trimmed.length >= 2 &&
+    ((trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+      (trimmed.startsWith('«') && trimmed.endsWith('»')));
+  const needle = (quoted ? trimmed.slice(1, -1).trim() : trimmed).toLocaleLowerCase();
+  if (!needle) return [];
+
+  return items.filter((item) => {
+    const haystack = [item.subject, item.sender?.name, item.sender?.email]
+      .filter((value): value is string => typeof value === 'string')
+      .join('\n')
+      .toLocaleLowerCase();
+    return haystack.includes(needle);
+  });
+}
+
 export function selectSearchPreviewItems<T>(params: {
   /** Une recherche (q non vide) est active. */
   isSearching: boolean;

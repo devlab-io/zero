@@ -1,9 +1,13 @@
+import {
+  pendingFolderNavigationAtom,
+  shouldMaskPendingMailFolder,
+} from '@/store/folder-navigation';
 import { selectNextThreadIds, useInitialThreadPrefetch } from '@/hooks/use-thread-prefetch';
+import { useMailSelection, type MailSelectionModifiers } from '@/hooks/use-mail-selection';
 import { focusedIndexAtom, useMailNavigation } from '@/hooks/use-mail-navigation';
 import { useOptimisticActions } from '@/hooks/use-optimistic-actions';
 import { memo, useCallback, useEffect, useMemo, useRef } from 'react';
 import { shouldLoadNextMailPage } from '@/lib/mail-pagination';
-import { useMailSelection } from '@/hooks/use-mail-selection';
 import { useMailListData } from '@/hooks/use-mail-list-data';
 import { selectMailListState } from '@/lib/mail-list-state';
 import { useSearchValue } from '@/hooks/use-search-value';
@@ -86,13 +90,13 @@ export const MailList = memo(
 
     const { getSelectMode, handleSelectMail, setAnchorIndex } = useMailSelection(itemsRef);
 
-    const [, setActiveReplyId] = useQueryState('activeReplyId');
     const [, setFocusedIndex] = useAtom(focusedIndexAtom);
+    const [pendingFolder, setPendingFolder] = useAtom(pendingFolderNavigationAtom);
 
     const { optimisticMarkAsRead } = useOptimisticActions();
     const handleMailClick = useCallback(
-      (message: ParsedMessage) => async () => {
-        const mode = getSelectMode();
+      (message: ParsedMessage, modifiers?: MailSelectionModifiers) => {
+        const mode = getSelectMode(modifiers);
         const autoRead = settingsData?.settings?.autoRead ?? true;
 
         if (mode !== 'single') {
@@ -101,7 +105,7 @@ export const MailList = memo(
           if (clickedIndex !== -1 && mode !== 'range') {
             setAnchorIndex(clickedIndex);
           }
-          return handleSelectMail(message);
+          return handleSelectMail(message, mode);
         }
 
         handleMouseEnter(message.id);
@@ -131,6 +135,7 @@ export const MailList = memo(
       [
         getSelectMode,
         handleSelectMail,
+        setAnchorIndex,
         handleMouseEnter,
         setFocusedIndex,
         optimisticMarkAsRead,
@@ -138,7 +143,6 @@ export const MailList = memo(
         setDraftId,
         prefetchThread,
         settingsData,
-        setActiveReplyId,
       ],
     );
 
@@ -150,10 +154,10 @@ export const MailList = memo(
 
     useEffect(() => {
       if (isFiltering && !isLoading) {
-        setSearchValue({
-          ...searchValue,
+        setSearchValue((current) => ({
+          ...current,
           isLoading: false,
-        });
+        }));
       }
     }, [isLoading, isFiltering, setSearchValue]);
 
@@ -166,14 +170,20 @@ export const MailList = memo(
     };
 
     const filteredItems = useMemo(() => items.filter((item) => item.id), [items]);
+    const isFolderTransitionMasked = shouldMaskPendingMailFolder(pendingFolder, folder);
+
+    useEffect(() => {
+      if (pendingFolder === folder) setPendingFolder(null);
+    }, [folder, pendingFolder, setPendingFolder]);
 
     // Honest network/state selection (issue #34): a failed read never renders as
     // "empty" and cached rows survive a failed refresh.
     const viewState = selectMailListState({
-      itemCount: items.length,
-      isLoading,
+      itemCount: isFolderTransitionMasked ? 0 : items.length,
+      isLoading: isLoading || isFolderTransitionMasked,
       isRestoring,
       isTransitionPending,
+      isFetching,
       isError,
       isOffline,
     });
@@ -202,17 +212,7 @@ export const MailList = memo(
           <></>
         );
       },
-      [
-        folder,
-        filteredItems,
-        focusedIndex,
-        keyboardActive,
-        isFetchingNextPage,
-        handleMailClick,
-        isLoading,
-        isFetching,
-        hasNextPage,
-      ],
+      [filteredItems, focusedIndex, keyboardActive, isFetchingNextPage, handleMailClick, Comp],
     );
 
     return (
