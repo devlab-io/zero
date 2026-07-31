@@ -9,7 +9,8 @@ import { markStage } from '@/lib/perf-stages';
 import { m } from '@/paraglide/messages';
 import { log } from '@/lib/log';
 
-import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
+import { useSendStatusWatch } from '@/hooks/use-send-status';
 import { useTRPC } from '@/providers/query-provider';
 import { useMutation } from '@tanstack/react-query';
 import { useSettings } from '@/hooks/use-settings';
@@ -79,6 +80,11 @@ export function CreateEmail({
   const { data: activeConnection } = useActiveConnection();
   const { data: settings, isLoading: settingsLoading } = useSettings();
   const { handleUndoSend } = useUndoSend();
+  const { watchSendStatus } = useSendStatusWatch();
+  // Clé d'idempotence de la soumission en cours : générée au premier clic,
+  // réutilisée telle quelle sur un retry après échec (le serveur déduplique via
+  // unique(connection, clé)), effacée seulement une fois l'enqueue confirmé.
+  const sendSubmissionKeyRef = useRef<string | null>(null);
   // If there was an error loading the draft, set the failed state
   useEffect(() => {
     if (draftError) {
@@ -109,10 +115,13 @@ export function CreateEmail({
       ? '<p style="color: #666; font-size: 12px;">Sent via <a href="https://0.email/" style="color: #0066cc; text-decoration: none;">Zero</a></p>'
       : '';
 
-    // Feedback immédiat (parité r3) : le clic Send n'affichait RIEN pendant la
-    // round-trip. La fermeture reste après confirmation réseau (mail.send est
-    // direct, pas d'outbox persisté) — le jalon send:dispatched→send:confirmed
-    // mesure exactement l'attente restante.
+    // Le clic Send confirme l'ENQUEUE DURABLE (ligne send_job Postgres + Queue
+    // acceptée), jamais l'appel Gmail : la réponse est quasi immédiate et
+    // l'issue réelle est suivie par watchSendStatus ci-dessous. Pas d'early
+    // return anti double-clic ici : deux invocations même-tick partagent la
+    // même clé et le serveur déduplique — un retour prématuré ferait fermer le
+    // composer par proceedWithSend avant la confirmation d'enqueue.
+    const clientSendId = (sendSubmissionKeyRef.current ??= crypto.randomUUID());
     const sendingToast = toast.loading(m['states.sending']());
     markStage('send:dispatched');
     let result: unknown;
@@ -127,20 +136,28 @@ export function CreateEmail({
         fromEmail: userName.trim() ? `${userName.replace(/[<>]/g, '')} <${fromEmail}>` : fromEmail,
         draftId: draftId ?? undefined,
         scheduleAt: data.scheduleAt,
+        clientSendId,
       });
 
-      // `mail.send` répond `{ success: false, error }` sans throw sur un échec
-      // de mise en file : le plier en erreur évite un composer fermé sans
-      // envoi réel (faux succès silencieux). proceedWithSend garde alors le
-      // composer ouvert et le brouillon sauvegardé reste la récupération.
+      // `mail.send` répond `{ success: false, error }` sans throw quand
+      // l'enqueue durable a échoué : le plier en erreur garde le composer
+      // ouvert (snapshot intact) et la même clé de soumission sert au retry.
       const outcome = interpretSendOutcome(result);
       if (!outcome.ok) {
         throw new Error(typeof outcome.error === 'string' ? outcome.error : 'Send failed');
       }
+      // Enqueue confirmé : la prochaine soumission est une nouvelle clé.
+      sendSubmissionKeyRef.current = null;
     } finally {
       toast.dismiss(sendingToast);
     }
     markStage('send:confirmed');
+
+    // Suivi asynchrone : un échec Gmail après l'enqueue devient un toast
+    // actionnable (Retry) au lieu d'un faux succès silencieux.
+    if (isSendResult(result)) {
+      watchSendStatus(result.messageId, result.sendAt);
+    }
 
     setDraftId(null);
     clearUndoData();

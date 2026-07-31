@@ -1,11 +1,12 @@
 export type SendOutcome = { ok: true; result: unknown } | { ok: false; error: unknown };
 
 /**
- * `mail.send` resolves with `{ success: false, error }` for scheduling/queue
- * failures instead of throwing. Treating every resolved mutation as sent made
- * those losses silent, so both failure shapes are folded into one outcome.
- * This is deliberately not called an outbox: compose/reply still wait for the
- * server because no durable enqueue boundary exists for them yet.
+ * `mail.send` resolves with `{ success: false, error }` for enqueue failures
+ * instead of throwing. Treating every resolved mutation as sent made those
+ * losses silent, so both failure shapes are folded into one outcome. A
+ * resolved `ok` now means the send is durably enqueued (send_job row + Queue
+ * message) — the provider outcome is asynchronous and watched separately via
+ * getSendStatus (hooks/use-send-status).
  */
 export function interpretSendOutcome(result: unknown): SendOutcome {
   if (

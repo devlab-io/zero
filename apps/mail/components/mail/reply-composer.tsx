@@ -1,10 +1,11 @@
 import { deriveReplyRecipients, deriveReplySubject } from './reply-recipients';
 import { constructReplyBody, constructForwardBody } from '@/lib/utils';
 import { useReplyStatePurge } from '@/hooks/use-reply-state-purge';
+import { lazy, Suspense, useEffect, useMemo, useRef } from 'react';
 import { useActiveConnection } from '@/hooks/use-connections';
+import { useSendStatusWatch } from '@/hooks/use-send-status';
 import { useEmailAliases } from '@/hooks/use-email-aliases';
 import { markDraftAbandoned } from '@/lib/abandoned-drafts';
-import { lazy, Suspense, useEffect, useMemo } from 'react';
 import { interpretSendOutcome } from '@/lib/send-outcome';
 import { useHotkeysContext } from 'react-hotkeys-hook';
 import { useTRPC } from '@/providers/query-provider';
@@ -56,6 +57,10 @@ export default function ReplyCompose({ messageId }: ReplyComposeProps) {
   const { data: settings, isLoading: settingsLoading } = useSettings();
   const { data: session } = useSession();
   const { handleUndoSend } = useUndoSend();
+  const { watchSendStatus } = useSendStatusWatch();
+  // Clé d'idempotence de la soumission en cours : générée au premier clic,
+  // réutilisée sur retry après échec (dédup serveur), effacée à l'enqueue confirmé.
+  const sendSubmissionKeyRef = useRef<string | null>(null);
 
   // Find the specific message to reply to
   const replyToMessage =
@@ -92,11 +97,13 @@ export default function ReplyCompose({ messageId }: ReplyComposeProps) {
       throw new Error('Cannot send a reply without an active message and account');
     }
 
-    // Optimistic send (W2-H): show an immediate "Sending…" state and close the
-    // composer as soon as the send resolves — no blocking refetch in the close
-    // path. La fermeture reste APRÈS la confirmation réseau : mail.send est
-    // direct (pas d'outbox persisté côté serveur pour compose/reply), fermer
-    // avant perdrait l'envoi sur un reload/crash pendant la round-trip.
+    // Le clic Send confirme l'ENQUEUE DURABLE (ligne send_job Postgres +
+    // Queue acceptée), jamais l'appel Gmail : fermeture quasi immédiate, issue
+    // réelle suivie par watchSendStatus. Sur échec d'enqueue, le composer
+    // reste ouvert et la même clé de soumission sert au retry (dédup serveur).
+    // Deux invocations même-tick partagent aussi cette clé : pas de double
+    // envoi possible sans early return (qui fermerait le composer trop tôt).
+    const clientSendId = (sendSubmissionKeyRef.current ??= crypto.randomUUID());
     const sendingToast = toast.loading(m['states.sending']());
 
     try {
@@ -193,23 +200,31 @@ export default function ReplyCompose({ messageId }: ReplyComposeProps) {
         isForward: mode === 'forward',
         originalMessage: replyToMessage.decodedBody,
         scheduleAt: data.scheduleAt,
+        clientSendId,
       };
 
-      // Jalon perf : send:dispatched → send:confirmed mesure la round-trip que
-      // le composer attend encore (parité r3 : l'écart à viser est <1 s).
+      // Jalon perf : send:dispatched → send:confirmed mesure la round-trip
+      // jusqu'à l'enqueue durable (plus aucun aller-retour Gmail dedans).
       markStage('send:dispatched');
       const result = await sendEmail(payload);
 
-      // `mail.send` répond `{ success: false, error }` sans throw sur les
-      // échecs de mise en file : c'était un faux succès silencieux (composer
-      // fermé, rien d'envoyé, aucun feedback). Le plier en erreur garde le
-      // contenu ouvert et récupérable.
+      // `mail.send` répond `{ success: false, error }` sans throw quand
+      // l'enqueue durable a échoué : le plier en erreur garde le contenu
+      // ouvert et récupérable, avec la même clé de soumission pour le retry.
       const outcome = interpretSendOutcome(result);
       if (!outcome.ok) {
         throw new Error(typeof outcome.error === 'string' ? outcome.error : 'Send failed');
       }
+      // Enqueue confirmé : la prochaine soumission est une nouvelle clé.
+      sendSubmissionKeyRef.current = null;
 
       markStage('send:confirmed');
+
+      // Suivi asynchrone : un échec Gmail après l'enqueue devient un toast
+      // actionnable (Retry) au lieu d'un faux succès silencieux.
+      if (isSendResult(result)) {
+        watchSendStatus(result.messageId, result.sendAt);
+      }
       posthog.capture('Reply Email Sent');
       toast.dismiss(sendingToast);
 

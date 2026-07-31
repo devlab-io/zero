@@ -1149,74 +1149,115 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
                     base64: string;
                 }[] | undefined;
                 fromEmail?: string | undefined;
-                draftId?: string | undefined;
-                originalMessage?: string | undefined;
                 isForward?: boolean | undefined;
+                originalMessage?: string | undefined;
+                draftId?: string | undefined;
                 scheduleAt?: string | undefined;
+                clientSendId?: string | undefined;
             };
             output: {
                 readonly success: false;
-                readonly error: "Invalid schedule date format";
-                scheduled?: undefined;
-                messageId?: undefined;
-                sendAt?: undefined;
-                queued?: undefined;
+                readonly error: "Failed to queue email send";
+                readonly queued?: undefined;
+                readonly messageId?: undefined;
+                readonly sendAt?: undefined;
+                readonly duplicate?: undefined;
+                readonly scheduled?: undefined;
             } | {
-                readonly success: false;
-                readonly error: "Schedule time must be in the future";
-                scheduled?: undefined;
-                messageId?: undefined;
-                sendAt?: undefined;
-                queued?: undefined;
+                readonly success: true;
+                readonly queued: true;
+                readonly messageId: string;
+                readonly sendAt: number | undefined;
+                readonly duplicate: true;
+                error?: undefined;
+                readonly scheduled?: undefined;
             } | {
-                readonly success: false;
-                readonly error: "Failed to schedule email status";
-                scheduled?: undefined;
-                messageId?: undefined;
-                sendAt?: undefined;
-                queued?: undefined;
-            } | {
-                readonly success: false;
-                readonly error: "Failed to schedule email payload";
-                scheduled?: undefined;
-                messageId?: undefined;
-                sendAt?: undefined;
-                queued?: undefined;
-            } | {
-                readonly success: false;
-                readonly error: "Failed to schedule email (long-term)";
-                scheduled?: undefined;
-                messageId?: undefined;
-                sendAt?: undefined;
-                queued?: undefined;
+                readonly success: true;
+                readonly scheduled: true;
+                readonly messageId: string;
+                readonly sendAt: number;
+                error?: undefined;
+                readonly queued?: undefined;
+                readonly duplicate?: undefined;
             } | {
                 readonly success: false;
                 readonly error: "Failed to enqueue email send";
-                scheduled?: undefined;
-                messageId?: undefined;
-                sendAt?: undefined;
-                queued?: undefined;
+                readonly queued?: undefined;
+                readonly messageId?: undefined;
+                readonly sendAt?: undefined;
+                readonly duplicate?: undefined;
+                readonly scheduled?: undefined;
             } | {
-                success: boolean;
-                scheduled: boolean;
+                readonly success: true;
+                readonly queued: true;
+                readonly messageId: string;
+                readonly sendAt: number;
+                error?: undefined;
+                readonly duplicate?: undefined;
+                readonly scheduled?: undefined;
+            } | {
+                readonly success: false;
+                readonly error: "Invalid schedule date format";
+            } | {
+                readonly success: false;
+                readonly error: "Schedule time must be in the future";
+            };
+            meta: object;
+        }>;
+        getSendStatus: import("@trpc/server").TRPCQueryProcedure<{
+            input: {
                 messageId: string;
-                sendAt: number;
-                error?: undefined;
-                queued?: undefined;
+            };
+            output: {
+                status: "unknown";
+                error: null;
+                sendAt: null;
             } | {
-                success: boolean;
-                queued: boolean;
+                status: "queued" | "sending" | "sent" | "cancelled" | "failed";
+                error: string | null;
+                sendAt: number | null;
+            };
+            meta: object;
+        }>;
+        listSendJobs: import("@trpc/server").TRPCQueryProcedure<{
+            input: {
+                statuses?: ("queued" | "sending" | "sent" | "cancelled" | "failed")[] | undefined;
+            } | undefined;
+            output: {
+                id: string;
+                status: "queued" | "sending" | "sent" | "cancelled" | "failed";
+                error: string | null;
+                subject: string | null;
+                to: string[];
+                sendAt: number | null;
+                createdAt: number;
+            }[];
+            meta: object;
+        }>;
+        retrySend: import("@trpc/server").TRPCMutationProcedure<{
+            input: {
                 messageId: string;
-                sendAt: number;
-                error?: undefined;
-                scheduled?: undefined;
+            };
+            output: {
+                readonly success: false;
+                readonly error: "Send job not found";
+                readonly queued?: undefined;
+                readonly messageId?: undefined;
             } | {
-                success: boolean;
+                readonly success: false;
+                readonly error: "Send was cancelled";
+                readonly queued?: undefined;
+                readonly messageId?: undefined;
+            } | {
+                readonly success: true;
+                readonly queued: true;
+                readonly messageId: string;
                 error?: undefined;
-                scheduled?: undefined;
-                messageId?: undefined;
-                sendAt?: undefined;
-                queued?: undefined;
+            } | {
+                readonly success: false;
+                readonly error: "Send job changed state; refresh and retry";
+                readonly queued?: undefined;
+                readonly messageId?: undefined;
             };
             meta: object;
         }>;
@@ -1225,6 +1266,12 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
                 messageId: string;
             };
             output: {
+                readonly success: true;
+                error?: undefined;
+            } | {
+                readonly success: false;
+                readonly error: "Too late to cancel (status: queued)" | "Too late to cancel (status: sending)" | "Too late to cancel (status: sent)" | "Too late to cancel (status: cancelled)" | "Too late to cancel (status: failed)";
+            } | {
                 readonly success: false;
                 readonly error: "Unauthorized: Cannot cancel another user's scheduled email";
             } | {

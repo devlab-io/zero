@@ -1,8 +1,8 @@
-import type { Context } from 'hono';
 // V2.4 shared-types-package (issue #25): ParsedMessage(+Schema), EPrompts et Tools
 // vivent désormais dans @zero/types ; ré-export arrière ici pour ne pas casser les
 // ~des dizaines d'imports serveur existants depuis '../types'. Voir ADR 0004.
 import { ParsedMessageSchema, EPrompts, Tools, type ParsedMessage } from '@zero/types';
+import type { Context } from 'hono';
 
 export { ParsedMessageSchema, EPrompts, Tools };
 export type { ParsedMessage };
@@ -188,4 +188,7 @@ export interface IEmailSendBatch {
   connectionId: string;
   mail?: IOutgoingMessage & { draftId?: string };
   sendAt?: number;
+  /** Nouveau chemin autoritatif : id de la ligne send_job (Postgres). Les corps
+   * sans jobId sont les messages legacy KV encore en vol au déploiement. */
+  jobId?: string;
 }

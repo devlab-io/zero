@@ -38,8 +38,78 @@ const KV = {
   scheduled_emails: makeKV(),
 };
 const send_email_queue = { send: vi.fn(async () => {}) };
-const fakeEnv = { ...KV, send_email_queue };
+const fakeEnv = {
+  ...KV,
+  send_email_queue,
+  HYPERDRIVE: { connectionString: 'postgres://fake' },
+};
 vi.mock('../../env', () => ({ env: fakeEnv }));
+
+// --- Outbox d'envoi (send_job) : fake en mémoire reproduisant la sémantique
+// CAS des opérations Postgres (dédup par clé, transitions conditionnelles). ---
+const sendJobs = new Map<string, any>();
+const sendOutbox = {
+  sendJobStatuses: ['queued', 'sending', 'sent', 'cancelled', 'failed'] as const,
+  createSendJob: vi.fn(async (_db: unknown, input: any) => {
+    for (const job of sendJobs.values()) {
+      if (
+        job.connectionId === input.connectionId &&
+        job.clientSubmissionKey === input.clientSubmissionKey
+      ) {
+        return { job, deduped: true };
+      }
+    }
+    const job = {
+      id: `job-${sendJobs.size + 1}`,
+      connectionId: input.connectionId,
+      clientSubmissionKey: input.clientSubmissionKey,
+      status: 'queued',
+      payload: input.payload,
+      threadId: input.threadId ?? null,
+      scheduledSendAt: input.scheduledSendAt ?? null,
+      enqueuedAt: null,
+      attempts: 0,
+      error: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+    sendJobs.set(job.id, job);
+    return { job, deduped: false };
+  }),
+  markSendJobEnqueued: vi.fn(async (_db: unknown, id: string) => {
+    const job = sendJobs.get(id);
+    if (job) job.enqueuedAt = new Date();
+  }),
+  deleteUnqueuedSendJob: vi.fn(async (_db: unknown, id: string) => {
+    const job = sendJobs.get(id);
+    if (job?.status === 'queued') sendJobs.delete(id);
+  }),
+  cancelSendJob: vi.fn(async (_db: unknown, input: { id: string; connectionId: string }) => {
+    const job = sendJobs.get(input.id);
+    if (!job || job.connectionId !== input.connectionId) return null;
+    if (job.status !== 'queued' && job.status !== 'failed') return null;
+    job.status = 'cancelled';
+    return job;
+  }),
+  retrySendJob: vi.fn(async (_db: unknown, input: { id: string; connectionId: string }) => {
+    const job = sendJobs.get(input.id);
+    if (!job || job.connectionId !== input.connectionId || job.status !== 'failed') return null;
+    job.status = 'queued';
+    job.error = null;
+    return job;
+  }),
+  getSendJobForConnection: vi.fn(
+    async (_db: unknown, input: { id: string; connectionId: string }) => {
+      const job = sendJobs.get(input.id);
+      return job && job.connectionId === input.connectionId ? job : null;
+    },
+  ),
+  listSendJobsForUser: vi.fn(async () => [] as any[]),
+};
+vi.mock('../../lib/send-outbox', () => sendOutbox);
+vi.mock('../../db', () => ({
+  createDb: () => ({ db: {}, conn: { end: async () => {} } }),
+}));
 
 vi.mock('../../lib/logger', () => ({
   logger: { info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn() },
@@ -127,6 +197,7 @@ async function call(name: string, rawInput?: unknown, ctx = makeCtx()) {
 beforeEach(() => {
   vi.clearAllMocks();
   for (const kv of Object.values(KV)) kv.map.clear();
+  sendJobs.clear();
   findUserSettings.mockResolvedValue({ settings: { undoSendEnabled: false } });
   getThreadsFromDB.mockResolvedValue({ threads: [] });
   getThread.mockResolvedValue({ result: { messages: [] } });
@@ -391,20 +462,51 @@ describe('mail router — deleteAllSpam', () => {
   });
 });
 
-describe('mail router — send (immédiat / planifié / erreurs)', () => {
+describe('mail router — send (enqueue durable, jamais Gmail dans la requête)', () => {
   const base = { to: [{ email: 'x@y.co' }], subject: 'S', message: 'M' };
 
-  it('immédiat (undoSend off) → stub.create, reSync si threadId', async () => {
-    const r = await call('send', { ...base, threadId: 'th-9' });
-    expect(stub.create).toHaveBeenCalled();
-    expect(reSyncThread).toHaveBeenCalledWith('conn-1', 'th-9');
-    expect(r).toEqual({ success: true });
+  it('immédiat (undoSend off) → send_job + Queue délai 0, aucun appel fournisseur', async () => {
+    const r = await call('send', { ...base, threadId: 'th-9', clientSendId: 'submit-11111111' });
+    expect(sendOutbox.createSendJob).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        connectionId: 'conn-1',
+        clientSubmissionKey: 'submit-11111111',
+        threadId: 'th-9',
+        payload: expect.objectContaining({ subject: 'S', connectionId: 'conn-1' }),
+      }),
+    );
+    expect(send_email_queue.send).toHaveBeenCalledWith(
+      expect.objectContaining({ jobId: 'job-1', connectionId: 'conn-1' }),
+      { delaySeconds: 0 },
+    );
+    expect(stub.create).not.toHaveBeenCalled();
+    expect(stub.sendDraft).not.toHaveBeenCalled();
+    expect(r).toMatchObject({ success: true, queued: true, messageId: 'job-1' });
   });
 
-  it('draftId → stub.sendDraft', async () => {
+  it('draftId → conservé dans le payload du job (le consumer fera sendDraft)', async () => {
     await call('send', { ...base, draftId: 'dr-1' });
-    expect(stub.sendDraft).toHaveBeenCalledWith('dr-1', expect.any(Object));
+    expect(sendOutbox.createSendJob).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ payload: expect.objectContaining({ draftId: 'dr-1' }) }),
+    );
+    expect(stub.sendDraft).not.toHaveBeenCalled();
     expect(stub.create).not.toHaveBeenCalled();
+  });
+
+  it('idempotence : même clientSendId → un seul job, un seul enqueue, duplicate:true', async () => {
+    const first = await call('send', { ...base, clientSendId: 'submit-22222222' });
+    const second = await call('send', { ...base, clientSendId: 'submit-22222222' });
+    expect(first).toMatchObject({ success: true, queued: true, messageId: 'job-1' });
+    expect(second).toMatchObject({
+      success: true,
+      queued: true,
+      messageId: 'job-1',
+      duplicate: true,
+    });
+    expect(send_email_queue.send).toHaveBeenCalledTimes(1);
+    expect(sendJobs.size).toBe(1);
   });
 
   it('scheduleAt invalide → erreur', async () => {
@@ -418,24 +520,113 @@ describe('mail router — send (immédiat / planifié / erreurs)', () => {
     expect(r).toEqual({ success: false, error: 'Schedule time must be in the future' });
   });
 
-  it('undoSend on → mise en file (queued) + KV pending/payload', async () => {
+  it('undoSend on → queued avec délai ≈15 s (fenêtre d’annulation via la Queue)', async () => {
     findUserSettings.mockResolvedValueOnce({ settings: { undoSendEnabled: true } });
     const r = await call('send', base);
-    expect(KV.pending_emails_status.put).toHaveBeenCalled();
-    expect(KV.pending_emails_payload.put).toHaveBeenCalled();
-    expect(send_email_queue.send).toHaveBeenCalled();
+    expect(send_email_queue.send).toHaveBeenCalledTimes(1);
+    const [, opts] = send_email_queue.send.mock.calls[0] as unknown as [
+      unknown,
+      { delaySeconds: number },
+    ];
+    expect(opts.delaySeconds).toBeGreaterThanOrEqual(14);
+    expect(opts.delaySeconds).toBeLessThanOrEqual(15);
     expect(r).toMatchObject({ success: true, queued: true });
   });
 
-  it('scheduleAt long-terme (>12h) → scheduledKV + scheduled:true', async () => {
+  it('scheduleAt long-terme (>12h) → job planifié en DB, pas d’enqueue (sweep cron)', async () => {
     const far = new Date(Date.now() + 13 * 3600 * 1000).toISOString();
     const r = await call('send', { ...base, scheduleAt: far });
-    expect(KV.scheduled_emails.put).toHaveBeenCalled();
-    expect(r).toMatchObject({ success: true, scheduled: true });
+    expect(send_email_queue.send).not.toHaveBeenCalled();
+    expect(r).toMatchObject({ success: true, scheduled: true, messageId: 'job-1' });
+    expect(sendJobs.get('job-1')?.scheduledSendAt).toBeInstanceOf(Date);
+  });
+
+  it('échec d’enqueue Queue → job supprimé (clé réutilisable) + success:false', async () => {
+    send_email_queue.send.mockRejectedValueOnce(new Error('queue down'));
+    const r = await call('send', { ...base, clientSendId: 'submit-33333333' });
+    expect(sendOutbox.deleteUnqueuedSendJob).toHaveBeenCalledWith(expect.anything(), 'job-1');
+    expect(sendJobs.size).toBe(0);
+    expect(r).toEqual({ success: false, error: 'Failed to enqueue email send' });
+    // La même clé doit pouvoir repartir proprement après l'échec.
+    const retry = await call('send', { ...base, clientSendId: 'submit-33333333' });
+    expect(retry).toMatchObject({ success: true, queued: true });
+  });
+
+  it('plus aucune écriture writing-style/IA sur le hot path d’envoi', async () => {
+    const { updateWritingStyleMatrix } = await import('../../services/writing-style-service');
+    await call('send', base);
+    expect(updateWritingStyleMatrix).not.toHaveBeenCalled();
   });
 });
 
-describe('mail router — unsend (ownership)', () => {
+describe('mail router — getSendStatus / retrySend', () => {
+  const base = { to: [{ email: 'x@y.co' }], subject: 'S', message: 'M' };
+
+  it('getSendStatus renvoie le statut du job de la connexion, unknown sinon', async () => {
+    await call('send', { ...base, clientSendId: 'submit-44444444' });
+    const r = await call('getSendStatus', { messageId: 'job-1' });
+    expect(r).toMatchObject({ status: 'queued' });
+    const missing = await call('getSendStatus', { messageId: 'nope' });
+    expect(missing).toMatchObject({ status: 'unknown' });
+  });
+
+  it('retrySend sur un job failed → requeue + ré-enqueue Queue', async () => {
+    await call('send', { ...base, clientSendId: 'submit-55555555' });
+    sendJobs.get('job-1').status = 'failed';
+    send_email_queue.send.mockClear();
+    const r = await call('retrySend', { messageId: 'job-1' });
+    expect(r).toMatchObject({ success: true, queued: true, messageId: 'job-1' });
+    expect(sendJobs.get('job-1')?.status).toBe('queued');
+    expect(send_email_queue.send).toHaveBeenCalledWith(
+      expect.objectContaining({ jobId: 'job-1' }),
+      { delaySeconds: 0 },
+    );
+  });
+
+  it('retrySend : job déjà sent → no-op sûr ; cancelled → refus ; inconnu → erreur', async () => {
+    await call('send', { ...base, clientSendId: 'submit-66666666' });
+    sendJobs.get('job-1').status = 'sent';
+    expect(await call('retrySend', { messageId: 'job-1' })).toMatchObject({ success: true });
+    sendJobs.get('job-1').status = 'cancelled';
+    expect(await call('retrySend', { messageId: 'job-1' })).toMatchObject({ success: false });
+    expect(await call('retrySend', { messageId: 'ghost' })).toMatchObject({
+      success: false,
+      error: 'Send job not found',
+    });
+  });
+});
+
+describe('mail router — unsend (send_job autoritatif)', () => {
+  const base = { to: [{ email: 'x@y.co' }], subject: 'S', message: 'M' };
+
+  it('job queued → annulation CAS, aucun toucher KV', async () => {
+    findUserSettings.mockResolvedValueOnce({ settings: { undoSendEnabled: true } });
+    await call('send', { ...base, clientSendId: 'submit-77777777' });
+    const r = await call('unsend', { messageId: 'job-1' });
+    expect(r).toEqual({ success: true });
+    expect(sendJobs.get('job-1')?.status).toBe('cancelled');
+    expect(KV.pending_emails_status.put).not.toHaveBeenCalled();
+  });
+
+  it('job déjà sending/sent → trop tard, refus explicite', async () => {
+    await call('send', { ...base, clientSendId: 'submit-88888888' });
+    sendJobs.get('job-1').status = 'sending';
+    const r = await call('unsend', { messageId: 'job-1' });
+    expect(r).toMatchObject({ success: false });
+    expect(String(r.error)).toContain('Too late');
+  });
+
+  it('job d’une autre connexion → invisible, retombe sur le chemin legacy', async () => {
+    await call('send', { ...base, clientSendId: 'submit-99999999' });
+    sendJobs.get('job-1').connectionId = 'other-conn';
+    const r = await call('unsend', { messageId: 'job-1' });
+    // Pas de fuite : le job des autres n'est ni annulé ni révélé.
+    expect(sendJobs.get('job-1')?.status).toBe('queued');
+    expect(r).toEqual({ success: true }); // legacy no-op (marqueur cancelled KV)
+  });
+});
+
+describe('mail router — unsend (repli legacy KV)', () => {
   it('rejette l’annulation d’un email planifié d’un autre propriétaire', async () => {
     KV.scheduled_emails.map.set('mid', JSON.stringify({ connectionId: 'other' }));
     const r = await call('unsend', { messageId: 'mid' });

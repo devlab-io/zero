@@ -1,4 +1,14 @@
 import {
+  cancelSendJob,
+  createSendJob,
+  deleteUnqueuedSendJob,
+  getSendJobForConnection,
+  listSendJobsForUser,
+  markSendJobEnqueued,
+  retrySendJob,
+  sendJobStatuses,
+} from '../../lib/send-outbox';
+import {
   forceReSync,
   getThreadsFromDB,
   getZeroAgent,
@@ -6,20 +16,19 @@ import {
   getThread,
   modifyThreadLabelsInDB,
   deleteAllSpam,
-  reSyncThread,
 } from '../../lib/server-utils';
 import { IGetThreadResponseSchema, type IGetThreadsResponse } from '../../lib/driver/types';
-import type { DeleteAllSpamResponse, IEmailSendBatch } from '../../types';
 import { activeDriverProcedure, router, privateProcedure } from '../trpc';
 import { processEmailHtml } from '../../lib/email-processor';
 import { previewSearchText } from '../../lib/search-preview';
 import { defaultPageSize, FOLDERS } from '../../lib/utils';
-import { toAttachmentFiles } from '../../lib/attachments';
 import { serializedFileSchema } from '../../lib/schemas';
+import type { DeleteAllSpamResponse } from '../../types';
 import { openThreadProcedure } from './open-thread';
 import { ThreadsResponseSchema } from '@zero/types';
 import { getContext } from 'hono/context-storage';
 import { type HonoContext } from '../../ctx';
+import { createDb, type DB } from '../../db';
 import { logger } from '../../lib/logger';
 import { TRPCError } from '@trpc/server';
 import { env } from '../../env';
@@ -29,6 +38,18 @@ const senderSchema = z.object({
   name: z.string().optional(),
   email: z.string(),
 });
+
+// Connexion Postgres par requête (pattern outbox.ts) : la fermeture part en
+// waitUntil pour ne pas allonger la réponse.
+const withSendDb = async <T>(callback: (db: DB) => Promise<T>) => {
+  const executionCtx = getContext<HonoContext>().executionCtx;
+  const { db, conn } = createDb(env.HYPERDRIVE.connectionString);
+  try {
+    return await callback(db);
+  } finally {
+    executionCtx.waitUntil(conn.end());
+  }
+};
 
 export const mailRouter = router({
   suggestRecipients: activeDriverProcedure
@@ -456,6 +477,10 @@ export const mailRouter = router({
       );
     }),
 
+  // Envoi durable : TOUT Send (immédiat, undo, planifié) devient une ligne
+  // send_job Postgres + un message Queue, et répond dès que les deux sont
+  // acceptés — jamais après Gmail. Le consumer (lib/send-outbox/consumer)
+  // porte l'appel fournisseur en at-least-once avec claim CAS.
   send: activeDriverProcedure
     .input(
       z.object({
@@ -472,151 +497,190 @@ export const mailRouter = router({
         isForward: z.boolean().optional(),
         originalMessage: z.string().optional(),
         scheduleAt: z.string().optional(),
+        // Clé d'idempotence générée par le composer, stable à travers les
+        // doubles clics et retries réseau ; scopée par connexion via la
+        // contrainte unique (connection_id, client_submission_key).
+        clientSendId: z
+          .string()
+          .regex(/^[A-Za-z0-9-]{8,64}$/)
+          .optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
       const { activeConnection, sessionUser } = ctx;
-      const executionCtx = getContext<HonoContext>().executionCtx;
-      const agent = await getZeroAgent(activeConnection.id, executionCtx);
-
-      const { draftId, scheduleAt, attachments, ...mail } = input as typeof input & {
+      const { draftId, scheduleAt, attachments, clientSendId, ...mail } = input as typeof input & {
         scheduleAt?: string;
       };
 
-      const db = await getZeroDB(sessionUser.id);
-      const userSettings = await db.findUserSettings();
-      const undoSendEnabled = userSettings?.settings?.undoSendEnabled ?? false;
-      const shouldSchedule = !!scheduleAt || undoSendEnabled;
-
-      const afterTask = async () => {
-        try {
-          logger.warn('Saving writing style matrix...');
-          // Post-send bookkeeping pulls in the AI SDK stack — load it off the hot path.
-          const { updateWritingStyleMatrix } = await import('../../services/writing-style-service');
-          await updateWritingStyleMatrix(activeConnection.id, input.message);
-          logger.warn('Saved writing style matrix.');
-        } catch (error) {
-          logger.error('Failed to save writing style matrix', error);
+      let scheduledTime: number | null = null;
+      if (scheduleAt) {
+        const parsedTime = Date.parse(scheduleAt);
+        if (isNaN(parsedTime)) {
+          return { success: false, error: 'Invalid schedule date format' } as const;
         }
+        if (parsedTime <= Date.now()) {
+          return { success: false, error: 'Schedule time must be in the future' } as const;
+        }
+        scheduledTime = parsedTime;
+      }
+
+      const zeroDb = await getZeroDB(sessionUser.id);
+      const userSettings = await zeroDb.findUserSettings();
+      const undoSendEnabled = userSettings?.settings?.undoSendEnabled ?? false;
+
+      // undo actif → fenêtre de 15 s via le délai Queue ; sinon envoi immédiat.
+      const targetTime = scheduledTime ?? (undoSendEnabled ? Date.now() + 15_000 : Date.now());
+      const rawDelaySeconds = Math.max(0, Math.floor((targetTime - Date.now()) / 1000));
+      const maxQueueDelay = 43200; // 12 h, délai maximal accepté par Cloudflare Queues
+      const isLongTerm = rawDelaySeconds > maxQueueDelay;
+
+      const mailPayload = {
+        ...mail,
+        draftId,
+        attachments,
+        connectionId: activeConnection.id,
       };
 
-      if (shouldSchedule) {
-        const messageId = crypto.randomUUID();
+      const { send_email_queue } = env;
 
-        // Validate scheduleAt if provided
-        let targetTime: number;
-        if (scheduleAt) {
-          const parsedTime = Date.parse(scheduleAt);
-          if (isNaN(parsedTime)) {
-            return { success: false, error: 'Invalid schedule date format' } as const;
-          }
-
-          const now = Date.now();
-
-          if (parsedTime <= now) {
-            return { success: false, error: 'Schedule time must be in the future' } as const;
-          }
-
-          targetTime = parsedTime;
-        } else {
-          targetTime = Date.now() + 15_000;
-        }
-
-        const rawDelaySeconds = Math.floor((targetTime - Date.now()) / 1000);
-        const maxQueueDelay = 43200; // 12 hours
-        const isLongTerm = rawDelaySeconds > maxQueueDelay;
-
-        const {
-          pending_emails_status: statusKV,
-          pending_emails_payload: payloadKV,
-          scheduled_emails: scheduledKV,
-          send_email_queue,
-        } = env;
-
+      return withSendDb(async (db) => {
+        let job;
+        let deduped;
         try {
-          await statusKV.put(messageId, 'pending', {
-            expirationTtl: 60 * 60 * 24,
-          });
-        } catch (error) {
-          logger.error(`Failed to write pending status to KV for message ${messageId}`, error);
-          return { success: false, error: 'Failed to schedule email status' } as const;
-        }
-
-        const mailPayload = {
-          ...mail,
-          draftId,
-          attachments,
-          connectionId: activeConnection.id,
-        };
-
-        try {
-          await payloadKV.put(messageId, JSON.stringify(mailPayload), {
-            expirationTtl: 60 * 60 * 24,
-          });
-        } catch (error) {
-          logger.error(`Failed to write email payload to KV for message ${messageId}`, error);
-          return { success: false, error: 'Failed to schedule email payload' } as const;
-        }
-
-        if (isLongTerm) {
-          try {
-            await scheduledKV.put(
-              messageId,
-              JSON.stringify({
-                messageId,
-                connectionId: activeConnection.id,
-                sendAt: targetTime,
-              }),
-              { expirationTtl: Math.min(Math.ceil(rawDelaySeconds + 3600), 31556952) },
-            );
-          } catch (error) {
-            logger.error(
-              `Failed to write long-term schedule to KV for message ${messageId}`,
-              error,
-            );
-            return { success: false, error: 'Failed to schedule email (long-term)' } as const;
-          }
-        } else {
-          const delaySeconds = rawDelaySeconds;
-          const queueBody: IEmailSendBatch = {
-            messageId,
+          ({ job, deduped } = await createSendJob(db, {
             connectionId: activeConnection.id,
-            sendAt: targetTime,
-          };
-          try {
-            await send_email_queue.send(queueBody, { delaySeconds });
-          } catch (error) {
-            logger.error(`Failed to enqueue email send for message ${messageId}`, error);
-            return { success: false, error: 'Failed to enqueue email send' } as const;
-          }
+            clientSubmissionKey: clientSendId ?? crypto.randomUUID(),
+            payload: mailPayload,
+            threadId: input.threadId ?? null,
+            scheduledSendAt: targetTime > Date.now() ? new Date(targetTime) : null,
+          }));
+        } catch (error) {
+          logger.error('Failed to persist send job', error);
+          return { success: false, error: 'Failed to queue email send' } as const;
         }
 
-        ctx.c.executionCtx.waitUntil(afterTask());
+        if (deduped) {
+          // Double clic / retry réseau : le job existe déjà, ne pas ré-enqueue.
+          // Son état réel (failed/cancelled inclus) est visible via getSendStatus.
+          return {
+            success: true,
+            queued: true,
+            messageId: job.id,
+            sendAt: job.scheduledSendAt?.getTime(),
+            duplicate: true,
+          } as const;
+        }
 
         if (isLongTerm) {
-          return { success: true, scheduled: true, messageId, sendAt: targetTime };
-        } else {
-          return { success: true, queued: true, messageId, sendAt: targetTime };
+          // Au-delà du délai Queue maximal : le sweep cron enqueue le job quand
+          // il entre dans l'horizon de 12 h. La ligne DB est l'autorité.
+          return {
+            success: true,
+            scheduled: true,
+            messageId: job.id,
+            sendAt: targetTime,
+          } as const;
         }
-      }
 
-      const mailWithAttachments = {
-        ...mail,
-        attachments: attachments?.map((att: any) =>
-          typeof att?.arrayBuffer === 'function' ? att : toAttachmentFiles([att])[0],
-        ),
-      } as typeof mail & { attachments: any[] };
+        try {
+          await send_email_queue.send(
+            { messageId: job.id, jobId: job.id, connectionId: activeConnection.id },
+            { delaySeconds: rawDelaySeconds },
+          );
+        } catch (error) {
+          logger.error(`Failed to enqueue send job ${job.id}`, error);
+          // La ligne n'a jamais été visible d'un consumer : la supprimer libère
+          // la clé de soumission pour que le retry client reparte proprement.
+          await deleteUnqueuedSendJob(db, job.id);
+          return { success: false, error: 'Failed to enqueue email send' } as const;
+        }
 
-      if (draftId) {
-        await agent.stub.sendDraft(draftId, mailWithAttachments);
-      } else {
-        await agent.stub.create(mailWithAttachments);
-      }
+        // Marqueur best-effort pour le sweep ; un échec ici est bénin.
+        await markSendJobEnqueued(db, job.id).catch(() => {});
 
-      if (input.threadId)
-        ctx.c.executionCtx.waitUntil(reSyncThread(activeConnection.id, input.threadId));
-      ctx.c.executionCtx.waitUntil(afterTask());
-      return { success: true };
+        return { success: true, queued: true, messageId: job.id, sendAt: targetTime } as const;
+      });
+    }),
+  // Suivi post-enqueue : le composer interroge l'état du job pour transformer
+  // un échec asynchrone en toast actionnable au lieu d'un faux succès muet.
+  getSendStatus: activeDriverProcedure
+    .input(z.object({ messageId: z.string() }))
+    .query(async ({ input, ctx }) =>
+      withSendDb(async (db) => {
+        const job = await getSendJobForConnection(db, {
+          id: input.messageId,
+          connectionId: ctx.activeConnection.id,
+        });
+        if (!job) return { status: 'unknown' as const, error: null, sendAt: null };
+        return {
+          status: job.status,
+          error: job.error,
+          sendAt: job.scheduledSendAt?.getTime() ?? null,
+        };
+      }),
+    ),
+  listSendJobs: activeDriverProcedure
+    .input(
+      z
+        .object({ statuses: z.array(z.enum(sendJobStatuses)).optional() })
+        .optional()
+        .default({}),
+    )
+    .query(async ({ input, ctx }) =>
+      withSendDb(async (db) => {
+        const jobs = await listSendJobsForUser(db, {
+          userId: ctx.sessionUser.id,
+          statuses: input.statuses,
+          limit: 20,
+        });
+        return jobs.map((job) => {
+          const payload = job.payload as { subject?: string; to?: { email: string }[] } | null;
+          return {
+            id: job.id,
+            status: job.status,
+            error: job.error,
+            subject: payload?.subject ?? null,
+            to: payload?.to?.map((recipient) => recipient.email) ?? [],
+            sendAt: job.scheduledSendAt?.getTime() ?? null,
+            createdAt: job.createdAt.getTime(),
+          };
+        });
+      }),
+    ),
+  retrySend: activeDriverProcedure
+    .input(z.object({ messageId: z.string() }))
+    .mutation(async ({ input, ctx }) => {
+      const { send_email_queue } = env;
+      return withSendDb(async (db) => {
+        const connectionId = ctx.activeConnection.id;
+        const job = await getSendJobForConnection(db, { id: input.messageId, connectionId });
+        if (!job) return { success: false, error: 'Send job not found' } as const;
+        if (job.status === 'cancelled') {
+          return { success: false, error: 'Send was cancelled' } as const;
+        }
+        if (job.status !== 'failed') {
+          // sent / queued / sending : déjà en route, le retry est un no-op sûr.
+          return { success: true, queued: true, messageId: job.id } as const;
+        }
+
+        const revived = await retrySendJob(db, { id: job.id, connectionId });
+        if (!revived) {
+          return { success: false, error: 'Send job changed state; refresh and retry' } as const;
+        }
+
+        try {
+          await send_email_queue.send(
+            { messageId: job.id, jobId: job.id, connectionId },
+            { delaySeconds: 0 },
+          );
+          await markSendJobEnqueued(db, job.id).catch(() => {});
+        } catch (error) {
+          // Le job est requeued en DB : le sweep cron le remettra dans la Queue.
+          logger.error(`Failed to re-enqueue send job ${job.id}; sweep will recover`, error);
+        }
+
+        return { success: true, queued: true, messageId: job.id } as const;
+      });
     }),
   unsend: activeDriverProcedure
     .input(
@@ -633,6 +697,27 @@ export const mailRouter = router({
         scheduled_emails: scheduledKV,
       } = env;
 
+      // Chemin autoritatif : annulation CAS de la ligne send_job (queued/failed
+      // uniquement — un job en cours d'envoi ou envoyé ne se rappelle pas).
+      const jobResult = await withSendDb(async (db) => {
+        const job = await getSendJobForConnection(db, {
+          id: messageId,
+          connectionId: activeConnection.id,
+        });
+        if (!job) return null;
+        const cancelled = await cancelSendJob(db, {
+          id: messageId,
+          connectionId: activeConnection.id,
+        });
+        if (cancelled) return { success: true } as const;
+        return {
+          success: false,
+          error: `Too late to cancel (status: ${job.status})`,
+        } as const;
+      });
+      if (jobResult) return jobResult;
+
+      // Repli legacy KV : messages enqueued avant le déploiement du send_job.
       const scheduledData = await scheduledKV.get(messageId);
       if (scheduledData) {
         try {

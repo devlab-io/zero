@@ -1,23 +1,20 @@
-import { logger } from './lib/logger';
-import {
-  toAttachmentFiles,
-  type SerializedAttachment,
-  type AttachmentFile,
-} from './lib/attachments';
 import { SyncThreadsCoordinatorWorkflow } from './workflows/sync-threads-coordinator-workflow';
-import { WorkerEntrypoint } from 'cloudflare:workers';
-import { getZeroAgent } from './lib/server-utils';
+import { processSendEmailBatch, type SendEmailQueueMessage } from './lib/send-outbox/consumer';
 import { SyncThreadsWorkflow } from './workflows/sync-threads-workflow';
 import { ShardRegistry, ZeroAgent, ZeroDriver } from './routes/agent';
+import { getZeroAgent, reSyncThread } from './lib/server-utils';
 import { ThreadSyncWorker } from './routes/agent/sync-worker';
-import { EProviders, type IEmailSendBatch, type IOutgoingMessage } from './types';
+import { EProviders, type IEmailSendBatch } from './types';
 import { ThinkingMCP } from './lib/sequential-thinking';
+import { WorkerEntrypoint } from 'cloudflare:workers';
+import { captureServerException } from './lib/sentry';
+import { sweepDueSendJobs } from './lib/send-outbox';
+import { bootEnv, env, type ZeroEnv } from './env';
 import { enableBrainFunction } from './lib/brain';
 import { ZeroMCP } from './routes/agent/mcp';
 import { WorkflowRunner } from './pipelines';
 import { initTracing } from './lib/tracing';
-import { bootEnv, env, type ZeroEnv } from './env';
-import { captureServerException } from './lib/sentry';
+import { logger } from './lib/logger';
 import { createDb } from './db';
 import { app } from './routes';
 
@@ -49,7 +46,11 @@ export default class Entry extends WorkerEntrypoint<ZeroEnv> {
       case batch.queue.startsWith('subscribe-queue'): {
         logger.info('batch', batch);
         await Promise.all(
-          (batch.messages as unknown as Array<{ body: { connectionId: string; providerId: EProviders } }>).map(async (msg) => {
+          (
+            batch.messages as unknown as Array<{
+              body: { connectionId: string; providerId: EProviders };
+            }>
+          ).map(async (msg) => {
             const connectionId = msg.body.connectionId;
             const providerId = msg.body.providerId;
             try {
@@ -66,80 +67,30 @@ export default class Entry extends WorkerEntrypoint<ZeroEnv> {
         return;
       }
       case batch.queue.startsWith('send-email-queue'): {
-        await Promise.all(
-          (batch.messages as Array<{ body: IEmailSendBatch }>).map(async (msg) => {
-            const { messageId, connectionId, mail } = msg.body;
-
-            const { pending_emails_status: statusKV, pending_emails_payload: payloadKV } = this
-              .env as { pending_emails_status: KVNamespace; pending_emails_payload: KVNamespace };
-
-            const status = await statusKV.get(messageId);
-            if (status === 'cancelled') {
-              logger.info(`Email ${messageId} cancelled – skipping send.`);
-              return;
-            }
-
-            let payload = mail;
-            if (!payload) {
-              const stored = await payloadKV.get(messageId);
-              if (!stored) {
-                logger.error(`No payload found for scheduled email ${messageId}`);
-                return;
-              }
-              payload = JSON.parse(stored);
-            }
-
-            const agent = await getZeroAgent(connectionId, this.ctx);
-            try {
-              const p = payload as Omit<IOutgoingMessage, 'attachments'> & { attachments?: (SerializedAttachment | AttachmentFile)[]; draftId?: string };
-              if (Array.isArray(p.attachments)) {
-                const attachments = p.attachments;
-
-                const processedAttachments = await Promise.all(
-                  attachments.map(
-                    async (att: SerializedAttachment | AttachmentFile, index: number) => {
-                      if ('arrayBuffer' in att && typeof att.arrayBuffer === 'function') {
-                        return { attachment: att as AttachmentFile, index };
-                      } else {
-                        const processed = toAttachmentFiles([att as SerializedAttachment]);
-                        return { attachment: processed[0], index };
-                      }
-                    },
-                  ),
-                );
-
-                const orderedAttachments = new Array<AttachmentFile>(attachments.length);
-                processedAttachments.forEach(({ attachment, index }) => {
-                  orderedAttachments[index] = attachment;
-                });
-
-                p.attachments = orderedAttachments;
-              }
-
-              if (p.draftId) {
-                const { draftId, ...rest } = p;
-                await agent.stub.sendDraft(draftId, rest as IOutgoingMessage);
-              } else {
-                await agent.stub.create(p as IOutgoingMessage);
-              }
-
-              await statusKV.delete(messageId);
-              await payloadKV.delete(messageId);
-              logger.info(`Email ${messageId} sent successfully`);
-            } catch (error) {
-              logger.error(`Failed to send scheduled email ${messageId}:`, error);
-              await statusKV.delete(messageId);
-              await payloadKV.delete(messageId);
-            }
-          }),
-        );
+        const { db, conn } = createDb(this.env.HYPERDRIVE.connectionString);
+        try {
+          await processSendEmailBatch(batch.messages as SendEmailQueueMessage[], {
+            db,
+            statusKV: this.env.pending_emails_status,
+            payloadKV: this.env.pending_emails_payload,
+            getAgent: (connectionId) => getZeroAgent(connectionId, this.ctx),
+            resyncThread: (connectionId, threadId) => reSyncThread(connectionId, threadId),
+            waitUntil: (promise) => this.ctx.waitUntil(promise),
+          });
+        } finally {
+          this.ctx.waitUntil(conn.end());
+        }
         return;
       }
       case batch.queue.startsWith('thread-queue'): {
         const tracer = initTracing();
 
         await Promise.all(
-          (batch.messages as unknown as Array<{ body: { providerId: string; historyId: string; subscriptionName: string } }>).map(async (msg) => {
+          (
+            batch.messages as unknown as Array<{
+              body: { providerId: string; historyId: string; subscriptionName: string };
+            }>
+          ).map(async (msg) => {
             const span = tracer.startSpan('thread_queue_processing', {
               attributes: {
                 'provider.id': msg.body.providerId,
@@ -194,6 +145,8 @@ export default class Entry extends WorkerEntrypoint<ZeroEnv> {
       send_email_queue: Queue<IEmailSendBatch>;
     };
 
+    await this.sweepSendJobs(send_email_queue);
+
     try {
       const now = Date.now();
       const twelveHoursFromNow = now + 12 * 60 * 60 * 1000;
@@ -238,6 +191,40 @@ export default class Entry extends WorkerEntrypoint<ZeroEnv> {
       } while (cursor);
     } catch (error) {
       logger.error('Error processing scheduled emails:', error);
+    }
+  }
+
+  /**
+   * Filet de réconciliation send_job : ré-enqueue les jobs jamais remis à la
+   * Queue (crash entre commit DB et enqueue, ou planifiés au-delà de l'horizon
+   * de délai Queue de 12 h), les jobs dont le message semble perdu, et les
+   * `sending` orphelins. Les relivraisons en trop sont neutralisées par le
+   * claim CAS du consumer.
+   */
+  private async sweepSendJobs(send_email_queue: Queue<IEmailSendBatch>) {
+    const { db, conn } = createDb(this.env.HYPERDRIVE.connectionString);
+    try {
+      const now = Date.now();
+      const due = await sweepDueSendJobs(db, { horizonMs: 12 * 60 * 60 * 1000 });
+      for (const job of due) {
+        const delaySeconds = Math.max(
+          0,
+          Math.floor(((job.scheduledSendAt?.getTime() ?? now) - now) / 1000),
+        );
+        try {
+          await send_email_queue.send(
+            { messageId: job.id, jobId: job.id, connectionId: job.connectionId },
+            { delaySeconds },
+          );
+          logger.info(`[SCHEDULED] Re-enqueued send job ${job.id} (delay ${delaySeconds}s)`);
+        } catch (error) {
+          logger.error(`[SCHEDULED] Failed to re-enqueue send job ${job.id}`, error);
+        }
+      }
+    } catch (error) {
+      logger.error('[SCHEDULED] Send job sweep failed:', error);
+    } finally {
+      this.ctx.waitUntil(conn.end());
     }
   }
 

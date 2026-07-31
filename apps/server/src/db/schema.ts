@@ -360,3 +360,35 @@ export const draftOutbox = createTable(
     index('draft_outbox_scheduled_send_at_idx').on(t.scheduledSendAt),
   ],
 );
+
+// Outbox d'envoi autoritatif : chaque mail.send devient une ligne send_job avant
+// tout contact Gmail. La contrainte unique (connection_id, client_submission_key)
+// est la barrière d'idempotence des doubles clics/retries client ; `payload` est
+// nullifié une fois `sent` (rétention minimale), conservé sur `failed` pour retry.
+export const sendJob = createTable(
+  'send_job',
+  {
+    id: text('id').primaryKey(),
+    connectionId: text('connection_id')
+      .notNull()
+      .references(() => connection.id, { onDelete: 'cascade' }),
+    clientSubmissionKey: text('client_submission_key').notNull(),
+    status: text('status')
+      .$type<'queued' | 'sending' | 'sent' | 'cancelled' | 'failed'>()
+      .notNull()
+      .default('queued'),
+    payload: jsonb('payload'),
+    threadId: text('thread_id'),
+    scheduledSendAt: timestamp('scheduled_send_at'),
+    enqueuedAt: timestamp('enqueued_at'),
+    attempts: integer('attempts').notNull().default(0),
+    error: text('error'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (t) => [
+    unique('mail0_send_job_connection_submission_unique').on(t.connectionId, t.clientSubmissionKey),
+    index('send_job_connection_status_idx').on(t.connectionId, t.status),
+    index('send_job_status_scheduled_idx').on(t.status, t.scheduledSendAt),
+  ],
+);
