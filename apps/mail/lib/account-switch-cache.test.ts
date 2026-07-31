@@ -52,6 +52,35 @@ describe('refreshActiveQueriesAfterAccountSwitch', () => {
     expect(queryClient.getQueryCache().findAll()).toHaveLength(2);
   });
 
+  it("purge les lectures INACTIVES de l'ancien compte (refetchOnMount:false ne les aurait jamais rafraîchies)", async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false, staleTime: Infinity } },
+    });
+    let account = 'admin';
+
+    const activeOptions = {
+      queryKey: ['mail', 'listThreads', 'inbox'] as const,
+      queryFn: async () => [`${account}-inbox`],
+      staleTime: Infinity,
+    };
+    // Dossier visité puis quitté : plus aucun observateur — c'est la lecture
+    // qui rendait les données croisées après switch.
+    await queryClient.fetchQuery({
+      queryKey: ['mail', 'listThreads', 'archive'] as const,
+      queryFn: async () => [`${account}-archive`],
+      staleTime: Infinity,
+    });
+    await queryClient.fetchQuery(activeOptions);
+    observers.push(new QueryObserver(queryClient, activeOptions).subscribe(() => undefined));
+
+    account = 'thomas';
+    await refreshActiveQueriesAfterAccountSwitch(queryClient);
+
+    // L'entrée inactive de l'ancien compte a disparu ; l'active est refetchée.
+    expect(queryClient.getQueryData(['mail', 'listThreads', 'archive'])).toBeUndefined();
+    expect(queryClient.getQueryData(activeOptions.queryKey)).toEqual(['thomas-inbox']);
+  });
+
   it('refetches only the first loaded page after a deeply scrolled account switch', async () => {
     const queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false, staleTime: Infinity } },

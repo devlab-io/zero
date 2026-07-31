@@ -1,3 +1,5 @@
+import { foldSearchText } from './search-fold';
+
 /**
  * Sélection d'affichage de la préview de recherche projection-first
  * (CUA 2026-07-30, obs 3 — « premier résultat <1 s »).
@@ -41,6 +43,47 @@ export function enrichThinItemsWithPreview<T extends { id: string; unread?: bool
   return changed ? enriched : items;
 }
 
+/**
+ * Fusion locale-d'abord d'une recherche LITTÉRALE une fois la réponse Gmail
+ * atterrie (CUA 2026-07-31 : Kura/Restaurant « empty », LIQUID STUDIO faux
+ * positif). La réponse Gmail remplaçait intégralement la préview projection :
+ * une page Gmail vide ou divergente effaçait des correspondances exactes
+ * sujet/expéditeur pourtant présentes dans la projection locale.
+ *
+ * Contrat : les matches locaux (préview projection, ordre date desc du DO)
+ * restent affichés en tête et gardent leurs positions du vol — Gmail ne peut
+ * qu'ENRICHIR (champs réels id/historyId des lignes qu'il confirme) et
+ * COMPLÉTER (ses matches hors projection — corps de message, autres dossiers —
+ * ajoutés après, dédupliqués par threadId). Il ne remplace jamais un exact
+ * local par un autre résultat.
+ */
+export function mergeAuthoritativeWithLocalMatches<T extends { id: string; unread?: boolean }>(
+  authoritativeItems: T[],
+  previewItems: T[] | undefined,
+): T[] {
+  if (!previewItems || previewItems.length === 0) return authoritativeItems;
+
+  const authoritativeById = new Map(authoritativeItems.map((item) => [item.id, item]));
+  const previewIds = new Set(previewItems.map((item) => item.id));
+
+  // Tête : les matches locaux, dans l'ordre où la préview les a affichés ; une
+  // ligne confirmée par Gmail récupère ses champs authoritatifs (id, historyId)
+  // par-dessus les champs d'affichage déjà servis.
+  const head = previewItems.map((item) => {
+    const confirmed = authoritativeById.get(item.id);
+    return confirmed ? { ...item, ...confirmed } : item;
+  });
+
+  // Queue : les matches Gmail hors projection (corps de message, hors dossier),
+  // enrichis si possible — dédupliqués contre la tête.
+  const tail = enrichThinItemsWithPreview(
+    authoritativeItems.filter((item) => !previewIds.has(item.id)),
+    previewItems,
+  );
+
+  return tail.length === 0 ? head : [...head, ...tail];
+}
+
 type LiteralSearchPreviewItem = {
   subject?: string | null;
   sender?: { name?: string | null; email?: string | null } | null;
@@ -50,6 +93,8 @@ type LiteralSearchPreviewItem = {
  * Return only real subject/sender matches from the list page already in memory.
  * This is the zero-round-trip first paint for a literal search; the projection
  * and Gmail queries still replace/complete it as soon as they resolve.
+ * Matching is accent/case/whitespace-folded (search-fold), same semantics as
+ * the DO projection LIKE.
  */
 export function filterLiteralSearchPreviewItems<T extends LiteralSearchPreviewItem>(
   items: T[],
@@ -60,16 +105,14 @@ export function filterLiteralSearchPreviewItems<T extends LiteralSearchPreviewIt
     trimmed.length >= 2 &&
     ((trimmed.startsWith('"') && trimmed.endsWith('"')) ||
       (trimmed.startsWith('«') && trimmed.endsWith('»')));
-  const needle = (quoted ? trimmed.slice(1, -1).trim() : trimmed).toLocaleLowerCase();
+  const needle = foldSearchText(quoted ? trimmed.slice(1, -1) : trimmed);
   if (!needle) return [];
 
-  return items.filter((item) => {
-    const haystack = [item.subject, item.sender?.name, item.sender?.email]
+  return items.filter((item) =>
+    [item.subject, item.sender?.name, item.sender?.email]
       .filter((value): value is string => typeof value === 'string')
-      .join('\n')
-      .toLocaleLowerCase();
-    return haystack.includes(needle);
-  });
+      .some((value) => foldSearchText(value).includes(needle)),
+  );
 }
 
 export function selectSearchPreviewItems<T>(params: {

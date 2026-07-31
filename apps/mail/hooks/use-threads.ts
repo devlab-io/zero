@@ -1,6 +1,7 @@
 import {
   enrichThinItemsWithPreview,
   filterLiteralSearchPreviewItems,
+  mergeAuthoritativeWithLocalMatches,
   selectSearchPreviewItems,
 } from '@/lib/search-preview-selector';
 import {
@@ -237,9 +238,16 @@ export const useThreads = () => {
         literalSearch: isSimpleLiteralSearch(searchValue.value),
       });
     }
-    // Réponse Gmail atterrie : ses lignes minces récupèrent les champs riches
-    // que la préview projection avait déjà servis (pas de flip vers un squelette
-    // pour les fils déjà affichés) ; ordre et composition restent Gmail.
+    // Réponse Gmail atterrie. Littéral : fusion locale-d'abord — les matches
+    // exacts de la projection restent en tête (une page Gmail vide ou
+    // divergente ne les efface jamais), Gmail enrichit les lignes qu'il
+    // confirme et complète avec ses matches hors projection, dédupliqués par
+    // threadId (CUA 2026-07-31 : Kura/Restaurant vides, LIQUID STUDIO faux
+    // positif). Non-littéral (opérateurs/IA) : composition Gmail inchangée,
+    // la préview n'y est qu'un sentinel d'enrichissement.
+    if (isSimpleLiteralSearch(searchValue.value)) {
+      return mergeAuthoritativeWithLocalMatches(held, previewThreads);
+    }
     return enrichThinItemsWithPreview(held, previewThreads);
   }, [
     forceSyncHold.active,

@@ -39,6 +39,7 @@ import { useTRPC } from '@/providers/query-provider';
 import { useMutation } from '@tanstack/react-query';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { Inbox, RefreshCcw } from 'lucide-react';
+import { markStage } from '@/lib/perf-stages';
 import { NotesPanel } from './note-panel';
 import { cn, FOLDERS } from '@/lib/utils';
 import type { Attachment } from '@/types';
@@ -111,6 +112,13 @@ export function ThreadDisplay() {
   const [navigationDirection, setNavigationDirection] = useState<'previous' | 'next' | null>(null);
 
   const animationsEnabled = useAnimations();
+
+  // Jalon perf : le corps du fil actif est rendu (messages présents). Posé
+  // APRÈS le paint (effect), mesuré depuis `thread:open` (clic liste).
+  const bodyReadyId = emailData?.messages?.length ? id : null;
+  useEffect(() => {
+    if (bodyReadyId) markStage('thread:body-ready');
+  }, [bodyReadyId]);
 
   // Réchauffage idle des chunks composer (voir warmComposerChunks ci-dessus).
   useEffect(() => {

@@ -1,6 +1,7 @@
 import {
   enrichThinItemsWithPreview,
   filterLiteralSearchPreviewItems,
+  mergeAuthoritativeWithLocalMatches,
   selectSearchPreviewItems,
 } from './search-preview-selector';
 import { describe, expect, it } from 'vitest';
@@ -39,6 +40,22 @@ describe('filterLiteralSearchPreviewItems — premier paint sans réseau', () =>
       ['dhl-sender'],
     );
     expect(filterLiteralSearchPreviewItems(rows, '   ')).toEqual([]);
+  });
+
+  it('plie accents, casse et espaces multiples (« réservation » ↔ « Reservation »)', () => {
+    const accented = [
+      {
+        id: 'resa',
+        subject: 'Réservation Restaurant Chez Rémy',
+        sender: { name: 'Chez Rémy', email: 'contact@chezremy.pf' },
+      },
+    ];
+    expect(filterLiteralSearchPreviewItems(accented, 'reservation restaurant')).toHaveLength(1);
+    expect(filterLiteralSearchPreviewItems(accented, 'RÉSERVATION').map((r) => r.id)).toEqual([
+      'resa',
+    ]);
+    expect(filterLiteralSearchPreviewItems(accented, '  chez   remy ')).toHaveLength(1);
+    expect(filterLiteralSearchPreviewItems(accented, 'liquid studio')).toEqual([]);
   });
 });
 
@@ -176,5 +193,53 @@ describe('enrichThinItemsWithPreview — greffe des champs riches sur les lignes
   it("aucune greffe effectuée → tableau d'origine par identité (pas de re-render)", () => {
     const items = [{ id: 'z', historyId: 'h' } as Row];
     expect(enrichThinItemsWithPreview(items, [richP1])).toBe(items);
+  });
+});
+
+describe('mergeAuthoritativeWithLocalMatches — un exact local ne se perd jamais (littéral)', () => {
+  type Row = { id: string; historyId?: string | null; subject?: string; unread?: boolean };
+  const localInvoice: Row = { id: 'liq-1', subject: 'Facture FA-2026-00451', unread: false };
+  const localOther: Row = { id: 'liq-2', subject: 'LIQUID STUDIO — relance', unread: true };
+
+  it('page Gmail vide → les matches locaux restent affichés (cas Kura/Restaurant)', () => {
+    expect(mergeAuthoritativeWithLocalMatches([], [localInvoice, localOther])).toEqual([
+      localInvoice,
+      localOther,
+    ]);
+  });
+
+  it('Gmail divergent → locaux en tête dans leur ordre, extras Gmail après, dédup par id (cas LIQUID STUDIO)', () => {
+    const gmailWrong: Row = { id: 'other-9', historyId: 'h9' };
+    const out = mergeAuthoritativeWithLocalMatches([gmailWrong], [localInvoice, localOther]);
+    expect(out.map((r) => r.id)).toEqual(['liq-1', 'liq-2', 'other-9']);
+  });
+
+  it('ligne locale confirmée par Gmail → champs authoritatifs greffés, position locale conservée', () => {
+    const gmailThin: Row = { id: 'liq-1', historyId: 'h42' };
+    const out = mergeAuthoritativeWithLocalMatches([gmailThin], [localInvoice, localOther]);
+    expect(out[0]).toEqual({
+      id: 'liq-1',
+      historyId: 'h42',
+      subject: 'Facture FA-2026-00451',
+      unread: false,
+    });
+    expect(out.map((r) => r.id)).toEqual(['liq-1', 'liq-2']);
+  });
+
+  it('extras Gmail minces enrichis via la préview quand possible, jamais dupliqués', () => {
+    const gmailConfirmed: Row = { id: 'liq-2', historyId: 'h2' };
+    const gmailExtra: Row = { id: 'body-match', historyId: 'h3' };
+    const out = mergeAuthoritativeWithLocalMatches(
+      [gmailConfirmed, gmailExtra],
+      [localInvoice, localOther],
+    );
+    expect(out.map((r) => r.id)).toEqual(['liq-1', 'liq-2', 'body-match']);
+    expect(out.filter((r) => r.id === 'liq-2')).toHaveLength(1);
+  });
+
+  it('préview absente ou vide → composition Gmail inchangée par identité', () => {
+    const gmail = [{ id: 'a', historyId: 'h' } as Row];
+    expect(mergeAuthoritativeWithLocalMatches(gmail, undefined)).toBe(gmail);
+    expect(mergeAuthoritativeWithLocalMatches(gmail, [])).toBe(gmail);
   });
 });

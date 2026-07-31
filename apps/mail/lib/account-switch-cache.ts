@@ -19,6 +19,14 @@ export async function refreshActiveQueriesAfterAccountSwitch(
 ) {
   await queryClient.cancelQueries();
 
+  // Les lectures INACTIVES de l'ancien compte doivent disparaître, pas juste
+  // être invalidées : listThreads est monté avec `refetchOnMount: false`, donc
+  // une invalidation seule laisserait l'Inbox de l'ancien compte se rendre
+  // telle quelle à la prochaine navigation de dossier — données croisées que
+  // le contrat interdit. Retirer les entrées sans observateur est sûr (aucun
+  // composant monté ne s'y détache) et force un fetch frais au prochain mount.
+  queryClient.removeQueries({ type: 'inactive' });
+
   // An infinite-query refetch replays every loaded page sequentially. After a
   // long inbox scroll that made account switches look frozen for 10-20 seconds.
   // The old account is hidden by the switch overlay, so only retain page one

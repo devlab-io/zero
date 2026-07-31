@@ -26,6 +26,7 @@ import type { ForceSyncSnapshot } from '@/lib/force-sync-hold-selector';
 import { activateForceSyncHoldAtom } from '@/store/force-sync-hold';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useDoState } from '@/components/mail/use-do-state';
+import { useSearchValue } from '@/hooks/use-search-value';
 import type { InfiniteData } from '@tanstack/react-query';
 import { useLoading } from '../context/loading-context';
 import { signOut, useSession } from '@/lib/auth-client';
@@ -107,6 +108,7 @@ export function NavUser() {
   const { state } = useSidebar();
   const trpc = useTRPC();
   const [, setThreadId] = useQueryState('threadId');
+  const [, setSearchValue] = useSearchValue();
   const { mutateAsync: setDefaultConnection } = useMutation(
     trpc.connections.setDefault.mutationOptions(),
   );
@@ -173,6 +175,10 @@ export function NavUser() {
     try {
       setLoading(true, m['common.navUser.switchingAccounts']());
       setThreadId(null);
+      // Une recherche/un filtre actif ne survit jamais au compte qui l'a posé :
+      // sans ce reset, la vue du nouveau compte rejouerait la requête `q` de
+      // l'ancien (contrat compte-actif atomique).
+      setSearchValue({ value: '', highlight: '', folder: '' });
       await setDefaultConnection({ connectionId });
       const targetConnection = data?.connections.find(
         (connection) => connection.id === connectionId,

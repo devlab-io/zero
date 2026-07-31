@@ -21,6 +21,7 @@ import { useTRPC } from '@/providers/query-provider';
 import { useMutation } from '@tanstack/react-query';
 import { useThreads } from '@/hooks/use-threads';
 import { useLabels } from '@/hooks/use-labels';
+import { markStage } from '@/lib/perf-stages';
 import { format, subDays } from 'date-fns';
 import { VisuallyHidden } from 'radix-ui';
 import { m } from '@/paraglide/messages';
@@ -179,6 +180,7 @@ export function CommandPaletteDialog({
         finalQuery = `${finalQuery} ${filterQuery}`.trim();
       }
 
+      markStage('search:applied');
       setSearchValue({
         value: finalQuery,
         highlight: getMainSearchTerm(finalQuery),
@@ -271,28 +273,40 @@ export function CommandPaletteDialog({
 
       try {
         let finalQuery = query;
+        let literalFallback = false;
 
         if (effectiveNaturalLanguage) {
-          const result = await generateSearchQuery({ query });
-          finalQuery = result.query;
+          // L'IA n'est jamais un point de défaillance de la recherche : si la
+          // réécriture échoue (réseau, OpenAI), la requête part telle quelle en
+          // recherche littérale au lieu d'un toast d'erreur sans résultat
+          // (CUA 2026-07-31 : « Anapa » → « Failed to process search »).
+          try {
+            const result = await generateSearchQuery({ query });
+            finalQuery = result.query;
 
-          const searchFilter: ActiveFilter = {
-            id: `ai-search-${Date.now()}`,
-            type: 'search',
-            value: finalQuery,
-            display: `AI Search: "${query}"`,
-          };
-          addFilter(searchFilter);
+            const searchFilter: ActiveFilter = {
+              id: `ai-search-${Date.now()}`,
+              type: 'search',
+              value: finalQuery,
+              display: `AI Search: "${query}"`,
+            };
+            addFilter(searchFilter);
 
-          setOpen(null);
+            setOpen(null);
 
-          return setSearchValue({
-            value: finalQuery,
-            highlight: getMainSearchTerm(query),
-            folder: searchValue.folder,
-            isAISearching: useNaturalLanguage,
-            isLoading: true,
-          });
+            markStage('search:applied');
+            return setSearchValue({
+              value: finalQuery,
+              highlight: getMainSearchTerm(query),
+              folder: searchValue.folder,
+              isAISearching: useNaturalLanguage,
+              isLoading: true,
+            });
+          } catch (error) {
+            log.error('AI search rewrite failed, falling back to literal search:', error);
+            finalQuery = query;
+            literalFallback = true;
+          }
         }
 
         const isFilterSyntax = /^(from:|to:|subject:|has:|is:|after:|before:|label:)/.test(
@@ -318,11 +332,12 @@ export function CommandPaletteDialog({
           setRecentSearches(getRecentSearches());
         }
 
+        markStage('search:applied');
         setSearchValue({
           value: finalQuery,
           highlight: getMainSearchTerm(query),
           folder: searchValue.folder,
-          isAISearching: effectiveNaturalLanguage,
+          isAISearching: effectiveNaturalLanguage && !literalFallback,
           isLoading: true,
         });
 

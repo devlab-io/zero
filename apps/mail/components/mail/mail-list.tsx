@@ -22,6 +22,7 @@ import { useIsOffline } from '@/hooks/use-online-status';
 import { usePrefetchThread } from '@/hooks/use-threads';
 import { useSettings } from '@/hooks/use-settings';
 import { VList, type VListHandle } from 'virtua';
+import { markStage } from '@/lib/perf-stages';
 import type { ParsedMessage } from '@/types';
 import { Thread } from './mail-list-thread';
 import { Draft } from './mail-list-draft';
@@ -138,6 +139,7 @@ export const MailList = memo(
         );
         setFocusedIndex(clickedIndex);
         if (message.unread && autoRead) optimisticMarkAsRead([messageThreadId], true);
+        markStage('thread:open');
         setThreadId(messageThreadId);
         setDraftId(null);
         // Don't clear activeReplyId - let ThreadDisplay handle Reply All auto-opening
@@ -157,10 +159,20 @@ export const MailList = memo(
     );
 
     const isFiltering = searchValue.value.trim().length > 0;
+    // Recherche : le préchauffage attend que les résultats soient POSÉS (plus
+    // de vol authoritative ni de transition) puis réchauffe les trois premières
+    // lignes — celles que l'utilisateur ouvre — pour une ouverture au cache
+    // (CUA 2026-07-31 : Linear 1108 ms à chaud depuis les résultats). Pendant
+    // le vol, aucune spéculation : la pagination et la préview gardent le DO.
+    const isSearchSettled = isFiltering && !isTransitionPending && !isFetching;
     useInitialThreadPrefetch(
       items,
-      folder !== FOLDERS.DRAFT && !isLoading && !isRestoring && !isFiltering,
+      folder !== FOLDERS.DRAFT && !isLoading && !isRestoring && (!isFiltering || isSearchSettled),
     );
+
+    useEffect(() => {
+      if (isSearchSettled) markStage('search:results-settled');
+    }, [isSearchSettled]);
 
     useEffect(() => {
       if (isFiltering && !isLoading) {

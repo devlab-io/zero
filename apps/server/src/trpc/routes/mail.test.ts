@@ -263,12 +263,15 @@ describe('mail router — listThreads (branchement dossiers)', () => {
     expect(stub.rawListThreads).not.toHaveBeenCalled();
   });
 
-  it('q à jokers LIKE (`%`/`_`) + localPreview → page vide, la projection n’est jamais interrogée', async () => {
-    for (const q of ['%', 'remise 50%', 'rapport_final']) {
-      const r = await call('listThreads', { folder: 'inbox', q, localPreview: true });
-      expect(r).toEqual({ threads: [], nextPageToken: '' });
+  it('q à jokers LIKE (`%`/`_`) + localPreview → servi par la projection (motif échappé par search-fold)', async () => {
+    getThreadsFromDB.mockResolvedValue({ threads: [], nextPageToken: '' });
+    for (const q of ['remise 50%', 'rapport_final']) {
+      await call('listThreads', { folder: 'inbox', q, localPreview: true });
+      expect(getThreadsFromDB).toHaveBeenCalledWith(
+        'conn-1',
+        expect.objectContaining({ folder: 'inbox', q }),
+      );
     }
-    expect(getThreadsFromDB).not.toHaveBeenCalled();
     expect(stub.rawListThreads).not.toHaveBeenCalled();
   });
 

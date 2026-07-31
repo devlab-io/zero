@@ -1,5 +1,6 @@
-import { eq, count, inArray, and, sql, desc, lt, like, or } from 'drizzle-orm';
 import type { DrizzleSqliteDODatabase } from 'drizzle-orm/durable-sqlite';
+import { eq, count, inArray, and, sql, desc, lt, or } from 'drizzle-orm';
+import { foldedLikeCondition } from '../../../lib/search-fold';
 import { threads, threadLabels, labels } from './schema';
 import type * as schema from './schema';
 
@@ -366,12 +367,7 @@ export async function findThreadsWithTextSearch(db: DB, searchText: string): Pro
   const results = await db
     .select(threadSelect)
     .from(threads)
-    .where(
-      or(
-        like(threads.latestSubject, `%${searchText}%`),
-        like(threads.latestSender, `%${searchText}%`),
-      ),
-    )
+    .where(buildTextSearchConditions(searchText))
     .orderBy(desc(threads.latestReceivedOn));
 
   return results;
@@ -399,11 +395,13 @@ function buildLabelConditions(db: DB, labelIds: string[], requireAllLabels: bool
   }
 }
 
-// Helper function to build text search conditions
+// Recherche sujet/expéditeur insensible aux accents, à la casse et aux espaces
+// multiples (contrat shortwave-parity item 2) : les deux côtés du LIKE sont
+// pliés par la même table (lib/search-fold), l'aiguille est littérale (ESCAPE).
 function buildTextSearchConditions(searchText: string) {
   return or(
-    like(threads.latestSubject, `%${searchText}%`),
-    like(threads.latestSender, `%${searchText}%`),
+    foldedLikeCondition(threads.latestSubject, searchText),
+    foldedLikeCondition(threads.latestSender, searchText),
   );
 }
 

@@ -11,16 +11,12 @@
  * actuel, vue précédente + bandeau). Un `Re: sujet` (deux-points suivi d'un
  * espace) n'est PAS un opérateur.
  *
- * Même règle pour `%` et `_` : la projection interroge SQLite en
- * `LIKE '%texte%'` SANS clause ESCAPE, donc tout `%`/`_` du texte est un joker
- * vivant — un `%` littéral matcherait presque tous les fils, soit un faux
- * résultat que le contrat interdit. Le paramètre est lié (pas d'injection SQL)
- * et SQLite ne connaît aucun autre métacaractère LIKE (pas de classes `[...]`,
- * ESCAPE inactif tant que non déclaré) : rejeter ces deux caractères suffit.
- * Pas de préview reste le fallback sûr ; Gmail sert la réponse exacte.
+ * `%` et `_` sont depuis le pliage accent-insensible traités LITTÉRALEMENT par
+ * la couche DB (motif échappé + `ESCAPE '\'`, voir lib/search-fold.ts) : ils ne
+ * sont plus des jokers vivants et n'ont plus à être rejetés ici — « 100% » est
+ * une préview substring valide.
  */
 const GMAIL_OPERATOR = /(^|\s)[a-zA-Z_]+:[^\s]/;
-const LIKE_WILDCARD = /[%_]/;
 
 /**
  * Texte de recherche utilisable par la préview projection, ou '' si la requête
@@ -33,6 +29,6 @@ export function previewSearchText(q: string): string {
     text.length >= 2 &&
     ((text.startsWith('"') && text.endsWith('"')) || (text.startsWith('«') && text.endsWith('»')));
   if (quoted) text = text.slice(1, -1).trim();
-  if (!text || GMAIL_OPERATOR.test(text) || LIKE_WILDCARD.test(text)) return '';
+  if (!text || GMAIL_OPERATOR.test(text)) return '';
   return text;
 }
