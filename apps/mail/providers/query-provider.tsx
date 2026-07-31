@@ -237,6 +237,7 @@ export function QueryProvider({ children }: PropsWithChildren) {
 
   return (
     <PersistQueryClientProvider
+      key={cacheOwner}
       client={queryClient}
       persistOptions={{
         persister,

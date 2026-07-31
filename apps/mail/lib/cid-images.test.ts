@@ -1,4 +1,4 @@
-import { resolveCidImages } from './cid-images';
+import { containsCidImage, resolveCidImages } from './cid-images';
 import { describe, expect, it } from 'vitest';
 
 const container = (html: string) => {
@@ -33,5 +33,13 @@ describe('resolveCidImages — résolution lazy des images inline', () => {
     const imgs = root.querySelectorAll('img');
     expect(imgs[0].getAttribute('src')).toBe('cid:missing@x');
     expect(imgs[1].getAttribute('src')).toBe('cid:empty@x');
+  });
+
+  it('tolère les variantes HTML et les Content-ID avec un pourcentage brut', () => {
+    expect(containsCidImage("<IMG SRC = 'CID:logo%broken'>")).toBe(true);
+    const root = container('<img src="CID:logo%broken">');
+    expect(
+      resolveCidImages(root, [{ contentId: 'logo%broken', mimeType: 'image/png', body: 'AAAA' }]),
+    ).toBe(1);
   });
 });

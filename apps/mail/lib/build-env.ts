@@ -13,6 +13,27 @@ export const ALLOWED_BUILD_ENVS = ['local', 'staging', 'production'] as const;
 
 export type BuildEnvName = (typeof ALLOWED_BUILD_ENVS)[number];
 
+export type BuildEnvConfig = {
+  name: BuildEnvName;
+  backendUrl: string;
+  appUrl: string;
+};
+
+const BUILD_ENV_URLS: Record<BuildEnvName, Omit<BuildEnvConfig, 'name'>> = {
+  local: {
+    backendUrl: 'http://localhost:8787',
+    appUrl: 'http://localhost:3000',
+  },
+  staging: {
+    backendUrl: 'https://zero-server-staging.devlab-tahiti.workers.dev',
+    appUrl: 'https://zero-staging.devlab-tahiti.workers.dev',
+  },
+  production: {
+    backendUrl: 'https://zero-server-production.devlab-tahiti.workers.dev',
+    appUrl: 'https://zero-production.devlab-tahiti.workers.dev',
+  },
+};
+
 export function assertBuildEnv(env: Record<string, string | undefined>): BuildEnvName {
   const cloudflareEnv = env.CLOUDFLARE_ENV;
   if (!cloudflareEnv) {
@@ -30,4 +51,35 @@ export function assertBuildEnv(env: Record<string, string | undefined>): BuildEn
     );
   }
   return cloudflareEnv as BuildEnvName;
+}
+
+export function getBuildEnvConfig(name: BuildEnvName): BuildEnvConfig {
+  const config = { name, ...BUILD_ENV_URLS[name] };
+  for (const [key, value] of Object.entries(config).filter(([key]) => key !== 'name')) {
+    const url = new URL(value);
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+      throw new Error(`${key} for CLOUDFLARE_ENV="${name}" must be an http(s) URL.`);
+    }
+  }
+  return config;
+}
+
+/**
+ * Dernier filet : inspecte le bundle client réellement produit. Une simple
+ * validation de CLOUDFLARE_ENV ne suffit pas si le plugin de build oublie
+ * d'injecter les vars Wrangler (l'incident prod du 31/07/2026).
+ */
+export function assertClientBundleEnv(sources: readonly string[], config: BuildEnvConfig): void {
+  const bundle = sources.join('\n');
+  const forbidden = ['undefined/api', 'undefined/login', 'undefined/mail'];
+  const leaked = forbidden.find((value) => bundle.includes(value));
+  if (leaked) {
+    throw new Error(`Client bundle contains forbidden runtime URL "${leaked}".`);
+  }
+  if (!bundle.includes(config.backendUrl)) {
+    throw new Error(`Client bundle is missing backend URL ${config.backendUrl}.`);
+  }
+  if (!bundle.includes(config.appUrl)) {
+    throw new Error(`Client bundle is missing app URL ${config.appUrl}.`);
+  }
 }

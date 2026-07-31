@@ -1,11 +1,11 @@
 import { emailContentQueryKey, resolveEmailContentTheme } from '@/lib/email-content-query';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
+import { containsCidImage, resolveCidImages } from '@/lib/cid-images';
 import { defaultUserSettings } from '@zero/server/schemas';
 import { useInlineImages } from '@/hooks/use-attachments';
 import { useTRPC } from '@/providers/query-provider';
 import { getBrowserTimezone } from '@/lib/timezones';
-import { resolveCidImages } from '@/lib/cid-images';
 import { useSettings } from '@/hooks/use-settings';
 import { m } from '@/paraglide/messages';
 import { useTheme } from 'next-themes';
@@ -113,10 +113,7 @@ export function MailContent({ id, html, senderEmail }: MailContentProps) {
   }, [processedData]);
 
   // Résolution lazy des images CID : uniquement si le corps rendu en contient.
-  const hasCidImages = useMemo(
-    () => Boolean(processedData?.html.includes('src="cid:')),
-    [processedData],
-  );
+  const hasCidImages = useMemo(() => containsCidImage(processedData?.html), [processedData]);
   const { data: inlineImages } = useInlineImages(id, hasCidImages);
 
   useEffect(() => {

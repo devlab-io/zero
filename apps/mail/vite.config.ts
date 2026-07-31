@@ -10,7 +10,12 @@ import { defineConfig } from 'vite';
 import path from 'node:path';
 import dedent from 'dedent';
 
-import { assertBuildEnv } from './lib/build-env';
+import {
+  assertBuildEnv,
+  assertClientBundleEnv,
+  getBuildEnvConfig,
+  type BuildEnvConfig,
+} from './lib/build-env';
 
 const require = createRequire(import.meta.url);
 // Client code only uses renderToString/renderToStaticMarkup (lib/email-utils.client.tsx,
@@ -33,9 +38,18 @@ export default defineConfig(({ command }) => {
   // Garde build env : `vite build` sans CLOUDFLARE_ENV valide produirait un
   // bundle au backend `undefined` (voir lib/build-env.ts). Le dev server n'est
   // pas concerné.
-  if (command === 'build') assertBuildEnv(process.env);
+  const buildEnv: BuildEnvConfig | null =
+    command === 'build' ? getBuildEnvConfig(assertBuildEnv(process.env)) : null;
 
   return {
+    // Do not rely on the Cloudflare plugin implicitly forwarding Wrangler vars
+    // into Vite. These values are compile-time constants in browser code.
+    define: buildEnv
+      ? {
+          'import.meta.env.VITE_PUBLIC_BACKEND_URL': JSON.stringify(buildEnv.backendUrl),
+          'import.meta.env.VITE_PUBLIC_APP_URL': JSON.stringify(buildEnv.appUrl),
+        }
+      : undefined,
     plugins: [
       oxlintPlugin(),
       reactRouter(),
@@ -84,6 +98,21 @@ export default defineConfig(({ command }) => {
                 Cache-Control: public, immutable, max-age=31536000
           `,
           });
+        },
+      },
+      {
+        name: 'assert-client-build-env',
+        applyToEnvironment: (env) => env.name === 'client',
+        generateBundle(_options, bundle) {
+          if (!buildEnv) return;
+          const sources = Object.values(bundle).map((entry) =>
+            entry.type === 'chunk'
+              ? entry.code
+              : typeof entry.source === 'string'
+                ? entry.source
+                : Buffer.from(entry.source).toString('utf8'),
+          );
+          assertClientBundleEnv(sources, buildEnv);
         },
       },
       paraglideVitePlugin({

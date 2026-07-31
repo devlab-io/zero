@@ -212,6 +212,7 @@ export const createDefaultWorkflows = (): WorkflowEngine => {
         enabled: true,
         errorHandling: 'fail',
         condition: async (context) => {
+          if (!isUserTriggered(context)) return false;
           const shouldGenerate = await shouldGenerateDraft(context.thread, context.foundConnection);
           logger.info('[WORKFLOW_ENGINE] Draft eligibility check', {
             threadId: context.threadId,
@@ -274,6 +275,7 @@ export const createDefaultWorkflows = (): WorkflowEngine => {
         name: 'Find Messages to Vectorize',
         description: 'Identifies messages that need vectorization',
         enabled: true,
+        condition: isUserTriggered,
         action: workflowFunctions.findMessagesToVectorize,
       },
       {
@@ -353,6 +355,7 @@ export const createDefaultWorkflows = (): WorkflowEngine => {
         name: 'Get User Labels',
         description: 'Retrieves existing labels from user account',
         enabled: true,
+        condition: isUserTriggered,
         action: workflowFunctions.getUserLabels,
       },
       {

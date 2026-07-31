@@ -15,9 +15,17 @@ export function resolveCidImages(
       .filter((image) => image.contentId && image.body)
       .map((image) => [image.contentId as string, image]),
   );
-  for (const el of root.querySelectorAll('img[src^="cid:"]')) {
+  for (const el of root.querySelectorAll('img')) {
     const img = el as HTMLImageElement;
-    const contentId = decodeURIComponent(img.getAttribute('src')?.slice(4) ?? '');
+    const src = img.getAttribute('src') ?? '';
+    if (!src.toLowerCase().startsWith('cid:')) continue;
+    const rawContentId = src.slice(4);
+    let contentId = rawContentId;
+    try {
+      contentId = decodeURIComponent(rawContentId);
+    } catch {
+      // A malformed Content-ID must never crash the whole message reader.
+    }
     const match = byContentId.get(contentId);
     if (!match) continue;
     img.src = `data:${match.mimeType};base64,${match.body}`;
@@ -25,4 +33,8 @@ export function resolveCidImages(
     resolved++;
   }
   return resolved;
+}
+
+export function containsCidImage(html: string | null | undefined): boolean {
+  return Boolean(html && /\bsrc\s*=\s*["']cid:/i.test(html));
 }

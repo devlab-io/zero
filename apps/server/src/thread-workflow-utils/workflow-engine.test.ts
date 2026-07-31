@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-// Contrat r2 (Shortwave parity, sans IA) : le résumé de thread ne part JAMAIS
-// sur le pipeline automatique d'arrivée de message — uniquement sur action
-// utilisateur explicite (context.trigger === 'user').
+// Contrat r2 (Shortwave parity, sans IA) : aucun workflow IA ne part sur le
+// pipeline automatique d'arrivée de message — uniquement sur action utilisateur
+// explicite (context.trigger === 'user').
 
 vi.mock('../lib/logger', () => ({
   logger: { info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn() },
@@ -65,21 +65,31 @@ const summarySpies = () =>
     workflowFunctions.upsertThreadSummary,
   ] as unknown as ReturnType<typeof vi.fn>[];
 
+const automaticAiSpies = () =>
+  [
+    workflowFunctions.analyzeEmailIntent,
+    workflowFunctions.generateAutomaticDraft,
+    workflowFunctions.findMessagesToVectorize,
+    workflowFunctions.vectorizeMessages,
+    workflowFunctions.generateThreadSummary,
+    workflowFunctions.generateLabelSuggestions,
+  ] as unknown as ReturnType<typeof vi.fn>[];
+
 beforeEach(() => {
   vi.clearAllMocks();
 });
 
-describe('thread-summary — jamais sans action utilisateur', () => {
-  it('pipeline automatique (trigger absent) : aucune étape résumé exécutée', async () => {
+describe('workflows IA — jamais sans action utilisateur', () => {
+  it('pipeline automatique (trigger absent) : aucune étape IA exécutée', async () => {
     const engine = createDefaultWorkflows();
     await engine.executeWorkflowChain(engine.getWorkflowNames(), makeContext());
-    for (const spy of summarySpies()) expect(spy).not.toHaveBeenCalled();
+    for (const spy of automaticAiSpies()) expect(spy).not.toHaveBeenCalled();
   });
 
-  it("trigger 'automatic' explicite : aucune étape résumé exécutée", async () => {
+  it("trigger 'automatic' explicite : aucune étape IA exécutée", async () => {
     const engine = createDefaultWorkflows();
     await engine.executeWorkflowChain(engine.getWorkflowNames(), makeContext('automatic'));
-    for (const spy of summarySpies()) expect(spy).not.toHaveBeenCalled();
+    for (const spy of automaticAiSpies()) expect(spy).not.toHaveBeenCalled();
   });
 
   it("trigger 'user' : le workflow résumé tourne entièrement", async () => {
