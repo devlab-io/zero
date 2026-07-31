@@ -41,7 +41,9 @@ function getSerializedSize(value: unknown) {
   }
 }
 
-function isDetailQuery(query: PersistableQuery) {
+/** Couture partagée : une requête « détail » (corps de mail rendu / fil complet).
+ * Utilisée par les budgets ci-dessous ET par la scission du persister (r10). */
+export function isDetailQuery(query: PersistableQuery) {
   return (
     query.queryKey[0] === 'email-content' || getTRPCProcedurePath(query.queryKey) === 'mail.get'
   );

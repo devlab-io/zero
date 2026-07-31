@@ -1,19 +1,26 @@
 import { describe, expect, it } from 'vitest';
 
 import { assertMailEnv, requiredMailEnvSchema } from './env-schema';
-import worker from './spa-fallback';
+import worker, { shellPathForNavigation } from './spa-fallback';
 
 // #44 (gate A8) — micro-harness for the SPA-fallback worker. A mocked ASSETS binding returns 404
 // for the requested (missing) route and a configurable status for the neutral shell, so we can
 // prove the worker's contract without a real deploy: a navigation gets the neutral shell only when
 // it is healthy; a broken shell (500) is forwarded, not masked as 200; and non-navigation / non-GET
 // requests keep their original 404.
-function makeEnv(shellStatus: number) {
+function makeEnv(shellStatus: number, mailShellStatus: number = 404) {
   return {
     ASSETS: {
       fetch: async (input: Request | URL | string) => {
         const url =
           typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+        // r10 : shell mail dédié (préchargé) — distinct du shell générique.
+        if (url.includes('__mail-spa-fallback.html')) {
+          return new Response(
+            mailShellStatus === 200 ? '<!doctype html><html>mail-shell</html>' : 'boom',
+            { status: mailShellStatus },
+          );
+        }
         if (url.includes('__spa-fallback.html')) {
           return new Response(shellStatus === 200 ? '<!doctype html><html>shell</html>' : 'boom', {
             status: shellStatus,
@@ -102,5 +109,49 @@ describe('assertMailEnv — boot guard for the ASSETS binding', () => {
 
   it('the error message points to the wrangler assets binding config', () => {
     expect(() => assertMailEnv({})).toThrow(/wrangler\.jsonc/);
+  });
+});
+
+// r10 : deux shells — le Worker choisit par pathname. /mail/* reçoit le shell
+// préchargé (graphe de route mail) ; /login, /settings/* et tout autre
+// deep-link gardent le shell générique (contre-revue : ne pas alourdir ces
+// routes de ~126 chunks mail).
+describe('spa-fallback worker — sélection de shell par pathname (r10)', () => {
+  const nav = (path: string) =>
+    new Request(`http://app.local${path}`, {
+      method: 'GET',
+      headers: { accept: 'text/html,application/xhtml+xml' },
+    });
+
+  it('shellPathForNavigation : /mail et /mail/* → shell mail ; le reste → shell générique', () => {
+    expect(shellPathForNavigation('/mail')).toBe('/__mail-spa-fallback.html');
+    expect(shellPathForNavigation('/mail/inbox')).toBe('/__mail-spa-fallback.html');
+    expect(shellPathForNavigation('/mailto-handler')).toBe('/__spa-fallback.html');
+    expect(shellPathForNavigation('/login')).toBe('/__spa-fallback.html');
+    expect(shellPathForNavigation('/settings/general')).toBe('/__spa-fallback.html');
+    expect(shellPathForNavigation('/queue')).toBe('/__spa-fallback.html');
+  });
+
+  it('navigation /mail/inbox avec shell mail SAIN → sert le shell mail préchargé', async () => {
+    const res = await worker.fetch(nav('/mail/inbox'), makeEnv(200, 200) as never);
+    expect(res.status).toBe(200);
+    expect(await res.text()).toContain('mail-shell');
+  });
+
+  it('navigation /login et /settings/* → toujours le shell GÉNÉRIQUE (jamais les preloads mail)', async () => {
+    for (const path of ['/login', '/settings/general']) {
+      const res = await worker.fetch(nav(path), makeEnv(200, 200) as never);
+      expect(res.status).toBe(200);
+      expect(await res.text()).toContain('shell');
+      expect(
+        await (await worker.fetch(nav(path), makeEnv(200, 200) as never)).text(),
+      ).not.toContain('mail-shell');
+    }
+  });
+
+  it('shell mail MANQUANT (déploiement intermédiaire) → repli sûr sur le shell générique', async () => {
+    const res = await worker.fetch(nav('/mail/inbox'), makeEnv(200, 404) as never);
+    expect(res.status).toBe(200);
+    expect(await res.text()).toContain('shell');
   });
 });

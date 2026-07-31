@@ -7,26 +7,20 @@ import {
   StaleConnectionResponseError,
 } from '@/lib/active-connection-store';
 import {
-  PersistQueryClientProvider,
-  type PersistedClient,
-  type Persister,
-} from '@tanstack/react-query-persist-client';
-import {
   QueryCache,
   QueryClient,
   QueryClientProvider,
   hashKey,
+  hydrate,
   type InfiniteData,
 } from '@tanstack/react-query';
-import {
-  QUERY_PERSIST_MAX_AGE_MS,
-  selectQueriesForPersistence,
-  shouldPersistQuery,
-} from '@/lib/query-persistence';
 import { useEffect, useMemo, useRef, useSyncExternalStore, type PropsWithChildren } from 'react';
+import { QUERY_PERSIST_MAX_AGE_MS, shouldPersistQuery } from '@/lib/query-persistence';
+import { PersistQueryClientProvider } from '@tanstack/react-query-persist-client';
 import { seedMailListPageSizeMigration } from '@/lib/mail-list-cache-migration';
 import { readCacheOwnerHint, resolveCacheOwner } from '@/lib/cache-owner-hint';
 import { readRetryDelay, shouldRetryRead } from '@/lib/query-retry';
+import { createSplitIDBPersister } from '@/lib/split-persister';
 import { createTRPCContext } from '@trpc/tanstack-react-query';
 import { createTRPCClient, httpBatchLink } from '@trpc/client';
 import { acquireQueryClient } from '@/lib/query-client-pool';
@@ -65,25 +59,9 @@ function purgeForeignQueryCaches(currentUserPrefix: string, isAuthenticated: boo
     .catch((error) => log.warn('Failed to purge stale query caches', error));
 }
 
-function createIDBPersister(idbValidKey: IDBValidKey = 'zero-query-cache') {
-  return {
-    persistClient: async (client: PersistedClient) => {
-      await set(idbValidKey, {
-        ...client,
-        clientState: {
-          ...client.clientState,
-          queries: selectQueriesForPersistence(client.clientState.queries),
-        },
-      });
-    },
-    restoreClient: async () => {
-      return await get<PersistedClient>(idbValidKey);
-    },
-    removeClient: async () => {
-      await del(idbValidKey);
-    },
-  } satisfies Persister;
-}
+// r10 : le persister est SCINDÉ (lib/split-persister.ts) — le restore bloquant
+// ne porte plus que les listes/état (petit), les corps de mails s'hydratent en
+// arrière-plan après le premier paint (voir onSuccess ci-dessous).
 
 export const makeQueryClient = (cacheOwner: string) =>
   new QueryClient({
@@ -215,8 +193,15 @@ export function QueryProvider({ children }: PropsWithChildren) {
   });
   const isConfirmedIdentity = Boolean(session?.user.id) && !isSessionPending;
 
-  const persister = useMemo(
-    () => createIDBPersister(`zero-query-cache-${cacheOwner}`),
+  // r10 : persister scindé — restore bloquant = listes/état seuls (petit),
+  // corps de mails hydratés en arrière-plan après le premier paint (onSuccess),
+  // avec validation buster/âge propre au blob détails (contre-revue P0).
+  const { persister, restoreDetails } = useMemo(
+    () =>
+      createSplitIDBPersister({ get, set, del }, `zero-query-cache-${cacheOwner}`, {
+        buster: CACHE_BURST_KEY,
+        maxAgeMs: QUERY_PERSIST_MAX_AGE_MS,
+      }),
     [cacheOwner],
   );
   const queryClient = useMemo(() => getQueryClient(cacheOwner), [cacheOwner]);
@@ -325,6 +310,18 @@ export function QueryProvider({ children }: PropsWithChildren) {
           type: 'active',
           refetchType: 'active',
         });
+        // r10 : hydratation DIFFÉRÉE des corps de mails, après le premier
+        // paint — validée buster/âge par restoreDetails (blob invalide :
+        // supprimé, jamais hydraté). `hydrate` respecte dataUpdatedAt : une
+        // réponse réseau plus fraîche déjà en cache n'est jamais écrasée
+        // (prouvé par lib/split-persister.test.ts sur un vrai QueryClient).
+        void restoreDetails()
+          .then((queries) => {
+            if (!queries) return;
+            hydrate(queryClient, { queries } as Parameters<typeof hydrate>[1]);
+            markStage('boot:details-restored');
+          })
+          .catch(() => {});
       }}
     >
       <TRPCProvider trpcClient={trpcClient} queryClient={queryClient}>

@@ -46,6 +46,19 @@ function isHtmlNavigation(request: Request): boolean {
   return (request.headers.get('Accept') ?? '').includes('text/html');
 }
 
+/**
+ * r10 : choix du shell par pathname. Les reloads /mail/* reçoivent le shell
+ * enrichi des modulepreloads du graphe de route mail (~345 KiB gz qui,
+ * sinon, ne se découvrent qu'en cascade APRÈS hydratation — cold boot CUA).
+ * Tout le reste (/login, /settings/*, deep-links publics) garde le shell
+ * générique : leur poids ne doit pas porter les chunks mail (contre-revue).
+ */
+export function shellPathForNavigation(pathname: string): string {
+  return pathname === '/mail' || pathname.startsWith('/mail/')
+    ? '/__mail-spa-fallback.html'
+    : '/__spa-fallback.html';
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     // Fail loud and legibly at the first request if the ASSETS binding is missing/misconfigured,
@@ -59,7 +72,13 @@ export default {
     if (!isHtmlNavigation(request)) return response;
 
     const url = new URL(request.url);
-    const shell = await env.ASSETS.fetch(new URL('/__spa-fallback.html', url.origin));
+    let shell = await env.ASSETS.fetch(new URL(shellPathForNavigation(url.pathname), url.origin));
+    // Sécurité de déploiement : si le shell mail dédié manque (build
+    // intermédiaire), retomber sur le shell générique plutôt que d'échouer la
+    // navigation — même HTML, simplement sans les preloads.
+    if (!shell.ok && shellPathForNavigation(url.pathname) !== '/__spa-fallback.html') {
+      shell = await env.ASSETS.fetch(new URL('/__spa-fallback.html', url.origin));
+    }
     // If the neutral shell asset is itself missing or errored, propagate ITS real error
     // response (surface the true failure — never mask it as a 404 or as a broken 200).
     if (!shell.ok) return shell;

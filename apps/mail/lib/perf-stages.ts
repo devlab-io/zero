@@ -20,6 +20,9 @@ const MEASURE_FROM: Record<string, string> = {
   // restore du cache owner-scopé. La CUA lit les measures directement.
   'boot:session-confirmed': 'boot:session-prime',
   'boot:cache-restored': 'boot:session-confirmed',
+  // r10 : le persister est scindé — les corps de mails s'hydratent APRÈS le
+  // premier paint ; cette mesure isole ce second temps du restore.
+  'boot:details-restored': 'boot:cache-restored',
   // r7 : « ouverture perçue » = le shell projection (sujet/expéditeur +
   // squelette) est peint, avant le corps. C'est la mesure honnête de la cible
   // <300 ms sur une ouverture profonde à froid : le corps complet reste borné
@@ -43,7 +46,8 @@ export function markStage(
     | 'send:dispatched'
     | 'send:confirmed'
     | 'boot:session-confirmed'
-    | 'boot:cache-restored',
+    | 'boot:cache-restored'
+    | 'boot:details-restored',
 ): void {
   if (typeof performance === 'undefined' || typeof performance.mark !== 'function') return;
   try {
