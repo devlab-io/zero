@@ -33,7 +33,6 @@ import {
   handleDownloadAllAttachments,
   openAttachment,
 } from './mail-display.attachments';
-import { MoreAboutPerson, MoreAboutQuery } from './mail-display.research';
 import { MailDisplayLabels } from './mail-display.labels';
 import { ActionButton } from './mail-display.parts';
 import { printMail } from './mail-display.print';
@@ -111,8 +110,6 @@ const MailDisplay = ({ emailData, index, totalEmails, demo, threadAttachments }:
     emailData.tags ? emailData.tags.map((l) => l.id) : [],
   );
   const { data: activeConnection } = useActiveConnection();
-  const [researchSender, setResearchSender] = useState<Sender | null>(null);
-  const [searchQuery, setSearchQuery] = useState<string | null>(null);
   //   const trpc = useTRPC();
 
   const isLastEmail = useMemo(
@@ -289,20 +286,7 @@ const MailDisplay = ({ emailData, index, totalEmails, demo, threadAttachments }:
       }}
     >
       <>
-        {searchQuery && (
-          <MoreAboutQuery
-            query={searchQuery}
-            open={!!searchQuery}
-            onOpenChange={(open) => (open ? void 0 : setSearchQuery(null))}
-          />
-        )}
-        {researchSender && (
-          <MoreAboutPerson
-            open={!!researchSender}
-            onOpenChange={(open) => (open ? void 0 : setResearchSender(null))}
-            person={researchSender}
-          />
-        )}
+        {/* Contrat r8 : les panneaux « research » IA du lecteur sont retirés. */}
         <div className="relative h-full overflow-y-auto">
           <div className={cn('px-4', index === 0 && 'border-b py-4')}>
             {index === 0 && (
@@ -384,18 +368,7 @@ const MailDisplay = ({ emailData, index, totalEmails, demo, threadAttachments }:
                       <div className="flex w-full items-center justify-between">
                         <div className="flex items-center gap-1">
                           <div className="flex items-center gap-2">
-                            <span
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                e.preventDefault();
-                                setResearchSender({
-                                  name: emailData?.sender?.name || '',
-                                  email: emailData?.sender?.email || '',
-                                  //   extra: emailData?.sender?.extra || '',
-                                });
-                              }}
-                              className="hover:bg-muted font-semibold"
-                            >
+                            <span className="font-semibold">
                               {cleanNameDisplay(emailData?.sender?.name)}
                             </span>
                           </div>

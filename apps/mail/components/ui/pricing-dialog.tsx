@@ -1,15 +1,10 @@
-import {
-  Dialog,
-  DialogContent,
-  DialogTitle,
-  DialogTrigger,
-} from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { PurpleThickCheck } from '@/components/icons/icons';
 import { useBilling } from '@/hooks/use-billing';
 import { PricingSwitch } from './pricing-switch';
 
-import { useState, } from 'react';
 import { useQueryState } from 'nuqs';
+import { useState } from 'react';
 
 import { Badge } from './badge';
 import { toast } from 'sonner';
@@ -127,8 +122,9 @@ export function PricingDialog() {
                 <div className="flex h-5 w-5 items-start justify-start gap-3 rounded-[125px] bg-[#1F1F1F] p-[5px] dark:bg-white/10">
                   <PurpleThickCheck className="relative left-px top-px" />
                 </div>
+                {/* Contrat r8b : avantages réels sans IA — ZERO n'expose aucune IA. */}
                 <div className="justify-center text-sm font-normal leading-normal text-white lg:text-base">
-                  AI-powered chat with your inbox
+                  Instant search across your inbox
                 </div>
               </div>
               <div className="inline-flex items-center justify-start gap-2.5">
@@ -136,7 +132,7 @@ export function PricingDialog() {
                   <PurpleThickCheck className="relative left-px top-px" />
                 </div>
                 <div className="justify-center text-sm font-normal leading-normal text-white lg:text-base">
-                  Auto labeling
+                  Custom labels & filters
                 </div>
               </div>
               <div className="inline-flex items-center justify-start gap-2.5">
@@ -144,7 +140,7 @@ export function PricingDialog() {
                   <PurpleThickCheck className="relative left-px top-px" />
                 </div>
                 <div className="justify-center text-sm font-normal leading-normal text-white lg:text-base">
-                  One-click AI email writing & replies
+                  Undo send & scheduled sending
                 </div>
               </div>
               <div className="inline-flex items-center justify-start gap-2.5">
@@ -152,7 +148,7 @@ export function PricingDialog() {
                   <PurpleThickCheck className="relative left-px top-px" />
                 </div>
                 <div className="justify-center text-sm font-normal leading-normal text-white lg:text-base">
-                  Instant thread AI-generated summaries
+                  Keyboard-first triage & snooze
                 </div>
               </div>
               <div className="inline-flex items-center justify-start gap-2.5">

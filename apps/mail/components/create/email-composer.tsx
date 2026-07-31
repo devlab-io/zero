@@ -1,21 +1,19 @@
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createDraftSaveLifecycle } from '@/lib/draft-save-lifecycle';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { resolveComposerEscape } from '@/lib/composer-escape';
 import { useEmailAliases } from '@/hooks/use-email-aliases';
 import { ScheduleSendPicker } from './schedule-send-picker';
-import { Command, Loader, Plus, Type } from 'lucide-react';
 import useComposeEditor from '@/hooks/use-compose-editor';
-import { CurvedArrow, Sparkles } from '../icons/icons';
+import { Command, Plus, Type } from 'lucide-react';
 import { zodResolver } from '@/lib/zod-resolver';
-import { AnimatePresence } from 'motion/react';
+import { CurvedArrow } from '../icons/icons';
 import { log } from '@/lib/log';
 
 import { useTRPC } from '@/providers/query-provider';
 import { useMutation } from '@tanstack/react-query';
 import { useSettings } from '@/hooks/use-settings';
 
-import { useThread } from '@/hooks/use-threads';
 import { serializeFiles } from '@/lib/schemas';
 import { Input } from '@/components/ui/input';
 import { EditorContent } from '@tiptap/react';
@@ -29,22 +27,16 @@ import { toast } from 'sonner';
 import { z } from 'zod';
 
 import {
-  buildThreadContent,
-  schema,
-  type EmailComposerProps,
-  type ThreadContent,
-} from './email-composer.types';
-import {
   attachmentKeywords,
   processComposerAttachments,
   replaceEmojiShortcodes,
 } from './email-composer.helpers';
 import { useComposerDraftPersistence } from '@/hooks/use-composer-draft-persistence';
+import { schema, type EmailComposerProps } from './email-composer.types';
 // Issue #32 — send-and-archive (mod+shift+Enter): the editor has no Mod-Shift-Enter
 // keymap, so it is bound here with useHotkeys and archives the open thread after send.
 import { useOptimisticActions } from '@/hooks/use-optimistic-actions';
 import { ComposerAttachments } from './email-composer.attachments';
-import { ContentPreview } from './email-composer.content-preview';
 import { computeArchiveAfterSend } from './send-and-archive';
 import type { ImageQuality } from '@/lib/image-compression';
 import { ComposerDialogs } from './email-composer.dialogs';
@@ -85,15 +77,11 @@ export function EmailComposer({
   const saveLifecycle = useRef(createDraftSaveLifecycle()).current;
   const [threadId] = useQueryState('threadId');
   const [isComposeOpen, setIsComposeOpen] = useQueryState('isComposeOpen');
-  const { data: emailData } = useThread(threadId ?? null);
   const params = useParams<{ folder: string }>();
   const { optimisticMoveThreadsTo } = useOptimisticActions();
   // Set by the send-and-archive handler; consumed once in proceedWithSend on success.
   const archiveAfterSendRef = useRef(false);
   const [draftId, setDraftId] = useQueryState('draftId');
-  const [aiGeneratedMessage, setAiGeneratedMessage] = useState<string | null>(null);
-  const [aiIsLoading, setAiIsLoading] = useState(false);
-  const [isGeneratingSubject, setIsGeneratingSubject] = useState(false);
   const [showLeaveConfirmation, setShowLeaveConfirmation] = useState(false);
   const [scheduleAt, setScheduleAt] = useState<string>();
   const [isScheduleValid, setIsScheduleValid] = useState<boolean>(true);
@@ -126,13 +114,11 @@ export function EmailComposer({
     if (filesToProcess.length > 0) setHasUnsavedChanges(true);
   };
 
+  // Contrat produit r8 : AUCUNE surface IA dans ZERO — les mutations de
+  // génération (corps, sujet) et leurs boutons ont été retirés.
   const trpc = useTRPC();
-  const { mutateAsync: aiCompose } = useMutation(trpc.ai.compose.mutationOptions());
   const { mutateAsync: createDraft } = useMutation(trpc.drafts.create.mutationOptions());
   const { mutateAsync: deleteDraftById } = useMutation(trpc.drafts.delete.mutationOptions());
-  const { mutateAsync: generateEmailSubject } = useMutation(
-    trpc.ai.generateEmailSubject.mutationOptions(),
-  );
 
   const form = useForm<z.infer<typeof schema>>({
     resolver: zodResolver(schema),
@@ -284,7 +270,6 @@ export function EmailComposer({
       }
 
       setIsLoading(true);
-      setAiGeneratedMessage(null);
       // Save draft before sending, we want to send drafts instead of sending new emails
       if (hasUnsavedChanges) await saveDraft();
 
@@ -347,33 +332,6 @@ export function EmailComposer({
     [handleSend],
   );
 
-  const threadContent: ThreadContent = useMemo(() => buildThreadContent(emailData), [emailData]);
-
-  const handleAiGenerate = async () => {
-    try {
-      setIsLoading(true);
-      setAiIsLoading(true);
-      const values = getValues();
-
-      const result = await aiCompose({
-        prompt: editor.getText(),
-        emailSubject: values.subject,
-        to: values.to,
-        cc: values.cc,
-        threadMessages: threadContent,
-      });
-
-      setAiGeneratedMessage(result.newBody);
-      // toast.success('Email generated successfully');
-    } catch (error) {
-      log.error('Error generating AI email:', error);
-      toast.error('Failed to generate email');
-    } finally {
-      setIsLoading(false);
-      setAiIsLoading(false);
-    }
-  };
-
   const saveDraft = async () => {
     const values = getValues();
 
@@ -384,7 +342,6 @@ export function EmailComposer({
     if (messageText.trim() === initialMessage.trim()) return;
     if (editor.getHTML() === initialMessage.trim()) return;
     if (!values.to.length || !values.subject.length || !messageText.length) return;
-    if (aiGeneratedMessage || aiIsLoading || isGeneratingSubject) return;
 
     try {
       setIsSavingDraft(true);
@@ -423,27 +380,6 @@ export function EmailComposer({
     } finally {
       setIsSavingDraft(false);
       setHasUnsavedChanges(false);
-    }
-  };
-
-  const handleGenerateSubject = async () => {
-    try {
-      setIsGeneratingSubject(true);
-      const messageText = editor.getText().trim();
-
-      if (!messageText) {
-        toast.error('Please enter some message content first');
-        return;
-      }
-
-      const { subject } = await generateEmailSubject({ message: messageText });
-      setValue('subject', subject);
-      setHasUnsavedChanges(true);
-    } catch (error) {
-      log.error('Error generating subject:', error);
-      toast.error('Failed to generate subject');
-    } finally {
-      setIsGeneratingSubject(false);
     }
   };
 
@@ -524,18 +460,6 @@ export function EmailComposer({
     };
   }, [handleAttachment]);
 
-  // useHotkeys('meta+y', async (e) => {
-  //   if (!editor.getText().trim().length && !subjectInput.trim().length) {
-  //     toast.error('Please enter a subject or a message');
-  //     return;
-  //   }
-  //   if (!subjectInput.trim()) {
-  //     await handleGenerateSubject();
-  //   }
-  //   setAiGeneratedMessage(null);
-  //   await handleAiGenerate();
-  // });
-
   // keep fromEmail in sync when settings or aliases load afterwards
   useEffect(() => {
     const preferred =
@@ -586,9 +510,6 @@ export function EmailComposer({
             setValue('subject', next);
             setHasUnsavedChanges(true);
           }}
-          onGenerateSubject={handleGenerateSubject}
-          isGeneratingSubject={isGeneratingSubject}
-          messageLength={messageLength}
           aliases={aliases}
           fromEmail={fromEmail || ''}
           onFromChange={(value) => {
@@ -603,11 +524,7 @@ export function EmailComposer({
             onClick={() => {
               editor.commands.focus();
             }}
-            className={cn(
-              `min-h-[200px] w-full`,
-              editorClassName,
-              aiGeneratedMessage !== null ? 'blur-sm' : '',
-            )}
+            className={cn(`min-h-[200px] w-full`, editorClassName)}
           >
             <EditorContent editor={editor} className="h-full w-full max-w-full overflow-x-auto" />
           </div>
@@ -695,58 +612,6 @@ export function EmailComposer({
                 <TooltipContent>Formatting options</TooltipContent>
               </Tooltip>
             </TooltipProvider>
-          </div>
-        </div>
-        <div className="flex items-start justify-start gap-2">
-          <div className="relative">
-            <AnimatePresence>
-              {aiGeneratedMessage !== null ? (
-                <ContentPreview
-                  content={aiGeneratedMessage}
-                  onAccept={() => {
-                    editor.commands.setContent({
-                      type: 'doc',
-                      content: aiGeneratedMessage.split(/\r?\n/).map((line) => {
-                        return {
-                          type: 'paragraph',
-                          content: line.trim().length === 0 ? [] : [{ type: 'text', text: line }],
-                        };
-                      }),
-                    });
-                    setAiGeneratedMessage(null);
-                  }}
-                  onReject={() => {
-                    setAiGeneratedMessage(null);
-                  }}
-                />
-              ) : null}
-            </AnimatePresence>
-            <Button
-              size={'xs'}
-              variant={'ghost'}
-              className="cursor-pointer border border-[#8B5CF6]"
-              onClick={async () => {
-                if (!subjectInput.trim()) {
-                  await handleGenerateSubject();
-                }
-                setAiGeneratedMessage(null);
-                await handleAiGenerate();
-              }}
-              disabled={isLoading || aiIsLoading || messageLength < 1}
-            >
-              <div className="flex items-center justify-center gap-2.5 pl-0.5">
-                <div className="flex h-5 items-center justify-center gap-1 rounded-sm">
-                  {aiIsLoading ? (
-                    <Loader className="h-3.5 w-3.5 animate-spin fill-black dark:fill-white" />
-                  ) : (
-                    <Sparkles className="h-3.5 w-3.5 fill-black dark:fill-white" />
-                  )}
-                </div>
-                <div className="hidden text-center text-sm leading-none text-black md:block dark:text-white">
-                  Generate
-                </div>
-              </div>
-            </Button>
           </div>
         </div>
       </div>

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { useForm } from 'react-hook-form';
+import { act } from 'react';
 
 // CUA 2026-07-30 (obs 5, faux positif) : le composer neuf ouvert via `c` a été rapporté
 // « pré-rempli » avec "Re: Design review feedback". C'était le PLACEHOLDER (copy marketing
@@ -18,8 +18,8 @@ vi.mock('@/components/ui/recipient-autosuggest', () => ({
   RecipientAutosuggest: () => <div data-testid="autosuggest" />,
 }));
 
-import { ComposerHeader } from './email-composer.fields';
 import type { ComposerFormValues } from './email-composer.types';
+import { ComposerHeader } from './email-composer.fields';
 
 function FreshComposerHeader() {
   // Mêmes defaults qu'un composer neuf dans email-composer.tsx : ni brouillon restauré,
@@ -40,9 +40,6 @@ function FreshComposerHeader() {
       activeReplyId={null}
       subjectInput={form.watch('subject')}
       onSubjectInputChange={() => {}}
-      onGenerateSubject={() => {}}
-      isGeneratingSubject={false}
-      messageLength={0}
       aliases={undefined}
       fromEmail=""
       onFromChange={() => {}}

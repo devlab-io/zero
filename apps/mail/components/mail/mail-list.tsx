@@ -10,10 +10,10 @@ import {
   shouldMaskPendingMailFolder,
 } from '@/store/folder-navigation';
 import { useMailSelection, type MailSelectionModifiers } from '@/hooks/use-mail-selection';
+import { mailListReserveRows, shouldLoadNextMailPage } from '@/lib/mail-pagination';
 import { focusedIndexAtom, useMailNavigation } from '@/hooks/use-mail-navigation';
 import { useOptimisticActions } from '@/hooks/use-optimistic-actions';
 import { memo, useCallback, useEffect, useMemo, useRef } from 'react';
-import { shouldLoadNextMailPage } from '@/lib/mail-pagination';
 import { useMailListData } from '@/hooks/use-mail-list-data';
 import { selectMailListState } from '@/lib/mail-list-state';
 import { useSearchValue } from '@/hooks/use-search-value';
@@ -289,15 +289,25 @@ export const MailList = memo(
       const list = vListRef.current;
       if (!list) return;
       const remainingItems = Math.max(0, filteredItems.length - 1 - list.findEndIndex());
-      if (shouldLoadNextMailPage({ remainingItems, isLoading, isFetchingNextPage, hasNextPage })) {
+      if (
+        shouldLoadNextMailPage({
+          remainingItems,
+          isLoading,
+          isFetchingNextPage,
+          hasNextPage,
+          reserveRows: mailListReserveRows(folder, isFiltering),
+        })
+      ) {
         void loadMoreRef.current();
         return;
       }
       scheduleVisibleThreadPrefetch();
     }, [
       filteredItems.length,
+      folder,
       hasNextPage,
       isFetchingNextPage,
+      isFiltering,
       isLoading,
       isRestoring,
       scheduleVisibleThreadPrefetch,
@@ -466,6 +476,7 @@ export const MailList = memo(
                       isLoading,
                       isFetchingNextPage,
                       hasNextPage,
+                      reserveRows: mailListReserveRows(folder, isFiltering),
                     });
                     if (shouldLoadNextPage) {
                       visiblePrefetchGenerationRef.current += 1;

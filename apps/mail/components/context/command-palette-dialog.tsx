@@ -8,18 +8,15 @@ import {
 } from './command-registry';
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { getRecentSearches, saveRecentSearch } from './command-palette-storage';
-import { getMainSearchTerm, parseNaturalLanguageSearch } from '@/lib/utils';
 import { DialogDescription, DialogTitle } from '@/components/ui/dialog';
 import { type CommandPaletteViewProps } from './command-palette-views';
 import { Clock, Loader2, Mail, Paperclip, Star } from 'lucide-react';
-import { isSimpleLiteralSearch } from '@/lib/search-intent';
 import { useSearchValue } from '@/hooks/use-search-value';
 import { CommandDialog } from '@/components/ui/command';
 import { useLocation, useNavigate } from 'react-router';
 import { navigationConfig } from '@/config/navigation';
-import { useTRPC } from '@/providers/query-provider';
-import { useMutation } from '@tanstack/react-query';
 import { useThreads } from '@/hooks/use-threads';
+import { getMainSearchTerm } from '@/lib/utils';
 import { useLabels } from '@/hooks/use-labels';
 import { markStage } from '@/lib/perf-stages';
 import { format, subDays } from 'date-fns';
@@ -84,10 +81,6 @@ export function CommandPaletteDialog({
   const { pathname } = useLocation();
 
   const { userLabels = [] } = useLabels();
-  const trpc = useTRPC();
-  const { mutateAsync: generateSearchQuery } = useMutation(
-    trpc.ai.generateSearchQuery.mutationOptions(),
-  );
 
   useEffect(() => {
     setRecentSearches(getRecentSearches());
@@ -147,7 +140,9 @@ export function CommandPaletteDialog({
   );
 
   const executeSearch = useCallback(
-    (query: string, isNaturalLanguage = false) => {
+    // Contrat produit r8 : l'interprétation « langage naturel » (locale ou IA)
+    // est retirée — la requête part littérale/opérateurs, telle que tapée.
+    (query: string, _isNaturalLanguage = false) => {
       setOpen(null);
 
       if (query && query.trim()) {
@@ -156,11 +151,6 @@ export function CommandPaletteDialog({
       }
 
       let finalQuery = query;
-
-      if (isNaturalLanguage) {
-        const semanticQuery = parseNaturalLanguageSearch(query);
-        finalQuery = semanticQuery || query;
-      }
 
       const isFilterSyntax = /^(from:|to:|subject:|has:|is:|after:|before:|label:)/.test(
         query.trim(),
@@ -185,7 +175,7 @@ export function CommandPaletteDialog({
         value: finalQuery,
         highlight: getMainSearchTerm(finalQuery),
         folder: searchValue.folder,
-        isAISearching: isNaturalLanguage,
+        isAISearching: false,
       });
 
       log.warn('Search applied', {
@@ -259,55 +249,18 @@ export function CommandPaletteDialog({
   );
 
   const handleSearch = useCallback(
-    async (query: string, useNaturalLanguage = true) => {
+    // Contrat produit r8 : AUCUNE IA dans ZERO. La réécriture de requête par
+    // le serveur et l'interprétation « langage naturel » sont retirées — toute
+    // requête part telle quelle en recherche littérale ou à opérateurs
+    // (préview projection + Gmail authoritatif). Le second paramètre
+    // historique est ignoré (les vues appellent encore avec `true`).
+    async (query: string, _useNaturalLanguage = true) => {
       if (isProcessing) return;
 
-      // CUA 2026-07-30 : coût amont mesuré — ce chemin appelait TOUJOURS
-      // ai.generateSearchQuery (aller-retour OpenAI) avant setSearchValue, même
-      // pour une phrase littérale comme « Banque de Tahiti ». Bypass
-      // déterministe : une requête littérale simple part immédiatement en
-      // recherche exacte (préview projection + Gmail authoritatif) ; l'IA reste
-      // en place pour la vraie intention naturelle, les dates et les opérateurs.
-      const effectiveNaturalLanguage = useNaturalLanguage && !isSimpleLiteralSearch(query);
       setIsProcessing(true);
 
       try {
-        let finalQuery = query;
-        let literalFallback = false;
-
-        if (effectiveNaturalLanguage) {
-          // L'IA n'est jamais un point de défaillance de la recherche : si la
-          // réécriture échoue (réseau, OpenAI), la requête part telle quelle en
-          // recherche littérale au lieu d'un toast d'erreur sans résultat
-          // (CUA 2026-07-31 : « Anapa » → « Failed to process search »).
-          try {
-            const result = await generateSearchQuery({ query });
-            finalQuery = result.query;
-
-            const searchFilter: ActiveFilter = {
-              id: `ai-search-${Date.now()}`,
-              type: 'search',
-              value: finalQuery,
-              display: `AI Search: "${query}"`,
-            };
-            addFilter(searchFilter);
-
-            setOpen(null);
-
-            markStage('search:applied');
-            return setSearchValue({
-              value: finalQuery,
-              highlight: getMainSearchTerm(query),
-              folder: searchValue.folder,
-              isAISearching: useNaturalLanguage,
-              isLoading: true,
-            });
-          } catch (error) {
-            log.error('AI search rewrite failed, falling back to literal search:', error);
-            finalQuery = query;
-            literalFallback = true;
-          }
-        }
+        const finalQuery = query;
 
         const isFilterSyntax = /^(from:|to:|subject:|has:|is:|after:|before:|label:)/.test(
           query.trim(),
@@ -323,9 +276,7 @@ export function CommandPaletteDialog({
         }
 
         const filterQuery = activeFilters.map((f) => f.value).join(' ');
-        if (filterQuery) {
-          finalQuery = `${finalQuery} ${filterQuery}`.trim();
-        }
+        const composedQuery = filterQuery ? `${finalQuery} ${filterQuery}`.trim() : finalQuery;
 
         if (query && query.trim()) {
           saveRecentSearch(query);
@@ -334,15 +285,15 @@ export function CommandPaletteDialog({
 
         markStage('search:applied');
         setSearchValue({
-          value: finalQuery,
+          value: composedQuery,
           highlight: getMainSearchTerm(query),
           folder: searchValue.folder,
-          isAISearching: effectiveNaturalLanguage && !literalFallback,
+          isAISearching: false,
           isLoading: true,
         });
 
         log.warn('Search applied', {
-          description: finalQuery,
+          description: composedQuery,
         });
 
         setOpen(null);
@@ -353,15 +304,7 @@ export function CommandPaletteDialog({
         setIsProcessing(false);
       }
     },
-    [
-      activeFilters,
-      searchValue.folder,
-      isProcessing,
-      addFilter,
-      generateSearchQuery,
-      setOpen,
-      setSearchValue,
-    ],
+    [activeFilters, searchValue.folder, isProcessing, addFilter, setOpen, setSearchValue],
   );
 
   const quickSearchResults = useMemo(() => {

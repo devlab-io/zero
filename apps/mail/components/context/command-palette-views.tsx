@@ -1,7 +1,14 @@
-import { log } from '@/lib/log';
+import {
+  IN_PALETTE_VIEW_COMMAND_TITLES,
+  PALETTE_TRIGGER_KEYS,
+  type ActiveFilter,
+  type CommandGroupData,
+  type CommandView,
+  type PaletteLabel,
+  type QuickSearchThread,
+} from './command-registry';
 import {
   ArrowLeft,
-  ArrowRight,
   Clock,
   FileText,
   Hash,
@@ -18,23 +25,15 @@ import {
   CommandItem,
   CommandList,
 } from '@/components/ui/command';
-import type { Dispatch, SetStateAction } from 'react';
-import { Fragment } from 'react';
-import type { NavigateFunction } from 'react-router';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
+import type { Dispatch, SetStateAction } from 'react';
+import type { NavigateFunction } from 'react-router';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '../ui/button';
+import { Fragment } from 'react';
+import { log } from '@/lib/log';
 import { toast } from 'sonner';
-import {
-  IN_PALETTE_VIEW_COMMAND_TITLES,
-  PALETTE_TRIGGER_KEYS,
-  type ActiveFilter,
-  type CommandGroupData,
-  type CommandView,
-  type PaletteLabel,
-  type QuickSearchThread,
-} from './command-registry';
 
 /**
  * Presentational views for the command palette. State and behaviour are owned by
@@ -346,29 +345,8 @@ export function SearchView({
           </CommandGroup>
         )}
 
-        {!searchQuery && (
-          <CommandGroup heading="Try Natural Language">
-            {[
-              'emails from john',
-              'emails from last week',
-              'unread emails with attachments',
-              'emails about meeting',
-              'emails from december 2023',
-            ].map((example) => (
-              <CommandItem
-                key={example}
-                onSelect={() => {
-                  setSearchQuery(example);
-                  handleSearch(example, true);
-                }}
-                disabled={isProcessing}
-              >
-                <ArrowRight className="h-4 w-4 opacity-60" />
-                <span className="text-muted-foreground ml-2 italic">{example}</span>
-              </CommandItem>
-            ))}
-          </CommandGroup>
-        )}
+        {/* Contrat r8 : la section d'exemples « langage naturel » est retirée —
+            la recherche est littérale et à opérateurs uniquement. */}
       </CommandList>
     </>
   );
@@ -536,22 +514,6 @@ export function HelpView({ setCurrentView }: CommandPaletteViewProps) {
               <code className="bg-muted block rounded px-2 py-1">
                 from:boss@company.com is:unread has:attachment
               </code>
-            </div>
-          </div>
-
-          <Separator />
-
-          <div>
-            <h4 className="mb-2 font-medium">Natural Language</h4>
-            <div className="space-y-2 text-sm">
-              <p className="text-muted-foreground">
-                You can also use natural language queries which will be converted to filters:
-              </p>
-              <div className="space-y-1">
-                <p className="italic">"emails from john about the project"</p>
-                <p className="italic">"unread messages with attachments from last week"</p>
-                <p className="italic">"starred emails from my boss"</p>
-              </div>
             </div>
           </div>
 

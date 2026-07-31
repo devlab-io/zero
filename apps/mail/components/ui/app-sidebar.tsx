@@ -13,7 +13,6 @@ import { preloadThreadReader } from '../mail/mail-lazy-surfaces';
 import React, { useEffect, useMemo, useState } from 'react';
 import { useTRPC } from '@/providers/query-provider';
 import { useSidebar } from '@/components/ui/sidebar';
-import { useAIFullScreen } from './use-ai-sidebar';
 import { PencilCompose, X } from '../icons/icons';
 import { useQuery } from '@tanstack/react-query';
 import { useBilling } from '@/hooks/use-billing';
@@ -48,7 +47,6 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
     }
     return true;
   });
-  const { isFullScreen } = useAIFullScreen();
   const { data: stats } = useStats();
   // CUA 2026-07-30: warm the compose waterfall once the boot path is idle, so the `c`
   // hotkey (no hover intent) opens without the Suspense spinner. Idle-time prefetch only.
@@ -143,25 +141,26 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   //     }
   //   };
 
+  // r8b : le vestige plein-écran IA (use-ai-sidebar) est retiré — la sidebar
+  // n'a plus d'état IA qui puisse la masquer.
   return (
     <div>
-      {!isFullScreen && (
-        <Sidebar
-          collapsible="icon"
-          {...props}
-          className={`bg-sidebar dark:bg-sidebar flex h-screen select-none flex-col items-center ${state === 'collapsed' ? '' : ''} pb-2`}
+      <Sidebar
+        collapsible="icon"
+        {...props}
+        className={`bg-sidebar dark:bg-sidebar flex h-screen select-none flex-col items-center ${state === 'collapsed' ? '' : ''} pb-2`}
+      >
+        <SidebarHeader
+          className={`relative top-2.5 flex flex-col gap-2 ${state === 'collapsed' ? 'px-2' : 'md:px-4'}`}
         >
-          <SidebarHeader
-            className={`relative top-2.5 flex flex-col gap-2 ${state === 'collapsed' ? 'px-2' : 'md:px-4'}`}
-          >
-            {session && <NavUser />}
+          {session && <NavUser />}
 
-            {showComposeButton && (
-              <div className="flex gap-1">
-                <div className={cn('w-full')}>
-                  <ComposeButton />
-                </div>
-                {/* {isPro ? (
+          {showComposeButton && (
+            <div className="flex gap-1">
+              <div className={cn('w-full')}>
+                <ComposeButton />
+              </div>
+              {/* {isPro ? (
                   <button
                     onClick={handleCreateMeet}
                     className="hover:bg-muted-foreground/10 inline-flex h-8 w-[20%] items-center justify-center gap-1 overflow-hidden rounded-lg border bg-white px-1.5 dark:border-none dark:bg-[#313131]"
@@ -169,51 +168,51 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                     <Video className="text-muted-foreground h-4 w-4" />
                   </button>
                 ) : null} */}
-              </div>
-            )}
-          </SidebarHeader>
-          <SidebarContent
-            className={`scrollbar scrollbar-w-1 scrollbar-thumb-accent/40 scrollbar-track-transparent hover:scrollbar-thumb-accent scrollbar-thumb-rounded-full overflow-x-hidden py-0 pt-0 ${state !== 'collapsed' ? 'mt-5 md:px-4' : 'px-2'}`}
-          >
-            <div className="flex-1 py-0">
-              <NavMain items={navItems} />
-            </div>
-          </SidebarContent>
-
-          {!isLoading && !isPro && showUpgrade && state !== 'collapsed' && (
-            <div className="relative top-3 mx-3 mb-4 rounded-lg border bg-white px-4 py-4 backdrop-blur-sm dark:bg-[#1C1C1C]">
-              <Button
-                variant="ghost"
-                size="icon"
-                className="absolute right-2 top-2 h-6 w-6 rounded-full hover:bg-white/10 [&>svg]:h-2.5 [&>svg]:w-2.5"
-                onClick={() => {
-                  setShowUpgrade(false);
-                  localStorage.setItem('hideUpgradeCard', 'true');
-                }}
-              >
-                <X className="h-2.5 w-2.5 fill-black dark:fill-white/50" />
-              </Button>
-              <div className="flex items-start gap-2">
-                <div className="flex-1 space-y-1">
-                  <div className="flex items-center gap-2">
-                    <h3 className="text-sm font-semibold text-black dark:text-white/90">
-                      Get Zero Pro
-                    </h3>
-                  </div>
-                  <p className="text-[13px] leading-snug text-black dark:text-white/50">
-                    Get unlimited AI chats, auto-labeling, writing assistant, and more.
-                  </p>
-                </div>
-              </div>
-              <PricingTrialButton />
             </div>
           )}
+        </SidebarHeader>
+        <SidebarContent
+          className={`scrollbar scrollbar-w-1 scrollbar-thumb-accent/40 scrollbar-track-transparent hover:scrollbar-thumb-accent scrollbar-thumb-rounded-full overflow-x-hidden py-0 pt-0 ${state !== 'collapsed' ? 'mt-5 md:px-4' : 'px-2'}`}
+        >
+          <div className="flex-1 py-0">
+            <NavMain items={navItems} />
+          </div>
+        </SidebarContent>
 
-          <SidebarFooter className={`px-0 pb-0 ${state === 'collapsed' ? 'md:px-2' : 'md:px-4'}`}>
-            <NavMain items={bottomNavItems} />
-          </SidebarFooter>
-        </Sidebar>
-      )}
+        {!isLoading && !isPro && showUpgrade && state !== 'collapsed' && (
+          <div className="relative top-3 mx-3 mb-4 rounded-lg border bg-white px-4 py-4 backdrop-blur-sm dark:bg-[#1C1C1C]">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="absolute right-2 top-2 h-6 w-6 rounded-full hover:bg-white/10 [&>svg]:h-2.5 [&>svg]:w-2.5"
+              onClick={() => {
+                setShowUpgrade(false);
+                localStorage.setItem('hideUpgradeCard', 'true');
+              }}
+            >
+              <X className="h-2.5 w-2.5 fill-black dark:fill-white/50" />
+            </Button>
+            <div className="flex items-start gap-2">
+              <div className="flex-1 space-y-1">
+                <div className="flex items-center gap-2">
+                  <h3 className="text-sm font-semibold text-black dark:text-white/90">
+                    Get Zero Pro
+                  </h3>
+                </div>
+                {/* Contrat r8 : promo sans promesse IA — ZERO n'expose aucune IA. */}
+                <p className="text-[13px] leading-snug text-black dark:text-white/50">
+                  Get more storage, priority support, and more.
+                </p>
+              </div>
+            </div>
+            <PricingTrialButton />
+          </div>
+        )}
+
+        <SidebarFooter className={`px-0 pb-0 ${state === 'collapsed' ? 'md:px-2' : 'md:px-4'}`}>
+          <NavMain items={bottomNavItems} />
+        </SidebarFooter>
+      </Sidebar>
     </div>
   );
 }

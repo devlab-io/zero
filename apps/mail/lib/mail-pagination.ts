@@ -5,6 +5,8 @@ interface MailPaginationState {
   isLoading: boolean;
   isFetchingNextPage: boolean;
   hasNextPage: boolean;
+  /** Réserve de lignes à maintenir sous le viewport (défaut historique : 20). */
+  reserveRows?: number;
 }
 
 /**
@@ -36,20 +38,41 @@ export function mailListMaxResults(
 }
 
 /**
+ * Réserve à maintenir sous le viewport, par type de vue (r8 — gap de scroll
+ * perçu : CUA action 1000 ms vs Shortwave 159 ms). Avec des pages projection
+ * de 50 et une réserve de 20, un flick de 5 pages (~40 lignes) atteignait la
+ * frontière chargée AVANT que la page 2 n'atterrisse → blanc pendant le RTT,
+ * c'est l'« action » mesurée.
+ *
+ * r8c : 35, PAS 45. À 45, la page 2 partait dès le premier paint (remaining
+ * 50-1-~8 ≈ 41 < 45) et cette requête projection de fond concurrençait le
+ * clic immédiat vers un autre dossier — CUA staging r8b : Drafts p75 dégradé
+ * de 485 à 701 ms (premières mesures 466-480, puis 664-712 une fois la
+ * page 2 en vol). À 35 : AUCUN fetch au premier paint (41 ≥ 35), départ dès
+ * le PREMIER scroll (remaining ≤ 34) — le flick de 5 pages (~40 lignes,
+ * frontière à 50) garde sa réserve, l'idle au paint reste vierge pour la
+ * navigation. La recherche et Drafts (pages de 20, requêtes Gmail chères —
+ * chemins déjà gagnants) gardent la réserve historique de 20 : AUCUNE
+ * requête supplémentaire n'y est admise.
+ */
+export function mailListReserveRows(folder: string | undefined, isSearching: boolean): number {
+  return mailListMaxResults(folder, isSearching) === MAIL_LIST_PAGE_SIZE ? 35 : 20;
+}
+
+/**
  * Page-list readiness only. Thread-body prefetches are intentionally absent:
  * reading or warming adjacent messages must never block infinite scrolling.
- * The threshold is a full viewport-plus of reserve (20 rows) so a fast flick
- * never reaches an unloaded boundary before the 50-row page lands; chained
- * re-checks after each append stop as soon as the reserve is met, which
- * bounds memory.
+ * Chained re-checks after each append stop as soon as the reserve is met,
+ * which bounds memory (projection : ~une page de 50 d'avance, pas plus).
  */
 export function shouldLoadNextMailPage({
   remainingItems,
   isLoading,
   isFetchingNextPage,
   hasNextPage,
+  reserveRows = 20,
 }: MailPaginationState) {
-  return remainingItems < 20 && !isLoading && !isFetchingNextPage && hasNextPage;
+  return remainingItems < reserveRows && !isLoading && !isFetchingNextPage && hasNextPage;
 }
 
 interface ReaderPaginationState {

@@ -1,0 +1,98 @@
+import { readdirSync, readFileSync, existsSync } from 'node:fs';
+import { describe, expect, it } from 'vitest';
+import { join } from 'node:path';
+
+// Contrat produit r8 : ZERO n'expose AUCUNE surface IA visible ou utilisable.
+// Ce test est le garde-fou CI : il échoue si une surface IA revient dans les
+// composants UI (palette, composeur, lecteur, sidebar). Les routes serveur
+// ai.* peuvent subsister temporairement derrière leurs gardes isUserTriggered —
+// c'est l'ABSENCE de déclencheur client qui est prouvée ici. La recherche
+// littérale et à opérateurs est préservée (testée par ailleurs).
+
+const APP_ROOT = join(__dirname, '..');
+
+// r8b : TOUTES les surfaces UI atteignables du shell mail authentifié —
+// components/** et app/** en entier, pas une liste étroite. Seules les pages
+// MARKETING PUBLIQUES (landing components/home, page /pricing publique
+// components/pricing) sont hors périmètre, conformément à la consigne « ne pas
+// réécrire les pages marketing publiques ». pricing-dialog (atteignable depuis
+// Get Zero Pro / Settings / NavUser) est DANS le périmètre.
+const UI_SCAN_ROOTS = ['components', 'app', 'hooks', 'providers'];
+const PUBLIC_MARKETING_DIRS = [
+  'components/home',
+  'components/pricing',
+  // Groupe de routes publiques (landing /about, /pricing, /terms…) — hors
+  // shell mail authentifié.
+  'app/(full-width)',
+];
+// Couche vocale ElevenLabs : hors du périmètre nominatif r8 (non listée par
+// le contrat) — seule exclusion fichier explicite, à retirer si la voix passe
+// dans le périmètre.
+const EXPLICIT_FILE_EXCLUSIONS = new Set(['providers/voice-provider.tsx']);
+
+// Déclencheurs client des routes IA + promesses/surfaces IA, motifs LARGES.
+const FORBIDDEN_PATTERNS: Array<{ pattern: RegExp; why: string }> = [
+  { pattern: /trpc\.ai\.|trpcClient\.ai\./, why: 'appel client à une route ai.*' },
+  { pattern: /Try Natural Language/, why: 'section NL du command palette' },
+  { pattern: /parseNaturalLanguageSearch/, why: 'interprétation langage naturel' },
+  { pattern: /generateSearchQuery/, why: 'réécriture IA de la recherche' },
+  { pattern: /aiCompose|generateEmailSubject/, why: 'génération IA sujet/corps du composeur' },
+  { pattern: /MoreAboutPerson|MoreAboutQuery/, why: 'panneau research IA du lecteur' },
+  // Promesses produit IA (pricing-dialog r8b, promos, onboarding) : toute
+  // déclinaison « AI-… », « AI chat/email/summary », « unlimited AI ».
+  {
+    pattern: /AI-powered|AI-generated|unlimited AI|\bAI (chat|email|summar|writing|draft)/i,
+    why: 'promesse produit IA',
+  },
+  { pattern: /writing assistant/, why: 'promo IA' },
+  { pattern: /useAISidebar|useAIFullScreen/, why: 'vestige sidebar IA' },
+];
+
+// La couche vocale (ElevenLabs, lib/) est hors du périmètre nominatif r8.
+const collectSourceFiles = (dir: string): string[] => {
+  const absolute = join(APP_ROOT, dir);
+  if (!existsSync(absolute)) return [];
+  return readdirSync(absolute, { recursive: true })
+    .map(String)
+    .filter((name) => /\.(ts|tsx)$/.test(name) && !/\.test\.(ts|tsx)$/.test(name))
+    .map((name) => join(dir, name))
+    .filter((relative) => !PUBLIC_MARKETING_DIRS.some((pub) => relative.startsWith(pub)))
+    .filter((relative) => !EXPLICIT_FILE_EXCLUSIONS.has(relative))
+    .map((relative) => join(APP_ROOT, relative));
+};
+
+describe('contrat r8 — aucune surface IA exposée', () => {
+  it('aucune surface UI atteignable ne référence une route ai.* ni une promesse/surface IA', () => {
+    const offenders: string[] = [];
+    for (const dir of UI_SCAN_ROOTS) {
+      for (const file of collectSourceFiles(dir)) {
+        const source = readFileSync(file, 'utf8');
+        for (const { pattern, why } of FORBIDDEN_PATTERNS) {
+          if (pattern.test(source)) {
+            offenders.push(`${file.replace(APP_ROOT, '')} → ${why} (${pattern})`);
+          }
+        }
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  it('les composants IA retirés n’existent plus (chat, sidebar IA, research, preview IA)', () => {
+    for (const gone of [
+      'components/create/ai-chat.tsx',
+      'components/ui/ai-sidebar.tsx',
+      'components/ui/use-ai-sidebar.ts',
+      'components/ui/prompts-dialog.tsx',
+      'components/ai-toggle-button.tsx',
+      'components/mail/mail-display.research.tsx',
+      'components/create/email-composer.content-preview.tsx',
+    ]) {
+      expect(existsSync(join(APP_ROOT, gone)), `${gone} devrait être supprimé`).toBe(false);
+    }
+  });
+
+  it('la recherche reste littérale/opérateurs : le sélecteur d’intention littérale est préservé', () => {
+    const searchIntent = readFileSync(join(APP_ROOT, 'lib/search-intent.ts'), 'utf8');
+    expect(searchIntent).toContain('isSimpleLiteralSearch');
+  });
+});

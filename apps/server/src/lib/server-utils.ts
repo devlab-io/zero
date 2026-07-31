@@ -1,3 +1,8 @@
+import {
+  decodeCompositeShardCursor,
+  mergeShardListPages,
+  type ShardListPage,
+} from './shard-list-merge';
 import type { IGetThreadResponse, IGetThreadsResponse } from './driver/types';
 import { OutgoingMessageType } from '../routes/agent/types';
 import { defaultPageSize, FOLDERS } from './utils';
@@ -481,6 +486,42 @@ export const getThreadsFromDB = async (
     return store(response);
   }
 
+  // Audit r8 (P0) : fusion multi-shard triée/dédupliquée avec curseur
+  // COMPOSITE par shard (voir shard-list-merge.ts). L'ancienne concaténation
+  // sans tri + continuation dérivée d'un seul shard produisait omissions,
+  // doublons et désordre en deep scroll multi-shard.
+  const compositeCursor = decodeCompositeShardCursor(params.pageToken);
+  if (!params.pageToken || compositeCursor) {
+    type ThreadRow = IGetThreadsResponse['threads'][number] & { receivedOn?: string };
+    const allShards = await listShardsCached(connectionId);
+    const pages = (
+      await Promise.all(
+        allShards.map(async ({ shard_id }): Promise<ShardListPage<ThreadRow> | null> => {
+          const entry = compositeCursor?.shards[shard_id];
+          // Shard épuisé lors d'une page précédente : ne jamais repartir de
+          // sa première page (ce serait resservir des doublons).
+          if (entry?.done) return null;
+          const shard = await getShardClient(connectionId, shard_id);
+          const response = (await shard.stub.getThreadsFromDB({
+            ...params,
+            maxResults,
+            pageToken: entry?.token ?? undefined,
+          })) as IGetThreadsResponse;
+          return {
+            shardId: shard_id,
+            threads: response.threads as ThreadRow[],
+            nextPageToken: response.nextPageToken ?? null,
+          };
+        }),
+      )
+    ).filter((page): page is ShardListPage<ThreadRow> => page !== null);
+
+    const merged = mergeShardListPages(pages, maxResults, compositeCursor);
+    return store({ threads: merged.threads, nextPageToken: merged.nextPageToken });
+  }
+
+  // pageToken legacy mono-shard (client en vol d'avant le curseur composite) :
+  // comportement historique inchangé, le temps que ces curseurs s'éteignent.
   const aggregated = await Effect.runPromise(
     aggregateShardDataEffect<IGetThreadsResponse>(
       connectionId,
@@ -492,16 +533,8 @@ export const getThreadsFromDB = async (
           }),
         ),
       (shardResults) => {
-        // Combine all threads from all shards
         const allThreads = shardResults.flatMap((result) => result.threads);
-
-        // Sort by some criteria if needed (assuming threads have a sortable field)
-        // allThreads.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
-
-        // Take only the requested amount
         const threads = allThreads.slice(0, maxResults);
-
-        // Determine if there's a next page token (simplified logic)
         const hasMoreResults = allThreads.length > maxResults;
         const nextPageToken = hasMoreResults
           ? shardResults.find((r) => r.nextPageToken)?.nextPageToken || null
