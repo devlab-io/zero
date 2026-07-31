@@ -1,5 +1,10 @@
+import {
+  InfiniteQueryObserver,
+  QueryClient,
+  QueryObserver,
+  type InfiniteData,
+} from '@tanstack/react-query';
 import { refreshActiveQueriesAfterAccountSwitch } from './account-switch-cache';
-import { QueryClient, QueryObserver } from '@tanstack/react-query';
 import { afterEach, describe, expect, it } from 'vitest';
 
 const observers: Array<() => void> = [];
@@ -45,5 +50,45 @@ describe('refreshActiveQueriesAfterAccountSwitch', () => {
     });
     expect(queryClient.getQueryData(inboxOptions.queryKey)).toEqual(['thomas-message']);
     expect(queryClient.getQueryCache().findAll()).toHaveLength(2);
+  });
+
+  it('refetches only the first loaded page after a deeply scrolled account switch', async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false, staleTime: Infinity } },
+    });
+    const calls: unknown[] = [];
+    const queryKey = [
+      ['mail', 'listThreads'],
+      { input: { folder: 'inbox' }, type: 'infinite' },
+    ] as const;
+    const options = {
+      queryKey,
+      queryFn: async ({ pageParam }: { pageParam: unknown }) => {
+        calls.push(pageParam);
+        return { account: 'thomas', page: pageParam };
+      },
+      initialPageParam: 'page-1',
+      getNextPageParam: () => undefined,
+      staleTime: Infinity,
+    };
+
+    queryClient.setQueryData<InfiniteData<{ account: string; page: string }, string>>(queryKey, {
+      pages: [
+        { account: 'admin', page: 'page-1' },
+        { account: 'admin', page: 'page-2' },
+        { account: 'admin', page: 'page-3' },
+      ],
+      pageParams: ['page-1', 'page-2', 'page-3'],
+    });
+    observers.push(new InfiniteQueryObserver(queryClient, options).subscribe(() => undefined));
+
+    await refreshActiveQueriesAfterAccountSwitch(queryClient, {
+      infiniteQueryKey: [['mail', 'listThreads']],
+    });
+
+    expect(calls).toEqual(['page-1']);
+    expect(
+      queryClient.getQueryData<InfiniteData<{ account: string; page: string }>>(queryKey),
+    ).toMatchObject({ pages: [{ account: 'thomas', page: 'page-1' }] });
   });
 });

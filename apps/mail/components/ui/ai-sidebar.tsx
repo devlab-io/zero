@@ -1,16 +1,12 @@
-import { log } from '@/lib/log';
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip';
-import { m } from '@/paraglide/messages';
 import { ArrowsPointingIn, PanelLeftOpen, Phone } from '../icons/icons';
 import { useActiveConnection } from '@/hooks/use-connections';
 import { ResizablePanel } from '@/components/ui/resizable';
 import { useSearchValue } from '@/hooks/use-search-value';
-import { useState, useEffect, useCallback } from 'react';
 import useSearchLabels from '@/hooks/use-labels-search';
 import { useQueryClient } from '@tanstack/react-query';
 import { AIChat } from '@/components/create/ai-chat';
 import { useTRPC } from '@/providers/query-provider';
-import { Tools } from '@zero/types';
 import { useDoState } from '../mail/use-do-state';
 import { useBilling } from '@/hooks/use-billing';
 import { PromptsDialog } from './prompts-dialog';
@@ -21,11 +17,15 @@ import { useAgentChat } from 'agents/ai-react';
 import { X, Expand, Plus } from 'lucide-react';
 import { IncomingMessageType } from '../party';
 import { Gauge } from '@/components/ui/gauge';
+import { m } from '@/paraglide/messages';
 import { useParams } from 'react-router';
 import { useAgent } from 'agents/react';
 import { useQueryState } from 'nuqs';
+import { Tools } from '@zero/types';
+import { useCallback } from 'react';
 import { cn } from '@/lib/utils';
 import posthog from 'posthog-js';
+import { log } from '@/lib/log';
 import { toast } from 'sonner';
 
 interface ChatHeaderProps {
@@ -136,7 +136,7 @@ function ChatHeader({
                 </TooltipTrigger>
                 <TooltipContent>
                   <p>
-                    You've used {chatMessages.usage} out of {chatMessages.included_usage} chat
+                    You&apos;ve used {chatMessages.usage} out of {chatMessages.included_usage} chat
                     messages.
                   </p>
                   <p className="mb-2">Upgrade for unlimited messages!</p>
@@ -222,13 +222,20 @@ function AISidebar({ className }: AISidebarProps) {
           });
         } else if (type === IncomingMessageType.Do_State) {
           const { isSyncing, syncingFolders, storageSize, counts, shards } = parsedData;
-          setDoState({ isSyncing, syncingFolders, storageSize, counts: counts ?? [], shards });
+          setDoState({
+            connectionId: activeConnection?.id ?? null,
+            isSyncing,
+            syncingFolders,
+            storageSize,
+            counts: counts ?? [],
+            shards,
+          });
         }
       } catch (error) {
         log.error('error parsing party message', error, { rawMessage: message.data });
       }
     },
-    [queryClient, trpc, labels, searchValue.value, setDoState],
+    [queryClient, trpc, labels, searchValue.value, setDoState, activeConnection?.id],
   );
 
   const agent = useAgent({

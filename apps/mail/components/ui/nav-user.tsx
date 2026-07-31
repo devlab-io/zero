@@ -143,7 +143,7 @@ export function NavUser() {
   const [, setPricingDialog] = useQueryState('pricingDialog');
   const [category] = useQueryState('category', { defaultValue: 'All Mail' });
   const { setLoading } = useLoading();
-  const [{ isSyncing, syncingFolders, storageSize, shards }] = useDoState();
+  const [{ isSyncing, syncingFolders, storageSize, shards }, setDoState] = useDoState();
 
   const getSettingsHref = useCallback(() => {
     const currentPath = category
@@ -174,15 +174,34 @@ export function NavUser() {
       setLoading(true, m['common.navUser.switchingAccounts']());
       setThreadId(null);
       await setDefaultConnection({ connectionId });
+      const targetConnection = data?.connections.find(
+        (connection) => connection.id === connectionId,
+      );
+      if (!targetConnection) throw new Error('The selected account is no longer available');
+
+      // Move the account identity and connection-owned live stats together.
+      // This prevents an old websocket payload (for example admin's Inbox=0)
+      // from being rendered below the newly selected Thomas identity.
+      const activeConnectionKey = trpc.connections.getDefault.queryKey();
+      queryClient.setQueryData(activeConnectionKey, targetConnection);
+      setDoState({
+        connectionId,
+        isSyncing: false,
+        syncingFolders: [],
+        storageSize: 0,
+        counts: [],
+        shards: 0,
+      });
       // Do not clear the live QueryClient here. `clear()` detaches the mounted
       // observers, so the following refetch used to match zero queries: the nav
       // could show Thomas while Inbox still held admin's empty result until a
       // later focus/websocket event. Keep the full-screen switch overlay visible
       // while every mounted account-scoped read is invalidated and refetched.
       await idbClear().catch((error) => log.warn('Failed to clear account cache:', error));
-      await refreshActiveQueriesAfterAccountSwitch(queryClient);
+      await refreshActiveQueriesAfterAccountSwitch(queryClient, {
+        infiniteQueryKey: trpc.mail.listThreads.infiniteQueryKey(),
+      });
 
-      const activeConnectionKey = trpc.connections.getDefault.queryKey();
       let confirmedConnection = queryClient.getQueryData<{ id: string } | null>(
         activeConnectionKey,
       );

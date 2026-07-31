@@ -8,6 +8,7 @@ import type { Route } from './+types/page';
 import { log } from '@/lib/log';
 
 const ALLOWED_FOLDERS = new Set(['inbox', 'draft', 'sent', 'spam', 'bin', 'archive', 'snoozed']);
+type LabelNode = { id: string; labels?: LabelNode[] };
 
 export async function clientLoader({ params, request }: Route.ClientLoaderArgs) {
   if (!params.folder) return Response.redirect(`${import.meta.env.VITE_PUBLIC_APP_URL}/mail/inbox`);
@@ -20,7 +21,11 @@ export async function clientLoader({ params, request }: Route.ClientLoaderArgs) 
   void authProxy.api
     .getSession({ headers: request.headers })
     .then((session) => {
-      if (!session) window.location.href = `${import.meta.env.VITE_PUBLIC_APP_URL}/login`;
+      // This is always a same-origin client navigation. Building it from a
+      // Vite env value produced `/mail/undefined/login` when that value was not
+      // embedded in the browser bundle, leaving signed-out staging users on a
+      // false 404 instead of the login screen.
+      if (!session) window.location.href = '/login';
     })
     .catch((error: unknown) => {
       // Échec réseau transitoire : ne pas rediriger (le backend refuse déjà les
@@ -51,12 +56,10 @@ export default function MailPage() {
     if (isLoadingLabels) return;
 
     if (userLabels) {
-      const checkLabelExists = (labels: any[]): boolean => {
+      const checkLabelExists = (labels: LabelNode[]): boolean => {
         for (const label of labels) {
           if (label.id === folder) return true;
-          if (label.labels && label.labels.length > 0) {
-            if (checkLabelExists(label.labels)) return true;
-          }
+          if (label.labels?.length && checkLabelExists(label.labels)) return true;
         }
         return false;
       };
@@ -80,7 +83,7 @@ export default function MailPage() {
       <div className="flex h-screen w-full flex-col items-center justify-center">
         <h2 className="text-xl font-semibold">Folder not found</h2>
         <p className="text-muted-foreground mt-2">
-          The folder you're looking for doesn't exist. Redirecting to inbox...
+          The folder you&apos;re looking for doesn&apos;t exist. Redirecting to inbox...
         </p>
       </div>
     );

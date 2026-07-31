@@ -1,6 +1,7 @@
 import { atom, useAtom } from 'jotai';
 
 export type State = {
+  connectionId: string | null;
   isSyncing: boolean;
   syncingFolders: string[];
   storageSize: number;
@@ -9,6 +10,7 @@ export type State = {
 };
 
 const stateAtom = atom<State>({
+  connectionId: null,
   isSyncing: false,
   syncingFolders: [],
   storageSize: 0,
