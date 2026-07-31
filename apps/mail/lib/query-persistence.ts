@@ -1,5 +1,13 @@
-const DETAIL_QUERY_BUDGET_BYTES = 8 * 1024 * 1024;
-const SINGLE_DETAIL_QUERY_LIMIT_BYTES = 3 * 1024 * 1024;
+/**
+ * Politique de rétention des corps persistés (explicite, r16) : une entrée
+ * détail (fil complet ou corps rendu) jusqu'à 3 Mo — le mail ChatGPT de
+ * 1,5 Mo est DANS la politique — et un budget total de 8 Mo servi par
+ * fraîcheur décroissante (dataUpdatedAt) : les corps les plus récemment
+ * lus/préchauffés survivent, les plus anciens sortent (LRU par récence de
+ * donnée). Aucune croissance illimitée.
+ */
+export const DETAIL_QUERY_BUDGET_BYTES = 8 * 1024 * 1024;
+export const SINGLE_DETAIL_QUERY_LIMIT_BYTES = 3 * 1024 * 1024;
 
 /**
  * Durée de vie du cache persisté (restore au boot). r7b — cadrage honnête :

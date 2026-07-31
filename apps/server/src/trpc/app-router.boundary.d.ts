@@ -562,10 +562,10 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
                 bcc?: string | undefined;
                 attachments?: {
                     name: string;
+                    base64: string;
                     type: string;
                     size: number;
                     lastModified: number;
-                    base64: string;
                 }[] | undefined;
             };
             output: {
@@ -995,6 +995,10 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
                     html: string;
                     hasBlockedImages: boolean;
                 }>;
+                timings: {
+                    getThreadMs: number;
+                    renderMs: number;
+                };
             };
             meta: object;
         }>;
@@ -1143,10 +1147,10 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
                 headers?: Record<string, string> | undefined;
                 attachments?: {
                     name: string;
+                    base64: string;
                     type: string;
                     size: number;
                     lastModified: number;
-                    base64: string;
                 }[] | undefined;
                 fromEmail?: string | undefined;
                 isForward?: boolean | undefined;

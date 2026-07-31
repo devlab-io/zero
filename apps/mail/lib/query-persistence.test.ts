@@ -50,6 +50,29 @@ describe('query persistence policy', () => {
     expect(selected.map((item) => item.state.dataUpdatedAt)).toEqual([4, 3, 2]);
   });
 
+  it('r16 : le corps de 1,5 Mo est DANS la politique — jamais exclu, tronqué ni écrasé par un plus vieux', () => {
+    const heavy = query(
+      [['mail', 'get'], { input: { id: 'chatgpt-pro' } }],
+      'x'.repeat(1_500_000),
+      100,
+    );
+    expect(shouldPersistQuery(heavy)).toBe(true);
+
+    // Budget 8 Mo servi par fraîcheur : le corps lourd fraîchement lu survit,
+    // les anciens sortent — LRU par récence, croissance bornée.
+    const older = Array.from({ length: 4 }, (_, index) =>
+      query(
+        [['mail', 'get'], { input: { id: `old-${index}` } }],
+        'x'.repeat(2 * 1024 * 1024),
+        index,
+      ),
+    );
+    const selected = selectQueriesForPersistence([...older, heavy]);
+    expect(selected[0]).toBe(heavy);
+    const totalBytes = selected.reduce((sum, item) => sum + (item.state.data as string).length, 0);
+    expect(totalBytes).toBeLessThanOrEqual(8 * 1024 * 1024);
+  });
+
   it('le snapshot persisté survit à plusieurs jours sans session (borne ≥ 7 jours)', () => {
     // Élimine la classe de cold boot multi-jour (cause POSSIBLE — non prouvée —
     // du spinner Drafts observé au premier clic post-reload, CUA r7). La

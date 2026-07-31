@@ -53,7 +53,67 @@ export type SplitPersisterOptions = {
   buster: string;
   /** Même durée de vie que le persister principal (QUERY_PERSIST_MAX_AGE_MS). */
   maxAgeMs: number;
+  /**
+   * r16 : deep-link lecteur. Preuve CUA staging (4e730554) : un reload sur un
+   * fil DÉJÀ LU repartait en openThread réseau (data-ready 6499 ms) — les
+   * corps n'étaient hydratés qu'après paint+idle, APRÈS le départ du queryFn.
+   * Quand cette fonction rend un threadId (URL ?threadId=…), le restore
+   * BLOQUANT fusionne l'entrée mail.get de CE fil et ses email-content depuis
+   * le blob détails : le lecteur monte cache chaud, staleTime/refetchOnMount
+   * (hasCompleteThreadBodies) concluent zéro réseau. Les autres corps restent
+   * hydratés à l'idle, inchangé.
+   */
+  getPriorityThreadId?: () => string | null;
 };
+
+/** ?threadId=… de l'URL — seul état fiable AVANT montage React (nuqs). */
+export function readPriorityThreadIdFromSearch(search: string): string | null {
+  try {
+    const threadId = new URLSearchParams(search).get('threadId');
+    return threadId && threadId.trim().length > 0 ? threadId : null;
+  } catch {
+    return null;
+  }
+}
+
+type ThreadDetailData = {
+  messages?: { id?: string }[];
+  latest?: { id?: string };
+};
+
+/**
+ * Sélection pure des entrées à restaurer en PRIORITÉ pour un fil : la query
+ * mail.get du fil, puis les email-content de SES messages (l'association
+ * threadId→messageIds vit dans la donnée mail.get persistée). Vide si le fil
+ * n'est pas dans le blob — le lecteur retombe alors sur le réseau, comme un
+ * cache froid honnête.
+ */
+export function selectPriorityDetailQueries<T extends PersistableQuery>(
+  queries: readonly T[],
+  threadId: string,
+): T[] {
+  const threadQuery = queries.find((query) => {
+    const path = query.queryKey[0];
+    if (!Array.isArray(path) || path.join('.') !== 'mail.get') return false;
+    const input = (query.queryKey[1] as { input?: { id?: string } } | undefined)?.input;
+    return input?.id === threadId;
+  });
+  if (!threadQuery) return [];
+
+  const data = threadQuery.state.data as ThreadDetailData | null | undefined;
+  const messageIds = new Set(
+    [...(data?.messages ?? []).map((message) => message?.id), data?.latest?.id].filter(
+      (id): id is string => typeof id === 'string' && id.length > 0,
+    ),
+  );
+  const contentQueries = queries.filter(
+    (query) =>
+      query.queryKey[0] === 'email-content' &&
+      typeof query.queryKey[2] === 'string' &&
+      messageIds.has(query.queryKey[2]),
+  );
+  return [threadQuery, ...contentQueries];
+}
 
 export type SplitPersister = {
   persister: Persister;
@@ -86,6 +146,21 @@ export function createSplitIDBPersister(
 ): SplitPersister {
   const detailsKey = `${mainKey}${DETAILS_KEY_SUFFIX}`;
   let lastDetailsFingerprint: string | null = null;
+
+  // Validation partagée de l'enveloppe détails (âge/buster/forme). Invalide :
+  // null — l'appelant supprime le blob, jamais hydraté (fallback réseau).
+  const readValidDetailQueries = (
+    stored: PersistedClient | undefined,
+  ): PersistedClient['clientState']['queries'] | null => {
+    const queries = stored?.clientState?.queries;
+    const isValid =
+      stored != null &&
+      typeof stored.timestamp === 'number' &&
+      Date.now() - stored.timestamp < options.maxAgeMs &&
+      stored.buster === options.buster &&
+      Array.isArray(queries);
+    return isValid ? queries : null;
+  };
 
   return {
     persister: {
@@ -133,7 +208,48 @@ export function createSplitIDBPersister(
         // fois, réécrit scindé au prochain persist. Blob scindé : listes
         // seules, le restore bloquant devient petit et rapide. La validation
         // âge/buster du blob principal reste faite par persistQueryClient.
-        return (await storage.get(mainKey)) as PersistedClient | undefined;
+        const priorityThreadId = options.getPriorityThreadId?.() ?? null;
+        if (!priorityThreadId) {
+          return (await storage.get(mainKey)) as PersistedClient | undefined;
+        }
+
+        // r16 : deep-link — le fil de l'URL est fusionné dans le restore
+        // BLOQUANT (voir SplitPersisterOptions.getPriorityThreadId). Coût payé
+        // uniquement sur un reload avec ?threadId : lecture+parse du blob
+        // détails avant la levée du restore.
+        const [main, storedDetails] = await Promise.all([
+          storage.get(mainKey) as Promise<PersistedClient | undefined>,
+          storage.get(detailsKey) as Promise<PersistedClient | undefined>,
+        ]);
+        const detailQueries = readValidDetailQueries(storedDetails);
+        if (detailQueries === null) {
+          // Périmé/corrompu : supprimé, restore listes seules — le lecteur
+          // retombe sur le réseau (fallback honnête, jamais de blob mensonger).
+          if (storedDetails != null) await storage.del(detailsKey).catch(() => {});
+          return main;
+        }
+
+        const priority = selectPriorityDetailQueries(
+          detailQueries as unknown as PersistableQuery[],
+          priorityThreadId,
+        ) as unknown as PersistedClient['clientState']['queries'];
+        if (priority.length === 0) return main;
+        if (!main) {
+          // Listes absentes mais fil demandé présent : enveloppe détails
+          // (timestamp/buster déjà validés) portant les seules entrées du fil.
+          return {
+            timestamp: (storedDetails as PersistedClient).timestamp,
+            buster: options.buster,
+            clientState: { mutations: [], queries: priority },
+          } satisfies PersistedClient;
+        }
+        return {
+          ...main,
+          clientState: {
+            ...main.clientState,
+            queries: [...main.clientState.queries, ...priority],
+          },
+        };
       },
       removeClient: async () => {
         await Promise.all([storage.del(mainKey), storage.del(detailsKey)]);
@@ -141,14 +257,8 @@ export function createSplitIDBPersister(
     },
     restoreDetails: async () => {
       const stored = (await storage.get(detailsKey)) as PersistedClient | undefined;
-      const queries = stored?.clientState?.queries;
-      const isValid =
-        stored != null &&
-        typeof stored.timestamp === 'number' &&
-        Date.now() - stored.timestamp < options.maxAgeMs &&
-        stored.buster === options.buster &&
-        Array.isArray(queries);
-      if (!isValid) {
+      const queries = readValidDetailQueries(stored);
+      if (queries === null) {
         // Périmé, buster d'un autre build, ou forme legacy/corrompue :
         // supprimé — jamais hydraté.
         if (stored != null) await storage.del(detailsKey).catch(() => {});

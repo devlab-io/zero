@@ -38,9 +38,17 @@ export const openThreadProcedure = activeDriverProcedure
     z.object({
       thread: IGetThreadResponseSchema,
       rendered: z.record(z.string(), renderedEmailSchema),
+      // r16 : découpage honnête du premier-ever cold — durées seules (aucun
+      // contenu). Le client les projette en measures zero:thread:server-*
+      // lisibles dans bootperf : getThread (Gmail/DO) vs sanitize (CPU).
+      timings: z.object({
+        getThreadMs: z.number(),
+        renderMs: z.number(),
+      }),
     }),
   )
   .query(async ({ input, ctx }) => {
+    const startedAt = Date.now();
     const result = await withSpan('openThread.getThread', async (span) => {
       const r = await getThread(ctx.activeConnection.id, input.id);
       span?.setAttribute('thread.id', input.id);
@@ -48,6 +56,7 @@ export const openThreadProcedure = activeDriverProcedure
       span?.setAttribute('message.count', r.result.messages.length);
       return r;
     });
+    const fetchedAt = Date.now();
     const thread = result.result;
     const candidates = thread.messages
       .flatMap((message) =>
@@ -87,6 +96,11 @@ export const openThreadProcedure = activeDriverProcedure
       span?.setAttribute('rendered.count', Object.keys(out).length);
       return out;
     });
+    const renderedAt = Date.now();
 
-    return { thread, rendered };
+    return {
+      thread,
+      rendered,
+      timings: { getThreadMs: fetchedAt - startedAt, renderMs: renderedAt - fetchedAt },
+    };
   });

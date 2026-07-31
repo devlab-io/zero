@@ -14,13 +14,17 @@ import {
   hydrate,
   type InfiniteData,
 } from '@tanstack/react-query';
+import {
+  PersistQueryClientProvider,
+  persistQueryClientSave,
+} from '@tanstack/react-query-persist-client';
 import { useEffect, useMemo, useRef, useSyncExternalStore, type PropsWithChildren } from 'react';
+import { createSplitIDBPersister, readPriorityThreadIdFromSearch } from '@/lib/split-persister';
 import { QUERY_PERSIST_MAX_AGE_MS, shouldPersistQuery } from '@/lib/query-persistence';
-import { PersistQueryClientProvider } from '@tanstack/react-query-persist-client';
 import { seedMailListPageSizeMigration } from '@/lib/mail-list-cache-migration';
 import { readCacheOwnerHint, resolveCacheOwner } from '@/lib/cache-owner-hint';
+import { registerDetailPersistFlusher } from '@/lib/detail-persist-flush';
 import { readRetryDelay, shouldRetryRead } from '@/lib/query-retry';
-import { createSplitIDBPersister } from '@/lib/split-persister';
 import { createTRPCContext } from '@trpc/tanstack-react-query';
 import { createTRPCClient, httpBatchLink } from '@trpc/client';
 import { scheduleAfterPaintIdle } from '@/lib/idle-scheduler';
@@ -202,6 +206,14 @@ export function QueryProvider({ children }: PropsWithChildren) {
       createSplitIDBPersister({ get, set, del }, `zero-query-cache-${cacheOwner}`, {
         buster: CACHE_BURST_KEY,
         maxAgeMs: QUERY_PERSIST_MAX_AGE_MS,
+        // r16 : deep-link lecteur — le fil de ?threadId est restauré de façon
+        // BLOQUANTE (mail.get + email-content de SES messages) : le lecteur
+        // monte cache chaud, zéro openThread réseau sur un fil déjà lu. Le
+        // persister étant owner-scopé, l'isolation P0 est inchangée.
+        getPriorityThreadId: () =>
+          typeof window === 'undefined'
+            ? null
+            : readPriorityThreadIdFromSearch(window.location.search),
       }),
     [cacheOwner],
   );
@@ -249,6 +261,28 @@ export function QueryProvider({ children }: PropsWithChildren) {
       cancelDetailsHydrationRef.current = null;
     };
   }, [cacheOwner]);
+
+  // r16 : flusher de persist immédiat — enregistré pour le couple
+  // (owner, persister) COURANT et confirmé seulement. Un openThread réussi
+  // demande une écriture explicite (coalescée) au lieu d'attendre l'abonnement
+  // throttlé ; au switch/logout le flusher est désenregistré AVANT que le
+  // nouveau s'installe — une demande en vol devient no-op, jamais une écriture
+  // croisée (isolation P0).
+  useEffect(() => {
+    if (!isConfirmedIdentity) {
+      registerDetailPersistFlusher(null);
+      return;
+    }
+    registerDetailPersistFlusher(() => {
+      void persistQueryClientSave({
+        queryClient,
+        persister,
+        buster: CACHE_BURST_KEY,
+        dehydrateOptions: { shouldDehydrateQuery: shouldPersistQuery },
+      });
+    });
+    return () => registerDetailPersistFlusher(null);
+  }, [isConfirmedIdentity, queryClient, persister]);
 
   if (isSessionPending) {
     // Shell NEUTRE structurel (P0 r6) : tant que l'identité n'est pas

@@ -254,6 +254,13 @@ describe('mail router — lectures simples', () => {
       m1: { html: '<p>ok</p>', hasBlockedImages: false },
       m2: { html: '<p>ok</p>', hasBlockedImages: false },
     });
+    // r16 : découpage getThread vs sanitize — durées numériques seules,
+    // aucun identifiant ni contenu dans le bloc timings.
+    expect(typeof r.timings.getThreadMs).toBe('number');
+    expect(typeof r.timings.renderMs).toBe('number');
+    expect(r.timings.getThreadMs).toBeGreaterThanOrEqual(0);
+    expect(r.timings.renderMs).toBeGreaterThanOrEqual(0);
+    expect(Object.keys(r.timings).sort()).toEqual(['getThreadMs', 'renderMs']);
   });
 
   it('openThread borne le pretraitement et isole un HTML invalide', async () => {

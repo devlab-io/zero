@@ -23,9 +23,11 @@ import {
 } from '@tanstack/react-query';
 import { backgroundQueueAtom, isThreadInBackgroundQueueAtom } from '@/store/backgroundQueue';
 import { emailContentQueryKey, resolveEmailContentTheme } from '@/lib/email-content-query';
+import { requestImmediateDetailPersist } from '@/lib/detail-persist-flush';
 import { canReuseMailListPlaceholder } from '@/lib/mail-list-placeholder';
 import { useTRPC, useTRPCClient } from '@/providers/query-provider';
 import { hasCompleteThreadBodies } from '@/lib/thread-detail-cache';
+import { recordOpenThreadTimings } from '@/lib/open-thread-timing';
 import { MAIL_LIST_QUERY_BEHAVIOR } from '@/lib/mail-list-query';
 import { isSimpleLiteralSearch } from '@/lib/search-intent';
 import { mailListMaxResults } from '@/lib/mail-pagination';
@@ -58,10 +60,12 @@ function useOpenThreadQueryOptions() {
         // every existing consumer continue to target the same thread detail.
         queryKey: trpc.mail.get.queryKey({ id }),
         queryFn: async ({ signal }) => {
+          const fetchStartMs = performance.now();
           const result = await trpcClient.mail.openThread.query(
             { id, shouldLoadImages, theme },
             { signal },
           );
+          const fetchEndMs = performance.now();
 
           for (const [messageId, processed] of Object.entries(result.rendered)) {
             queryClient.setQueryData(
@@ -69,6 +73,19 @@ function useOpenThreadQueryOptions() {
               processed,
             );
           }
+
+          // r16 : découpage du premier-ever cold (RTT / seed / getThread vs
+          // sanitize serveur) — durées seules, lisibles dans ?bootperf=1.
+          recordOpenThreadTimings({
+            fetchStartMs,
+            fetchEndMs,
+            seedEndMs: performance.now(),
+            server: result.timings,
+          });
+          // r16 : persist EXPLICITE des entrées lourdes fraîches (coalescé) —
+          // un reload juste après lecture retrouve le corps dans l'IDB
+          // owner-scopé au lieu de repayer un openThread réseau.
+          requestImmediateDetailPersist();
 
           return result.thread;
         },

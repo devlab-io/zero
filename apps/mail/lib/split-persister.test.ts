@@ -1,10 +1,14 @@
 import {
   createSplitIDBPersister,
+  readPriorityThreadIdFromSearch,
+  selectPriorityDetailQueries,
   splitPersistedQueries,
   DETAILS_KEY_SUFFIX,
 } from './split-persister';
 import type { PersistedClient } from '@tanstack/react-query-persist-client';
-import { hydrate, QueryClient } from '@tanstack/react-query';
+import { hashKey, hydrate, QueryClient } from '@tanstack/react-query';
+import { hasCompleteThreadBodies } from './thread-detail-cache';
+import { emailContentQueryKey } from './email-content-query';
 import { describe, expect, it } from 'vitest';
 
 // r10 : le restore bloquant ne porte que les listes ; les corps s'hydratent
@@ -250,5 +254,197 @@ describe('garde anti-réécriture des détails (r11 — empreinte bon marché)',
     };
     await split.persister.persistClient(client([listQuery, newer]));
     expect(storage.map.get(`${MAIN_KEY}${DETAILS_KEY_SUFFIX}`)).not.toBe(before);
+  });
+});
+
+// ————————————————————————————————————————————————————————————————————————
+// r16 : restore PRIORITAIRE du fil de l'URL. Preuve CUA staging (4e730554) :
+// reload sur un fil déjà lu → data-ready 6499 ms — le corps persisté n'était
+// hydraté qu'après paint+idle, APRÈS le départ réseau du lecteur. Le fil de
+// ?threadId est désormais fusionné dans le restore BLOQUANT.
+// ————————————————————————————————————————————————————————————————————————
+
+const T1_KEY = [['mail', 'get'], { input: { id: 't1' }, type: 'query' }];
+const bigBody = 'x'.repeat(1_500_000);
+const threadT1 = {
+  queryKey: T1_KEY,
+  queryHash: hashKey(T1_KEY),
+  state: {
+    data: {
+      messages: [
+        { id: 'm1', decodedBody: '<p>un</p>' },
+        { id: 'm2', decodedBody: bigBody },
+      ],
+      latest: { id: 'm2' },
+    },
+    dataUpdatedAt: Date.now(),
+    status: 'success',
+  },
+};
+const contentM1 = {
+  queryKey: emailContentQueryKey('m1', true, 'light'),
+  queryHash: hashKey(emailContentQueryKey('m1', true, 'light')),
+  state: { data: { html: '<p>un</p>' }, dataUpdatedAt: Date.now(), status: 'success' },
+};
+const contentM2 = {
+  queryKey: emailContentQueryKey('m2', true, 'light'),
+  queryHash: hashKey(emailContentQueryKey('m2', true, 'light')),
+  state: { data: { html: bigBody }, dataUpdatedAt: Date.now(), status: 'success' },
+};
+const threadT2 = {
+  queryKey: [['mail', 'get'], { input: { id: 't2' }, type: 'query' }],
+  queryHash: 'thread-t2',
+  state: {
+    data: { messages: [{ id: 'm9', decodedBody: '<p>autre</p>' }], latest: { id: 'm9' } },
+    dataUpdatedAt: Date.now(),
+    status: 'success',
+  },
+};
+const contentM9 = {
+  queryKey: emailContentQueryKey('m9', true, 'light'),
+  queryHash: 'content-m9',
+  state: { data: { html: '<p>autre</p>' }, dataUpdatedAt: Date.now(), status: 'success' },
+};
+
+function makeSpyStorage(initial: Record<string, unknown> = {}) {
+  const base = makeStorage(initial);
+  const reads: string[] = [];
+  return {
+    ...base,
+    reads,
+    get: async (key: string) => {
+      reads.push(key);
+      return base.get(key);
+    },
+  };
+}
+
+const makePriorityPersister = (
+  storage: ReturnType<typeof makeStorage>,
+  priorityThreadId: string | null,
+  mainKey = MAIN_KEY,
+) =>
+  createSplitIDBPersister(storage, mainKey, {
+    buster: BUSTER,
+    maxAgeMs: MAX_AGE,
+    getPriorityThreadId: () => priorityThreadId,
+  });
+
+describe('readPriorityThreadIdFromSearch — ?threadId de l’URL', () => {
+  it('extrait le threadId, ignore le bruit, null sans paramètre ou vide', () => {
+    expect(readPriorityThreadIdFromSearch('?threadId=19f9552d11a099e5&mode=reply')).toBe(
+      '19f9552d11a099e5',
+    );
+    expect(readPriorityThreadIdFromSearch('')).toBeNull();
+    expect(readPriorityThreadIdFromSearch('?folder=inbox')).toBeNull();
+    expect(readPriorityThreadIdFromSearch('?threadId=')).toBeNull();
+    expect(readPriorityThreadIdFromSearch('?threadId=%20')).toBeNull();
+  });
+});
+
+describe('selectPriorityDetailQueries — sélection pure du fil + SES corps', () => {
+  it('rend mail.get du fil et les email-content de ses messages, rien d’autre', () => {
+    const selected = selectPriorityDetailQueries(
+      [threadT2, contentM9, threadT1, contentM1, contentM2] as never[],
+      't1',
+    );
+    expect(selected).toEqual([threadT1, contentM1, contentM2]);
+  });
+
+  it('fil absent du blob → vide (le lecteur retombe sur le réseau, cache froid honnête)', () => {
+    expect(selectPriorityDetailQueries([threadT2, contentM9] as never[], 't1')).toEqual([]);
+  });
+
+  it('fil sans messages exploitables → la seule entrée mail.get', () => {
+    const bare = {
+      queryKey: [['mail', 'get'], { input: { id: 't3' }, type: 'query' }],
+      queryHash: 'thread-t3',
+      state: { data: { messages: [] }, dataUpdatedAt: Date.now(), status: 'success' },
+    };
+    expect(selectPriorityDetailQueries([bare, contentM1] as never[], 't3')).toEqual([bare]);
+  });
+});
+
+describe('restore prioritaire BLOQUANT (r16)', () => {
+  it('corps de 1,5 Mo persisté puis restauré AVANT le réseau : entrée intacte, politique zéro-refetch', async () => {
+    const storage = makeStorage();
+    const split = makePriorityPersister(storage, 't1');
+    await split.persister.persistClient(
+      client([listQuery, threadT1, contentM1, contentM2, threadT2, contentM9]),
+    );
+
+    const restored = (await split.persister.restoreClient()) as PersistedClient;
+    // Restore bloquant = listes + LE fil demandé et SES corps ; les autres
+    // corps (t2/m9) restent à l'hydratation idle.
+    expect(restored.clientState.queries).toEqual([listQuery, threadT1, contentM1, contentM2]);
+
+    // L'entrée lourde n'est ni tronquée ni écrasée…
+    const queryClient = new QueryClient();
+    hydrate(queryClient, restored.clientState);
+    const data = queryClient.getQueryData(T1_KEY) as {
+      messages: { decodedBody: string }[];
+    };
+    expect(data.messages[1].decodedBody).toHaveLength(1_500_000);
+    // …et satisfait le contrat zéro-réseau du lecteur : corps complets →
+    // staleTime 1 h + refetchOnMount false (useOpenThreadQueryOptions dérive
+    // les deux de hasCompleteThreadBodies).
+    expect(hasCompleteThreadBodies(data)).toBe(true);
+  });
+
+  it('sans threadId dans l’URL : clé principale seule, le blob détails n’est PAS lu', async () => {
+    const storage = makeSpyStorage();
+    const split = makePriorityPersister(storage, null);
+    await split.persister.persistClient(client([listQuery, threadT1]));
+    storage.reads.length = 0;
+
+    const restored = (await split.persister.restoreClient()) as PersistedClient;
+    expect(restored.clientState.queries).toEqual([listQuery]);
+    expect(storage.reads).toEqual([MAIN_KEY]);
+  });
+
+  it('blob détails corrompu/périmé avec threadId demandé : listes seules, blob supprimé — fallback réseau', async () => {
+    const storage = makeStorage();
+    const split = makePriorityPersister(storage, 't1');
+    await split.persister.persistClient(client([listQuery, threadT1]));
+    storage.map.set(`${MAIN_KEY}${DETAILS_KEY_SUFFIX}`, {
+      timestamp: Date.now() - MAX_AGE - 1,
+      buster: BUSTER,
+      clientState: { mutations: [], queries: [threadT1] },
+    });
+
+    const restored = (await split.persister.restoreClient()) as PersistedClient;
+    expect(restored.clientState.queries).toEqual([listQuery]);
+    expect(storage.map.has(`${MAIN_KEY}${DETAILS_KEY_SUFFIX}`)).toBe(false);
+  });
+
+  it('listes absentes mais fil demandé présent : enveloppe détails validée portant le fil seul', async () => {
+    const storage = makeStorage();
+    const split = makePriorityPersister(storage, 't1');
+    await split.persister.persistClient(client([listQuery, threadT1, contentM2]));
+    storage.map.delete(MAIN_KEY);
+
+    const restored = (await split.persister.restoreClient()) as PersistedClient;
+    expect(restored.buster).toBe(BUSTER);
+    expect(typeof restored.timestamp).toBe('number');
+    expect(restored.clientState.queries).toEqual([threadT1, contentM2]);
+  });
+
+  it('isolation A→B→A : le restore prioritaire de B ne lit ni ne rend JAMAIS les clés de A', async () => {
+    const storage = makeSpyStorage();
+    const splitA = makePriorityPersister(storage, 't1');
+    await splitA.persister.persistClient(client([listQuery, threadT1, contentM2]));
+
+    const B_KEY = 'zero-query-cache-user-2-conn-b';
+    const splitB = makePriorityPersister(storage, 't1', B_KEY);
+    storage.reads.length = 0;
+    const restoredB = await splitB.persister.restoreClient();
+
+    // B n'a rien : aucun fil de A ne fuit, et seules les clés de B sont lues.
+    expect(restoredB).toBeUndefined();
+    expect(storage.reads).toEqual([B_KEY, `${B_KEY}${DETAILS_KEY_SUFFIX}`]);
+
+    // Retour sur A : son cache est intact, fil prioritaire compris.
+    const restoredA = (await splitA.persister.restoreClient()) as PersistedClient;
+    expect(restoredA.clientState.queries).toEqual([listQuery, threadT1, contentM2]);
   });
 });
