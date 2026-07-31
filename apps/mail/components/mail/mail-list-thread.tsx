@@ -3,9 +3,9 @@ import {
   threadRowPropsAreEqual,
   type ThreadRowProps,
 } from './mail-list-thread-projection';
+import { DeferredThreadContextMenu } from '@/components/context/thread-context.deferred';
 import { useOptimisticThreadState } from '@/components/mail/optimistic-thread-state';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { ThreadContextMenu } from '@/components/context/thread-context';
 import { useOptimisticActions } from '@/hooks/use-optimistic-actions';
 import { highlightText } from '@/lib/email-utils-highlight.client';
 import { useMail, type Config } from '@/components/mail/use-mail';
@@ -460,7 +460,7 @@ export const Thread = memo(function Thread({
 
   return latestMessage ? (
     !optimisticState.shouldHide && idToUse ? (
-      <ThreadContextMenu
+      <DeferredThreadContextMenu
         threadId={idToUse}
         isInbox={isFolderInbox}
         isSpam={isFolderSpam}
@@ -468,7 +468,7 @@ export const Thread = memo(function Thread({
         isBin={isFolderBin}
       >
         {content}
-      </ThreadContextMenu>
+      </DeferredThreadContextMenu>
     ) : null
   ) : null;
 }, threadRowPropsAreEqual);

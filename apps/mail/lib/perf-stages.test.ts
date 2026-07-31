@@ -3,8 +3,9 @@ import {
   markStage,
   markStageAfterPaint,
   markStageOnce,
+  whenBootStage,
 } from './perf-stages';
-import { describe, expect, it, beforeEach } from 'vitest';
+import { describe, expect, it, beforeEach, vi } from 'vitest';
 
 beforeEach(() => {
   performance.clearMarks();
@@ -109,6 +110,77 @@ describe('markStageOnce / markStageAfterPaint — une seule fois par chargement 
       'zero:boot:list-data-ready->boot:list-painted',
     ]) {
       expect(performance.getEntriesByName(name, 'measure')).toHaveLength(1);
+    }
+  });
+});
+
+describe('whenBootStage — déclencheur différé sur signal réel (contre-revue r13)', () => {
+  beforeEach(() => {
+    __resetPerfStagesOnceForTests();
+  });
+
+  it('AUCUNE exécution avant le signal ; le jalon list-painted déclenche', () => {
+    const run = vi.fn();
+    whenBootStage('boot:list-painted', run, { fallbackMs: 60_000 });
+    expect(run).not.toHaveBeenCalled();
+
+    markStage('boot:list-painted'); // émet l'événement zero:perf-stage
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+
+  it('un AUTRE jalon ne déclenche pas', () => {
+    const run = vi.fn();
+    const cancel = whenBootStage('boot:list-painted', run, { fallbackMs: 60_000 });
+    markStage('boot:route-mounted');
+    expect(run).not.toHaveBeenCalled();
+    cancel();
+  });
+
+  it('jalon DÉJÀ marqué (abonné tardif) → exécution immédiate', () => {
+    markStage('boot:list-painted');
+    const run = vi.fn();
+    whenBootStage('boot:list-painted', run);
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+
+  it('fallback borné : boîte vide/erreur (jalon jamais atteint) → exécution quand même', () => {
+    vi.useFakeTimers();
+    try {
+      const run = vi.fn();
+      whenBootStage('boot:list-painted', run, { fallbackMs: 2_500 });
+      vi.advanceTimersByTime(2_499);
+      expect(run).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(1);
+      expect(run).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('annulation (unmount / changement d’owner) : ni signal ni fallback n’exécutent', () => {
+    vi.useFakeTimers();
+    try {
+      const run = vi.fn();
+      const cancel = whenBootStage('boot:list-painted', run, { fallbackMs: 1_000 });
+      cancel();
+      markStage('boot:list-painted');
+      vi.runAllTimers();
+      expect(run).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('exécution AU PLUS une fois (signal puis fallback)', () => {
+    vi.useFakeTimers();
+    try {
+      const run = vi.fn();
+      whenBootStage('boot:list-painted', run, { fallbackMs: 1_000 });
+      markStage('boot:list-painted');
+      vi.runAllTimers();
+      expect(run).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
     }
   });
 });

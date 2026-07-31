@@ -3,6 +3,16 @@ import { HydratedRouter } from 'react-router/dom';
 import { hydrateRoot } from 'react-dom/client';
 import './instrument';
 
+// r13 (diagnostic) : le bundle d'entrée vient d'être ÉVALUÉ (tous ses imports
+// statiques exécutés), juste avant hydrateRoot. Avec session-prime-resolved,
+// ce jalon découpe le segment dominant HTML→route-mounted : téléchargement/
+// parse/évaluation d'un côté, hydratation + montage route de l'autre.
+try {
+  performance.mark('zero:boot:entry-evaluated');
+} catch {
+  // environnement sans performance
+}
+
 // w2cd (client weight): @sentry/react is no longer statically imported here so it
 // stays out of the critical hydration bundle. React render errors are forwarded to
 // Sentry via dynamic import() — and only when telemetry is enabled (DSN set) and the

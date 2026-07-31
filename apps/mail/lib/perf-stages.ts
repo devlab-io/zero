@@ -68,6 +68,66 @@ export function markStage(
   } catch {
     // Marque de départ absente — parcours entamé avant le chargement : ignoré.
   }
+  // r13 : chaque jalon est aussi un ÉVÉNEMENT — les travaux différés (sidebar,
+  // menus) attendent le signal réel boot:list-painted au lieu de se déclencher
+  // sur leur propre montage (whenBootStage). Le dispatch est INDÉPENDANT de la
+  // mesure : une marque de départ absente ne doit jamais avaler le signal.
+  try {
+    if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+      window.dispatchEvent(new CustomEvent(PERF_STAGE_EVENT, { detail: stage }));
+    }
+  } catch {
+    // environnement sans CustomEvent
+  }
+}
+
+/** Nom d'événement émis à chaque markStage (detail = nom du jalon). */
+export const PERF_STAGE_EVENT = 'zero:perf-stage';
+
+/**
+ * Exécute `run` quand le jalon `stage` est atteint (r13). Trois chemins :
+ * déjà marqué → exécution immédiate ; sinon abonnement à PERF_STAGE_EVENT ;
+ * et un FALLBACK borné (boîte vide, erreur de liste : le jalon ne viendra
+ * jamais — la sidebar doit apparaître quand même). Retourne une annulation
+ * (unmount / changement d'owner) ; `run` s'exécute au plus une fois.
+ */
+export function whenBootStage(
+  stage: Stage,
+  run: () => void,
+  options?: { fallbackMs?: number },
+): () => void {
+  if (typeof window === 'undefined') return () => {};
+  const fallbackMs = options?.fallbackMs ?? 2_500;
+
+  if (
+    typeof performance !== 'undefined' &&
+    performance.getEntriesByName(`zero:${stage}`, 'mark').length > 0
+  ) {
+    run();
+    return () => {};
+  }
+
+  let done = false;
+  const finish = () => {
+    if (done) return;
+    done = true;
+    cleanup();
+    run();
+  };
+  const onStage = (event: Event) => {
+    if ((event as CustomEvent).detail === stage) finish();
+  };
+  const timerId = window.setTimeout(finish, fallbackMs);
+  const cleanup = () => {
+    window.removeEventListener(PERF_STAGE_EVENT, onStage);
+    window.clearTimeout(timerId);
+  };
+  window.addEventListener(PERF_STAGE_EVENT, onStage);
+
+  return () => {
+    done = true;
+    cleanup();
+  };
 }
 
 type Stage = Parameters<typeof markStage>[0];

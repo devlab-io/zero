@@ -71,22 +71,48 @@ export function extractExistingPreloads(html) {
   return hrefs;
 }
 
+/** Budgets DURS d'injection (r13) : au plus 10 preloads supplémentaires et
+ * 90 KiB gzip au total — mesurés sur les liens réellement injectés (après
+ * dédup avec le shell générique). Le cut-set du sélecteur est le POOL de
+ * candidats ; l'injecteur applique la coupe finale dans l'ordre du sélecteur
+ * (entrées de route d'abord). */
+export const MAX_INJECTED_PRELOADS = 10;
+export const MAX_INJECTED_GZIP_BYTES = 90 * 1024;
+
 /**
- * Injecte les modulepreloads manquants juste avant </head>. Idempotent :
- * les hrefs déjà présents sont ignorés ; sans </head>, HTML inchangé.
+ * Injecte les modulepreloads manquants juste avant </head>, sous budgets.
+ * Idempotent : les hrefs déjà présents sont ignorés ; sans </head>, HTML
+ * inchangé. Un chunk qui ferait dépasser le budget octets est SAUTÉ (un plus
+ * petit suivant peut encore entrer).
  * @param {string} html
  * @param {string[]} chunkNames
+ * @param {{ sizeOf?: (name: string) => number | null, maxCount?: number, maxTotalBytes?: number }} [limits]
  */
-export function injectMailRoutePreloads(html, chunkNames) {
+export function injectMailRoutePreloads(html, chunkNames, limits = {}) {
+  const maxCount = limits.maxCount ?? MAX_INJECTED_PRELOADS;
+  const maxTotalBytes = limits.maxTotalBytes ?? MAX_INJECTED_GZIP_BYTES;
+  const sizeOf = limits.sizeOf ?? (() => 0);
+
   const existing = extractExistingPreloads(html);
-  const missing = chunkNames.map((name) => `/assets/${name}`).filter((href) => !existing.has(href));
-  if (missing.length === 0) return { html, injected: 0 };
+  const missing = [];
+  let injectedBytes = 0;
+  for (const name of chunkNames) {
+    const href = `/assets/${name}`;
+    if (existing.has(href)) continue;
+    if (missing.length >= maxCount) break;
+    const size = sizeOf(name) ?? 0;
+    if (injectedBytes + size > maxTotalBytes) continue;
+    missing.push(href);
+    injectedBytes += size;
+  }
+  if (missing.length === 0) return { html, injected: 0, injectedBytes: 0 };
   const headClose = html.indexOf('</head>');
-  if (headClose === -1) return { html, injected: 0 };
+  if (headClose === -1) return { html, injected: 0, injectedBytes: 0 };
   const tags = missing.map((href) => `<link rel="modulepreload" href="${href}"/>`).join('');
   return {
     html: html.slice(0, headClose) + tags + html.slice(headClose),
     injected: missing.length,
+    injectedBytes,
   };
 }
 

@@ -19,8 +19,10 @@ describe('buildSessionPrimeSnippet', () => {
     expect(snippet).toContain('"https://api.example.com/api/auth/get-session"');
     expect(snippet).toContain("credentials:'include'");
     expect(snippet).toContain("performance.mark('zero:boot:session-prime')");
+    // r13 : le resolve effectif (succès ou échec) pose son propre jalon.
+    expect(snippet).toContain("performance.mark('zero:boot:session-prime-resolved')");
     // Un échec réseau résout à null : le vrai appelant refera sa requête.
-    expect(snippet).toContain('catch(function(){return null})');
+    expect(snippet).toContain('return null');
   });
 
   it('normalise le slash final et ne peut jamais fermer la balise script', () => {

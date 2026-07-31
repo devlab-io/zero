@@ -15,6 +15,7 @@ import {
 import { readdirSync, readFileSync, writeFileSync, existsSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { gzipSync } from 'node:zlib';
 
 const clientDir = join(dirname(fileURLToPath(import.meta.url)), '..', 'build', 'client');
 const assetsDir = join(clientDir, 'assets');
@@ -54,8 +55,17 @@ const chunks = selectMailPreloadChunks(
 );
 
 const html = readFileSync(fallbackPath, 'utf8');
-const { html: injected, injected: count } = injectMailRoutePreloads(html, chunks);
+// r13 : budget dur mesuré au gzip réel des chunks injectés.
+const gzipSizeOf = (name) => {
+  const path = join(assetsDir, name);
+  return existsSync(path) ? gzipSync(readFileSync(path)).length : null;
+};
+const {
+  html: injected,
+  injected: count,
+  injectedBytes,
+} = injectMailRoutePreloads(html, chunks, { sizeOf: gzipSizeOf });
 writeFileSync(mailFallbackPath, injected);
 console.log(
-  `[inject-mail-preloads] __mail-spa-fallback.html écrit : ${count} modulepreloads (cut-set borné : ${chunks.length} chunks) — __spa-fallback.html générique intact.`,
+  `[inject-mail-preloads] __mail-spa-fallback.html écrit : ${count} modulepreloads / ${Math.round(injectedBytes / 1024)} KiB gz (budgets ≤10 / ≤90 KiB) — __spa-fallback.html générique intact.`,
 );

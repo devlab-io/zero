@@ -42,9 +42,12 @@ export function buildSessionPrimeSnippet(backendUrl: string): string {
   // échappe les quotes, et `<` est échappé en < pour qu'aucune valeur ne
   // puisse fermer la balise <script> (séquence `</script>`).
   const serializedUrl = JSON.stringify(url).replace(/</g, '\\u003c');
+  // r13 : jalon session-prime-resolved posé au RESOLVE effectif du fetch
+  // (succès comme échec) — il sépare la RTT session réelle du reste du boot.
+  const markResolved = `try{performance.mark('zero:boot:session-prime-resolved')}catch(e){}`;
   return (
     `try{performance.mark('zero:boot:session-prime');` +
-    `window.__zeroSessionPrime={at:Date.now(),promise:fetch(${serializedUrl},{credentials:'include'}).catch(function(){return null})}}` +
+    `window.__zeroSessionPrime={at:Date.now(),promise:fetch(${serializedUrl},{credentials:'include'}).then(function(r){${markResolved}return r},function(){${markResolved}return null})}}` +
     `catch(e){}`
   );
 }

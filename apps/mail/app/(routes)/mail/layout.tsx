@@ -1,4 +1,4 @@
-import { AppSidebar } from '@/components/ui/app-sidebar';
+import { DeferredAppSidebar } from '@/components/ui/app-sidebar.deferred';
 import { lazy, Suspense } from 'react';
 import { Outlet } from 'react-router';
 
@@ -15,7 +15,9 @@ const OnboardingWrapper = lazy(() =>
 export default function MailLayout() {
   return (
     <>
-      <AppSidebar />
+      {/* r13 : sidebar hors du graphe critique — placeholder iso-largeur puis
+          chargement après premier paint + idle (voir app-sidebar.deferred). */}
+      <DeferredAppSidebar />
       <div className="bg-sidebar dark:bg-sidebar w-full">
         <Outlet />
       </div>

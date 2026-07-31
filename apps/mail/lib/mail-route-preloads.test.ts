@@ -4,6 +4,7 @@ import {
   extractMailRouteModules,
   extractStaticImports,
   injectMailRoutePreloads,
+  MAX_INJECTED_PRELOADS,
   MAX_MAIL_PRELOADS,
   selectMailPreloadChunks,
 } from '../scripts/mail-route-preloads.mjs';
@@ -139,5 +140,37 @@ describe('selectMailPreloadChunks — cut-set critique borné (r11)', () => {
     const a = selectMailPreloadChunks(['layout.js', 'page.js'], read, size);
     const b = selectMailPreloadChunks(['layout.js', 'page.js'], read, size);
     expect(a).toEqual(b);
+  });
+});
+
+describe('injectMailRoutePreloads — budgets durs (r13)', () => {
+  const bare = '<html><head></head><body></body></html>';
+
+  it('jamais plus de MAX_INJECTED_PRELOADS liens injectés', () => {
+    const names = Array.from({ length: 15 }, (_, i) => `c${i}.js`);
+    const { injected } = injectMailRoutePreloads(bare, names);
+    expect(injected).toBe(MAX_INJECTED_PRELOADS);
+  });
+
+  it('budget gzip : un chunk qui dépasserait le total est SAUTÉ, un plus petit suivant peut entrer', () => {
+    const sizes: Record<string, number> = { 'a.js': 60_000, 'b.js': 60_000, 'c.js': 20_000 };
+    const { injected, injectedBytes, html } = injectMailRoutePreloads(
+      bare,
+      ['a.js', 'b.js', 'c.js'],
+      { sizeOf: (n: string) => sizes[n] ?? 0 },
+    );
+    expect(injected).toBe(2); // a (60k) + c (20k) ; b ferait dépasser 90 KiB
+    expect(injectedBytes).toBe(80_000);
+    expect(html).toContain('/assets/a.js');
+    expect(html).not.toContain('/assets/b.js');
+    expect(html).toContain('/assets/c.js');
+  });
+
+  it('l’ordre du sélecteur est respecté : les entrées de route passent en premier sous le budget', () => {
+    const { html } = injectMailRoutePreloads(bare, ['entry.js', 'x.js'], {
+      maxCount: 1,
+    });
+    expect(html).toContain('/assets/entry.js');
+    expect(html).not.toContain('/assets/x.js');
   });
 });
