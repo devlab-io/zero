@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
 import { selectMailListState } from './mail-list-state';
+import { describe, expect, it } from 'vitest';
 
 // Issue #34, check points 1 & 2 (barème A9): a failed read NEVER renders "empty",
 // and cached rows survive a failed refresh.
@@ -26,6 +26,30 @@ describe('selectMailListState', () => {
   it('first load in flight with no data → loading', () => {
     expect(
       selectMailListState({ itemCount: 0, isLoading: true, isError: false, isOffline: false }),
+    ).toBe('loading');
+  });
+
+  it('cache hydration with no rows → loading (never a false empty)', () => {
+    expect(
+      selectMailListState({
+        itemCount: 0,
+        isLoading: false,
+        isRestoring: true,
+        isError: false,
+        isOffline: false,
+      }),
+    ).toBe('loading');
+  });
+
+  it('search transition with no preview rows → loading (never a false empty)', () => {
+    expect(
+      selectMailListState({
+        itemCount: 0,
+        isLoading: false,
+        isTransitionPending: true,
+        isError: false,
+        isOffline: false,
+      }),
     ).toBe('loading');
   });
 

@@ -1,6 +1,7 @@
 import { focusedIndexAtom, useMailNavigation } from '@/hooks/use-mail-navigation';
 import { useOptimisticActions } from '@/hooks/use-optimistic-actions';
 import { memo, useCallback, useEffect, useMemo, useRef } from 'react';
+import { selectNextThreadIds } from '@/hooks/use-thread-prefetch';
 import { shouldLoadNextMailPage } from '@/lib/mail-pagination';
 import { useMailSelection } from '@/hooks/use-mail-selection';
 import { useMailListData } from '@/hooks/use-mail-list-data';
@@ -8,6 +9,7 @@ import { selectMailListState } from '@/lib/mail-list-state';
 import { useSearchValue } from '@/hooks/use-search-value';
 import { EmptyStateIcon } from '../icons/empty-state-svg';
 import { useIsOffline } from '@/hooks/use-online-status';
+import { usePrefetchThread } from '@/hooks/use-threads';
 import { useSettings } from '@/hooks/use-settings';
 import { VList, type VListHandle } from 'virtua';
 import type { ParsedMessage } from '@/types';
@@ -36,6 +38,7 @@ export const MailList = memo(
     const {
       items,
       isLoading,
+      isRestoring,
       isFetching,
       isTransitionPending,
       isFetchingNextPage,
@@ -47,6 +50,7 @@ export const MailList = memo(
     } = useMailListData();
 
     const isOffline = useIsOffline();
+    const prefetchThread = usePrefetchThread();
 
     const itemsRef = useRef(items);
     const parentRef = useRef<HTMLDivElement>(null);
@@ -104,6 +108,20 @@ export const MailList = memo(
 
         const messageThreadId = message.threadId ?? message.id;
         const clickedIndex = itemsRef.current.findIndex((item) => item.id === messageThreadId);
+        // Warm exactly the current thread and the next two before navigation.
+        // React Query deduplicates the current-row pointer prefetch. Starting the
+        // adjacent requests here makes ArrowDown instant even when the reader is
+        // opened and advanced before its post-render effect gets a turn.
+        const adjacentThreadIds = selectNextThreadIds(
+          itemsRef.current.map((item) => item.id),
+          messageThreadId,
+          clickedIndex,
+        );
+        void Promise.all(
+          [messageThreadId, ...adjacentThreadIds].map((id) =>
+            prefetchThread(id).catch(() => undefined),
+          ),
+        );
         setFocusedIndex(clickedIndex);
         if (message.unread && autoRead) optimisticMarkAsRead([messageThreadId], true);
         setThreadId(messageThreadId);
@@ -118,6 +136,7 @@ export const MailList = memo(
         optimisticMarkAsRead,
         setThreadId,
         setDraftId,
+        prefetchThread,
         settingsData,
         setActiveReplyId,
       ],
@@ -149,6 +168,8 @@ export const MailList = memo(
     const viewState = selectMailListState({
       itemCount: items.length,
       isLoading,
+      isRestoring,
+      isTransitionPending,
       isError,
       isOffline,
     });

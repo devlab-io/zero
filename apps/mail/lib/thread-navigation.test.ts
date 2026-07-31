@@ -1,4 +1,4 @@
-import { selectAdjacentThreadTarget } from './thread-navigation';
+import { selectAdjacentThreadTarget, shouldMarkAdjacentThreadRead } from './thread-navigation';
 import { describe, expect, it } from 'vitest';
 
 describe('selectAdjacentThreadTarget', () => {
@@ -26,5 +26,14 @@ describe('selectAdjacentThreadTarget', () => {
       targetId: 't3',
       index: 2,
     });
+  });
+});
+
+describe('shouldMarkAdjacentThreadRead', () => {
+  it('only mutates Gmail when the projection says the target is unread', () => {
+    expect(shouldMarkAdjacentThreadRead({ unread: true })).toBe(true);
+    expect(shouldMarkAdjacentThreadRead({ unread: false })).toBe(false);
+    expect(shouldMarkAdjacentThreadRead({})).toBe(false);
+    expect(shouldMarkAdjacentThreadRead()).toBe(false);
   });
 });

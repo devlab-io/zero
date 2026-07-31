@@ -1,3 +1,4 @@
+import { useIsRestoring } from '@tanstack/react-query';
 import { useThreads } from '@/hooks/use-threads';
 
 /**
@@ -19,6 +20,8 @@ export interface MailListData {
   items: MailListItem[];
   /** First load in flight, no data yet. */
   isLoading: boolean;
+  /** Persisted IndexedDB cache is still being restored. */
+  isRestoring: boolean;
   /** Any list fetch in flight (foreground or background revalidation). */
   isFetching: boolean;
   /**
@@ -62,10 +65,12 @@ export interface MailListData {
  */
 export function useMailListData(): MailListData {
   const [threadsQuery, items, isReachingEnd, loadMore, isForceSyncHold] = useThreads();
+  const isRestoring = useIsRestoring();
 
   return {
     items,
     isLoading: threadsQuery.isLoading,
+    isRestoring,
     isFetching: threadsQuery.isFetching,
     isTransitionPending: threadsQuery.isPlaceholderData && threadsQuery.isFetching,
     isFetchingNextPage: threadsQuery.isFetchingNextPage,

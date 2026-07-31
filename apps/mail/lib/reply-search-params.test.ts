@@ -1,5 +1,6 @@
 import {
   markReplyOpened,
+  replaceThreadAndStripReplyState,
   stripReplyStateFromSearch,
   wasReplyOpenedSince,
 } from './reply-search-params';
@@ -27,6 +28,18 @@ describe('stripReplyStateFromSearch', () => {
 
   it('toutes les clés reply sans autre paramètre → chaîne vide (URL nue)', () => {
     expect(stripReplyStateFromSearch('?mode=reply&activeReplyId=m1')).toBe('');
+  });
+});
+
+describe('replaceThreadAndStripReplyState', () => {
+  it('changes thread and purges reply state in one URL update', () => {
+    expect(
+      replaceThreadAndStripReplyState('?threadId=old&mode=reply&activeReplyId=m1&foo=bar', 'next'),
+    ).toBe('?threadId=next&foo=bar');
+  });
+
+  it('can close the reader while preserving unrelated state', () => {
+    expect(replaceThreadAndStripReplyState('?threadId=old&foo=bar', null)).toBe('?foo=bar');
   });
 });
 

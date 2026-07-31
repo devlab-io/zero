@@ -13,6 +13,10 @@ export interface MailListStateInput {
   itemCount: number;
   /** First load in flight with no data yet. */
   isLoading: boolean;
+  /** IndexedDB query-cache hydration is still restoring persisted rows. */
+  isRestoring?: boolean;
+  /** A new search/folder key is still resolving from placeholder data. */
+  isTransitionPending?: boolean;
   /** The list query resolved to an error (500, network, offline fetch reject). */
   isError: boolean;
   /** The browser reports no connectivity. */
@@ -27,11 +31,18 @@ export interface MailListStateInput {
  * - no rows + resolved healthy     → `empty`  (the only honest empty)
  */
 export function selectMailListState(input: MailListStateInput): MailListViewState {
-  const { itemCount, isLoading, isError, isOffline } = input;
+  const {
+    itemCount,
+    isLoading,
+    isRestoring = false,
+    isTransitionPending = false,
+    isError,
+    isOffline,
+  } = input;
   if (itemCount > 0) {
     return isError || isOffline ? 'stale' : 'ready';
   }
-  if (isLoading) return 'loading';
+  if (isLoading || isRestoring || isTransitionPending) return 'loading';
   if (isError || isOffline) return 'error';
   return 'empty';
 }

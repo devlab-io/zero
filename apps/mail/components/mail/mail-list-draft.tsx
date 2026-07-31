@@ -1,8 +1,10 @@
 import { useOptimisticThreadState } from '@/components/mail/optimistic-thread-state';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useOptimisticActions } from '@/hooks/use-optimistic-actions';
+import { selectDraftRowPreview } from './mail-list-draft-preview';
 import { type UseQueryResult } from '@tanstack/react-query';
 import { cleanNameDisplay } from './mail-list-utils';
+import type { ThreadListItem } from '@zero/types';
 import type { ParsedDraft } from '@zero/types';
 import { useDraft } from '@/hooks/use-drafts';
 import { formatDate } from '@/lib/date-utils';
@@ -14,8 +16,9 @@ import { Button } from '../ui/button';
 import { useQueryState } from 'nuqs';
 import { cn } from '@/lib/utils';
 
-export const Draft = memo(({ message, index }: { message: { id: string }; index: number }) => {
-  const draftQuery = useDraft(message.id) as UseQueryResult<ParsedDraft>;
+export const Draft = memo(({ message, index }: { message: ThreadListItem; index: number }) => {
+  const preview = selectDraftRowPreview(message);
+  const draftQuery = useDraft(message.id, { enabled: !preview }) as UseQueryResult<ParsedDraft>;
   const draft = draftQuery.data;
   const [, setComposeOpen] = useQueryState('isComposeOpen');
   const [, setDraftId] = useQueryState('draftId');
@@ -40,7 +43,7 @@ export const Draft = memo(({ message, index }: { message: { id: string }; index:
     return null;
   }
 
-  if (!draft) {
+  if (!preview && !draft) {
     return (
       <div className="select-none py-1">
         <div
@@ -121,17 +124,18 @@ export const Draft = memo(({ message, index }: { message: { id: string }; index:
                     )}
                   >
                     <span className={cn('max-w-[25ch] truncate text-sm')}>
-                      {cleanNameDisplay(draft?.to?.[0] || 'No Recipient') || ''}
+                      {cleanNameDisplay(preview?.recipient ?? draft?.to?.[0] ?? 'No Recipient') ||
+                        ''}
                     </span>
                   </span>
                 </div>
-                {draft.rawMessage?.internalDate && (
+                {(preview?.receivedAt ?? draft?.rawMessage?.internalDate) && (
                   <p
                     className={cn(
                       'text-muted-foreground text-nowrap text-xs font-normal opacity-70 transition-opacity group-hover:opacity-100 dark:text-[#8C8C8C]',
                     )}
                   >
-                    {formatDate(Number(draft.rawMessage?.internalDate))}
+                    {formatDate(Number(preview?.receivedAt ?? draft?.rawMessage?.internalDate))}
                   </p>
                 )}
               </div>
@@ -141,7 +145,7 @@ export const Draft = memo(({ message, index }: { message: { id: string }; index:
                     'mt-1 line-clamp-1 max-w-[50ch] text-sm text-[#8C8C8C] md:max-w-[30ch]',
                   )}
                 >
-                  {draft?.subject}
+                  {preview?.subject ?? draft?.subject}
                 </p>
               </div>
             </div>

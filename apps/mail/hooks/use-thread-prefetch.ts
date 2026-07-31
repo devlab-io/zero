@@ -2,7 +2,6 @@ import { usePrefetchThread } from '@/hooks/use-threads';
 import { useEffect, useMemo } from 'react';
 
 const PREFETCH_COUNT = 2;
-const START_DELAY_MS = 50;
 
 export type NetworkInformation = {
   saveData?: boolean;
@@ -35,7 +34,7 @@ export function selectNextThreadIds(
 /**
  * Warms only the two threads ArrowDown will open next. The active thread must
  * already be rendered before this hook is enabled. Both requests start in the
- * same tick so the tRPC batch link can share one HTTP request and one
+ * effect's first tick so the tRPC batch link can share one HTTP request and one
  * getActiveConnection lookup, while the hard limit prevents the old row storm.
  */
 export function useNextThreadPrefetch(
@@ -59,15 +58,6 @@ export function useNextThreadPrefetch(
     const connection = (navigator as Navigator & { connection?: NetworkInformation }).connection;
     if (!enabled || !shouldPrefetchThreadBodies(connection) || selectedIds.length === 0) return;
 
-    let cancelled = false;
-    const timer = window.setTimeout(() => {
-      if (cancelled) return;
-      void Promise.all(selectedIds.map((id) => prefetchThread(id).catch(() => undefined)));
-    }, START_DELAY_MS);
-
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timer);
-    };
+    void Promise.all(selectedIds.map((id) => prefetchThread(id).catch(() => undefined)));
   }, [enabled, prefetchThread, selectedIds]);
 }

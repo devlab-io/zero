@@ -4,6 +4,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '../ui/dropdown-menu';
+import { shouldFetchMessageAttachments, useAttachments } from '@/hooks/use-attachments';
 import { formatDate, formatTime, shouldShowSeparateTime } from '@/lib/date-utils';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Forward, Printer, Reply, ReplyAll, ThreeDots } from '../icons/icons';
@@ -12,7 +13,6 @@ import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover';
 import { CopyIcon, HardDriveDownload, Lock } from 'lucide-react';
 import type { Sender, ParsedMessage, Attachment } from '@/types';
 import { useActiveConnection } from '@/hooks/use-connections';
-import { useAttachments } from '@/hooks/use-attachments';
 import { useThreadLabels } from '@/hooks/use-labels';
 import { useThread } from '@/hooks/use-threads';
 import { BimiAvatar } from '../ui/bimi-avatar';
@@ -67,7 +67,9 @@ const cleanNameDisplay = (name?: string) => {
 const MailDisplay = ({ emailData, index, totalEmails, demo, threadAttachments }: Props) => {
   const [isCollapsed, setIsCollapsed] = useState<boolean>(false);
   const { data: threadData } = useThread(emailData.threadId ?? null);
-  const { data: messageAttachments } = useAttachments(emailData.id);
+  const { data: messageAttachments } = useAttachments(emailData.id, {
+    enabled: shouldFetchMessageAttachments(emailData.attachments),
+  });
   //   const [unsubscribed, setUnsubscribed] = useState(false);
   //   const [isUnsubscribing, setIsUnsubscribing] = useState(false);
   const [preventCollapse, setPreventCollapse] = useState(false);

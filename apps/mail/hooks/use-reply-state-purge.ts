@@ -1,4 +1,8 @@
-import { stripReplyStateFromSearch, wasReplyOpenedSince } from '@/lib/reply-search-params';
+import {
+  replaceThreadAndStripReplyState,
+  stripReplyStateFromSearch,
+  wasReplyOpenedSince,
+} from '@/lib/reply-search-params';
 import { parseAsString, useQueryStates } from 'nuqs';
 import { useCallback } from 'react';
 
@@ -43,8 +47,11 @@ export function useReplyStatePurge() {
         ...(opts ? { threadId: opts.threadId } : {}),
       });
 
-      const stripNow = () => {
-        const stripped = stripReplyStateFromSearch(window.location.search);
+      const writeSearch = (threadId?: string | null) => {
+        const stripped =
+          threadId === undefined
+            ? stripReplyStateFromSearch(window.location.search)
+            : replaceThreadAndStripReplyState(window.location.search, threadId);
         if (stripped === null) return;
         window.history.replaceState(
           window.history.state,
@@ -52,12 +59,15 @@ export function useReplyStatePurge() {
           `${window.location.pathname}${stripped}${window.location.hash}`,
         );
       };
-      stripNow();
+      // Navigation must be visible synchronously. Verification ticks below only
+      // strip reply keys and intentionally preserve whatever thread a later key
+      // press selected, so rapid ArrowDown presses can never be rolled back.
+      writeSearch(opts?.threadId);
 
       let ticks = 0;
       const verify = () => {
         if (wasReplyOpenedSince(startedAt)) return;
-        stripNow();
+        writeSearch();
         if (++ticks < VERIFY_MAX_TICKS) window.setTimeout(verify, VERIFY_INTERVAL_MS);
       };
       window.setTimeout(verify, VERIFY_INTERVAL_MS);

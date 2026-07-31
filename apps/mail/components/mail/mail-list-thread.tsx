@@ -217,8 +217,13 @@ export const Thread = memo(function Thread({
         // Devlab: hover targeting restored — required for Superhuman-style
         // single-key actions (d/r/a/f/h) on the thread under the cursor.
         onMouseEnter={() => {
+          void thread.prefetch();
           window.dispatchEvent(new CustomEvent('emailHover', { detail: { id: idToUse } }));
         }}
+        // Touch/fast-click path: start the same request before React processes
+        // the click that opens the reader. A normal pointer hover gets a larger
+        // head start; pointer-down still removes avoidable scheduling latency.
+        onPointerDown={() => void thread.prefetch()}
         onMouseLeave={() => {
           window.dispatchEvent(new CustomEvent('emailHover', { detail: { id: null } }));
         }}

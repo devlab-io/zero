@@ -17,3 +17,8 @@ export function selectAdjacentThreadTarget<T extends { id: string }>(
   const target = items[targetIndex];
   return target ? { targetId: target.id, index: targetIndex } : null;
 }
+
+/** Avoid an idempotent-but-expensive label mutation for threads already read. */
+export function shouldMarkAdjacentThreadRead(item?: { unread?: boolean }): boolean {
+  return item?.unread === true;
+}

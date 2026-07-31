@@ -1,7 +1,7 @@
+import { selectAdjacentThreadTarget, shouldMarkAdjacentThreadRead } from '@/lib/thread-navigation';
 import { focusedIndexAtom, mailNavigationCommandAtom } from '@/hooks/use-mail-navigation';
 import { isTypingOrModalTarget, useShortcuts } from './use-hotkey-utils';
 import { useOptimisticActions } from '@/hooks/use-optimistic-actions';
-import { selectAdjacentThreadTarget } from '@/lib/thread-navigation';
 import { THREAD_DISPLAY_HANDLED_ACTIONS } from './handler-manifest';
 import { useReplyStatePurge } from '@/hooks/use-reply-state-purge';
 import { selectArchiveAdvanceTarget } from '@/lib/archive-advance';
@@ -56,7 +56,9 @@ export function ThreadDisplayHotkeys() {
 
       void purgeReplyState({ threadId: target.targetId });
       setFocusedIndex(target.index);
-      optimisticMarkAsRead([target.targetId], true);
+      if (shouldMarkAdjacentThreadRead(items[target.index])) {
+        optimisticMarkAsRead([target.targetId], true);
+      }
     },
     [focusedIndex, items, openThreadId, optimisticMarkAsRead, purgeReplyState, setFocusedIndex],
   );
@@ -69,7 +71,6 @@ export function ThreadDisplayHotkeys() {
 
     const handleArrowNavigation = (event: KeyboardEvent) => {
       if (
-        event.repeat ||
         event.metaKey ||
         event.ctrlKey ||
         event.altKey ||
