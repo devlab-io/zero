@@ -1,9 +1,9 @@
 // TODO: Implement shortcuts syncing and caching
 import { type Shortcut, keyboardShortcuts, enhancedKeyboardShortcuts } from '@/config/shortcuts';
 import { keyboardLayoutMapper, type KeyboardLayout } from '@/utils/keyboard-layout-map';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { getKeyCodeFromKey } from '@/utils/keyboard-utils';
 import { useHotkeys } from 'react-hotkeys-hook';
-import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { isMac } from '@/lib/platform';
 
 export const useShortcutCache = () => {
@@ -284,27 +284,45 @@ export function isTypingOrModalTarget(target: EventTarget | null): boolean {
   );
 }
 
+/**
+ * Table de liaison PAR COMBINAISON (r18, revue Codex — bug central). L'ancien
+ * reduce était indexé PAR ACTION : chaque alias écrasait le précédent, et
+ * seule la DERNIÈRE ligne d'une action survivait dans le binder — `d` mort
+ * (e gardé), `u` mort (shift+u gardé), `#` et `delete` morts (mod+backspace
+ * gardé), `mod+k` et `mod+shift+k` morts (mod+shift+p gardé), `shift+?` mort
+ * (mod+/ gardé)… pendant que l'aide annonçait toutes ces touches. Indexée par
+ * combinaison : chaque alias est réellement lié ; une combinaison ne porte
+ * qu'UNE ligne (première inscription gagne) et la résolution est un lookup
+ * exact — un événement ne peut jamais déclencher deux handlers. Les lignes
+ * `ignore` (liées ailleurs) et les séquences n'entrent jamais ici.
+ */
+export function buildComboBindings(
+  shortcuts: Shortcut[],
+  handlers: { [key: string]: (() => void) | undefined },
+): Map<string, Shortcut> {
+  const bindings = new Map<string, Shortcut>();
+  for (const shortcut of shortcuts) {
+    if (shortcut.type === 'sequence' || shortcut.ignore) continue;
+    if (!handlers[shortcut.action]) continue;
+    const combo = formatKeys(shortcut.keys);
+    if (combo && !bindings.has(combo)) bindings.set(combo, shortcut);
+  }
+  return bindings;
+}
+
 export function useShortcuts(
   shortcuts: Shortcut[],
   handlers: { [key: string]: () => void },
   options: Partial<HotkeyOptions> = {},
 ) {
   // Sequences are driven separately (useShortcutSequences); the react-hotkeys-hook
-  // binder only owns single keys and modifier chords.
-  const shortcutMap = useMemo(() => {
-    return shortcuts.reduce<Record<string, Shortcut>>((acc, shortcut) => {
-      if (shortcut.type !== 'sequence' && handlers[shortcut.action]) {
-        acc[shortcut.action] = shortcut;
-      }
-      return acc;
-    }, {});
-  }, [shortcuts, handlers]);
+  // binder only owns single keys and modifier chords — one row per COMBINATION.
+  const comboBindings = useMemo(
+    () => buildComboBindings(shortcuts, handlers),
+    [shortcuts, handlers],
+  );
 
-  const shortcutString = useMemo(() => {
-    return [...new Set(Object.values(shortcutMap).map((shortcut) => formatKeys(shortcut.keys)))]
-      .filter(Boolean)
-      .join(',');
-  }, [shortcutMap]);
+  const shortcutString = useMemo(() => [...comboBindings.keys()].join(','), [comboBindings]);
 
   useHotkeys(
     shortcutString,
@@ -323,20 +341,16 @@ export function useShortcuts(
 
       const pressedKeys = getModifierString(hotkeysEvent) + (hotkeysEvent.keys?.join('+') || '');
 
-      const matchingEntry = Object.entries(shortcutMap).find(
-        ([_, shortcut]) => formatKeys(shortcut.keys) === pressedKeys,
-      );
-
-      if (matchingEntry) {
-        const [action, shortcut] = matchingEntry;
+      const matching = comboBindings.get(pressedKeys);
+      if (matching) {
         // A bare key must never fire while typing or inside a dialog. Modifier chords
         // (mod+…) are safe there and stay live (e.g. ⌘K to dismiss the palette).
-        if (shortcut.type === 'single' && isTypingOrModalTarget(event.target)) {
+        if (matching.type === 'single' && isTypingOrModalTarget(event.target)) {
           return;
         }
-        const handlerFn = handlers[action];
+        const handlerFn = handlers[matching.action];
         if (handlerFn) {
-          if (shortcut.preventDefault || options.preventDefault) {
+          if (matching.preventDefault || options.preventDefault) {
             event.preventDefault();
           }
           handlerFn();
@@ -352,7 +366,7 @@ export function useShortcuts(
       keyup: false,
       keydown: true,
     },
-    [shortcutMap, handlers, options],
+    [comboBindings, handlers, options],
   );
 }
 

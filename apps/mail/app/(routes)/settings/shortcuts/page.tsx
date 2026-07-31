@@ -66,7 +66,8 @@ const actionLabels: Record<string, () => string> = {
   remind: m['pages.settings.shortcuts.actions.remind'],
 };
 
-const actionLabel = (action: string): string => actionLabels[action]?.() ?? action;
+const actionLabel = (shortcut: Shortcut): string =>
+  actionLabels[shortcut.action]?.() ?? shortcut.description;
 
 export default function ShortcutsPage() {
   const {
@@ -128,9 +129,9 @@ export default function ShortcutsPage() {
                   if (shortcut.action in categoryActionIndex && categorySettings.length) {
                     const idx = categoryActionIndex[shortcut.action];
                     const cat = categorySettings[idx];
-                    label = cat ? `Show ${cat.name}` : actionLabel(shortcut.action);
+                    label = cat ? `Show ${cat.name}` : actionLabel(shortcut);
                   } else {
-                    label = actionLabel(shortcut.action);
+                    label = actionLabel(shortcut);
                   }
 
                   return (

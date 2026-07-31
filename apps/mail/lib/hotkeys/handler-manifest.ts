@@ -54,6 +54,7 @@ export const THREAD_DISPLAY_HANDLED_ACTIONS = [
   'markAsNotImportant',
   'delete',
   'closeView',
+  'copyThreadLink',
 ] as const;
 
 /** `mail-list` scope — bound by MailListHotkeys via useShortcuts. */
@@ -96,4 +97,14 @@ export const LIST_IMPERATIVE_ACTIONS = [
  * `sendAndArchive` (mod+shift+Enter) via a useHotkeys → send + archive the open thread.
  * Listed so the coverage test accounts for their external binding, not as unhandled.
  */
-export const COMPOSER_EXTERNAL_ACTIONS = ['sendEmail', 'sendAndArchive'] as const;
+export const COMPOSER_EXTERNAL_ACTIONS = [
+  'sendEmail',
+  'sendAndArchive',
+  // r18 : chords composer (mod+shift+c/b/a/d/,) — liés dans email-composer.tsx
+  // par event.code (composer-chords.ts) : actifs pendant la frappe, hors du
+  // binder générique.
+  'toggleCc',
+  'toggleBcc',
+  'attachFile',
+  'discardDraft',
+] as const;

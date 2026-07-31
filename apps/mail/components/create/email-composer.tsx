@@ -1,5 +1,6 @@
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip';
 import { createDraftSaveLifecycle } from '@/lib/draft-save-lifecycle';
+import { resolveComposerChord } from '@/lib/hotkeys/composer-chords';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { resolveComposerEscape } from '@/lib/composer-escape';
 import { useEmailAliases } from '@/hooks/use-email-aliases';
@@ -8,6 +9,7 @@ import useComposeEditor from '@/hooks/use-compose-editor';
 import { Command, Plus, Type } from 'lucide-react';
 import { zodResolver } from '@/lib/zod-resolver';
 import { CurvedArrow } from '../icons/icons';
+import { isMac } from '@/lib/platform';
 import { log } from '@/lib/log';
 
 import { useTRPC } from '@/providers/query-provider';
@@ -69,6 +71,8 @@ export function EmailComposer({
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [messageLength, setMessageLength] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const ccInputRef = useRef<HTMLInputElement>(null);
+  const bccInputRef = useRef<HTMLInputElement>(null);
   /** Racine du composer — périmètre du Escape-ferme-un-reply-vide (CUA échec 6). */
   const rootRef = useRef<HTMLDivElement>(null);
   // Course sauvegarde/fermeture (CUA round 4, échec 2) : après fermeture, plus
@@ -383,6 +387,42 @@ export function EmailComposer({
     }
   };
 
+  // r18 : jeter le brouillon (mod+shift+d / mod+shift+,) — suppression RÉELLE
+  // et sans confirmation, parité Shortwave « Discard draft ». Ordre du cycle
+  // de vie : marqué abandonné D'ABORD (une sauvegarde en vol se compense en
+  // supprimant le brouillon qu'elle vient de créer — même contrat que
+  // l'abandon d'un composer vide), snapshot local purgé, brouillon serveur
+  // supprimé, composer fermé.
+  const discardDraft = () => {
+    saveLifecycle.markClosed({ abandonedEmpty: true });
+    clearDraftSnapshot();
+    if (draftId) void deleteDraftById({ id: draftId }).catch(() => {});
+    setShowLeaveConfirmation(false);
+    onAbandonEmpty?.();
+    onClose?.();
+  };
+
+  // r18 : chords composer Shortwave (Cc/Bcc/pièce jointe/jeter) — liés ICI et
+  // non au binder générique : ils doivent fonctionner pendant la frappe dans
+  // l'éditeur et les champs (le binder désactive formulaires/contenteditable),
+  // et mod+shift+, n'est pas exprimable dans react-hotkeys-hook v5. Portée
+  // naturelle : le keydown bulle depuis l'élément focusé — un composer non
+  // focusé ne reçoit rien.
+  const handleComposerChordKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    const action = resolveComposerChord(event.nativeEvent, isMac);
+    if (!action) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (action === 'toggleCc') {
+      setShowCc(true);
+      requestAnimationFrame(() => ccInputRef.current?.focus());
+    } else if (action === 'toggleBcc') {
+      setShowBcc(true);
+      requestAnimationFrame(() => bccInputRef.current?.focus());
+    } else if (action === 'attachFile') fileInputRef.current?.click();
+    else discardDraft();
+  };
+
   const handleClose = () => {
     const hasContent = editor?.getText()?.trim().length > 0;
     if (hasContent) {
@@ -488,6 +528,7 @@ export function EmailComposer({
   return (
     <div
       ref={rootRef}
+      onKeyDownCapture={handleComposerChordKeyDown}
       className={cn(
         'flex max-h-[500px] w-full max-w-[750px] flex-col overflow-hidden rounded-2xl bg-[#FAFAFA] shadow-sm dark:bg-[#202020]',
         className,
@@ -499,6 +540,8 @@ export function EmailComposer({
           isLoading={isLoading}
           showCc={showCc}
           showBcc={showBcc}
+          ccInputRef={ccInputRef}
+          bccInputRef={bccInputRef}
           onToggleCc={() => setShowCc(!showCc)}
           onToggleBcc={() => setShowBcc(!showBcc)}
           canClose={!!onClose}

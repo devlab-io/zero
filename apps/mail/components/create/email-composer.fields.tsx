@@ -9,6 +9,7 @@ import { RecipientAutosuggest } from '@/components/ui/recipient-autosuggest';
 import type { ComposerFormValues } from './email-composer.types';
 import type { Control } from 'react-hook-form';
 import { m } from '@/paraglide/messages';
+import type { RefObject } from 'react';
 import { X } from '../icons/icons';
 
 // Composer header fields (To/Cc/Bcc, Subject, From), extracted verbatim from
@@ -21,6 +22,8 @@ interface ComposerHeaderProps {
   isLoading: boolean;
   showCc: boolean;
   showBcc: boolean;
+  ccInputRef?: RefObject<HTMLInputElement | null>;
+  bccInputRef?: RefObject<HTMLInputElement | null>;
   onToggleCc: () => void;
   onToggleBcc: () => void;
   canClose: boolean;
@@ -38,6 +41,8 @@ export function ComposerHeader({
   isLoading,
   showCc,
   showBcc,
+  ccInputRef,
+  bccInputRef,
   onToggleCc,
   onToggleBcc,
   canClose,
@@ -99,6 +104,7 @@ export function ComposerHeader({
               <RecipientAutosuggest
                 control={control}
                 name="cc"
+                inputRef={ccInputRef}
                 placeholder="Enter email for Cc"
                 disabled={isLoading}
               />
@@ -112,6 +118,7 @@ export function ComposerHeader({
               <RecipientAutosuggest
                 control={control}
                 name="bcc"
+                inputRef={bccInputRef}
                 placeholder="Enter email for Bcc"
                 disabled={isLoading}
               />

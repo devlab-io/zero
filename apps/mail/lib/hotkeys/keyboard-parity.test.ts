@@ -113,10 +113,12 @@ describe('Shortwave keyboard parity — registry ↔ handler coverage (frozen ch
     expectCombosWired(SMOKE_COMBOS);
   });
 
-  // 100% of the frozen table — docs/spec/niveau8-mailos.md §Shortwave keyboard contract.
-  // Every in-scope key combo must be registered AND resolve to a live handler. The spec's
-  // out-of-parity carve-outs (team sharing/assignment/channels/todos, AI snippets,
-  // favorite-search number slots, account-number switching) are intentionally NOT here.
+  // 100% of the frozen table — docs/spec/niveau8-mailos.md §Shortwave keyboard contract,
+  // étendue r18 (doc officielle shortwave.com/docs/references/shortcuts). Every in-scope
+  // key combo must be registered AND resolve to a live handler. The carve-outs restants
+  // (team sharing/assignment/todos, IA — Thomas n'en veut aucune dans ZERO —, favorite
+  // slots g+1-9, mute sans action réelle, mod+k lien sans commande d'éditeur, instant
+  // intro) sont intentionnellement absents.
   it('every in-scope frozen-table key combo is registered and wired', () => {
     const REQUIRED_TABLE_COMBOS = [
       // Compose
@@ -126,6 +128,17 @@ describe('Shortwave keyboard parity — registry ↔ handler coverage (frozen ch
       'f',
       'mod+enter',
       'mod+shift+enter',
+      // r18 — chords composer (liés dans email-composer via event.code)
+      'mod+shift+c',
+      'ctrl+shift+c',
+      'mod+shift+b',
+      'ctrl+shift+b',
+      'mod+shift+a',
+      'ctrl+shift+a',
+      'mod+shift+d',
+      'ctrl+shift+d',
+      'mod+shift+,',
+      'ctrl+shift+,',
       // Global
       '/',
       'escape',
@@ -137,6 +150,9 @@ describe('Shortwave keyboard parity — registry ↔ handler coverage (frozen ch
       'mod+,',
       'mod+shift+l',
       'mod+z',
+      // r18 — undo nu (Ctrl Z ou Z), alias littéral d'aide
+      'z',
+      'shift+/',
       // Thread
       'd',
       'e',
@@ -150,11 +166,14 @@ describe('Shortwave keyboard parity — registry ↔ handler coverage (frozen ch
       '#',
       'delete',
       'mod+backspace',
+      'ctrl+c',
       'u',
       'shift+u',
       'shift+i',
       '+',
       '-',
+      // r18 — copie du lien de fil (mod+c, copie native prioritaire)
+      'mod+c',
       // List
       'j',
       'arrowdown',

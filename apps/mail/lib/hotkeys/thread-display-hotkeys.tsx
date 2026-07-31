@@ -4,6 +4,7 @@ import {
   shouldMarkAdjacentThreadRead,
 } from '@/lib/thread-navigation';
 import { focusedIndexAtom, mailNavigationCommandAtom } from '@/hooks/use-mail-navigation';
+import { buildThreadLink, shouldCopyThreadLink } from './copy-thread-link';
 import { isTypingOrModalTarget, useShortcuts } from './use-hotkey-utils';
 import { useOptimisticActions } from '@/hooks/use-optimistic-actions';
 import { THREAD_DISPLAY_HANDLED_ACTIONS } from './handler-manifest';
@@ -20,6 +21,7 @@ import { useCallback, useEffect } from 'react';
 import { useParams } from 'react-router';
 import { flushSync } from 'react-dom';
 import { useQueryState } from 'nuqs';
+import { toast } from 'sonner';
 
 // `openLabels`/`openMove` open the label/move picker via the `picker` query-state
 // (label-move-picker.tsx) — wired below since #32.
@@ -174,6 +176,25 @@ export function ThreadDisplayHotkeys() {
     markAsNotImportant: () => {
       if (!openThreadId) return;
       optimisticToggleImportant([openThreadId], false);
+    },
+    // r18 : mod+c — copier le lien du fil. La copie NATIVE garde la main :
+    // aucun preventDefault (ligne du registre), et rien ne part dès qu'une
+    // sélection existe ou que le focus est éditable.
+    copyThreadLink: () => {
+      if (!openThreadId) return;
+      const selection = typeof window.getSelection === 'function' ? window.getSelection() : null;
+      const allowed = shouldCopyThreadLink({
+        threadId: openThreadId,
+        hasTextSelection: Boolean(selection && !selection.isCollapsed),
+        isTypingTarget: isTypingOrModalTarget(document.activeElement),
+      });
+      if (!allowed) return;
+      void navigator.clipboard
+        ?.writeText(buildThreadLink(window.location.origin, folder, openThreadId))
+        .then(
+          () => toast.success('Thread link copied'),
+          () => toast.error('Failed to copy thread link'),
+        );
     },
     // Escape hors focus composer ferme le fil ET nettoie l'état reply. Passer
     // explicitement `threadId: null` est indispensable : sans option, la purge

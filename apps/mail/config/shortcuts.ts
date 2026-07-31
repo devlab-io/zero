@@ -144,6 +144,12 @@ const globalShortcuts: Shortcut[] = [
     type: 'combination',
     preventDefault: true,
   }),
+  // r18 : alias littéral de la doc Shortwave (`Shift /`) — sur les layouts où
+  // shift+/ ne produit pas `?`, la ligne shift+? ci-dessus ne matche pas.
+  shortcut(['shift', '/'], 'helpWithShortcuts', 'Show keyboard shortcuts', 'global', {
+    type: 'combination',
+    preventDefault: true,
+  }),
   shortcut(['mod', '/'], 'helpWithShortcuts', 'Show keyboard shortcuts', 'global', {
     type: 'combination',
     preventDefault: true,
@@ -164,6 +170,10 @@ const globalShortcuts: Shortcut[] = [
     type: 'combination',
     preventDefault: true,
   }),
+  // r18 : parité Shortwave `Ctrl Z ou Z` — délègue au MÊME handler undo ;
+  // touche nue, donc inerte pendant la frappe, et combinaison distincte de
+  // mod+z : jamais de double déclenchement.
+  shortcut(['z'], 'undoLastAction', 'Undo last reversible action', 'global', { type: 'single' }),
   shortcut(['mod', 'shift', 'f'], 'clearAllFilters', 'Clear all filters', 'global', {
     type: 'combination',
     preventDefault: true,
@@ -289,6 +299,21 @@ const threadDisplayShortcuts: Shortcut[] = [
     type: 'single',
     preventDefault: true,
   }),
+  // r18 : parité `Ctrl C — Copy thread link`. JAMAIS de preventDefault : la
+  // copie native garde la main dès qu'une sélection de texte existe ou que le
+  // focus est éditable (garde dans le handler, lib/hotkeys/copy-thread-link).
+  shortcut(['mod', 'c'], 'copyThreadLink', 'Copy thread link', 'thread-display', {
+    type: 'combination',
+  }),
+  shortcut(
+    ['ctrl', 'c'],
+    'copyThreadLink',
+    'Copy thread link (browser fallback)',
+    'thread-display',
+    {
+      type: 'combination',
+    },
+  ),
 ];
 
 const composeShortcuts: Shortcut[] = [
@@ -308,6 +333,62 @@ const composeShortcuts: Shortcut[] = [
     ignore: true,
   }),
   shortcut(['escape'], 'closeCompose', 'Close composer', 'compose'),
+  // r18 : chords composer Shortwave — liés DANS email-composer.tsx par
+  // event.code (lib/hotkeys/composer-chords.ts) : ils doivent fonctionner
+  // pendant la frappe dans l'éditeur/les champs (le binder générique désactive
+  // formulaires et contenteditable), et `mod+shift+,` n'est pas exprimable
+  // dans react-hotkeys-hook v5. Lignes `ignore` : documentées dans l'aide,
+  // comptées par le test de couverture, jamais liées deux fois.
+  shortcut(['mod', 'shift', 'c'], 'toggleCc', 'Focus Cc field', 'compose', {
+    type: 'combination',
+    preventDefault: true,
+    ignore: true,
+  }),
+  shortcut(['ctrl', 'shift', 'c'], 'toggleCc', 'Focus Cc field (browser fallback)', 'compose', {
+    type: 'combination',
+    preventDefault: true,
+    ignore: true,
+  }),
+  shortcut(['mod', 'shift', 'b'], 'toggleBcc', 'Focus Bcc field', 'compose', {
+    type: 'combination',
+    preventDefault: true,
+    ignore: true,
+  }),
+  shortcut(['ctrl', 'shift', 'b'], 'toggleBcc', 'Focus Bcc field (browser fallback)', 'compose', {
+    type: 'combination',
+    preventDefault: true,
+    ignore: true,
+  }),
+  shortcut(['mod', 'shift', 'a'], 'attachFile', 'Attach file', 'compose', {
+    type: 'combination',
+    preventDefault: true,
+    ignore: true,
+  }),
+  shortcut(['ctrl', 'shift', 'a'], 'attachFile', 'Attach file (browser fallback)', 'compose', {
+    type: 'combination',
+    preventDefault: true,
+    ignore: true,
+  }),
+  shortcut(['mod', 'shift', 'd'], 'discardDraft', 'Discard draft', 'compose', {
+    type: 'combination',
+    preventDefault: true,
+    ignore: true,
+  }),
+  shortcut(['ctrl', 'shift', 'd'], 'discardDraft', 'Discard draft (browser fallback)', 'compose', {
+    type: 'combination',
+    preventDefault: true,
+    ignore: true,
+  }),
+  shortcut(['mod', 'shift', ','], 'discardDraft', 'Discard draft', 'compose', {
+    type: 'combination',
+    preventDefault: true,
+    ignore: true,
+  }),
+  shortcut(['ctrl', 'shift', ','], 'discardDraft', 'Discard draft (browser fallback)', 'compose', {
+    type: 'combination',
+    preventDefault: true,
+    ignore: true,
+  }),
 ];
 
 // List focus/paging keys handled imperatively in hooks/use-mail-navigation.ts (they need
