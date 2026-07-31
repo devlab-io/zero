@@ -1,5 +1,10 @@
+import {
+  __resetPerfStagesOnceForTests,
+  markStage,
+  markStageAfterPaint,
+  markStageOnce,
+} from './perf-stages';
 import { describe, expect, it, beforeEach } from 'vitest';
-import { markStage } from './perf-stages';
 
 beforeEach(() => {
   performance.clearMarks();
@@ -57,5 +62,53 @@ describe('markStage — jalons perf par étapes', () => {
     expect(
       performance.getEntriesByName('zero:thread:open->thread:body-ready', 'measure'),
     ).toHaveLength(0);
+  });
+});
+
+describe('markStageOnce / markStageAfterPaint — une seule fois par chargement (r12)', () => {
+  beforeEach(() => {
+    __resetPerfStagesOnceForTests();
+  });
+
+  it('markStageOnce ne pose la marque qu’UNE fois malgré des re-montages', () => {
+    markStageOnce('boot:route-mounted');
+    markStageOnce('boot:route-mounted');
+    markStageOnce('boot:route-mounted');
+    expect(performance.getEntriesByName('zero:boot:route-mounted', 'mark')).toHaveLength(1);
+  });
+
+  it('markStageAfterPaint marque après DOUBLE rAF, une seule fois', async () => {
+    const rafQueue: FrameRequestCallback[] = [];
+    const original = globalThis.requestAnimationFrame;
+    globalThis.requestAnimationFrame = ((cb: FrameRequestCallback) => {
+      rafQueue.push(cb);
+      return rafQueue.length;
+    }) as typeof requestAnimationFrame;
+    try {
+      markStageAfterPaint('boot:list-painted');
+      markStageAfterPaint('boot:list-painted'); // re-signalé : ignoré
+      expect(performance.getEntriesByName('zero:boot:list-painted', 'mark')).toHaveLength(0);
+      rafQueue.shift()!(0); // 1er rAF : avant présentation
+      expect(performance.getEntriesByName('zero:boot:list-painted', 'mark')).toHaveLength(0);
+      rafQueue.shift()!(0); // 2e rAF : frame peint → marque
+      expect(performance.getEntriesByName('zero:boot:list-painted', 'mark')).toHaveLength(1);
+      expect(rafQueue).toHaveLength(0); // le doublon n'a rien replanifié
+    } finally {
+      globalThis.requestAnimationFrame = original;
+    }
+  });
+
+  it('les mesures du segment post-confirmation s’enchaînent (route → data → paint)', () => {
+    markStage('boot:session-confirmed');
+    markStage('boot:route-mounted');
+    markStage('boot:list-data-ready');
+    markStage('boot:list-painted');
+    for (const name of [
+      'zero:boot:session-confirmed->boot:route-mounted',
+      'zero:boot:route-mounted->boot:list-data-ready',
+      'zero:boot:list-data-ready->boot:list-painted',
+    ]) {
+      expect(performance.getEntriesByName(name, 'measure')).toHaveLength(1);
+    }
   });
 });

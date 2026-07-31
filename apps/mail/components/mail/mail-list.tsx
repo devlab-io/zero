@@ -12,6 +12,7 @@ import {
 import { useMailSelection, type MailSelectionModifiers } from '@/hooks/use-mail-selection';
 import { mailListReserveRows, shouldLoadNextMailPage } from '@/lib/mail-pagination';
 import { focusedIndexAtom, useMailNavigation } from '@/hooks/use-mail-navigation';
+import { markStage, markStageAfterPaint, markStageOnce } from '@/lib/perf-stages';
 import { useOptimisticActions } from '@/hooks/use-optimistic-actions';
 import { memo, useCallback, useEffect, useMemo, useRef } from 'react';
 import { useMailListData } from '@/hooks/use-mail-list-data';
@@ -22,7 +23,6 @@ import { useIsOffline } from '@/hooks/use-online-status';
 import { usePrefetchThread } from '@/hooks/use-threads';
 import { useSettings } from '@/hooks/use-settings';
 import { VList, type VListHandle } from 'virtua';
-import { markStage } from '@/lib/perf-stages';
 import type { ParsedMessage } from '@/types';
 import { Thread } from './mail-list-thread';
 import { Draft } from './mail-list-draft';
@@ -74,6 +74,15 @@ export const MailList = memo(
     useEffect(() => {
       itemsRef.current = items;
     }, [items]);
+
+    // Jalons r12 (diagnostic cold boot), une seule fois par chargement :
+    // premières données de liste NON VIDES, puis peinture réellement
+    // présentée (ce commit + double rAF).
+    useEffect(() => {
+      if (items.length === 0) return;
+      markStageOnce('boot:list-data-ready');
+      markStageAfterPaint('boot:list-painted');
+    }, [items.length]);
 
     // Add event listener for refresh
     useEffect(() => {

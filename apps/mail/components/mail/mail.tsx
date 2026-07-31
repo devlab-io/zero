@@ -22,6 +22,7 @@ import { useNavigate, useParams } from 'react-router';
 import { useMail } from '@/components/mail/use-mail';
 import { SidebarToggle } from '../ui/sidebar-toggle';
 import { clearBulkSelectionAtom } from './use-mail';
+import { markStageOnce } from '@/lib/perf-stages';
 import { log } from '@/lib/log';
 
 import { useThreads } from '@/hooks/use-threads';
@@ -315,6 +316,12 @@ export function MailLayout() {
   const params = useParams<{ folder: string }>();
   const folder = params?.folder ?? 'inbox';
   const [mail, setMail] = useMail();
+
+  // Jalon r12 (diagnostic cold boot) : la route mail est MONTÉE — une seule
+  // fois par chargement de document (module-scopé, pas par montage).
+  useEffect(() => {
+    markStageOnce('boot:route-mounted');
+  }, []);
   const [, clearBulkSelection] = useAtom(clearBulkSelectionAtom);
   const isMobile = useIsMobile();
   const navigate = useNavigate();

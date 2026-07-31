@@ -11,6 +11,7 @@ import {
 import { ServerProviders } from '@/providers/server-providers';
 import { ClientProviders } from '@/providers/client-providers';
 import { buildSessionPrimeSnippet } from '@/lib/session-prime';
+import { BootPerfPanel } from '@/components/boot-perf-panel';
 import { useEffect, type PropsWithChildren } from 'react';
 import { Button } from '@/components/ui/button';
 import { getLocale } from '@/paraglide/runtime';
@@ -95,6 +96,9 @@ export function Layout({ children }: PropsWithChildren) {
           {/* Devlab: DubAnalytics removed — click/referral tracking phoning dub.co
               for the editor's mail0.com domain. Nothing to gain in self-host. */}
         </ServerProviders>
+        {/* r12 : panneau diagnostic cold boot, UNIQUEMENT avec ?bootperf=1 —
+            hors providers pour vivre même pendant le shell neutre. */}
+        <BootPerfPanel />
         <ScrollRestoration />
         <Scripts />
       </body>

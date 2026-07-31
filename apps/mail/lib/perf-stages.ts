@@ -23,6 +23,12 @@ const MEASURE_FROM: Record<string, string> = {
   // r10 : le persister est scindé — les corps de mails s'hydratent APRÈS le
   // premier paint ; cette mesure isole ce second temps du restore.
   'boot:details-restored': 'boot:cache-restored',
+  // r12 (diagnostic) : découpage du segment restant après confirmation —
+  // montage de la route mail, premières données de liste NON VIDES, puis
+  // peinture réellement présentée (commit + double rAF).
+  'boot:route-mounted': 'boot:session-confirmed',
+  'boot:list-data-ready': 'boot:route-mounted',
+  'boot:list-painted': 'boot:list-data-ready',
   // r7 : « ouverture perçue » = le shell projection (sujet/expéditeur +
   // squelette) est peint, avant le corps. C'est la mesure honnête de la cible
   // <300 ms sur une ouverture profonde à froid : le corps complet reste borné
@@ -47,7 +53,10 @@ export function markStage(
     | 'send:confirmed'
     | 'boot:session-confirmed'
     | 'boot:cache-restored'
-    | 'boot:details-restored',
+    | 'boot:details-restored'
+    | 'boot:route-mounted'
+    | 'boot:list-data-ready'
+    | 'boot:list-painted',
 ): void {
   if (typeof performance === 'undefined' || typeof performance.mark !== 'function') return;
   try {
@@ -59,4 +68,41 @@ export function markStage(
   } catch {
     // Marque de départ absente — parcours entamé avant le chargement : ignoré.
   }
+}
+
+type Stage = Parameters<typeof markStage>[0];
+
+// r12 : « une seule fois par reload » — l'état vit au niveau module, donc il
+// se réinitialise à chaque chargement de document et JAMAIS sur un simple
+// re-montage de composant ou une navigation client.
+const oncePerLoad = new Set<Stage>();
+
+/** Pose la marque UNE seule fois par chargement de document. */
+export function markStageOnce(stage: Stage): void {
+  if (oncePerLoad.has(stage)) return;
+  oncePerLoad.add(stage);
+  markStage(stage);
+}
+
+/**
+ * Pose la marque une seule fois, APRÈS que le commit courant a réellement été
+ * peint : double requestAnimationFrame (le 1er court avant la présentation du
+ * frame, le 2e garantit qu'un frame est présenté). Sans rAF (tests, workers) :
+ * marque immédiate.
+ */
+export function markStageAfterPaint(stage: Stage): void {
+  if (oncePerLoad.has(stage)) return;
+  oncePerLoad.add(stage);
+  if (typeof requestAnimationFrame !== 'function') {
+    markStage(stage);
+    return;
+  }
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => markStage(stage));
+  });
+}
+
+/** Reset de test uniquement. */
+export function __resetPerfStagesOnceForTests(): void {
+  oncePerLoad.clear();
 }
