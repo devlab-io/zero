@@ -1,4 +1,3 @@
-import { log } from '@/lib/log';
 import {
   DropdownMenu,
   DropdownMenuItem,
@@ -38,6 +37,7 @@ import { Badge } from '@/components/ui/badge';
 import { GripVertical } from 'lucide-react';
 import { m } from '@/paraglide/messages';
 import { CSS } from '@dnd-kit/utilities';
+import { log } from '@/lib/log';
 import { toast } from 'sonner';
 
 interface SortableCategoryItemProps {
@@ -345,7 +345,7 @@ export default function CategoriesSettingsPage() {
   return (
     <SettingsCard
       title={m['navigation.settings.categories']()}
-      description="Customise how Zero shows the category tabs in your inbox. Drag and drop to reorder."
+      description="Customise how Reta shows the category tabs in your inbox. Drag and drop to reorder."
       footer={
         <div className="flex justify-between">
           <Button type="button" variant="outline" onClick={handleResetToDefaults}>

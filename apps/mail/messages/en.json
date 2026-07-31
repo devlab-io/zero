@@ -419,14 +419,14 @@
       "saveLabelSuccess": "Label saved successfully"
     },
     "onboarding": {
-      "welcomeTitle": "Welcome to Zero Email!",
+      "welcomeTitle": "Welcome to Reta!",
       "welcomeDescription": "Your new intelligent email experience starts here.",
       "chatTitle": "Chat with your inbox",
-      "chatDescription": "Zero allows you to chat with your inbox, and take actions on your behalf.",
+      "chatDescription": "Reta lets you work with your inbox and take action without losing momentum.",
       "composeTitle": "AI Compose & Reply",
       "composeDescription": "Our AI assistant allows you to write emails that sound like you.",
       "labelTitle": "Label your emails",
-      "labelDescription": "Zero helps you label your emails to focus on what matters.",
+      "labelDescription": "Reta helps you label your emails so you can focus on what matters.",
       "comingSoonTitle": "Coming Soon",
       "comingSoonDescription": "We're excited to bring these powerful features to all users very soon!",
       "readyTitle": "Ready to start?",
@@ -609,8 +609,8 @@
         "customPromptPlaceholder": "Enter your custom prompt for the AI...",
         "customPromptDescription": "Customize how the AI writes your email replies. This will be added to the base prompt.",
         "noResultsFound": "No results found",
-        "zeroSignature": "Zero Signature",
-        "zeroSignatureDescription": "Add a Zero signature to your emails.",
+        "zeroSignature": "Reta Signature",
+        "zeroSignatureDescription": "Add a Reta by Devlab signature to your emails.",
         "undoSendEnabled": "Undo Send",
         "undoSendEnabledDescription": "Allow canceling emails within 30 seconds of sending.",
         "defaultEmailAlias": "Default Email Alias",
@@ -623,7 +623,7 @@
       },
       "connections": {
         "title": "Email Connections",
-        "description": "Connect your email accounts to Zero.",
+        "description": "Connect your email accounts to Reta.",
         "disconnectTitle": "Disconnect Email Account",
         "disconnectDescription": "Are you sure you want to disconnect this email?",
         "cancel": "Cancel",
@@ -829,7 +829,7 @@
   "errorMessages": {
     "required_scopes_missing": "We're missing the permissions needed to craft your full experience. Please sign in again and allow the requested access.",
     "early_access_required": "Early access is required to log in",
-    "unauthorized": "Zero could not load your data from the 3rd party provider. Please try again."
+    "unauthorized": "Reta could not load your data from the third-party provider. Please try again."
   },
   "states": {
     "sending": "Sending…",

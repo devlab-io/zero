@@ -1,3 +1,4 @@
+import { DevlabMark, ProductLockup } from '@/components/brand/devlab-brand';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Suspense, useEffect, useState, type ReactNode } from 'react';
 import type { EnvVarInfo } from '@zero/server/auth-providers';
@@ -7,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { TriangleAlert } from 'lucide-react';
 import { signIn } from '@/lib/auth-client';
 import { useNavigate } from 'react-router';
+import { productBrand } from '@/lib/brand';
 import { useQueryState } from 'nuqs';
 import { toast } from 'sonner';
 
@@ -45,22 +47,9 @@ const getProviderIcon = (providerId: string, className?: string): ReactNode => {
 
     case 'zero':
       return (
-        <>
-          <img
-            src="/white-icon.svg"
-            alt="Zero"
-            width={15}
-            height={15}
-            className="mr-2 hidden dark:block"
-          />
-          <img
-            src="/black-icon.svg"
-            alt="Zero"
-            width={15}
-            height={15}
-            className="mr-2 block dark:hidden"
-          />
-        </>
+        <span className="mr-2 flex size-5 items-center justify-center rounded-md bg-[#6f00ff] text-white">
+          <DevlabMark className="size-3" />
+        </span>
       );
     default:
       return null;
@@ -136,7 +125,12 @@ function LoginClientContent({ providers, isProd }: LoginClientProps) {
     <div className="flex min-h-screen w-full flex-col items-center justify-between bg-[#111111]">
       <div className="animate-in slide-in-from-bottom-4 mx-auto flex max-w-[600px] grow items-center justify-center space-y-8 px-4 duration-500 sm:px-12 md:px-0">
         <div className="w-full space-y-4">
-          <p className="text-center text-4xl font-bold text-white md:text-5xl">Login to Zero</p>
+          <div className="mb-8 flex flex-col items-center gap-5">
+            <ProductLockup inverted className="scale-110" />
+            <p className="font-brand-display text-center text-4xl font-bold text-white md:text-5xl">
+              Login to {productBrand.name}
+            </p>
+          </div>
 
           {error && (
             <Alert variant="default" className="border-orange-500/40 bg-orange-500/10">
@@ -246,7 +240,7 @@ function LoginClientContent({ providers, isProd }: LoginClientProps) {
                 </div>
 
                 <a
-                  href="https://github.com/Mail-0/Mail-0/blob/main/README.md"
+                  href="https://github.com/devlab-io/zero"
                   target="_blank"
                   rel="noopener noreferrer"
                   className="inline-flex items-center text-sm text-black/60 underline underline-offset-2 hover:text-black dark:text-white/60 dark:hover:text-white"
@@ -303,7 +297,9 @@ function LoginClientContent({ providers, isProd }: LoginClientProps) {
           )}
         </div>
       </div>
-      <a href={'/'} className='text-white hover:text-gray-200'>Return home</a>
+      <a href={'/'} className="text-white hover:text-gray-200">
+        Return home
+      </a>
 
       <footer className="w-full px-6 py-4">
         <div className="mx-auto flex max-w-6xl items-center justify-center gap-6">

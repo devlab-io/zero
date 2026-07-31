@@ -1,23 +1,24 @@
-const TITLE = 'Zero';
-const DESCRIPTION =
-  'Experience email the way you want with 0 - the first open source email app that puts your privacy and safety first.';
+import { productBrand } from '@/lib/brand';
+
+const TITLE = productBrand.fullName;
+const DESCRIPTION = productBrand.description;
 
 export const siteConfig = {
   title: TITLE,
   description: DESCRIPTION,
   icons: {
-    icon: '/favicon.ico',
+    icon: '/reta-mark.svg',
   },
-  applicationName: 'Zero',
-  creator: '@nizzyabi @bruvimtired @ripgrim @needleXO @dakdevs @mrgsub',
+  applicationName: productBrand.name,
+  creator: productBrand.company,
   openGraph: {
     title: TITLE,
     description: DESCRIPTION,
     images: [
       {
-        url: `${import.meta.env.VITE_PUBLIC_APP_URL}/og.png`,
-        width: 1200,
-        height: 630,
+        url: `${import.meta.env.VITE_PUBLIC_APP_URL}/reta-mark.svg`,
+        width: 512,
+        height: 512,
         alt: TITLE,
       },
     ],
@@ -29,7 +30,6 @@ export const siteConfig = {
   keywords: [
     'Mail',
     'Email',
-    'Open Source',
     'Email Client',
     'Gmail Alternative',
     'Webmail',
@@ -47,6 +47,9 @@ export const siteConfig = {
     'Digital Communication',
     'Email Service',
     'Web Application',
+    'Devlab',
+    'Tahiti',
+    'Reta',
   ],
   //   metadataBase: new URL(import.meta.env.VITE_PUBLIC_APP_URL!),
 };

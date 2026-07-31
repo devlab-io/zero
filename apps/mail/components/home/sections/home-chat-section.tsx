@@ -7,6 +7,8 @@ import {
   Plus,
   X,
 } from '@/components/icons/icons';
+import { DevlabMark } from '@/components/brand/devlab-brand';
+import { productBrand } from '@/lib/brand';
 import { motion } from 'motion/react';
 
 const firstRowQueries: string[] = [
@@ -31,7 +33,7 @@ export function HomeChatSection() {
           className="flex items-center justify-center"
         >
           <h1 className="text-lg font-light text-zinc-500 md:text-xl dark:text-white/40">
-            AI email chat with natural language
+            AI-agnostic by design
           </h1>
         </motion.div>
         <motion.div
@@ -40,12 +42,24 @@ export function HomeChatSection() {
           transition={{ duration: 0.5, delay: 0.2 }}
           className="mt-2 flex flex-col items-center justify-center md:mt-8"
         >
-          <h1 className="text-4xl font-medium text-zinc-950 md:text-6xl dark:text-white">
-            Ask away
+          <h1 className="text-center text-4xl font-medium text-zinc-950 md:text-6xl dark:text-white">
+            Bring your own AI
           </h1>
-          <h1 className="mb-4 text-4xl font-medium text-zinc-500 md:text-6xl dark:text-white/40">
-            Get your answers
+          <h1 className="mb-4 text-center text-4xl font-medium text-zinc-500 md:text-6xl dark:text-white/40">
+            or none at all
           </h1>
+        </motion.div>
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5, delay: 0.3 }}
+          className="mb-4 flex items-center justify-center px-4"
+        >
+          <p className="max-w-2xl text-center text-base font-normal text-zinc-600 dark:text-[#B7B7B7]">
+            {productBrand.name} never makes a model the center of your mailbox. Connect any
+            MCP-compatible agent to its draft-only surface, or simply use the fast inbox without an
+            AI workflow.
+          </p>
         </motion.div>
 
         <motion.div
@@ -76,7 +90,7 @@ export function HomeChatSection() {
                       <div className="flex flex-1 items-center justify-start gap-3">
                         <div className="flex items-center justify-start gap-1">
                           <div className="text-base-gray-950 justify-start text-sm leading-none">
-                            Adam from Zero
+                            The {productBrand.name} team
                           </div>
                           <div className="justify-start text-center text-sm leading-none text-[#8C8C8C]">
                             [9]
@@ -183,7 +197,9 @@ export function HomeChatSection() {
                 </div>
               </div>
               <div className="relative flex h-full flex-1 flex-col items-center justify-between gap-8 self-stretch overflow-hidden px-5 py-4">
-                <img src="/white-icon.svg" alt="chat" width={28} height={28} className="h-7 w-7" />
+                <span className="flex size-7 items-center justify-center rounded-lg bg-[#6f00ff] text-white">
+                  <DevlabMark className="size-4" />
+                </span>
                 <div className="flex flex-col items-center justify-start gap-3">
                   <div className="text-base-gray-950 justify-start text-sm leading-none">
                     Ask anything about your emails
@@ -237,7 +253,7 @@ export function HomeChatSection() {
                   <div className="flex h-8 flex-1 items-center justify-start gap-1.5 overflow-hidden rounded-md bg-[#141414] pl-2.5 pr-1">
                     <div className="relative h-3 w-px rounded-full bg-white" />
                     <div className="flex-1 justify-start text-sm leading-none text-[#727272]">
-                      Ask Zero to do anything...
+                      Ask {productBrand.name} to do anything...
                     </div>
                     <div className="flex h-6 items-center justify-center gap-2.5 rounded bg-[#262626] px-1">
                       <CurvedArrow className="relative left-px mt-1 h-4 w-4 fill-black dark:fill-[#929292]" />

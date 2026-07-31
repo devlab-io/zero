@@ -1,6 +1,7 @@
 import { HomeFeatureCards } from '@/components/home/sections/home-feature-cards';
 import { HomeReplyMockup } from '@/components/home/sections/home-reply-mockup';
 import { HomeChatSection } from '@/components/home/sections/home-chat-section';
+import { HomeApiSection } from '@/components/home/sections/home-api-section';
 import { PixelatedBackground } from '@/components/home/pixelated-bg';
 import { HomeHero } from '@/components/home/sections/home-hero';
 import { ThemeToggle } from '@/components/theme/theme-toggle';
@@ -9,7 +10,7 @@ import Footer from './footer';
 
 export default function HomeContent() {
   return (
-    <main className="relative flex h-full flex-1 flex-col overflow-x-hidden bg-[#F7F7F8] px-2 text-zinc-950 transition-colors duration-300 dark:bg-[#0F0F0F] dark:text-white">
+    <main className="brand-landing relative flex h-full flex-1 flex-col overflow-x-hidden bg-[#F7F7F8] px-2 text-zinc-950 transition-colors duration-300 dark:bg-[#0F0F0F] dark:text-white">
       <PixelatedBackground
         className="z-1 absolute left-1/2 top-[-40px] h-auto w-screen min-w-[1920px] -translate-x-1/2 object-cover opacity-35 dark:opacity-100"
         style={{
@@ -30,6 +31,8 @@ export default function HomeContent() {
       <HomeReplyMockup />
 
       <HomeFeatureCards />
+
+      <HomeApiSection />
 
       <HomeChatSection />
 

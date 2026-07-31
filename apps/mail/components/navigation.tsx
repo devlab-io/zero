@@ -7,100 +7,59 @@ import {
   ListItem,
 } from '@/components/ui/navigation-menu';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
-import { GitHub, Twitter, Discord, LinkedIn, Star } from './icons/icons';
-import { AnimatedNumber } from '@/components/ui/animated-number';
+import { DevlabMark, ProductLockup } from '@/components/brand/devlab-brand';
 import { signIn, useSession } from '@/lib/auth-client';
 import { Separator } from '@/components/ui/separator';
+import { GitHub, LinkedIn } from './icons/icons';
 import { Link, useNavigate } from 'react-router';
 import { Button } from '@/components/ui/button';
-import { useState, useEffect } from 'react';
+import { productBrand } from '@/lib/brand';
 import { Menu } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import { useState } from 'react';
 import { toast } from 'sonner';
 
 const resources = [
   {
     title: 'GitHub',
-    href: 'https://github.com/Mail-0/Zero',
-    description: 'Check out our open-source projects and contributions.',
+    href: 'https://github.com/devlab-io',
+    description: 'Explore the products and open-source work built by Devlab.',
     platform: 'github' as const,
   },
   {
-    title: 'Twitter',
-    href: 'https://x.com/mail0dotcom',
-    description: 'Follow us for the latest updates and announcements.',
-    platform: 'twitter' as const,
-  },
-  {
     title: 'LinkedIn',
-    href: 'https://www.linkedin.com/company/mail0/',
-    description: 'Connect with us professionally and stay updated.',
+    href: 'https://www.linkedin.com/company/devlab-pf',
+    description: 'Follow Devlab product news from Tahiti.',
     platform: 'linkedin' as const,
-  },
-  {
-    title: 'Discord',
-    href: 'https://discord.gg/mail0',
-    description: 'Join our community and chat with the team.',
-    platform: 'discord' as const,
   },
 ];
 
 const aboutLinks = [
   {
     title: 'About',
-    href: '/about',
-    description: 'Learn more about Zero and our mission.',
+    href: productBrand.companyUrl,
+    description: 'Meet Devlab, the Tahiti team behind Reta.',
   },
   {
     title: 'Privacy',
-    href: '/privacy',
-    description: 'Read our privacy policy and data handling practices.',
+    href: 'https://devlab.io/en/privacy-policy',
+    description: 'Read Devlab’s privacy policy and data handling practices.',
   },
   {
-    title: 'Terms of Service',
-    href: '/terms',
-    description: 'Review our terms of service and usage guidelines.',
-  },
-  {
-    title: 'Contributors',
-    href: '/contributors',
-    description: 'See the contributors to Zero.',
+    title: 'Legal',
+    href: 'https://devlab.io/en/legal-mentions',
+    description: 'Review Devlab’s legal information.',
   },
 ];
 
 const IconComponent = {
   github: GitHub,
-  twitter: Twitter,
-  discord: Discord,
   linkedin: LinkedIn,
 };
 
-interface GitHubApiResponse {
-  stargazers_count: number;
-}
-
 export function Navigation() {
   const [open, setOpen] = useState(false);
-  const [stars, setStars] = useState(0); // Default fallback value
   const { data: session } = useSession();
   const navigate = useNavigate();
-
-  // w2cd (client weight): plain fetch instead of react-query — the public shell
-  // (landing, full-width pages) no longer ships a QueryClientProvider, and this
-  // component renders there. Failure leaves the fallback star count, as before.
-  useEffect(() => {
-    fetch('https://api.github.com/repos/Mail-0/Zero', {
-      headers: {
-        Accept: 'application/vnd.github.v3+json',
-      },
-    })
-      .then((response) => {
-        if (!response.ok) throw new Error('Failed to fetch GitHub stars');
-        return response.json() as Promise<GitHubApiResponse>;
-      })
-      .then((data) => setStars(data.stargazers_count || 0))
-      .catch(() => {});
-  }, []);
 
   return (
     <>
@@ -108,24 +67,9 @@ export function Navigation() {
       <header className="fixed left-[50%] z-50 hidden w-full max-w-4xl translate-x-[-50%] items-center justify-center px-4 pt-6 lg:flex">
         <nav className="border-input/50 flex w-full max-w-4xl items-center justify-between gap-2 rounded-xl border bg-white/90 p-3 px-6 text-zinc-950 shadow-sm backdrop-blur-md transition-colors dark:border-t dark:bg-[#1E1E1E]/90 dark:text-white">
           <div className="flex items-center gap-6">
-            <Link to="/" className="relative bottom-1 cursor-pointer">
-              <img
-                src="/black-icon.svg"
-                alt="Zero Email"
-                className="object-contain dark:hidden"
-                width={22}
-                height={22}
-              />
-              <img
-                src="/white-icon.svg"
-                alt="Zero Email"
-                className="hidden object-contain dark:block"
-                width={22}
-                height={22}
-              />
-              <span className="text-muted-foreground absolute -right-[-0.5px] text-[10px]">
-                beta
-              </span>
+            <Link to="/" className="flex cursor-pointer items-center gap-1.5">
+              <ProductLockup />
+              <span className="text-muted-foreground text-[10px]">beta</span>
             </Link>
             <NavigationMenu>
               <NavigationMenuList className="gap-1">
@@ -164,11 +108,17 @@ export function Navigation() {
                 </NavigationMenuItem>
                 <NavigationMenuItem className="bg-transparent text-zinc-950 dark:text-white">
                   <Button asChild variant="ghost" className="h-9 cursor-pointer bg-transparent">
-                    <a href="/pricing">Pricing</a>
+                    <a href={productBrand.contactUrl} target="_blank" rel="noopener noreferrer">
+                      Contact
+                    </a>
                   </Button>
                 </NavigationMenuItem>
                 <NavigationMenuItem className="cursor-pointer bg-transparent text-zinc-950 dark:text-white">
-                  <a href="/privacy">
+                  <a
+                    href="https://devlab.io/en/privacy-policy"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
                     <Button variant="ghost" className="ml-1 h-9 bg-transparent">
                       Privacy
                     </Button>
@@ -179,25 +129,16 @@ export function Navigation() {
           </div>
           <div className="flex gap-2">
             <a
-              href="https://github.com/Mail-0/Zero"
+              href={productBrand.companyUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className={cn(
-                'group inline-flex h-8 items-center gap-2 rounded-lg bg-black px-2 text-sm text-white transition-colors hover:bg-black/90',
-              )}
+              className="group inline-flex h-8 items-center gap-2 rounded-lg border border-[#6f00ff]/20 bg-[#f1e8ff] px-3 text-sm font-medium text-[#140151] transition-colors hover:bg-[#e6d5ff] dark:border-[#9d6dff]/30 dark:bg-[#6f00ff]/15 dark:text-[#c9afff] dark:hover:bg-[#6f00ff]/25"
             >
-              <div className="flex items-center text-white">
-                <GitHub className="mr-1 size-4 fill-white" />
-                <span className="ml-1 lg:hidden">Star</span>
-                <span className="ml-1 hidden lg:inline">GitHub</span>
-              </div>
-              <div className="flex items-center gap-1 text-sm">
-                <Star className="relative top-px size-4 fill-gray-400 duration-300 group-hover:fill-yellow-400 group-hover:drop-shadow-[0_0_8px_rgba(250,204,21,0.6)]" />
-                <AnimatedNumber value={stars} className="font-medium text-white" />
-              </div>
+              <DevlabMark className="size-4" />
+              Devlab
             </a>
             <Button
-              className="h-8 cursor-pointer bg-zinc-950 text-white hover:bg-zinc-800 hover:text-white dark:bg-white dark:text-black dark:hover:bg-zinc-100 dark:hover:text-black"
+              className="h-8 cursor-pointer bg-[#6f00ff] text-white hover:bg-[#5600ff] hover:text-white"
               onClick={() => {
                 if (session) {
                   navigate('/mail/inbox');
@@ -232,20 +173,7 @@ export function Navigation() {
             <SheetHeader className="flex flex-row items-center justify-between">
               <SheetTitle>
                 <Link to="/" onClick={() => setOpen(false)}>
-                  <img
-                    src="white-icon.svg"
-                    alt="Zero Email"
-                    className="hidden object-contain dark:block"
-                    width={22}
-                    height={22}
-                  />
-                  <img
-                    src="/black-icon.svg"
-                    alt="0.email Logo"
-                    className="object-contain dark:hidden"
-                    width={22}
-                    height={22}
-                  />
+                  <ProductLockup />
                 </Link>
               </SheetTitle>
             </SheetHeader>
@@ -254,9 +182,9 @@ export function Navigation() {
                 <Link to="/" onClick={() => setOpen(false)}>
                   Home
                 </Link>
-                <Link to="/pricing" onClick={() => setOpen(false)}>
-                  Pricing
-                </Link>
+                <a href={productBrand.contactUrl} target="_blank" rel="noopener noreferrer">
+                  Contact
+                </a>
                 {aboutLinks.map((link) => (
                   <a key={link.title} href={link.href} className="block font-medium">
                     {link.title}
@@ -266,7 +194,7 @@ export function Navigation() {
               <a
                 target="_blank"
                 rel="noreferrer noopener"
-                href="https://cal.com/team/0/chat"
+                href={productBrand.contactUrl}
                 className="font-medium"
               >
                 Contact Us

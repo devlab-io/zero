@@ -1,16 +1,26 @@
 import { PixelatedLeft, PixelatedRight } from '@/components/home/pixelated-bg';
+import { DevlabMark, DevlabWordmark } from '@/components/brand/devlab-brand';
+import { Cube, Lightning, Puzzle } from '@/components/icons/icons';
 import { Tabs, TabsContent } from '@/components/ui/tabs';
 import { signIn, useSession } from '@/lib/auth-client';
 import { Link, useNavigate } from 'react-router';
 import { Button } from '@/components/ui/button';
 import { Balancer } from 'react-wrap-balancer';
+import { productBrand } from '@/lib/brand';
 import { toast } from 'sonner';
 
 const tabs = [
-  { label: 'Chat With Your Inbox', value: 'smart-categorization' },
-  { label: 'Smart Labels', value: 'ai-features' },
-  { label: 'Write Better Emails', value: 'feature-3' },
+  { label: 'Fast Inbox', value: 'smart-categorization' },
+  { label: 'Keyboard First', value: 'ai-features' },
+  { label: 'Your Tools, Your Rules', value: 'feature-3' },
 ];
+
+const pillars = [
+  { label: 'Lightning fast', icon: Lightning },
+  { label: 'Keyboard first', glyph: '⌘' },
+  { label: 'API-first', icon: Cube },
+  { label: 'AI-agnostic', icon: Puzzle },
+] as const;
 
 export function HomeHero() {
   const navigate = useNavigate();
@@ -23,35 +33,51 @@ export function HomeHero() {
             prerendered index.html, hiding the hero until JS boot (FCP=LCP=boot). CSS
             animate-fade-up (translate only, never opacity:0) paints at CSS-parse time. */}
         <h1 className="animate-fade-up text-center text-4xl font-medium [animation-delay:0.2s] md:text-6xl">
-          <Balancer className="mb-3 max-w-[1130px]">
-            AI Powered Email, Built to Save You Time
-          </Balancer>
+          <Balancer className="mb-3 max-w-[1130px]">Email at the Speed of Thought</Balancer>
         </h1>
         <p className="animate-fade-up mx-auto mb-4 max-w-2xl text-center text-base font-medium text-zinc-600 [animation-delay:0.4s] md:text-lg dark:text-[#B7B7B7]">
-          Zero is an AI-native email client that manages your inbox, so you don&apos;t have to.
+          {productBrand.name} is the lightning-fast, keyboard-first email client built in Tahiti by
+          Devlab. API-first and AI-agnostic — your inbox, your models, your rules.
         </p>
         <p className="mb-4 ml-0.5 text-xs text-zinc-500 dark:text-[#B7B7B7]/60">
           No credit card required.
         </p>
-        <div className="animate-fade-up border-input/50 mb-6 inline-flex items-center gap-4 rounded-full border border-zinc-200 bg-white px-4 py-1 shadow-sm dark:border-[#2A2A2A] dark:bg-[#1E1E1E] dark:shadow-none">
-          <Link to="https://yc.vc" target="_blank" className="flex items-center gap-2 text-sm">
-            Backed by
-            <span>
-              <img
-                src="/yc-small.svg"
-                alt="Y Combinator"
-                className="rounded-[2px]"
-                width={18}
-                height={18}
-              />
+        <div className="animate-fade-up border-input/50 mb-4 inline-flex items-center gap-4 rounded-full border border-[#6f00ff]/20 bg-white px-4 py-1 shadow-sm dark:border-[#9d6dff]/30 dark:bg-[#1E1E1E] dark:shadow-none">
+          <Link
+            to={productBrand.companyUrl}
+            target="_blank"
+            className="flex items-center gap-2 text-sm text-[#140151] dark:text-white"
+          >
+            <span className="flex size-[18px] items-center justify-center rounded-[5px] bg-[#6f00ff] text-white">
+              <DevlabMark className="size-2.5" />
             </span>
-            Combinator
+            Built in Tahiti by
+            <DevlabWordmark className="h-3 w-auto" />
           </Link>
+        </div>
+
+        <div className="animate-fade-up mb-6 flex flex-wrap items-center justify-center gap-2 [animation-delay:0.5s]">
+          {pillars.map((pillar) => (
+            <span
+              key={pillar.label}
+              className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 bg-white px-3 py-1 text-xs font-medium text-zinc-700 dark:border-[#2A2A2A] dark:bg-[#1E1E1E] dark:text-[#B7B7B7]"
+            >
+              {'icon' in pillar ? (
+                <pillar.icon className="size-3 fill-[#6f00ff] dark:fill-[#c9afff]" />
+              ) : (
+                <span className="flex h-4 min-w-4 items-center justify-center rounded-[4px] bg-[#f1e8ff] px-0.5 text-[10px] font-semibold leading-none text-[#6f00ff] dark:bg-[#6f00ff]/15 dark:text-[#c9afff]">
+                  {pillar.glyph}
+                </span>
+              )}
+              {pillar.label}
+            </span>
+          ))}
         </div>
 
         {/* Get Started button only visible for mobile screens */}
         <div className="animate-fade-up mb-6 [animation-delay:0.6s] lg:hidden">
           <Button
+            className="bg-[#6f00ff] text-white hover:bg-[#5600ff]"
             onClick={() => {
               if (session) {
                 navigate('/mail/inbox');
@@ -96,7 +122,7 @@ export function HomeHero() {
                 <TabsContent key={tab.value} value={tab.value}>
                   <img
                     src="/email-preview.png"
-                    alt="Zero Email Preview"
+                    alt={`${productBrand.name} email preview`}
                     width={1920}
                     height={1080}
                     className="relative hidden md:block"
@@ -112,7 +138,7 @@ export function HomeHero() {
       <div className="flex items-center justify-center px-4 md:hidden">
         <img
           src="/email-preview.png"
-          alt="Zero Email Preview"
+          alt={`${productBrand.name} email preview`}
           width={1920}
           height={1080}
           className="mt-10 h-fit w-full rounded-xl border"

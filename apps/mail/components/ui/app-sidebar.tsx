@@ -196,7 +196,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
               <div className="flex-1 space-y-1">
                 <div className="flex items-center gap-2">
                   <h3 className="text-sm font-semibold text-black dark:text-white/90">
-                    Get Zero Pro
+                    Get Reta Pro
                   </h3>
                 </div>
                 {/* Contrat r8 : promo sans promesse IA — ZERO n'expose aucune IA. */}

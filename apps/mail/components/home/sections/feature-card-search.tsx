@@ -165,7 +165,7 @@ export function FeatureCardSearch() {
                   </div>
                   <div className="inline-flex items-center justify-start gap-2.5 self-stretch">
                     <div className="text-base-gray-500/50 flex-1 justify-start text-sm font-normal leading-none">
-                      Comments on "Landing Page v2"
+                      Comments on &ldquo;Landing Page v2&rdquo;
                     </div>
                     <div className="flex items-start justify-start gap-1">
                       <div className="relative h-3.5 w-3.5 overflow-hidden" />
@@ -274,11 +274,11 @@ export function FeatureCardSearch() {
       </div>
       <div className="mt-4">
         <h1 className="mb-2 text-lg font-medium leading-loose text-zinc-950 dark:text-white">
-          Smart Search
+          Keyboard First
         </h1>
         <p className="max-w-sm text-sm font-light text-zinc-600 dark:text-[#979797]">
-          Your inbox, your rules. Create personalized email processing flows that match exactly how
-          you organize,write, reply, and work.
+          Shortwave-class ergonomics: search, triage, reply and archive without touching the mouse.
+          Every action is one keystroke away.
         </p>
       </div>
     </motion.div>

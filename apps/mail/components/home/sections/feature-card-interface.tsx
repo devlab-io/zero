@@ -10,6 +10,7 @@ import {
   Tag,
   User,
 } from '@/components/icons/icons';
+import { productBrand } from '@/lib/brand';
 import { motion } from 'motion/react';
 
 export function FeatureCardInterface() {
@@ -154,8 +155,8 @@ export function FeatureCardInterface() {
           Lightning-Fast Interface
         </h1>
         <p className="max-w-sm text-sm font-light text-zinc-600 dark:text-[#979797]">
-          Email at the speed of thought. Navigate your entire inbox using just your keyboard.
-          Process hundreds of emails in minutes.
+          Opening, moving, replying and scrolling feel immediate. {productBrand.name} stays out of
+          your way, so the inbox never slows you down.
         </p>
       </div>
     </motion.div>

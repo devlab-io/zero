@@ -60,8 +60,9 @@ export function Layout({ children }: PropsWithChildren) {
       <head>
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <meta name="theme-color" content="#141414" media="(prefers-color-scheme: dark)" />
+        <meta name="theme-color" content="#140151" media="(prefers-color-scheme: dark)" />
         <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
+        <link rel="icon" href="/reta-mark.svg" type="image/svg+xml" />
         <link rel="manifest" href="/manifest.json" />
         {/* Warm up the connection to the tRPC backend early: saves one DNS+TLS
             round-trip (~150-200ms from Tahiti) on the first data fetch. */}

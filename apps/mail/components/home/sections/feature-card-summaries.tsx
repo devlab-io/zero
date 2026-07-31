@@ -234,11 +234,11 @@ export function FeatureCardSummaries() {
       </div>
       <div>
         <h1 className="mb-2 mt-4 text-lg font-medium leading-loose text-zinc-950 dark:text-white">
-          AI-Powered Summaries
+          AI on Your Terms
         </h1>
         <p className="max-w-sm text-sm font-light text-zinc-600 dark:text-[#979797]">
-          Your personal email copilot. Let our AI draft responses, summarize long threads, and
-          extract action items automatically.
+          Connect an MCP-compatible agent to Reta&apos;s draft-only surface, or use the inbox
+          without an AI workflow. The model is your choice; the mailbox remains useful on its own.
         </p>
       </div>
     </motion.div>
