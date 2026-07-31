@@ -10,7 +10,7 @@ export function HomeReplyMockup() {
         transition={{ duration: 0.5 }}
         className="flex items-center justify-center"
       >
-        <h1 className="text-lg font-light text-white/40 md:text-xl">
+        <h1 className="text-lg font-light text-zinc-500 md:text-xl dark:text-white/40">
           Designed for power users who value time
         </h1>
       </motion.div>
@@ -20,10 +20,10 @@ export function HomeReplyMockup() {
         transition={{ duration: 0.5, delay: 0.2 }}
         className="mt-2 flex flex-col items-center justify-center md:mt-8"
       >
-        <h1 className="text-center text-4xl font-medium text-white md:text-6xl">
+        <h1 className="text-center text-4xl font-medium text-zinc-950 md:text-6xl dark:text-white">
           Speed Is Everything
         </h1>
-        <h1 className="mb-3 text-center text-4xl font-medium text-white/40 md:text-6xl">
+        <h1 className="mb-3 text-center text-4xl font-medium text-zinc-500 md:text-6xl dark:text-white/40">
           Reply in seconds
         </h1>
       </motion.div>
@@ -31,7 +31,7 @@ export function HomeReplyMockup() {
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5, delay: 0.4 }}
-        className="relative bottom-3 mx-12 flex items-center justify-center bg-[#0F0F0F] md:mx-0"
+        className="relative bottom-3 mx-12 flex items-center justify-center bg-[#F7F7F8] transition-colors md:mx-0 dark:bg-[#0F0F0F]"
       >
         <div className="bg-panelDark mx-auto mt-10 inline-flex max-w-[600px] flex-col items-center justify-center overflow-hidden rounded-2xl shadow-md">
           <div className="inline-flex h-12 items-center justify-start gap-2 self-stretch border-b-[0.50px] p-4">

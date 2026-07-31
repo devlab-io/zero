@@ -1,4 +1,13 @@
-import { Calendar, ChevronDown, ChevronLeft, ChevronRight, Docx, Figma, ImageFile, X } from '@/components/icons/icons';
+import {
+  Calendar,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  Docx,
+  Figma,
+  ImageFile,
+  X,
+} from '@/components/icons/icons';
 import { motion } from 'motion/react';
 
 export function FeatureCardSummaries() {
@@ -199,7 +208,7 @@ export function FeatureCardSummaries() {
               </div>
             </div>
 
-            <div className="from-tokens-scroll-overlay-primary to-tokens-scroll-overlay-top/0 absolute left-0 top-[668.98px] h-12 w-[547.09px] bg-linear-to-l" />
+            <div className="from-tokens-scroll-overlay-primary to-tokens-scroll-overlay-top/0 bg-linear-to-l absolute left-0 top-[668.98px] h-12 w-[547.09px]" />
             <div className="bg-tokens-agent-surface/10 border-tokens-agent-stroke absolute left-[498.90px] top-[674.65px] h-8 w-8 rounded-full border-2 px-1 shadow-[0px_8.503936767578125px_17.00787353515625px_0px_rgba(0,0,0,0.15)] backdrop-blur-lg" />
           </div>
           <div className="absolute left-0 top-[121px] inline-flex w-[650px] flex-col items-start justify-start gap-4 overflow-hidden rounded-3xl border border-[#8B5CF6] bg-[#2A1D48] p-6 outline outline-[#3F325F]">
@@ -224,10 +233,10 @@ export function FeatureCardSummaries() {
         </div>
       </div>
       <div>
-        <h1 className="mb-2 mt-4 text-lg font-medium leading-loose text-white">
+        <h1 className="mb-2 mt-4 text-lg font-medium leading-loose text-zinc-950 dark:text-white">
           AI-Powered Summaries
         </h1>
-        <p className="max-w-sm text-sm font-light text-[#979797]">
+        <p className="max-w-sm text-sm font-light text-zinc-600 dark:text-[#979797]">
           Your personal email copilot. Let our AI draft responses, summarize long threads, and
           extract action items automatically.
         </p>

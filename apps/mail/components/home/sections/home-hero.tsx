@@ -27,11 +27,13 @@ export function HomeHero() {
             AI Powered Email, Built to Save You Time
           </Balancer>
         </h1>
-        <p className="animate-fade-up mx-auto mb-4 max-w-2xl text-center text-base font-medium text-[#B7B7B7] [animation-delay:0.4s] md:text-lg">
+        <p className="animate-fade-up mx-auto mb-4 max-w-2xl text-center text-base font-medium text-zinc-600 [animation-delay:0.4s] md:text-lg dark:text-[#B7B7B7]">
           Zero is an AI-native email client that manages your inbox, so you don&apos;t have to.
         </p>
-        <p className="mb-4 ml-0.5 text-xs text-[#B7B7B7]/60">No credit card required.</p>
-        <div className="animate-fade-up border-input/50 mb-6 inline-flex items-center gap-4 rounded-full border border-[#2A2A2A] bg-[#1E1E1E] px-4 py-1">
+        <p className="mb-4 ml-0.5 text-xs text-zinc-500 dark:text-[#B7B7B7]/60">
+          No credit card required.
+        </p>
+        <div className="animate-fade-up border-input/50 mb-6 inline-flex items-center gap-4 rounded-full border border-zinc-200 bg-white px-4 py-1 shadow-sm dark:border-[#2A2A2A] dark:bg-[#1E1E1E] dark:shadow-none">
           <Link to="https://yc.vc" target="_blank" className="flex items-center gap-2 text-sm">
             Backed by
             <span>
@@ -118,7 +120,7 @@ export function HomeHero() {
         />
       </div>
 
-      <div className="relative -top-3.5 hidden h-px w-full bg-[#313135] md:block" />
+      <div className="relative -top-3.5 hidden h-px w-full bg-zinc-200 md:block dark:bg-[#313135]" />
     </>
   );
 }

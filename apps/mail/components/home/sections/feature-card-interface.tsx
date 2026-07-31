@@ -97,7 +97,9 @@ export function FeatureCardInterface() {
                 <div className="inline-flex items-start justify-start gap-2 self-stretch">
                   <div className="flex flex-1 items-center justify-start gap-2.5">
                     <div className="flex items-center justify-start gap-[3.04px]">
-                      <div className="text-base-gray-950 justify-start text-xs leading-3">Nizzy</div>
+                      <div className="text-base-gray-950 justify-start text-xs leading-3">
+                        Nizzy
+                      </div>
                       <div className="justify-start text-center text-xs leading-3 text-[#8C8C8C]">
                         [9]
                       </div>
@@ -148,10 +150,10 @@ export function FeatureCardInterface() {
         </div>
       </div>
       <div className="mt-4 gap-4">
-        <h1 className="mb-2 text-xl font-medium leading-loose text-white">
+        <h1 className="mb-2 text-xl font-medium leading-loose text-zinc-950 dark:text-white">
           Lightning-Fast Interface
         </h1>
-        <p className="max-w-sm text-sm font-light text-[#979797]">
+        <p className="max-w-sm text-sm font-light text-zinc-600 dark:text-[#979797]">
           Email at the speed of thought. Navigate your entire inbox using just your keyboard.
           Process hundreds of emails in minutes.
         </p>

@@ -1,4 +1,12 @@
-import { CurvedArrow, Expand, GitHub, GroupPeople, PanelLeftOpen, Plus, X } from '@/components/icons/icons';
+import {
+  CurvedArrow,
+  Expand,
+  GitHub,
+  GroupPeople,
+  PanelLeftOpen,
+  Plus,
+  X,
+} from '@/components/icons/icons';
 import { motion } from 'motion/react';
 
 const firstRowQueries: string[] = [
@@ -22,7 +30,7 @@ export function HomeChatSection() {
           transition={{ duration: 0.5 }}
           className="flex items-center justify-center"
         >
-          <h1 className="text-lg font-light text-white/40 md:text-xl">
+          <h1 className="text-lg font-light text-zinc-500 md:text-xl dark:text-white/40">
             AI email chat with natural language
           </h1>
         </motion.div>
@@ -32,8 +40,12 @@ export function HomeChatSection() {
           transition={{ duration: 0.5, delay: 0.2 }}
           className="mt-2 flex flex-col items-center justify-center md:mt-8"
         >
-          <h1 className="text-4xl font-medium text-white md:text-6xl">Ask away</h1>
-          <h1 className="mb-4 text-4xl font-medium text-white/40 md:text-6xl">Get your answers</h1>
+          <h1 className="text-4xl font-medium text-zinc-950 md:text-6xl dark:text-white">
+            Ask away
+          </h1>
+          <h1 className="mb-4 text-4xl font-medium text-zinc-500 md:text-6xl dark:text-white/40">
+            Get your answers
+          </h1>
         </motion.div>
 
         <motion.div
@@ -152,7 +164,7 @@ export function HomeChatSection() {
                 </div>
               </div>
             </div>
-            <div className="absolute top-0 inline-flex aspect-96/125 w-full flex-col items-center justify-center overflow-hidden rounded-xl bg-[#252525] md:h-[500px] md:w-96">
+            <div className="aspect-96/125 absolute top-0 inline-flex w-full flex-col items-center justify-center overflow-hidden rounded-xl bg-[#252525] md:h-[500px] md:w-96">
               <div className="border-tokens-stroke-light/5 inline-flex items-center justify-start gap-2 self-stretch overflow-hidden border-b-[0.50px] py-3.5 pl-5 pr-3.5">
                 <div className="flex flex-1 items-center justify-start gap-3">
                   <div className="text-base-gray-950 flex flex-1 items-center justify-start text-sm leading-none">
@@ -197,8 +209,8 @@ export function HomeChatSection() {
                         </div>
                       ))}
                     </div>
-                    <div className="absolute left-0 top-0 h-7 w-12 bg-linear-to-l from-neutral-800/0 to-neutral-800" />
-                    <div className="absolute right-0 top-0 h-7 w-12 bg-linear-to-l from-neutral-800 to-neutral-800/0" />
+                    <div className="bg-linear-to-l absolute left-0 top-0 h-7 w-12 from-neutral-800/0 to-neutral-800" />
+                    <div className="bg-linear-to-l absolute right-0 top-0 h-7 w-12 from-neutral-800 to-neutral-800/0" />
                   </div>
 
                   {/* Second row */}
@@ -217,8 +229,8 @@ export function HomeChatSection() {
                         </div>
                       ))}
                     </div>
-                    <div className="absolute left-0 top-0 h-7 w-12 bg-linear-to-l from-neutral-800/0 to-neutral-800" />
-                    <div className="absolute right-0 top-0 h-7 w-12 bg-linear-to-l from-neutral-800 to-neutral-800/0" />
+                    <div className="bg-linear-to-l absolute left-0 top-0 h-7 w-12 from-neutral-800/0 to-neutral-800" />
+                    <div className="bg-linear-to-l absolute right-0 top-0 h-7 w-12 from-neutral-800 to-neutral-800/0" />
                   </div>
                 </div>
                 <div className="inline-flex w-full items-center justify-start gap-4 overflow-hidden p-0 md:w-96 md:p-4 md:pb-0">

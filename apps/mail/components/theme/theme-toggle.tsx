@@ -10,12 +10,12 @@ interface ThemeToggleProps {
 
 export function ThemeToggle({ className = '', showLabel = false }: ThemeToggleProps) {
   const [isRendered, setIsRendered] = useState(false);
-  const { theme, resolvedTheme, setTheme } = useTheme();
+  const { resolvedTheme, setTheme } = useTheme();
 
   useEffect(() => setIsRendered(true), []);
 
   async function handleThemeToggle() {
-    const newTheme = theme === 'dark' ? 'light' : 'dark';
+    const newTheme = resolvedTheme === 'dark' ? 'light' : 'dark';
 
     function update() {
       setTheme(newTheme);
@@ -32,14 +32,19 @@ export function ThemeToggle({ className = '', showLabel = false }: ThemeTogglePr
 
   if (!isRendered) return null;
 
+  const isDark = resolvedTheme === 'dark';
+  const targetTheme = isDark ? 'light' : 'dark';
+
   return (
     <button
+      type="button"
       onClick={handleThemeToggle}
-      className={`flex items-center rounded-md p-2 text-gray-600 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-white ${className}`}
-      aria-label="Toggle theme"
+      className={`flex items-center rounded-md p-2 text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-800 dark:hover:text-white ${className}`}
+      aria-label={`Switch to ${targetTheme} mode`}
+      title={`Switch to ${targetTheme} mode`}
     >
-      {theme === 'dark' ? <MoonIcon className="opacity-60" /> : <SunIcon className="opacity-60" />}
-      {showLabel && <span className="ml-2 text-sm">Toggle theme</span>}
+      {isDark ? <SunIcon className="opacity-80" /> : <MoonIcon className="opacity-80" />}
+      {showLabel && <span className="ml-2 text-sm font-medium">{isDark ? 'Light' : 'Dark'}</span>}
     </button>
   );
 }

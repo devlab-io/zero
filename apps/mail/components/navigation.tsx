@@ -106,10 +106,23 @@ export function Navigation() {
     <>
       {/* Desktop Navigation - Hidden on mobile */}
       <header className="fixed left-[50%] z-50 hidden w-full max-w-4xl translate-x-[-50%] items-center justify-center px-4 pt-6 lg:flex">
-        <nav className="border-input/50 flex w-full max-w-4xl items-center justify-between gap-2 rounded-xl border-t bg-[#1E1E1E] p-3 px-6">
+        <nav className="border-input/50 flex w-full max-w-4xl items-center justify-between gap-2 rounded-xl border bg-white/90 p-3 px-6 text-zinc-950 shadow-sm backdrop-blur-md transition-colors dark:border-t dark:bg-[#1E1E1E]/90 dark:text-white">
           <div className="flex items-center gap-6">
             <Link to="/" className="relative bottom-1 cursor-pointer">
-              <img src="white-icon.svg" alt="Zero Email" width={22} height={22} />
+              <img
+                src="/black-icon.svg"
+                alt="Zero Email"
+                className="object-contain dark:hidden"
+                width={22}
+                height={22}
+              />
+              <img
+                src="/white-icon.svg"
+                alt="Zero Email"
+                className="hidden object-contain dark:block"
+                width={22}
+                height={22}
+              />
               <span className="text-muted-foreground absolute -right-[-0.5px] text-[10px]">
                 beta
               </span>
@@ -117,7 +130,7 @@ export function Navigation() {
             <NavigationMenu>
               <NavigationMenuList className="gap-1">
                 <NavigationMenuItem>
-                  <NavigationMenuTrigger className="cursor-pointer bg-transparent text-white">
+                  <NavigationMenuTrigger className="cursor-pointer bg-transparent text-zinc-950 dark:text-white">
                     Company
                   </NavigationMenuTrigger>
                   <NavigationMenuContent>
@@ -131,7 +144,7 @@ export function Navigation() {
                   </NavigationMenuContent>
                 </NavigationMenuItem>
                 <NavigationMenuItem>
-                  <NavigationMenuTrigger className="cursor-pointer bg-transparent text-white">
+                  <NavigationMenuTrigger className="cursor-pointer bg-transparent text-zinc-950 dark:text-white">
                     Resources
                   </NavigationMenuTrigger>
                   <NavigationMenuContent>
@@ -149,12 +162,12 @@ export function Navigation() {
                     </ul>
                   </NavigationMenuContent>
                 </NavigationMenuItem>
-                <NavigationMenuItem className="bg-transparent text-white">
+                <NavigationMenuItem className="bg-transparent text-zinc-950 dark:text-white">
                   <Button asChild variant="ghost" className="h-9 cursor-pointer bg-transparent">
                     <a href="/pricing">Pricing</a>
                   </Button>
                 </NavigationMenuItem>
-                <NavigationMenuItem className="cursor-pointer bg-transparent text-white">
+                <NavigationMenuItem className="cursor-pointer bg-transparent text-zinc-950 dark:text-white">
                   <a href="/privacy">
                     <Button variant="ghost" className="ml-1 h-9 bg-transparent">
                       Privacy
@@ -184,7 +197,7 @@ export function Navigation() {
               </div>
             </a>
             <Button
-              className="h-8 cursor-pointer bg-white text-black hover:bg-white hover:text-black"
+              className="h-8 cursor-pointer bg-zinc-950 text-white hover:bg-zinc-800 hover:text-white dark:bg-white dark:text-black dark:hover:bg-zinc-100 dark:hover:text-black"
               onClick={() => {
                 if (session) {
                   navigate('/mail/inbox');
