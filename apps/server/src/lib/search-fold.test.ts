@@ -1,4 +1,9 @@
-import { foldSearchText, SEARCH_FOLD_PAIRS, toLikePattern } from './search-fold';
+import {
+  foldSearchText,
+  SEARCH_FOLD_PAIRS,
+  SEARCH_SEPARATOR_PAIRS,
+  toLikePattern,
+} from './search-fold';
 import { describe, expect, it } from 'vitest';
 
 describe('foldSearchText — pliage JS de l’aiguille (serveur)', () => {
@@ -15,6 +20,18 @@ describe('foldSearchText — pliage JS de l’aiguille (serveur)', () => {
 
   it('plie les ligatures œ/æ', () => {
     expect(foldSearchText('Œuvre cœur')).toBe('oeuvre coeur');
+  });
+
+  it('traite le slash du sujet comme une frontière de mots', () => {
+    expect(foldSearchText('Reçu Restaurant/35506')).toBe('recu restaurant 35506');
+  });
+});
+
+describe('SEARCH_SEPARATOR_PAIRS — accord séparateurs SQL/JS', () => {
+  it('chaque séparateur se plie en frontière de mots', () => {
+    for (const [from] of SEARCH_SEPARATOR_PAIRS) {
+      expect(foldSearchText(`avant${from}après`)).toBe('avant apres');
+    }
   });
 });
 

@@ -243,3 +243,16 @@ describe('mergeAuthoritativeWithLocalMatches — un exact local ne se perd jamai
     expect(mergeAuthoritativeWithLocalMatches(gmail, [])).toBe(gmail);
   });
 });
+
+describe('filterLiteralSearchPreviewItems — séparation Shortwave-like', () => {
+  it('trouve Restaurant 35506 malgré le slash du sujet', () => {
+    const rows = [
+      {
+        id: 'restaurant',
+        subject: 'Reçu Restaurant/35506',
+        sender: { name: 'contact', email: 'notifications@example.com' },
+      },
+    ];
+    expect(filterLiteralSearchPreviewItems(rows, 'Restaurant 35506')).toEqual(rows);
+  });
+});

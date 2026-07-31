@@ -21,5 +21,9 @@ export function foldSearchText(text: string): string {
   for (const [pattern, replacement] of LIGATURES) {
     folded = folded.replace(pattern, replacement);
   }
+  // Gmail/Shortwave search treats common subject separators as word
+  // boundaries. Keep the local first-paint filter aligned so
+  // `Restaurant 35506` matches `Reçu Restaurant/35506`.
+  folded = folded.replace(/\//g, ' ');
   return folded.replace(/\s+/g, ' ').trim();
 }

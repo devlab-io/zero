@@ -15,6 +15,10 @@ describe('foldSearchText — accents/casse/espaces pliés (client)', () => {
     expect(foldSearchText('  Banque   de\tTahiti  ')).toBe('banque de tahiti');
   });
 
+  it('traite le slash du sujet comme une frontière de mots', () => {
+    expect(foldSearchText('Reçu Restaurant/35506')).toBe('recu restaurant 35506');
+  });
+
   it('plie les ligatures œ/æ', () => {
     expect(foldSearchText('Œuvre cœur Ægide')).toBe('oeuvre coeur aegide');
   });

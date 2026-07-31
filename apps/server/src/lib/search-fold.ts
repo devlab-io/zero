@@ -78,11 +78,17 @@ export const SEARCH_FOLD_PAIRS: ReadonlyArray<readonly [string, string]> = [
   ['Æ', 'ae'],
 ];
 
+/** Séparateurs de sujet qui doivent se comporter comme des frontières de mots. */
+export const SEARCH_SEPARATOR_PAIRS: ReadonlyArray<readonly [string, string]> = [['/', ' ']];
+
 /** Pliage JS de l'aiguille : accents → ASCII (NFD + table), minuscules, espaces réduits. */
 export function foldSearchText(text: string): string {
   let folded = text.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
   folded = folded.toLowerCase();
   folded = folded.replace(/œ/g, 'oe').replace(/æ/g, 'ae');
+  for (const [from, to] of SEARCH_SEPARATOR_PAIRS) {
+    folded = folded.replaceAll(from, to);
+  }
   return folded.replace(/\s+/g, ' ').trim();
 }
 
@@ -101,7 +107,16 @@ export function foldedColumn(column: SQL | SQL.Aliased | unknown): SQL {
   for (const [from, to] of SEARCH_FOLD_PAIRS) {
     expr = sql`replace(${expr}, ${from}, ${to})`;
   }
-  return sql`lower(${expr})`;
+  for (const [from, to] of SEARCH_SEPARATOR_PAIRS) {
+    expr = sql`replace(${expr}, ${from}, ${to})`;
+  }
+  // SQLite has no regexp replace in Durable Objects. Three deterministic
+  // passes collapse runs up to eight spaces, enough for adjacent separators
+  // while keeping the expression portable and index-free.
+  for (let pass = 0; pass < 3; pass += 1) {
+    expr = sql`replace(${expr}, '  ', ' ')`;
+  }
+  return sql`trim(lower(${expr}))`;
 }
 
 /**
