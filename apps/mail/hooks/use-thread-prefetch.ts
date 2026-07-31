@@ -2,6 +2,7 @@ import { usePrefetchThread } from '@/hooks/use-threads';
 import { useEffect, useMemo } from 'react';
 
 const PREFETCH_COUNT = 2;
+const PREVIOUS_PREFETCH_COUNT = 1;
 const INITIAL_PREFETCH_COUNT = 3;
 const VISIBLE_PREFETCH_AHEAD_COUNT = 2;
 const VISIBLE_PREFETCH_BATCH_SIZE = 2;
@@ -16,22 +17,59 @@ export function shouldPrefetchThreadBodies(connection?: NetworkInformation): boo
   return !['slow-2g', '2g'].includes(connection?.effectiveType ?? '');
 }
 
+/**
+ * The open thread can be keyed by a projection/message id that is absent from
+ * the list; the focused row is then the only truthful position. Shared by the
+ * prefetch selectors and the reader-driven page extension in thread-display.
+ */
+export function resolveActiveThreadIndex(
+  ids: readonly string[],
+  currentId: string | null,
+  currentIndexHint: number | null = null,
+): number {
+  if (!currentId) return -1;
+  const matchingIndex = ids.findIndex((id) => id === currentId);
+  if (matchingIndex !== -1) return matchingIndex;
+  return currentIndexHint !== null && currentIndexHint >= 0 && currentIndexHint < ids.length
+    ? currentIndexHint
+    : -1;
+}
+
 export function selectNextThreadIds(
   ids: readonly string[],
   currentId: string | null,
   currentIndexHint: number | null = null,
 ): string[] {
-  if (!currentId) return [];
-  const matchingIndex = ids.findIndex((id) => id === currentId);
-  const currentIndex =
-    matchingIndex !== -1
-      ? matchingIndex
-      : currentIndexHint !== null && currentIndexHint >= 0 && currentIndexHint < ids.length
-        ? currentIndexHint
-        : -1;
+  const currentIndex = resolveActiveThreadIndex(ids, currentId, currentIndexHint);
   if (currentIndex === -1) return [];
 
   return [...new Set(ids.slice(currentIndex + 1).filter(Boolean))].slice(0, PREFETCH_COUNT);
+}
+
+/**
+ * Reader warm set: the two threads ArrowDown/j opens next plus the one
+ * ArrowUp/k returns to. Shortwave serves k-navigation from cache (CUA
+ * 2026-07-31 : 664 ms, corps stable ~249 ms) — the previous body must already
+ * be local when the reader sits on a row, wherever it is in the list.
+ */
+export function selectAdjacentThreadIds(
+  ids: readonly string[],
+  currentId: string | null,
+  currentIndexHint: number | null = null,
+): string[] {
+  const currentIndex = resolveActiveThreadIndex(ids, currentId, currentIndexHint);
+  if (currentIndex === -1) return [];
+
+  const nextIds = [...new Set(ids.slice(currentIndex + 1).filter(Boolean))].slice(
+    0,
+    PREFETCH_COUNT,
+  );
+  const previousIds = ids
+    .slice(Math.max(0, currentIndex - PREVIOUS_PREFETCH_COUNT), currentIndex)
+    .filter(Boolean)
+    .reverse();
+
+  return [...new Set([...nextIds, ...previousIds])].filter((id) => id !== currentId);
 }
 
 export function selectInitialThreadIds(ids: readonly string[]): string[] {
@@ -103,12 +141,13 @@ export function useInitialThreadPrefetch(threads: readonly { id: string }[], ena
 }
 
 /**
- * Warms only the two threads ArrowDown will open next. The active thread must
- * already be rendered before this hook is enabled. Both requests start in the
- * effect's first tick so the tRPC batch link can share one HTTP request and one
- * getActiveConnection lookup, while the hard limit prevents the old row storm.
+ * Warms the two threads ArrowDown will open next and the one ArrowUp returns
+ * to. The active thread must already be rendered before this hook is enabled.
+ * All requests start in the effect's first tick so the tRPC batch link can
+ * share one HTTP request and one getActiveConnection lookup, while the hard
+ * limit (three bodies) prevents the old row storm.
  */
-export function useNextThreadPrefetch(
+export function useAdjacentThreadPrefetch(
   threads: readonly { id: string }[],
   currentId: string | null,
   enabled: boolean,
@@ -117,7 +156,7 @@ export function useNextThreadPrefetch(
   const prefetchThread = usePrefetchThread();
   const selectedIds = useMemo(
     () =>
-      selectNextThreadIds(
+      selectAdjacentThreadIds(
         threads.map((thread) => thread.id),
         currentId,
         currentIndexHint,

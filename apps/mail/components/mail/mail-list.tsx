@@ -266,6 +266,34 @@ export const MailList = memo(
       }, 40);
     }, [prefetchVisibleThreads]);
 
+    // Parité r3 (CUA : 5 pages de scroll profond = 1 246 ms chez Shortwave) :
+    // une page qui atterrit ne génère PAS d'événement scroll. Sans ce
+    // re-contrôle, un viewport haut (première page entièrement visible) ou un
+    // arrêt pile à la frontière laissait la page suivante ET le réchauffage
+    // des corps attendre le prochain geste. Chaîne loadMore tant que la
+    // réserve est sous le seuil (borné : il s'arrête à une page pleine de
+    // réserve), sinon réarme le warmer pour les lignes fraîchement révélées.
+    const loadMoreRef = useRef(loadMore);
+    loadMoreRef.current = loadMore;
+    useEffect(() => {
+      if (isLoading || isRestoring || isFetchingNextPage) return;
+      const list = vListRef.current;
+      if (!list) return;
+      const remainingItems = Math.max(0, filteredItems.length - 1 - list.findEndIndex());
+      if (shouldLoadNextMailPage({ remainingItems, isLoading, isFetchingNextPage, hasNextPage })) {
+        void loadMoreRef.current();
+        return;
+      }
+      scheduleVisibleThreadPrefetch();
+    }, [
+      filteredItems.length,
+      hasNextPage,
+      isFetchingNextPage,
+      isLoading,
+      isRestoring,
+      scheduleVisibleThreadPrefetch,
+    ]);
+
     useEffect(() => {
       lastVisiblePrefetchKeyRef.current = '';
       visiblePrefetchGenerationRef.current += 1;

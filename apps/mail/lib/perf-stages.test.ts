@@ -24,6 +24,12 @@ describe('markStage — jalons perf par étapes', () => {
     expect(
       performance.getEntriesByName('zero:search:applied->search:results-settled', 'measure'),
     ).toHaveLength(1);
+
+    markStage('send:dispatched');
+    markStage('send:confirmed');
+    expect(
+      performance.getEntriesByName('zero:send:dispatched->send:confirmed', 'measure'),
+    ).toHaveLength(1);
   });
 
   it('reste silencieux quand la marque de départ manque (parcours entamé avant chargement)', () => {

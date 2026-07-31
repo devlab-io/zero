@@ -1,19 +1,21 @@
-import { log } from '@/lib/log';
 import { useUndoSend, type EmailData, deserializeFiles } from '@/hooks/use-undo-send';
-import { m } from '@/paraglide/messages';
+import { cleanEmailAddresses, isSendResult } from '@/lib/email-utils';
 import { useActiveConnection } from '@/hooks/use-connections';
 import { Dialog, DialogClose } from '@/components/ui/dialog';
 import { useEmailAliases } from '@/hooks/use-email-aliases';
-import { cleanEmailAddresses } from '@/lib/email-utils';
+import { interpretSendOutcome } from '@/lib/send-outbox';
 import { loadGitHubEmojis } from '@/lib/emoji-data';
+import { markStage } from '@/lib/perf-stages';
+import { m } from '@/paraglide/messages';
+import { log } from '@/lib/log';
 
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { useTRPC } from '@/providers/query-provider';
 import { useMutation } from '@tanstack/react-query';
 import { useSettings } from '@/hooks/use-settings';
 import { useSession } from '@/lib/auth-client';
 import { serializeFiles } from '@/lib/schemas';
 import { useDraft } from '@/hooks/use-drafts';
-import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 
 import type { Attachment } from '@/types';
 import { useQueryState } from 'nuqs';
@@ -107,17 +109,38 @@ export function CreateEmail({
       ? '<p style="color: #666; font-size: 12px;">Sent via <a href="https://0.email/" style="color: #0066cc; text-decoration: none;">Zero</a></p>'
       : '';
 
-    const result = await sendEmail({
-      to: data.to.map((email) => ({ email, name: email.split('@')[0] || email })),
-      cc: data.cc?.map((email) => ({ email, name: email.split('@')[0] || email })),
-      bcc: data.bcc?.map((email) => ({ email, name: email.split('@')[0] || email })),
-      subject: data.subject,
-      message: data.message + zeroSignature,
-      attachments: await serializeFiles(data.attachments),
-      fromEmail: userName.trim() ? `${userName.replace(/[<>]/g, '')} <${fromEmail}>` : fromEmail,
-      draftId: draftId ?? undefined,
-      scheduleAt: data.scheduleAt,
-    });
+    // Feedback immédiat (parité r3) : le clic Send n'affichait RIEN pendant la
+    // round-trip. La fermeture reste après confirmation réseau (mail.send est
+    // direct, pas d'outbox persisté) — le jalon send:dispatched→send:confirmed
+    // mesure exactement l'attente restante.
+    const sendingToast = toast.loading(m['states.sending']());
+    markStage('send:dispatched');
+    let result: unknown;
+    try {
+      result = await sendEmail({
+        to: data.to.map((email) => ({ email, name: email.split('@')[0] || email })),
+        cc: data.cc?.map((email) => ({ email, name: email.split('@')[0] || email })),
+        bcc: data.bcc?.map((email) => ({ email, name: email.split('@')[0] || email })),
+        subject: data.subject,
+        message: data.message + zeroSignature,
+        attachments: await serializeFiles(data.attachments),
+        fromEmail: userName.trim() ? `${userName.replace(/[<>]/g, '')} <${fromEmail}>` : fromEmail,
+        draftId: draftId ?? undefined,
+        scheduleAt: data.scheduleAt,
+      });
+
+      // `mail.send` répond `{ success: false, error }` sans throw sur un échec
+      // de mise en file : le plier en erreur évite un composer fermé sans
+      // envoi réel (faux succès silencieux). proceedWithSend garde alors le
+      // composer ouvert et le brouillon sauvegardé reste la récupération.
+      const outcome = interpretSendOutcome(result);
+      if (!outcome.ok) {
+        throw new Error(typeof outcome.error === 'string' ? outcome.error : 'Send failed');
+      }
+    } finally {
+      toast.dismiss(sendingToast);
+    }
+    markStage('send:confirmed');
 
     setDraftId(null);
     clearUndoData();
@@ -133,16 +156,24 @@ export function CreateEmail({
       posthog.capture('Create Email Sent');
     }
 
-    handleUndoSend(result, settings, {
-      to: data.to,
-      cc: data.cc,
-      bcc: data.bcc,
-      subject: data.subject,
-      message: data.message,
-      attachments: data.attachments,
-      fromEmail: data.fromEmail,
-      scheduleAt: data.scheduleAt,
-    });
+    if (isSendResult(result) && settings?.settings?.undoSendEnabled) {
+      handleUndoSend(result, settings, {
+        to: data.to,
+        cc: data.cc,
+        bcc: data.bcc,
+        subject: data.subject,
+        message: data.message,
+        attachments: data.attachments,
+        fromEmail: data.fromEmail,
+        scheduleAt: data.scheduleAt,
+      });
+    } else {
+      // Sans fenêtre d'annulation, aucune confirmation n'était affichée :
+      // confirmer explicitement une fois le serveur résolu.
+      toast.success(
+        data.scheduleAt ? m['common.undoSend.emailScheduled']() : m['common.undoSend.emailSent'](),
+      );
+    }
   };
 
   useEffect(() => {
@@ -167,17 +198,17 @@ export function CreateEmail({
   const undoEmailData = useMemo((): EmailData | null => {
     if (isComposeOpen !== 'true') return null;
     if (typeof window === 'undefined') return null;
-    
+
     const storedData = localStorage.getItem('undoEmailData');
     if (!storedData) return null;
-    
+
     try {
       const parsedData = JSON.parse(storedData);
-      
+
       if (parsedData.attachments && Array.isArray(parsedData.attachments)) {
         parsedData.attachments = deserializeFiles(parsedData.attachments);
       }
-      
+
       return parsedData;
     } catch (error) {
       log.error('Failed to parse undo email data:', error);
@@ -221,7 +252,7 @@ export function CreateEmail({
         <div className="flex min-h-screen flex-col items-center justify-center gap-1">
           <div className="flex w-[750px] justify-start">
             <DialogClose asChild className="flex">
-              <button className="dark:bg-panelDark flex items-center gap-1 rounded-lg bg-[#F0F0F0] px-2 py-1 hover:bg-gray-100 dark:hover:bg-[#404040] transition-colors cursor-pointer">
+              <button className="dark:bg-panelDark flex cursor-pointer items-center gap-1 rounded-lg bg-[#F0F0F0] px-2 py-1 transition-colors hover:bg-gray-100 dark:hover:bg-[#404040]">
                 <X className="fill-muted-foreground mt-0.5 h-3.5 w-3.5 dark:fill-[#929292]" />
                 <span className="text-muted-foreground text-sm font-medium dark:text-white">
                   esc
@@ -244,46 +275,38 @@ export function CreateEmail({
                 </div>
               }
             >
-            <EmailComposer
-              key={typedDraft?.id || undoEmailData?.to?.join(',') || 'composer'}
-              className="mb-12 rounded-2xl border"
-              onSendEmail={handleSendEmail}
-              initialMessage={
-                undoEmailData?.message || 
-                typedDraft?.content || 
-                initialBody
-              }
-              initialTo={
-                undoEmailData?.to ||
-                typedDraft?.to?.map((e: string) => e.replace(/[<>]/g, '')) ||
-                processInitialEmails(initialTo)
-              }
-              initialCc={
-                undoEmailData?.cc ||
-                typedDraft?.cc?.map((e: string) => e.replace(/[<>]/g, '')) ||
-                processInitialEmails(initialCc)
-              }
-              initialBcc={
-                undoEmailData?.bcc ||
-                typedDraft?.bcc?.map((e: string) => e.replace(/[<>]/g, '')) ||
-                processInitialEmails(initialBcc)
-              }
-              onClose={() => {
-                setThreadId(null);
-                setActiveReplyId(null);
-                setIsComposeOpen(null);
-                setDraftId(null);
-                clearUndoData();
-              }}
-              initialAttachments={undoEmailData?.attachments || files}
-              initialSubject={
-                undoEmailData?.subject || 
-                typedDraft?.subject || 
-                initialSubject
-              }
-              autofocus={false}
-              settingsLoading={settingsLoading}
-            />
+              <EmailComposer
+                key={typedDraft?.id || undoEmailData?.to?.join(',') || 'composer'}
+                className="mb-12 rounded-2xl border"
+                onSendEmail={handleSendEmail}
+                initialMessage={undoEmailData?.message || typedDraft?.content || initialBody}
+                initialTo={
+                  undoEmailData?.to ||
+                  typedDraft?.to?.map((e: string) => e.replace(/[<>]/g, '')) ||
+                  processInitialEmails(initialTo)
+                }
+                initialCc={
+                  undoEmailData?.cc ||
+                  typedDraft?.cc?.map((e: string) => e.replace(/[<>]/g, '')) ||
+                  processInitialEmails(initialCc)
+                }
+                initialBcc={
+                  undoEmailData?.bcc ||
+                  typedDraft?.bcc?.map((e: string) => e.replace(/[<>]/g, '')) ||
+                  processInitialEmails(initialBcc)
+                }
+                onClose={() => {
+                  setThreadId(null);
+                  setActiveReplyId(null);
+                  setIsComposeOpen(null);
+                  setDraftId(null);
+                  clearUndoData();
+                }}
+                initialAttachments={undoEmailData?.attachments || files}
+                initialSubject={undoEmailData?.subject || typedDraft?.subject || initialSubject}
+                autofocus={false}
+                settingsLoading={settingsLoading}
+              />
             </Suspense>
           )}
         </div>

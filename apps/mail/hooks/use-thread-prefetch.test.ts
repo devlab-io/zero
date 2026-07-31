@@ -1,5 +1,7 @@
 import {
   prefetchThreadIdsInBatches,
+  resolveActiveThreadIndex,
+  selectAdjacentThreadIds,
   selectInitialThreadIds,
   selectNextThreadIds,
   selectVisibleThreadIds,
@@ -32,6 +34,29 @@ describe('targeted thread prefetch', () => {
 
   it('uses the focused row when the open thread uses another projection id', () => {
     expect(selectNextThreadIds(['a', 'b', 'c', 'd'], 'message-id', 1)).toEqual(['c', 'd']);
+  });
+
+  it('resolves the active index by id first, then by focused-row hint', () => {
+    expect(resolveActiveThreadIndex(['a', 'b', 'c'], 'b', null)).toBe(1);
+    expect(resolveActiveThreadIndex(['a', 'b', 'c'], 'missing', 2)).toBe(2);
+    expect(resolveActiveThreadIndex(['a', 'b', 'c'], 'missing', 5)).toBe(-1);
+    expect(resolveActiveThreadIndex(['a', 'b', 'c'], null, 1)).toBe(-1);
+  });
+
+  it('warms the two next threads and the previous one around the reader', () => {
+    expect(selectAdjacentThreadIds(['a', 'b', 'c', 'd', 'e'], 'c')).toEqual(['d', 'e', 'b']);
+    expect(selectAdjacentThreadIds(['a', 'b', 'c', 'd'], 'message-id', 2)).toEqual(['d', 'b']);
+  });
+
+  it('adjacent selection degrades cleanly at both list boundaries', () => {
+    expect(selectAdjacentThreadIds(['a', 'b', 'c'], 'a')).toEqual(['b', 'c']);
+    expect(selectAdjacentThreadIds(['a', 'b', 'c'], 'c')).toEqual(['b']);
+    expect(selectAdjacentThreadIds(['only'], 'only')).toEqual([]);
+    expect(selectAdjacentThreadIds(['a', 'b'], 'missing')).toEqual([]);
+  });
+
+  it('never duplicates between the next and previous windows', () => {
+    expect(selectAdjacentThreadIds(['x', 'b', 'y', 'b', 'c'], 'missing', 2)).toEqual(['b', 'c']);
   });
 
   it('warms the full visible window and the next two rows after a scroll', () => {

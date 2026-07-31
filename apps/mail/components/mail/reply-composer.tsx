@@ -5,16 +5,19 @@ import { useActiveConnection } from '@/hooks/use-connections';
 import { useEmailAliases } from '@/hooks/use-email-aliases';
 import { markDraftAbandoned } from '@/lib/abandoned-drafts';
 import { lazy, Suspense, useEffect, useMemo } from 'react';
+import { interpretSendOutcome } from '@/lib/send-outbox';
 import { useHotkeysContext } from 'react-hotkeys-hook';
 import { useTRPC } from '@/providers/query-provider';
 import { useMutation } from '@tanstack/react-query';
 import { useUndoSend } from '@/hooks/use-undo-send';
 import { loadGitHubEmojis } from '@/lib/emoji-data';
 import { useSettings } from '@/hooks/use-settings';
+import { isSendResult } from '@/lib/email-utils';
 import { useThread } from '@/hooks/use-threads';
 import { useSession } from '@/lib/auth-client';
 import { serializeFiles } from '@/lib/schemas';
 import { useDraft } from '@/hooks/use-drafts';
+import { markStage } from '@/lib/perf-stages';
 import { m } from '@/paraglide/messages';
 import type { Sender } from '@/types';
 import { useQueryState } from 'nuqs';
@@ -88,7 +91,10 @@ export default function ReplyCompose({ messageId }: ReplyComposeProps) {
     if (!replyToMessage || !activeConnection?.email) return;
 
     // Optimistic send (W2-H): show an immediate "Sending…" state and close the
-    // composer as soon as the send resolves — no blocking refetch in the close path.
+    // composer as soon as the send resolves — no blocking refetch in the close
+    // path. La fermeture reste APRÈS la confirmation réseau : mail.send est
+    // direct (pas d'outbox persisté côté serveur pour compose/reply), fermer
+    // avant perdrait l'envoi sur un reload/crash pendant la round-trip.
     const sendingToast = toast.loading(m['states.sending']());
 
     try {
@@ -162,7 +168,7 @@ export default function ReplyCompose({ messageId }: ReplyComposeProps) {
               //   replyToMessage.decodedBody,
             );
 
-      const result = await sendEmail({
+      const payload = {
         to: toRecipients,
         cc: ccRecipients,
         bcc: bccRecipients,
@@ -185,8 +191,23 @@ export default function ReplyCompose({ messageId }: ReplyComposeProps) {
         isForward: mode === 'forward',
         originalMessage: replyToMessage.decodedBody,
         scheduleAt: data.scheduleAt,
-      });
+      };
 
+      // Jalon perf : send:dispatched → send:confirmed mesure la round-trip que
+      // le composer attend encore (parité r3 : l'écart à viser est <1 s).
+      markStage('send:dispatched');
+      const result = await sendEmail(payload);
+
+      // `mail.send` répond `{ success: false, error }` sans throw sur les
+      // échecs de mise en file : c'était un faux succès silencieux (composer
+      // fermé, rien d'envoyé, aucun feedback). Le plier en erreur garde le
+      // contenu ouvert et récupérable.
+      const outcome = interpretSendOutcome(result);
+      if (!outcome.ok) {
+        throw new Error(typeof outcome.error === 'string' ? outcome.error : 'Send failed');
+      }
+
+      markStage('send:confirmed');
       posthog.capture('Reply Email Sent');
       toast.dismiss(sendingToast);
 
@@ -197,15 +218,25 @@ export default function ReplyCompose({ messageId }: ReplyComposeProps) {
       void purgeReplyState();
       void refetch();
 
-      handleUndoSend(result, settings, {
-        to: data.to,
-        cc: data.cc,
-        bcc: data.bcc,
-        subject: data.subject,
-        message: data.message,
-        attachments: data.attachments,
-        scheduleAt: data.scheduleAt,
-      });
+      if (isSendResult(result) && settings?.settings?.undoSendEnabled) {
+        handleUndoSend(result, settings, {
+          to: data.to,
+          cc: data.cc,
+          bcc: data.bcc,
+          subject: data.subject,
+          message: data.message,
+          attachments: data.attachments,
+          scheduleAt: data.scheduleAt,
+        });
+      } else {
+        // Sans fenêtre d'annulation, la disparition du toast « envoi… » était
+        // le seul signal : confirmer explicitement une fois le serveur résolu.
+        toast.success(
+          data.scheduleAt
+            ? m['common.undoSend.emailScheduled']()
+            : m['common.undoSend.emailSent'](),
+        );
+      }
     } catch (error) {
       toast.dismiss(sendingToast);
       log.error('Error sending email:', error);

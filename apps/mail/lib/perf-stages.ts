@@ -13,10 +13,20 @@
 const MEASURE_FROM: Record<string, string> = {
   'search:results-settled': 'search:applied',
   'thread:body-ready': 'thread:open',
+  // `send:dispatched` = l'UI est libérée (composer fermé, envoi en fond) ;
+  // `send:confirmed` = le serveur a accepté/enfilé. L'écart mesure la latence
+  // réseau que l'outbox optimiste retire du chemin perçu.
+  'send:confirmed': 'send:dispatched',
 };
 
 export function markStage(
-  stage: 'search:applied' | 'search:results-settled' | 'thread:open' | 'thread:body-ready',
+  stage:
+    | 'search:applied'
+    | 'search:results-settled'
+    | 'thread:open'
+    | 'thread:body-ready'
+    | 'send:dispatched'
+    | 'send:confirmed',
 ): void {
   if (typeof performance === 'undefined' || typeof performance.mark !== 'function') return;
   try {

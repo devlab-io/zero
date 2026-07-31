@@ -18,12 +18,13 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { resolveActiveThreadIndex, useAdjacentThreadPrefetch } from '@/hooks/use-thread-prefetch';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { selectThreadShellRow, selectThreadViewState } from '@/lib/thread-view-state';
 import { useOptimisticThreadState } from '@/components/mail/optimistic-thread-state';
-import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { preloadComposeSurface } from '@/components/create/compose-surface';
 import { useOptimisticActions } from '@/hooks/use-optimistic-actions';
-import { useNextThreadPrefetch } from '@/hooks/use-thread-prefetch';
+import { shouldExtendReaderPages } from '@/lib/mail-pagination';
 import { focusedIndexAtom } from '@/hooks/use-mail-navigation';
 import { type ThreadDestination } from '@/lib/thread-actions';
 import { handleUnsubscribe } from '@/lib/email-utils.client';
@@ -103,9 +104,40 @@ export function ThreadDisplay() {
   const [id, setThreadId] = useQueryState('threadId');
   const { data: emailData, isLoading, isError, refetch: refetchThread } = useThread(id ?? null);
   const isOffline = useIsOffline();
-  const [, items] = useThreads();
+  const [threadsQuery, items, , loadMoreThreads] = useThreads();
   const [focusedIndex, setFocusedIndex] = useAtom(focusedIndexAtom);
-  useNextThreadPrefetch(items, id, Boolean(emailData), focusedIndex);
+  useAdjacentThreadPrefetch(items, id, Boolean(emailData), focusedIndex);
+
+  // Parité Shortwave r3 : pendant la lecture, la liste ne défile pas, donc la
+  // pagination au scroll ne s'arme jamais — ArrowDown/j butait sur la fin des
+  // pages chargées pour un mail bas dans l'inbox. Étendre la liste depuis le
+  // lecteur donne aussi des cibles réelles au préchargement des deux suivants.
+  const readerIndex = useMemo(
+    () =>
+      resolveActiveThreadIndex(
+        items.map((item) => item.id),
+        id,
+        focusedIndex,
+      ),
+    [items, id, focusedIndex],
+  );
+  const loadMoreThreadsRef = useRef(loadMoreThreads);
+  loadMoreThreadsRef.current = loadMoreThreads;
+  const readerHasNextPage = threadsQuery.hasNextPage ?? false;
+  const readerIsFetchingNextPage = threadsQuery.isFetchingNextPage;
+  useEffect(() => {
+    if (!id) return;
+    if (
+      shouldExtendReaderPages({
+        index: readerIndex,
+        itemCount: items.length,
+        isFetchingNextPage: readerIsFetchingNextPage,
+        hasNextPage: readerHasNextPage,
+      })
+    ) {
+      void loadMoreThreadsRef.current();
+    }
+  }, [id, readerIndex, items.length, readerIsFetchingNextPage, readerHasNextPage]);
   const [isStarred, setIsStarred] = useState(false);
   const [isImportant, setIsImportant] = useState(false);
 
