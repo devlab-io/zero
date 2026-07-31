@@ -200,3 +200,55 @@ describe('hydratation différée — ne remplace JAMAIS une réponse réseau plu
     expect(queryClient.getQueryData(KEY)).toEqual({ body: 'newer-disk' });
   });
 });
+
+describe('garde anti-réécriture des détails (r11 — empreinte bon marché)', () => {
+  it('empreinte inchangée → AUCUNE lecture/sérialisation de state.data détail et AUCUN write ::details', async () => {
+    const storage = makeStorage();
+    const split = makePersister(storage);
+    const at = Date.now();
+    const stableDetail = {
+      queryKey: [['mail', 'get'], { input: { id: 't1' } }],
+      queryHash: 'detail',
+      state: { data: { messages: ['body'] }, dataUpdatedAt: at, status: 'success' },
+    };
+
+    await split.persister.persistClient(client([listQuery, stableDetail]));
+    const detailWritesAfterFirst = [...storage.map.keys()].filter((k) =>
+      k.endsWith(DETAILS_KEY_SUFFIX),
+    ).length;
+    expect(detailWritesAfterFirst).toBe(1);
+    const firstBlob = storage.map.get(`${MAIN_KEY}${DETAILS_KEY_SUFFIX}`);
+
+    // Second persist : MÊME empreinte (longueur + dataUpdatedAt identiques)
+    // mais state.data PIÉGÉ — toute lecture/sérialisation du corps jetterait.
+    const trappedDetail = {
+      queryKey: [['mail', 'get'], { input: { id: 't1' } }],
+      queryHash: 'detail',
+      state: {
+        get data(): unknown {
+          throw new Error('state.data détail lu alors que l’empreinte est inchangée');
+        },
+        dataUpdatedAt: at,
+        status: 'success',
+      },
+    };
+    await split.persister.persistClient(client([listQuery, trappedDetail]));
+
+    // Ni sérialisé (pas de throw), ni réécrit : le blob détails est intact.
+    expect(storage.map.get(`${MAIN_KEY}${DETAILS_KEY_SUFFIX}`)).toBe(firstBlob);
+  });
+
+  it('empreinte changée (corps modifié → dataUpdatedAt bumpé) → budget appliqué et ::details réécrit', async () => {
+    const storage = makeStorage();
+    const split = makePersister(storage);
+    await split.persister.persistClient(client([listQuery, detailQuery]));
+    const before = storage.map.get(`${MAIN_KEY}${DETAILS_KEY_SUFFIX}`);
+
+    const newer = {
+      ...detailQuery,
+      state: { ...detailQuery.state, dataUpdatedAt: Date.now() + 5_000 },
+    };
+    await split.persister.persistClient(client([listQuery, newer]));
+    expect(storage.map.get(`${MAIN_KEY}${DETAILS_KEY_SUFFIX}`)).not.toBe(before);
+  });
+});

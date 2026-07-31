@@ -4,6 +4,8 @@ import {
   extractMailRouteModules,
   extractStaticImports,
   injectMailRoutePreloads,
+  MAX_MAIL_PRELOADS,
+  selectMailPreloadChunks,
 } from '../scripts/mail-route-preloads.mjs';
 import { describe, expect, it } from 'vitest';
 
@@ -72,5 +74,70 @@ describe('injectMailRoutePreloads', () => {
 
   it('extractExistingPreloads liste les hrefs déjà préchargés', () => {
     expect([...extractExistingPreloads(html)]).toEqual(['/assets/entry.js']);
+  });
+});
+
+describe('selectMailPreloadChunks — cut-set critique borné (r11)', () => {
+  const graph: Record<string, string> = {
+    'layout.js': 'from"./big-a.js";from"./small.js";from"./big-b.js"',
+    'page.js': 'from"./big-b.js";from"./big-c.js";from"./tiny.js"',
+    // niveau 2 : jamais préchargé
+    'big-a.js': 'from"./level2.js"',
+  };
+  const sizes: Record<string, number> = {
+    'layout.js': 40_000,
+    'page.js': 30_000,
+    'big-a.js': 90_000,
+    'big-b.js': 80_000,
+    'big-c.js': 50_000,
+    'small.js': 9_000,
+    'tiny.js': 1_000,
+    'level2.js': 200_000,
+  };
+  const read = (name: string) => graph[name] ?? null;
+  const size = (name: string) => sizes[name] ?? null;
+
+  it('les entrées de route sont TOUJOURS incluses, en tête', () => {
+    const chunks = selectMailPreloadChunks(['layout.js', 'page.js'], read, size);
+    expect(chunks.slice(0, 2)).toEqual(['layout.js', 'page.js']);
+  });
+
+  it('imports DIRECTS triés par taille décroissante, sous le budget de nombre', () => {
+    const chunks = selectMailPreloadChunks(['layout.js', 'page.js'], read, size, {
+      maxPreloads: 4,
+    });
+    // 2 entrées + 2 plus lourds du niveau 1 : big-a (90k), big-b (80k).
+    expect(chunks).toEqual(['layout.js', 'page.js', 'big-a.js', 'big-b.js']);
+  });
+
+  it('le NIVEAU 2 (level2.js, 200k) n’est JAMAIS préchargé — pas de fermeture entière', () => {
+    const chunks = selectMailPreloadChunks(['layout.js', 'page.js'], read, size);
+    expect(chunks).not.toContain('level2.js');
+  });
+
+  it('les chunks sous MIN_PRELOAD_BYTES sont écartés (le coût requête dépasse le gain)', () => {
+    const chunks = selectMailPreloadChunks(['layout.js', 'page.js'], read, size);
+    expect(chunks).not.toContain('tiny.js');
+    expect(chunks).toContain('small.js'); // 9k ≥ 8k : gardé
+  });
+
+  it('budget global : jamais plus de MAX_MAIL_PRELOADS chunks au total', () => {
+    const wide = Object.fromEntries(
+      Array.from({ length: 60 }, (_, i) => [`c${i}.js`, '']),
+    ) as Record<string, string>;
+    wide['entry.js'] = Array.from({ length: 60 }, (_, i) => `from"./c${i}.js"`).join(';');
+    const chunks = selectMailPreloadChunks(
+      ['entry.js'],
+      (n: string) => wide[n] ?? null,
+      () => 50_000,
+    );
+    expect(chunks.length).toBeLessThanOrEqual(MAX_MAIL_PRELOADS);
+    expect(chunks[0]).toBe('entry.js');
+  });
+
+  it('déterministe : deux appels identiques → même liste', () => {
+    const a = selectMailPreloadChunks(['layout.js', 'page.js'], read, size);
+    const b = selectMailPreloadChunks(['layout.js', 'page.js'], read, size);
+    expect(a).toEqual(b);
   });
 });

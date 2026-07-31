@@ -23,6 +23,7 @@ import { readRetryDelay, shouldRetryRead } from '@/lib/query-retry';
 import { createSplitIDBPersister } from '@/lib/split-persister';
 import { createTRPCContext } from '@trpc/tanstack-react-query';
 import { createTRPCClient, httpBatchLink } from '@trpc/client';
+import { scheduleAfterPaintIdle } from '@/lib/idle-scheduler';
 import { acquireQueryClient } from '@/lib/query-client-pool';
 import { signOut, useSession } from '@/lib/auth-client';
 import type { AppRouter } from '@zero/server/trpc';
@@ -235,6 +236,20 @@ export function QueryProvider({ children }: PropsWithChildren) {
     void get('__zero-idb-warm').catch(() => {});
   }, [isSessionPending]);
 
+  // r11 : époque + annulation de l'hydratation différée des corps. Un
+  // changement d'owner (switch de compte) ou un démontage invalide et annule
+  // tout travail planifié — rien d'un ancien owner ne touche le client suivant.
+  const detailsEpochRef = useRef(0);
+  const cancelDetailsHydrationRef = useRef<(() => void) | null>(null);
+  useEffect(() => {
+    detailsEpochRef.current += 1;
+    return () => {
+      detailsEpochRef.current += 1;
+      cancelDetailsHydrationRef.current?.();
+      cancelDetailsHydrationRef.current = null;
+    };
+  }, [cacheOwner]);
+
   if (isSessionPending) {
     // Shell NEUTRE structurel (P0 r6) : tant que l'identité n'est pas
     // confirmée, les children ne montent PAS — aucune requête (même servie
@@ -310,18 +325,27 @@ export function QueryProvider({ children }: PropsWithChildren) {
           type: 'active',
           refetchType: 'active',
         });
-        // r10 : hydratation DIFFÉRÉE des corps de mails, après le premier
-        // paint — validée buster/âge par restoreDetails (blob invalide :
-        // supprimé, jamais hydraté). `hydrate` respecte dataUpdatedAt : une
-        // réponse réseau plus fraîche déjà en cache n'est jamais écrasée
-        // (prouvé par lib/split-persister.test.ts sur un vrai QueryClient).
-        void restoreDetails()
-          .then((queries) => {
-            if (!queries) return;
-            hydrate(queryClient, { queries } as Parameters<typeof hydrate>[1]);
-            markStage('boot:details-restored');
-          })
-          .catch(() => {});
+        // r11 : hydratation des corps RÉELLEMENT différée. onSuccess est
+        // AWAITÉ par persistQueryClientRestore AVANT setIsRestoring(false)
+        // (code TanStack) : tout travail lancé ici concurrence la levée du
+        // restore et la première peinture. On ne fait donc que PLANIFIER —
+        // double rAF (un frame peint) puis idle (lib/idle-scheduler) — et le
+        // travail est annulé si l'owner change entre-temps (isolation P0).
+        // restoreDetails valide buster/âge (blob invalide : supprimé, jamais
+        // hydraté) ; `hydrate` respecte dataUpdatedAt : une réponse réseau
+        // plus fraîche n'est jamais écrasée (prouvé sur vrai QueryClient).
+        const scheduledEpoch = detailsEpochRef.current;
+        cancelDetailsHydrationRef.current?.();
+        cancelDetailsHydrationRef.current = scheduleAfterPaintIdle(() => {
+          if (scheduledEpoch !== detailsEpochRef.current) return;
+          void restoreDetails()
+            .then((queries) => {
+              if (!queries || scheduledEpoch !== detailsEpochRef.current) return;
+              hydrate(queryClient, { queries } as Parameters<typeof hydrate>[1]);
+              markStage('boot:details-restored');
+            })
+            .catch(() => {});
+        });
       }}
     >
       <TRPCProvider trpcClient={trpcClient} queryClient={queryClient}>

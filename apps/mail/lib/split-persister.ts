@@ -61,38 +61,72 @@ export type SplitPersister = {
   restoreDetails: () => Promise<PersistedClient['clientState']['queries'] | null>;
 };
 
+/**
+ * Empreinte bon marché du lot détails : longueur + max + somme des
+ * dataUpdatedAt. Toute modification réelle d'un corps bump son dataUpdatedAt →
+ * l'empreinte change ; à empreinte identique, la réécriture (structured clone
+ * de plusieurs Mo vers IDB) est SAUTÉE — r11 : l'hydratation différée marquait
+ * le cache « modifié » et redéclenchait l'écriture du blob lourd en rafale.
+ */
+export function detailsFingerprint(queries: readonly PersistableQuery[]): string {
+  let max = 0;
+  let sum = 0;
+  for (const query of queries) {
+    const at = query.state.dataUpdatedAt ?? 0;
+    if (at > max) max = at;
+    sum += at;
+  }
+  return `${queries.length}:${max}:${sum}`;
+}
+
 export function createSplitIDBPersister(
   storage: SplitPersisterStorage,
   mainKey: string,
   options: SplitPersisterOptions,
 ): SplitPersister {
   const detailsKey = `${mainKey}${DETAILS_KEY_SUFFIX}`;
+  let lastDetailsFingerprint: string | null = null;
 
   return {
     persister: {
       persistClient: async (client: PersistedClient) => {
-        const selected = selectQueriesForPersistence(
-          client.clientState.queries as unknown as PersistableQuery[],
-        );
-        const [critical, details] = splitPersistedQueries(selected);
-        await Promise.all([
+        const raw = client.clientState.queries as unknown as PersistableQuery[];
+        // r11 (contre-revue) : PARTITION AVANT toute sérialisation —
+        // isDetailQuery n'inspecte que la clé. selectQueriesForPersistence
+        // JSON.stringify chaque détail (limite 3 Mo + budget 8 Mo) à chaque
+        // événement cache : ce coût CPU (le jank principal) n'est payé que si
+        // l'empreinte bon marché des détails (dataUpdatedAt seuls, jamais
+        // state.data) a réellement changé.
+        const [rawCritical, rawDetails] = splitPersistedQueries(raw);
+        const fingerprint = detailsFingerprint(rawDetails);
+        const writes: Promise<unknown>[] = [
           storage.set(mainKey, {
             ...client,
-            clientState: { ...client.clientState, queries: critical },
-          }),
-          // Contre-revue r10 (P0) : les détails portent leur PROPRE enveloppe
-          // PersistedClient (timestamp + buster) — le restore différé ne doit
-          // jamais contourner maxAge/buster : un blob périmé ou d'un ancien
-          // build serait sinon hydraté même après rejet du blob principal.
-          storage.set(detailsKey, {
-            timestamp: Date.now(),
-            buster: options.buster,
             clientState: {
-              mutations: [],
-              queries: details as unknown as PersistedClient['clientState']['queries'],
+              ...client.clientState,
+              queries: selectQueriesForPersistence(rawCritical),
             },
-          } satisfies PersistedClient),
-        ]);
+          }),
+        ];
+        if (fingerprint !== lastDetailsFingerprint) {
+          // Budget/limites appliqués SEULEMENT maintenant, sur les détails
+          // modifiés. Contre-revue r10 (P0) : enveloppe PersistedClient propre
+          // (timestamp + buster) — le restore différé ne contourne jamais
+          // maxAge/buster.
+          const details = selectQueriesForPersistence(rawDetails);
+          writes.push(
+            storage.set(detailsKey, {
+              timestamp: Date.now(),
+              buster: options.buster,
+              clientState: {
+                mutations: [],
+                queries: details as unknown as PersistedClient['clientState']['queries'],
+              },
+            } satisfies PersistedClient),
+          );
+          lastDetailsFingerprint = fingerprint;
+        }
+        await Promise.all(writes);
       },
       restoreClient: async () => {
         // Blob legacy (pré-scission) : restauré tel quel — lent une dernière

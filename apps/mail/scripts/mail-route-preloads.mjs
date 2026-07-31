@@ -89,3 +89,50 @@ export function injectMailRoutePreloads(html, chunkNames) {
     injected: missing.length,
   };
 }
+
+/**
+ * r11 : cut-set CRITIQUE borné, pas la fermeture entière. Le shell r10
+ * préchargeait 85 chunks (100 dans la fermeture) — tempête de requêtes +
+ * parse qui a produit une variance CUA catastrophique (4845/4339 ms). Le
+ * navigateur ne précharge PAS récursivement les dépendances d'un module
+ * modulepreloadé de façon fiable ; on précharge donc les ENTRÉES de route
+ * (toujours) plus leurs imports DIRECTS les plus lourds, sous un double
+ * budget explicite : nombre total ≤ MAX_MAIL_PRELOADS, taille ≥
+ * MIN_PRELOAD_BYTES (les petits chunks coûtent plus en requête qu'ils ne
+ * rapportent). Niveau 2+ : jamais préchargé — découvert par le graphe module
+ * normal, déjà recouvert par la RTT session et l'hydratation.
+ */
+export const MAX_MAIL_PRELOADS = 24;
+export const MIN_PRELOAD_BYTES = 8 * 1024;
+
+/**
+ * @param {string[]} routeEntries — modules d'entrée de la route (toujours inclus)
+ * @param {(name: string) => string | null} readChunk
+ * @param {(name: string) => number | null} sizeOf — taille (octets) du chunk
+ * @param {{ maxPreloads?: number, minBytes?: number }} [limits]
+ */
+export function selectMailPreloadChunks(routeEntries, readChunk, sizeOf, limits = {}) {
+  const maxPreloads = limits.maxPreloads ?? MAX_MAIL_PRELOADS;
+  const minBytes = limits.minBytes ?? MIN_PRELOAD_BYTES;
+  const entries = [...new Set(routeEntries)];
+
+  const directImports = new Set();
+  for (const entry of entries) {
+    const source = readChunk(entry);
+    if (source == null) continue;
+    for (const child of extractStaticImports(source)) {
+      if (!entries.includes(child)) directImports.add(child);
+    }
+  }
+
+  const ranked = [...directImports]
+    .map((name) => ({ name, size: sizeOf(name) ?? 0 }))
+    .filter((chunk) => chunk.size >= minBytes)
+    // Déterministe : plus lourds d'abord (gain réseau/parse maximal par
+    // requête), départage par nom.
+    .sort((a, b) => b.size - a.size || (a.name < b.name ? -1 : 1))
+    .slice(0, Math.max(0, maxPreloads - entries.length))
+    .map((chunk) => chunk.name);
+
+  return [...entries, ...ranked];
+}

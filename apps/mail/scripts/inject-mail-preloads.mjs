@@ -8,11 +8,11 @@
  * touché non plus. Voir mail-route-preloads.mjs pour la preuve du waterfall.
  */
 import {
-  collectRouteChunks,
   extractMailRouteModules,
   injectMailRoutePreloads,
+  selectMailPreloadChunks,
 } from './mail-route-preloads.mjs';
-import { readdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { readdirSync, readFileSync, writeFileSync, existsSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -38,14 +38,24 @@ if (routeModules.length === 0) {
   process.exit(1);
 }
 
-const chunks = collectRouteChunks(routeModules, (name) => {
-  const path = join(assetsDir, name);
-  return existsSync(path) ? readFileSync(path, 'utf8') : null;
-});
+// r11 : cut-set critique borné (entrées + imports directs les plus lourds),
+// pas la fermeture entière — la tempête de 85 preloads a produit la variance
+// CUA catastrophique. Budgets : MAX_MAIL_PRELOADS / MIN_PRELOAD_BYTES.
+const chunks = selectMailPreloadChunks(
+  routeModules,
+  (name) => {
+    const path = join(assetsDir, name);
+    return existsSync(path) ? readFileSync(path, 'utf8') : null;
+  },
+  (name) => {
+    const path = join(assetsDir, name);
+    return existsSync(path) ? statSync(path).size : null;
+  },
+);
 
 const html = readFileSync(fallbackPath, 'utf8');
 const { html: injected, injected: count } = injectMailRoutePreloads(html, chunks);
 writeFileSync(mailFallbackPath, injected);
 console.log(
-  `[inject-mail-preloads] __mail-spa-fallback.html écrit : ${count} modulepreloads (graphe route mail : ${chunks.length} chunks) — __spa-fallback.html générique intact.`,
+  `[inject-mail-preloads] __mail-spa-fallback.html écrit : ${count} modulepreloads (cut-set borné : ${chunks.length} chunks) — __spa-fallback.html générique intact.`,
 );
