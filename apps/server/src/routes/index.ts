@@ -4,6 +4,7 @@
 // /public sub-routers + tRPC at /api/trpc) and the root `app` (CORS, OAuth
 // discovery, MCP/SSE mounts, agents websocket middleware, health, Sentry
 // tunnel and provider webhooks). Frontier rationale: docs/adr/0001-routing-hono-vs-trpc.md.
+import { handleGetSessionFast } from '../lib/auth-fast-path';
 import { oAuthDiscoveryMetadata } from 'better-auth/plugins';
 import { getZeroDB, verifyToken } from '../lib/server-utils';
 import { ThinkingMCP } from '../lib/sequential-thinking';
@@ -51,6 +52,14 @@ function hashIpAddress(ip: string | undefined): string | undefined {
 
 export const api = new Hono<HonoContext>()
   .use(contextStorage())
+  // r14 : chemin RAPIDE get-session — enregistré AVANT le middleware global,
+  // donc SANS la pré-résolution de session ni le tracing par-requête que ce
+  // middleware impose à toutes les routes (CUA r13 : RTT get-session
+  // 1,12-1,54 s, double résolution mesurée). UNE seule résolution, par le
+  // MÊME handler better-auth (plugins/cookieCache/cookies inchangés). Les
+  // autres /auth/* (OAuth, callbacks, sign-out) et tRPC passent toujours par
+  // le middleware complet ci-dessous — voir lib/auth-fast-path.ts.
+  .get('/auth/get-session', (c) => handleGetSessionFast(createAuth, c.req.raw))
   .use('*', async (c, next) => {
     // Initialize request tracing using headers (no context pollution)
     const traceId = c.req.header('X-Trace-ID') || crypto.randomUUID();
