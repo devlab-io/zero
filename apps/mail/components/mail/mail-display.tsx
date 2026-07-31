@@ -736,41 +736,43 @@ const MailDisplay = ({
                     ))}
                   </div>
                 ) : null}
-                <div className="my-2.5 flex gap-2 px-4">
-                  <ActionButton
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setIsCollapsed(false);
-                      setMode('reply');
-                      setActiveReplyId(emailData.id);
-                    }}
-                    icon={<Reply className="fill-muted-foreground dark:fill-[#9B9B9B]" />}
-                    text={m['common.mail.reply']()}
-                    shortcut={isLastEmail ? 'r' : undefined}
-                  />
-                  <ActionButton
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setIsCollapsed(false);
-                      setMode('replyAll');
-                      setActiveReplyId(emailData.id);
-                    }}
-                    icon={<ReplyAll className="fill-muted-foreground dark:fill-[#9B9B9B]" />}
-                    text={m['common.mail.replyAll']()}
-                    shortcut={isLastEmail ? 'a' : undefined}
-                  />
-                  <ActionButton
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setIsCollapsed(false);
-                      setMode('forward');
-                      setActiveReplyId(emailData.id);
-                    }}
-                    icon={<Forward className="fill-muted-foreground dark:fill-[#9B9B9B]" />}
-                    text={m['common.mail.forward']()}
-                    shortcut={isLastEmail ? 'f' : undefined}
-                  />
-                </div>
+                {(demo || !isLastEmail) && (
+                  <div className="my-2.5 flex gap-2 px-4">
+                    <ActionButton
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setIsCollapsed(false);
+                        setMode('reply');
+                        setActiveReplyId(emailData.id);
+                      }}
+                      icon={<Reply className="fill-muted-foreground dark:fill-[#9B9B9B]" />}
+                      text={m['common.mail.reply']()}
+                      shortcut={isLastEmail ? 'r' : undefined}
+                    />
+                    <ActionButton
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setIsCollapsed(false);
+                        setMode('replyAll');
+                        setActiveReplyId(emailData.id);
+                      }}
+                      icon={<ReplyAll className="fill-muted-foreground dark:fill-[#9B9B9B]" />}
+                      text={m['common.mail.replyAll']()}
+                      shortcut={isLastEmail ? 'a' : undefined}
+                    />
+                    <ActionButton
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setIsCollapsed(false);
+                        setMode('forward');
+                        setActiveReplyId(emailData.id);
+                      }}
+                      icon={<Forward className="fill-muted-foreground dark:fill-[#9B9B9B]" />}
+                      text={m['common.mail.forward']()}
+                      shortcut={isLastEmail ? 'f' : undefined}
+                    />
+                  </div>
+                )}
               </div>
             </div>
           </div>

@@ -56,6 +56,7 @@ import { useAtom } from 'jotai';
 import { toast } from 'sonner';
 
 import { THREAD_TRANSITION_WRAPPER_CLASS } from './thread-display.transition';
+import { ThreadReplyBar, type ThreadReplyMode } from './thread-reply-bar';
 import { ThreadActionButton } from './thread-display.action-button';
 import { MessageList } from './thread-display.message-list';
 import { printThread } from './thread-display.print';
@@ -191,6 +192,17 @@ export function ThreadDisplay() {
   const [mode, setMode] = useQueryState('mode');
   const [activeReplyId, setActiveReplyId] = useQueryState('activeReplyId');
   const [, setDraftId] = useQueryState('draftId');
+
+  const openLatestReply = useCallback(
+    (nextMode: ThreadReplyMode) => {
+      const latestMessageId = emailData?.latest?.id;
+      if (!latestMessageId) return;
+      warmComposerChunks();
+      setMode(nextMode);
+      setActiveReplyId(latestMessageId);
+    },
+    [emailData?.latest?.id, setMode, setActiveReplyId],
+  );
 
   // Devlab: threads can be opened directly in reply/replyAll/forward mode from the
   // mail list (r / a / f). When a mode arrives without an explicit reply target,
@@ -500,8 +512,7 @@ export function ThreadDisplay() {
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
-                    setMode('replyAll');
-                    setActiveReplyId(emailData?.latest?.id ?? '');
+                    openLatestReply('replyAll');
                   }}
                   className="inline-flex h-7 cursor-pointer items-center justify-center gap-1 overflow-hidden rounded-lg border bg-white px-1.5 transition-colors hover:bg-gray-100 dark:border-none dark:bg-[#313131] dark:hover:bg-[#404040]"
                 >
@@ -670,6 +681,18 @@ export function ThreadDisplay() {
                   <MessageList {...messageListProps} />
                 );
               })()}
+
+              {!mode && (
+                <ThreadReplyBar
+                  labels={{
+                    reply: m['common.mail.reply'](),
+                    replyAll: m['common.mail.replyAll'](),
+                    forward: m['common.mail.forward'](),
+                  }}
+                  onIntent={warmComposerChunks}
+                  onSelect={openLatestReply}
+                />
+              )}
 
               {mode &&
                 activeReplyId &&
