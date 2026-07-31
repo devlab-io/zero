@@ -17,9 +17,15 @@ interface MailContentProps {
   id: string;
   html: string;
   senderEmail: string;
+  /**
+   * r15a : posé après que le corps traité a RÉELLEMENT été injecté dans le
+   * shadow DOM et qu'un frame a été présenté (double rAF) — c'est le jalon
+   * `thread:content-painted`, comparable au « corps visible » de Shortwave.
+   */
+  onContentPainted?: () => void;
 }
 
-export function MailContent({ id, html, senderEmail }: MailContentProps) {
+export function MailContent({ id, html, senderEmail, onContentPainted }: MailContentProps) {
   const { data, refetch } = useSettings();
   const queryClient = useQueryClient();
   const isTrustedSender = useMemo(
@@ -106,10 +112,34 @@ export function MailContent({ id, html, senderEmail }: MailContentProps) {
     shadowRootRef.current = hostRef.current.attachShadow({ mode: 'open' });
   }, []);
 
+  // La ref évite qu'un changement d'identité du callback (nouveau fil actif)
+  // ne re-déclenche l'injection : l'effet ne dépend QUE de processedData et
+  // l'injection elle-même est inchangée (aucune transformation du HTML).
+  const onContentPaintedRef = useRef(onContentPainted);
+  onContentPaintedRef.current = onContentPainted;
+
   useEffect(() => {
     if (!shadowRootRef.current || !processedData) return;
 
     shadowRootRef.current.innerHTML = processedData.html;
+
+    if (!onContentPaintedRef.current) return;
+    // Double rAF : le 1er court avant la présentation du frame, le 2e garantit
+    // qu'un frame contenant le corps injecté a été présenté. Sans rAF (tests,
+    // environnements headless) : signal immédiat. La dédupe une-fois-par-fil
+    // vit chez l'appelant (thread-display, markThreadStageOnce).
+    if (typeof requestAnimationFrame !== 'function') {
+      onContentPaintedRef.current?.();
+      return;
+    }
+    let secondFrameId = 0;
+    const firstFrameId = requestAnimationFrame(() => {
+      secondFrameId = requestAnimationFrame(() => onContentPaintedRef.current?.());
+    });
+    return () => {
+      cancelAnimationFrame(firstFrameId);
+      if (secondFrameId) cancelAnimationFrame(secondFrameId);
+    };
   }, [processedData]);
 
   // Résolution lazy des images CID : uniquement si le corps rendu en contient.

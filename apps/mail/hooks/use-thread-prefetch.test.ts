@@ -2,13 +2,14 @@ import {
   planVisibleThreadPrefetch,
   prefetchThreadIdsInBatches,
   resolveActiveThreadIndex,
+  runClickPrefetchPlan,
   selectAdjacentThreadIds,
   selectInitialThreadIds,
   selectNextThreadIds,
   selectVisibleThreadIds,
   shouldPrefetchThreadBodies,
 } from './use-thread-prefetch';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 describe('targeted thread prefetch', () => {
   it('does not prefetch on data saver or 2g', () => {
@@ -131,5 +132,82 @@ describe('targeted thread prefetch', () => {
 
     expect(completed).toBe(false);
     expect(prefetched).toEqual(['a', 'b']);
+  });
+});
+
+// r15a : au clic, le fil ouvert passe DEVANT toute spéculation — la file
+// visible est annulée avant le moindre départ, le courant part seul, les deux
+// suivants attendent sa résolution (ils chauffent pendant la lecture, pas en
+// concurrence avec l'ouverture).
+describe('runClickPrefetchPlan — priorité au fil cliqué', () => {
+  it('annule la file spéculative SYNCHRONEMENT, avant le moindre prefetch', () => {
+    const order: string[] = [];
+    void runClickPrefetchPlan({
+      currentId: 'current',
+      nextIds: ['n1', 'n2'],
+      prefetch: (id) => {
+        order.push(`prefetch:${id}`);
+        return new Promise(() => {});
+      },
+      cancelSpeculative: () => order.push('cancel'),
+    });
+
+    // Aucun await nécessaire : l'annulation ET le départ du courant sont
+    // synchrones dans le handler de clic ; rien d'autre n'est parti.
+    expect(order).toEqual(['cancel', 'prefetch:current']);
+  });
+
+  it('ne lance les deux suivants qu’APRÈS la résolution du courant', async () => {
+    const order: string[] = [];
+    let resolveCurrent = () => {};
+    const plan = runClickPrefetchPlan({
+      currentId: 'current',
+      nextIds: ['n1', 'n2'],
+      prefetch: (id) => {
+        order.push(id);
+        if (id === 'current') {
+          return new Promise<void>((resolve) => {
+            resolveCurrent = resolve;
+          });
+        }
+        return Promise.resolve();
+      },
+      cancelSpeculative: vi.fn(),
+    });
+
+    // Le courant est en vol : les suivants ne sont PAS partis.
+    await Promise.resolve();
+    expect(order).toEqual(['current']);
+
+    resolveCurrent();
+    await plan;
+    expect(order).toEqual(['current', 'n1', 'n2']);
+  });
+
+  it('chauffe quand même les suivants si le courant échoue (le useQuery lecteur couvre)', async () => {
+    const order: string[] = [];
+    await runClickPrefetchPlan({
+      currentId: 'current',
+      nextIds: ['n1', 'n2'],
+      prefetch: (id) => {
+        order.push(id);
+        return id === 'current' ? Promise.reject(new Error('offline')) : Promise.resolve();
+      },
+      cancelSpeculative: vi.fn(),
+    });
+
+    expect(order).toEqual(['current', 'n1', 'n2']);
+  });
+
+  it('un échec d’un suivant ne rejette jamais le plan', async () => {
+    await expect(
+      runClickPrefetchPlan({
+        currentId: 'current',
+        nextIds: ['n1'],
+        prefetch: (id) =>
+          id === 'n1' ? Promise.reject(new Error('boom')) : Promise.resolve(undefined),
+        cancelSpeculative: vi.fn(),
+      }),
+    ).resolves.toBeUndefined();
   });
 });

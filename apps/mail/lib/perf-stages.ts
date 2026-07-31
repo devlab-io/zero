@@ -12,7 +12,15 @@
 /** Étape → étape de départ de la mesure auto. */
 const MEASURE_FROM: Record<string, string> = {
   'search:results-settled': 'search:applied',
-  'thread:body-ready': 'thread:open',
+  // r15a : l'ancien `thread:body-ready` mélangeait deux réalités. Découpage
+  // honnête — `data-ready` : les messages du fil sont en cache (données
+  // présentes, rien n'est peint) ; `content-painted` : le corps traité du
+  // message actif est injecté dans le shadow DOM ET un frame a été présenté
+  // (double rAF). C'est `content-painted` qui se compare au « corps visible »
+  // de Shortwave. Chaque jalon est posé une fois par fil ouvert
+  // (lib/thread-stage-once.ts).
+  'thread:data-ready': 'thread:open',
+  'thread:content-painted': 'thread:open',
   // r9 (cold boot) : `zero:boot:session-prime` est posé par le script inline
   // du <head> (lib/session-prime.ts) au parse du HTML. Ces deux mesures
   // découpent le waterfall du reload authentifié : amorce → identité
@@ -48,7 +56,8 @@ export function markStage(
     | 'search:results-settled'
     | 'thread:open'
     | 'thread:shell-ready'
-    | 'thread:body-ready'
+    | 'thread:data-ready'
+    | 'thread:content-painted'
     | 'send:dispatched'
     | 'send:confirmed'
     | 'boot:session-confirmed'

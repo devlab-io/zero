@@ -50,6 +50,8 @@ type Props = {
   onReplyAll?: () => void;
   onForward?: () => void;
   threadAttachments?: Attachment[];
+  /** r15a : jalon content-painted, fourni uniquement pour le message actif. */
+  onContentPainted?: () => void;
 };
 
 const cleanEmailDisplay = (email?: string) => {
@@ -63,7 +65,14 @@ const cleanNameDisplay = (name?: string) => {
   return name.trim();
 };
 
-const MailDisplay = ({ emailData, index, totalEmails, demo, threadAttachments }: Props) => {
+const MailDisplay = ({
+  emailData,
+  index,
+  totalEmails,
+  demo,
+  threadAttachments,
+  onContentPainted,
+}: Props) => {
   const [isCollapsed, setIsCollapsed] = useState<boolean>(false);
   const { data: threadData } = useThread(emailData.threadId ?? null);
   // Plus aucun fetch de corps de pièces jointes au rendu (l'ancien useAttachments
@@ -691,6 +700,7 @@ const MailDisplay = ({ emailData, index, totalEmails, demo, threadAttachments }:
                     id={emailData.id}
                     html={emailData?.decodedBody}
                     senderEmail={emailData.sender.email}
+                    onContentPainted={onContentPainted}
                   />
                 ) : null}
                 {/* mail attachments */}

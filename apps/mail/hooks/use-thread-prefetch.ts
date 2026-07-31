@@ -136,6 +136,35 @@ export function planVisibleThreadPrefetch(
   return { ids: selected, key, skip: key === '' || key === lastCompletedKey };
 }
 
+/**
+ * Plan de préchargement au CLIC (r15a). Preuve CUA : après un scroll profond,
+ * l'openThread du fil cliqué partait en même temps que la file spéculative des
+ * lignes visibles ET que les deux suivants — le fil lu concourait avec sa
+ * propre ouverture sur le DO mailbox. Ordre garanti ici : la file spéculative
+ * est annulée SYNCHRONEMENT avant le moindre départ, le fil courant part
+ * seul, et les deux suivants ne chauffent qu'une fois le courant résolu (ou
+ * échoué — le useQuery du lecteur déduplique et couvre le fallback).
+ */
+export async function runClickPrefetchPlan({
+  currentId,
+  nextIds,
+  prefetch,
+  cancelSpeculative,
+}: {
+  currentId: string;
+  nextIds: readonly string[];
+  prefetch: (id: string) => Promise<unknown>;
+  cancelSpeculative: () => void;
+}): Promise<void> {
+  cancelSpeculative();
+  try {
+    await prefetch(currentId);
+  } catch {
+    // L'échec du warm courant n'empêche pas de chauffer la lecture qui suit.
+  }
+  await Promise.all(nextIds.map((id) => prefetch(id).catch(() => undefined)));
+}
+
 export async function prefetchThreadIdsInBatches(
   ids: readonly string[],
   prefetch: (id: string) => Promise<unknown>,

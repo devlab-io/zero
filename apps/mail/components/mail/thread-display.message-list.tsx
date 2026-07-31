@@ -1,7 +1,7 @@
-import type { Attachment, ParsedMessage } from '@/types';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { lazy, Suspense } from 'react';
+import type { Attachment, ParsedMessage } from '@/types';
 import MailDisplay from './mail-display';
+import { lazy, Suspense } from 'react';
 import { cn } from '@/lib/utils';
 
 // #44 (gate A8): the reply composer statically pulls posthog-js (+ its own shell) into the
@@ -21,6 +21,13 @@ interface MessageListProps {
   mode?: string;
   activeReplyId?: string;
   isMobile: boolean;
+  /**
+   * r15a : jalon `thread:content-painted` — transmis au SEUL dernier message
+   * (le message actif, déplié par défaut) ; posé par MailContent après
+   * injection réelle du corps traité + double rAF. La dédupe par fil vit dans
+   * thread-display (markThreadStageOnce).
+   */
+  onContentPainted?: () => void;
 }
 
 export const MessageList = ({
@@ -31,6 +38,7 @@ export const MessageList = ({
   mode,
   activeReplyId,
   isMobile,
+  onContentPainted,
 }: MessageListProps) => (
   <ScrollArea className={cn('flex-1', isMobile ? 'h-[calc(100%-1px)]' : 'h-full')} type="auto">
     <div className="pb-4">
@@ -60,6 +68,7 @@ export const MessageList = ({
               index={index}
               totalEmails={totalReplies}
               threadAttachments={index === 0 ? allThreadAttachments : undefined}
+              onContentPainted={isLastMessage ? onContentPainted : undefined}
             />
             {isReplyingToThisMessage && !isLastMessage && (
               <div className="px-4 py-2" id={`reply-composer-${message.id}`}>

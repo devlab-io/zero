@@ -30,6 +30,7 @@ import { preloadComposeSurface } from '@/components/create/compose-surface';
 import { useOptimisticActions } from '@/hooks/use-optimistic-actions';
 import { shouldExtendReaderPages } from '@/lib/mail-pagination';
 import { focusedIndexAtom } from '@/hooks/use-mail-navigation';
+import { markThreadStageOnce } from '@/lib/thread-stage-once';
 import { type ThreadDestination } from '@/lib/thread-actions';
 import { handleUnsubscribe } from '@/lib/email-utils.client';
 import { useThread, useThreads } from '@/hooks/use-threads';
@@ -149,12 +150,22 @@ export function ThreadDisplay() {
 
   const animationsEnabled = useAnimations();
 
-  // Jalon perf : le corps du fil actif est rendu (messages présents). Posé
-  // APRÈS le paint (effect), mesuré depuis `thread:open` (clic liste).
-  const bodyReadyId = emailData?.messages?.length ? id : null;
+  // Jalons perf lecteur (r15a) — l'ancien `thread:body-ready` était posé à
+  // chaque transition de données (doublons CUA 7430/9846/10460 ms) et ne
+  // mesurait PAS le DOM. Découpage honnête, une fois par fil ouvert :
+  // `thread:data-ready` = messages du fil présents en cache ;
+  // `thread:content-painted` = corps du message actif injecté + peint
+  // (posé par MailContent après double rAF, via le callback ci-dessous).
+  const dataReadyId = emailData?.messages?.length ? id : null;
+  const dataReadyMarkedRef = useRef<string | null>(null);
   useEffect(() => {
-    if (bodyReadyId) markStage('thread:body-ready');
-  }, [bodyReadyId]);
+    markThreadStageOnce(dataReadyMarkedRef, dataReadyId, () => markStage('thread:data-ready'));
+  }, [dataReadyId]);
+
+  const contentPaintedMarkedRef = useRef<string | null>(null);
+  const handleContentPainted = useCallback(() => {
+    markThreadStageOnce(contentPaintedMarkedRef, id, () => markStage('thread:content-painted'));
+  }, [id]);
 
   // Réchauffage idle des chunks composer (voir warmComposerChunks ci-dessus).
   useEffect(() => {
@@ -347,7 +358,7 @@ export function ThreadDisplay() {
   // peint (sujet/expéditeur d'une ligne riche — r7b : jamais marqué sur un
   // squelette nu). Décision pure testée : shouldMarkThreadShellReady. Posé
   // APRÈS le paint (effect), une fois par fil — le corps complet, lui, reste
-  // mesuré par thread:body-ready et borné par un RTT openThread sur un fil
+  // mesuré par thread:content-painted et borné par un RTT openThread sur un fil
   // non réchauffé.
   const shellMarkedIdRef = useRef<string | null>(null);
   useEffect(() => {
@@ -631,6 +642,7 @@ export function ThreadDisplay() {
                   mode: mode || undefined,
                   activeReplyId: activeReplyId || undefined,
                   isMobile,
+                  onContentPainted: handleContentPainted,
                 };
                 // Animations on → lazy motion wrapper (resolved on first thread render). The
                 // Suspense fallback is STRUCTURALLY EQUIVALENT to the resolved output: the animated

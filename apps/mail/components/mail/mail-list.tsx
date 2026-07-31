@@ -1,6 +1,7 @@
 import {
   planVisibleThreadPrefetch,
   prefetchThreadIdsInBatches,
+  runClickPrefetchPlan,
   selectNextThreadIds,
   shouldPrefetchThreadBodies,
   useInitialThreadPrefetch,
@@ -132,20 +133,29 @@ export const MailList = memo(
 
         const messageThreadId = message.threadId ?? message.id;
         const clickedIndex = itemsRef.current.findIndex((item) => item.id === messageThreadId);
-        // Warm exactly the current thread and the next two before navigation.
-        // React Query deduplicates the current-row pointer prefetch. Starting the
-        // adjacent requests here makes ArrowDown instant even when the reader is
-        // opened and advanced before its post-render effect gets a turn.
+        // r15a : le fil CLIQUÉ passe devant toute spéculation. La file des
+        // lignes visibles est invalidée synchronement (génération + timer)
+        // avant le moindre départ réseau, l'openThread courant part SEUL
+        // (React Query déduplique avec le useQuery du lecteur), et les deux
+        // suivants — ceux qu'ArrowDown ouvrira — ne chauffent qu'une fois le
+        // courant résolu : pendant la lecture, plus en concurrence avec elle.
         const adjacentThreadIds = selectNextThreadIds(
           itemsRef.current.map((item) => item.id),
           messageThreadId,
           clickedIndex,
         );
-        void Promise.all(
-          [messageThreadId, ...adjacentThreadIds].map((id) =>
-            prefetchThread(id).catch(() => undefined),
-          ),
-        );
+        void runClickPrefetchPlan({
+          currentId: messageThreadId,
+          nextIds: adjacentThreadIds,
+          prefetch: (id) => prefetchThread(id),
+          cancelSpeculative: () => {
+            visiblePrefetchGenerationRef.current += 1;
+            if (visiblePrefetchTimerRef.current !== null) {
+              clearTimeout(visiblePrefetchTimerRef.current);
+              visiblePrefetchTimerRef.current = null;
+            }
+          },
+        });
         setFocusedIndex(clickedIndex);
         if (message.unread && autoRead) optimisticMarkAsRead([messageThreadId], true);
         markStage('thread:open');

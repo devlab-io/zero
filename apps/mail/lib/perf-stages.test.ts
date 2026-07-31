@@ -19,11 +19,16 @@ describe('markStage — jalons perf par étapes', () => {
   });
 
   it('mesure automatiquement les paires connues', () => {
+    // r15a : découpage honnête — données présentes vs corps réellement peint.
     markStage('thread:open');
-    markStage('thread:body-ready');
-    const measures = performance.getEntriesByName('zero:thread:open->thread:body-ready', 'measure');
+    markStage('thread:data-ready');
+    markStage('thread:content-painted');
+    const measures = performance.getEntriesByName('zero:thread:open->thread:data-ready', 'measure');
     expect(measures).toHaveLength(1);
     expect(measures[0].duration).toBeGreaterThanOrEqual(0);
+    expect(
+      performance.getEntriesByName('zero:thread:open->thread:content-painted', 'measure'),
+    ).toHaveLength(1);
 
     // r7 : « ouverture perçue » — le shell projection peint avant le corps.
     markStage('thread:open');
@@ -58,10 +63,10 @@ describe('markStage — jalons perf par étapes', () => {
   });
 
   it('reste silencieux quand la marque de départ manque (parcours entamé avant chargement)', () => {
-    expect(() => markStage('thread:body-ready')).not.toThrow();
-    expect(performance.getEntriesByName('zero:thread:body-ready', 'mark')).toHaveLength(1);
+    expect(() => markStage('thread:content-painted')).not.toThrow();
+    expect(performance.getEntriesByName('zero:thread:content-painted', 'mark')).toHaveLength(1);
     expect(
-      performance.getEntriesByName('zero:thread:open->thread:body-ready', 'measure'),
+      performance.getEntriesByName('zero:thread:open->thread:content-painted', 'measure'),
     ).toHaveLength(0);
   });
 });
