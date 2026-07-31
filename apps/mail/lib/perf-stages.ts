@@ -13,6 +13,13 @@
 const MEASURE_FROM: Record<string, string> = {
   'search:results-settled': 'search:applied',
   'thread:body-ready': 'thread:open',
+  // r9 (cold boot) : `zero:boot:session-prime` est posé par le script inline
+  // du <head> (lib/session-prime.ts) au parse du HTML. Ces deux mesures
+  // découpent le waterfall du reload authentifié : amorce → identité
+  // confirmée (RTT session recouverte par le bundle), puis confirmation →
+  // restore du cache owner-scopé. La CUA lit les measures directement.
+  'boot:session-confirmed': 'boot:session-prime',
+  'boot:cache-restored': 'boot:session-confirmed',
   // r7 : « ouverture perçue » = le shell projection (sujet/expéditeur +
   // squelette) est peint, avant le corps. C'est la mesure honnête de la cible
   // <300 ms sur une ouverture profonde à froid : le corps complet reste borné
@@ -34,7 +41,9 @@ export function markStage(
     | 'thread:shell-ready'
     | 'thread:body-ready'
     | 'send:dispatched'
-    | 'send:confirmed',
+    | 'send:confirmed'
+    | 'boot:session-confirmed'
+    | 'boot:cache-restored',
 ): void {
   if (typeof performance === 'undefined' || typeof performance.mark !== 'function') return;
   try {

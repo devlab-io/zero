@@ -1,3 +1,4 @@
+import { clearSessionPrime, consumeSessionPrime } from '@/lib/session-prime';
 import { invalidateSessionCache } from '@/lib/session-invalidation';
 import { purgeClientIdentityHints } from '@/lib/cache-owner-hint';
 import { phoneNumberClient } from 'better-auth/client/plugins';
@@ -17,6 +18,14 @@ import type { Auth } from '@zero/server/auth';
 const GET_SESSION_SUFFIX = '/get-session';
 const GET_SESSION_DEDUP_TTL_MS = 5_000;
 
+// r9b : époque monotone du transport get-session. Chaque requête capture
+// l'époque à son DÉMARRAGE ; une invalidation (logout) l'incrémente AVANT de
+// vider les références. Une requête partie sous une époque antérieure peut
+// finir, mais devient sans effet observable : elle ne remplit jamais le cache
+// et ne libère jamais l'in-flight d'une requête plus récente — sans cela, le
+// then/finally d'une promesse pré-logout pouvait recacher l'ANCIENNE session
+// après la purge (fenêtre élargie par l'amorce HTML du cold boot r9).
+let getSessionEpoch = 0;
 let inflightGetSession: Promise<Response> | null = null;
 let cachedGetSession: { at: number; response: Response } | null = null;
 
@@ -49,14 +58,32 @@ async function dedupedFetch(input: string | URL | Request, init?: RequestInit): 
   }
 
   if (!inflightGetSession) {
-    inflightGetSession = fetch(input, init)
+    // r9 (cold boot) : le <head> prérendu a peut-être DÉJÀ lancé ce même
+    // aller-retour au parse du HTML (lib/session-prime.ts) — le consommer
+    // évite de payer la RTT session APRÈS le chargement du bundle. Amorce
+    // absente/périmée/échouée → requête normale inchangée.
+    const primed = consumeSessionPrime();
+    const issuedEpoch = getSessionEpoch;
+    const tracked: Promise<Response> = (
+      primed ? primed.then((response) => response ?? fetch(input, init)) : fetch(input, init)
+    )
       .then((response) => {
-        cachedGetSession = { at: Date.now(), response };
+        // r9b : une réponse émise avant une invalidation (logout) ne remplit
+        // JAMAIS le cache — elle porterait l'ancienne session.
+        if (issuedEpoch === getSessionEpoch) {
+          cachedGetSession = { at: Date.now(), response };
+        }
         return response;
       })
       .finally(() => {
-        inflightGetSession = null;
+        // r9b : ne libère l'in-flight que si CETTE requête le détient encore
+        // sous la MÊME époque — le finally d'une requête pré-logout ne doit
+        // jamais déloger la requête suivante déjà partie.
+        if (issuedEpoch === getSessionEpoch && inflightGetSession === tracked) {
+          inflightGetSession = null;
+        }
       });
+    inflightGetSession = tracked;
   }
 
   const response = await inflightGetSession;
@@ -65,9 +92,17 @@ async function dedupedFetch(input: string | URL | Request, init?: RequestInit): 
 
 /** À appeler après une déconnexion : la prochaine résolution de session doit repartir du réseau. */
 export const invalidateGetSessionDedup = () => {
+  // Époque incrémentée AVANT de vider les références : toute requête encore
+  // en vol devient immédiatement sans effet observable (cache + in-flight).
+  getSessionEpoch += 1;
   cachedGetSession = null;
   inflightGetSession = null;
+  // Une amorce jamais consommée ne doit pas survivre à un logout.
+  clearSessionPrime();
 };
+
+/** Couture de test UNIQUEMENT : la dédup transport get-session (voir tests r9b). */
+export { dedupedFetch as __getSessionTransportForTests };
 
 export const authClient = createAuthClient({
   baseURL: import.meta.env.VITE_PUBLIC_BACKEND_URL,

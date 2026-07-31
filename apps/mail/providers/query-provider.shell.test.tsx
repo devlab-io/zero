@@ -83,8 +83,11 @@ describe('QueryProvider — shell neutre pendant la résolution de session', () 
     expect(container.innerHTML).not.toContain('MAILBOX-SENTINEL');
     expect(sentinelRenders).toBe(0);
     expect(h.fetchCalls).toBe(0);
-    // Aucun persister restauré pendant pending.
-    expect(h.idbGets).toEqual([]);
+    // Aucun persister restauré pendant pending : la SEULE lecture IDB admise
+    // est le warm du handle (clé constante '__zero-idb-warm', jamais écrite,
+    // r9) — aucune clé user-scopée (zero-query-cache-*) n'est touchée.
+    expect(h.idbGets.filter((key) => key !== '__zero-idb-warm')).toEqual([]);
+    expect(h.idbGets.some((key) => key.includes('zero-query-cache'))).toBe(false);
 
     // La session résout sur une identité confirmée.
     h.session = { data: { user: { id: 'user-1' } }, isPending: false };

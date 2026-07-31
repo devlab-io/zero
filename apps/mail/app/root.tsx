@@ -10,6 +10,7 @@ import {
 } from 'react-router';
 import { ServerProviders } from '@/providers/server-providers';
 import { ClientProviders } from '@/providers/client-providers';
+import { buildSessionPrimeSnippet } from '@/lib/session-prime';
 import { useEffect, type PropsWithChildren } from 'react';
 import { Button } from '@/components/ui/button';
 import { getLocale } from '@/paraglide/runtime';
@@ -71,6 +72,15 @@ export function Layout({ children }: PropsWithChildren) {
               crossOrigin="anonymous"
             />
             <link rel="dns-prefetch" href={import.meta.env.VITE_PUBLIC_BACKEND_URL} />
+            {/* r9 (cold boot) : lance /api/auth/get-session dès le PARSE du
+                HTML — la RTT session recouvre le chargement du bundle au lieu
+                de le suivre (waterfall CUA : ~1 s de gap au reload). Consommée
+                one-shot par dedupedFetch ; P0 shell neutre inchangé. */}
+            <script
+              dangerouslySetInnerHTML={{
+                __html: buildSessionPrimeSnippet(import.meta.env.VITE_PUBLIC_BACKEND_URL),
+              }}
+            />
           </>
         )}
         <Meta />

@@ -26,6 +26,18 @@ describe('markStage — jalons perf par étapes', () => {
       performance.getEntriesByName('zero:thread:open->thread:shell-ready', 'measure'),
     ).toHaveLength(1);
 
+    // r9 : waterfall du cold boot — l'amorce du <head> pose la marque brute
+    // zero:boot:session-prime (même convention de préfixe que markStage).
+    performance.mark('zero:boot:session-prime');
+    markStage('boot:session-confirmed');
+    markStage('boot:cache-restored');
+    expect(
+      performance.getEntriesByName('zero:boot:session-prime->boot:session-confirmed', 'measure'),
+    ).toHaveLength(1);
+    expect(
+      performance.getEntriesByName('zero:boot:session-confirmed->boot:cache-restored', 'measure'),
+    ).toHaveLength(1);
+
     markStage('search:applied');
     markStage('search:results-settled');
     expect(

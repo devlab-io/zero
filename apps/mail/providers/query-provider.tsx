@@ -23,7 +23,7 @@ import {
   selectQueriesForPersistence,
   shouldPersistQuery,
 } from '@/lib/query-persistence';
-import { useEffect, useMemo, useSyncExternalStore, type PropsWithChildren } from 'react';
+import { useEffect, useMemo, useRef, useSyncExternalStore, type PropsWithChildren } from 'react';
 import { seedMailListPageSizeMigration } from '@/lib/mail-list-cache-migration';
 import { readCacheOwnerHint, resolveCacheOwner } from '@/lib/cache-owner-hint';
 import { readRetryDelay, shouldRetryRead } from '@/lib/query-retry';
@@ -35,6 +35,7 @@ import type { AppRouter } from '@zero/server/trpc';
 import { CACHE_BURST_KEY } from '@/lib/constants';
 import { useQuery } from '@tanstack/react-query';
 import { get, set, del, keys } from 'idb-keyval';
+import { markStage } from '@/lib/perf-stages';
 import superjson from 'superjson';
 import { log } from '@/lib/log';
 
@@ -231,6 +232,24 @@ export function QueryProvider({ children }: PropsWithChildren) {
     );
   }, [isSessionPending, session?.user.id]);
 
+  // Jalon boot r9 : identité confirmée (fin de la RTT session, amorcée au
+  // parse du HTML par session-prime). Une seule marque par chargement.
+  const sessionConfirmedMarkedRef = useRef(false);
+  useEffect(() => {
+    if (!isConfirmedIdentity || sessionConfirmedMarkedRef.current) return;
+    sessionConfirmedMarkedRef.current = true;
+    markStage('boot:session-confirmed');
+  }, [isConfirmedIdentity]);
+
+  // r9 (cold boot) : pendant la résolution de session, OUVRE le handle IndexedDB
+  // (lecture d'une clé constante inexistante — AUCUNE clé user-scopée, aucune
+  // donnée restaurée : le contrat P0 est intact). Le restore du persister qui
+  // suit la confirmation ne paie plus l'ouverture à froid de la base (~30-80 ms).
+  useEffect(() => {
+    if (!isSessionPending) return;
+    void get('__zero-idb-warm').catch(() => {});
+  }, [isSessionPending]);
+
   if (isSessionPending) {
     // Shell NEUTRE structurel (P0 r6) : tant que l'identité n'est pas
     // confirmée, les children ne montent PAS — aucune requête (même servie
@@ -277,6 +296,9 @@ export function QueryProvider({ children }: PropsWithChildren) {
         // r6 : recopie les listes persistées sous l'ancienne clé (20 lignes)
         // vers la clé pages-de-50 — le premier boot post-déploiement peint le
         // snapshot existant au lieu d'être artificiellement froid.
+        // Jalon boot r9 : cache owner-scopé restauré — la première liste peut
+        // peindre depuis le snapshot local.
+        markStage('boot:cache-restored');
         seedMailListPageSizeMigration(queryClient);
         const threadQueryKey = [['mail', 'listThreads'], { type: 'infinite' }];
         queryClient.setQueriesData(
