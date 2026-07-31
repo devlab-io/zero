@@ -29,12 +29,16 @@ export type ManagerConfig = {
 
 export interface MailManager {
   config: ManagerConfig;
-  getMessageAttachments(id: string): Promise<
+  getMessageAttachments(
+    id: string,
+    options?: { inlineOnly?: boolean },
+  ): Promise<
     {
       filename: string;
       mimeType: string;
       size: number;
       attachmentId: string;
+      contentId: string | null;
       headers: { name: string; value: string }[];
       body: string;
     }[]

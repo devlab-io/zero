@@ -1,12 +1,14 @@
-import { describe, expect, it, vi } from 'vitest';
 import type { GmailTransport } from './google-transport';
 import type { IOutgoingMessage } from '../../types';
+import { describe, expect, it, vi } from 'vitest';
 
 // google-messages importe google-parse (→ ./utils → server-utils) + ./utils. On coupe les
 // feuilles lourdes ; le VRAI pipeline messages s'exécute via le transport factice injecté.
 vi.mock('../server-utils', () => ({ getActiveConnection: vi.fn(), getZeroDB: vi.fn() }));
 vi.mock('hono/context-storage', () => ({ getContext: vi.fn(() => ({})) }));
-vi.mock('../logger', () => ({ logger: { info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
+vi.mock('../logger', () => ({
+  logger: { info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn() },
+}));
 vi.mock('../sanitize-tip-tap-html', () => ({
   sanitizeTipTapHtml: vi.fn(async (html: string) => ({ html, inlineImages: [] })),
 }));
@@ -87,10 +89,94 @@ describe('GmailMessages.getMessageAttachments', () => {
         mimeType: 'application/pdf',
         size: 11,
         attachmentId: 'att-a',
+        contentId: null,
         headers: [{ name: 'Content-Type', value: 'application/pdf' }],
         body: 'UERG+REFU/QQ', // -_ remappés en +/
       },
-      { filename: 'b.png', mimeType: 'image/png', size: 22, attachmentId: 'att-b', headers: [], body: 'UE5H/REFU+QQ' },
+      {
+        filename: 'b.png',
+        mimeType: 'image/png',
+        size: 22,
+        attachmentId: 'att-b',
+        contentId: null,
+        headers: [],
+        body: 'UE5H/REFU+QQ',
+      },
+    ]);
+  });
+
+  it('inlineOnly → uniquement les images CID inline, contentId nettoyé', async () => {
+    const gmail = makeFakeGmail({
+      'users.messages.get': () =>
+        data({
+          payload: {
+            parts: [
+              {
+                filename: 'doc.pdf',
+                mimeType: 'application/pdf',
+                body: { attachmentId: 'att-doc', size: 10 },
+              },
+              {
+                filename: 'logo.png',
+                mimeType: 'image/png',
+                body: { attachmentId: 'att-logo', size: 5 },
+                headers: [
+                  { name: 'Content-Disposition', value: 'inline' },
+                  { name: 'Content-ID', value: '<logo@x>' },
+                ],
+              },
+            ],
+          },
+        }),
+    });
+    const refs: { messageId: string; attachmentId: string }[] = [];
+    const t = makeFakeTransport({
+      gmail,
+      batchAttachmentsGet: async (r) => {
+        refs.push(...r);
+        return ['SU1H'];
+      },
+    });
+    const out = await new GmailMessages(asT(t)).getMessageAttachments('msg1', {
+      inlineOnly: true,
+    });
+    expect(refs).toEqual([{ messageId: 'msg1', attachmentId: 'att-logo' }]);
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatchObject({ attachmentId: 'att-logo', contentId: 'logo@x', body: 'SU1H' });
+  });
+
+  it('sans inlineOnly : PJ classiques + images inline (résolution CID du reader)', async () => {
+    const gmail = makeFakeGmail({
+      'users.messages.get': () =>
+        data({
+          payload: {
+            parts: [
+              {
+                filename: 'doc.pdf',
+                mimeType: 'application/pdf',
+                body: { attachmentId: 'att-doc', size: 10 },
+              },
+              {
+                filename: 'logo.png',
+                mimeType: 'image/png',
+                body: { attachmentId: 'att-logo', size: 5 },
+                headers: [
+                  { name: 'Content-Disposition', value: 'inline' },
+                  { name: 'Content-ID', value: '<logo@x>' },
+                ],
+              },
+            ],
+          },
+        }),
+    });
+    const t = makeFakeTransport({
+      gmail,
+      batchAttachmentsGet: async (r) => r.map(() => 'QQ'),
+    });
+    const out = await new GmailMessages(asT(t)).getMessageAttachments('msg1');
+    expect(out.map((a) => [a.attachmentId, a.contentId])).toEqual([
+      ['att-doc', null],
+      ['att-logo', 'logo@x'],
     ]);
   });
 
@@ -134,7 +220,7 @@ describe('GmailMessages.create / delete', () => {
     expect(res).toEqual({ id: 'sent-1', threadId: 'thread-9' });
     expect(sentBody?.requestBody?.threadId).toBe('thread-9');
     expect(typeof sentBody?.requestBody?.raw).toBe('string');
-    expect((sentBody?.requestBody?.raw?.length ?? 0)).toBeGreaterThan(0);
+    expect(sentBody?.requestBody?.raw?.length ?? 0).toBeGreaterThan(0);
   });
 
   it('delete renvoie la donnée de l’API', async () => {
@@ -147,7 +233,9 @@ describe('GmailMessages.create / delete', () => {
 
 describe('GmailMessages.getRawEmail', () => {
   it('décode le raw base64 en UTF-8', async () => {
-    const rawB64 = Buffer.from('From: a@b.c\r\nSubject: Ping\r\n\r\nHello', 'utf-8').toString('base64');
+    const rawB64 = Buffer.from('From: a@b.c\r\nSubject: Ping\r\n\r\nHello', 'utf-8').toString(
+      'base64',
+    );
     const t = makeFakeTransport({
       gmail: makeFakeGmail({ 'users.messages.get': () => data({ raw: rawB64 }) }),
     });

@@ -1,15 +1,17 @@
-import { describe, expect, it, vi } from 'vitest';
 import type { GmailTransport } from './google-transport';
 import type { GmailMessages } from './google-messages';
 import type { GmailLabels } from './google-labels';
 import type { gmail_v1 } from '@googleapis/gmail';
+import { describe, expect, it, vi } from 'vitest';
 
 // google-threads → ./utils (server-utils→cloudflare), ../utils (→ ../env), google-parse
 // (→ sanitize). On neutralise les feuilles lourdes ; le pipeline threads tourne en réel.
 vi.mock('../server-utils', () => ({ getActiveConnection: vi.fn(), getZeroDB: vi.fn() }));
 vi.mock('hono/context-storage', () => ({ getContext: vi.fn(() => ({})) }));
 vi.mock('../../env', () => ({ env: {} }));
-vi.mock('../logger', () => ({ logger: { info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
+vi.mock('../logger', () => ({
+  logger: { info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn() },
+}));
 vi.mock('../sanitize-tip-tap-html', () => ({
   sanitizeTipTapHtml: vi.fn(async (html: string) => ({ html, inlineImages: [] })),
 }));
@@ -20,7 +22,8 @@ const { makeFakeTransport, makeFakeGmail, data, gmailError } = await import(
 );
 
 const asT = (t: unknown) => t as unknown as GmailTransport;
-const b64url = (s: string) => Buffer.from(s, 'utf-8').toString('base64').replace(/\+/g, '-').replace(/\//g, '_');
+const b64url = (s: string) =>
+  Buffer.from(s, 'utf-8').toString('base64').replace(/\+/g, '-').replace(/\//g, '_');
 const noMessages = () => ({ getAttachment: vi.fn() }) as unknown as GmailMessages;
 const noLabels = () =>
   ({ modifyThreadLabels: vi.fn(), modifyLabels: vi.fn() }) as unknown as GmailLabels;
@@ -92,7 +95,9 @@ describe('GmailThreads.list', () => {
         },
       }),
     });
-    const out = await new GmailThreads(asT(t), noMessages(), noLabels()).list({ folder: 'archive' });
+    const out = await new GmailThreads(asT(t), noMessages(), noLabels()).list({
+      folder: 'archive',
+    });
     expect(listParams?.labelIds).toEqual([]);
     expect(out.nextPageToken).toBeNull();
   });
@@ -140,7 +145,10 @@ describe('GmailThreads.get / parseThread', () => {
     expect(res.totalReplies).toBe(1); // le DRAFT ne compte pas
     expect(res.latest?.id).toBe('m1'); // dernier message non-draft
     expect(res.labels).toEqual(
-      expect.arrayContaining([{ id: 'INBOX', name: 'INBOX' }, { id: 'UNREAD', name: 'UNREAD' }]),
+      expect.arrayContaining([
+        { id: 'INBOX', name: 'INBOX' },
+        { id: 'UNREAD', name: 'UNREAD' },
+      ]),
     );
     const withAtt = res.messages.find((m) => m.id === 'm1')!;
     expect(withAtt.attachments).toEqual([
@@ -156,7 +164,10 @@ describe('GmailThreads.get / parseThread', () => {
     expect(withAtt.decodedBody).toContain('Hello world');
   });
 
-  it('remplace les images inline (cid:) par des data URIs via getAttachment', async () => {
+  it('chemin froid : AUCUN getAttachment malgré une image CID inline, ref cid: conservée', async () => {
+    // Contrat r2 (Shortwave parity) : parseThread ne télécharge plus les images
+    // inline au sync (l'ancienne boucle coûtait 4-7 s par thread image-lourd).
+    // Le client les résout à la demande via getMessageAttachments(inlineOnly).
     const inlineMsg: gmail_v1.Schema$Message = {
       id: 'm9',
       threadId: 't9',
@@ -182,38 +193,9 @@ describe('GmailThreads.get / parseThread', () => {
       gmail: makeFakeGmail({ 'users.threads.get': () => data({ messages: [inlineMsg] }) }),
     });
     const res = await new GmailThreads(asT(t), messages, noLabels()).get('t9');
-    expect((messages.getAttachment as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('m9', 'attImg');
-    expect(res.messages[0].decodedBody).toContain('data:image/png;base64,IMGB64');
-    expect(res.messages[0].decodedBody).not.toContain('cid:img1');
-  });
-
-  it('échec getAttachment inline → corps conservé, aucune exception', async () => {
-    const inlineMsg: gmail_v1.Schema$Message = {
-      id: 'm9',
-      threadId: 't9',
-      labelIds: ['INBOX'],
-      snippet: 's',
-      payload: {
-        body: { data: b64url('<p>voir cid:img1</p>') },
-        headers: [{ name: 'From', value: 'a@b.c' }],
-        parts: [
-          {
-            mimeType: 'image/png',
-            body: { attachmentId: 'attImg' },
-            headers: [
-              { name: 'Content-Disposition', value: 'inline' },
-              { name: 'Content-ID', value: '<img1>' },
-            ],
-          },
-        ],
-      },
-    };
-    const messages = { getAttachment: vi.fn(async () => { throw new Error('boom'); }) } as unknown as GmailMessages;
-    const t = makeFakeTransport({
-      gmail: makeFakeGmail({ 'users.threads.get': () => data({ messages: [inlineMsg] }) }),
-    });
-    const res = await new GmailThreads(asT(t), messages, noLabels()).get('t9');
-    expect(res.messages[0].decodedBody).toContain('cid:img1'); // inchangé
+    expect(messages.getAttachment as ReturnType<typeof vi.fn>).not.toHaveBeenCalled();
+    expect(res.messages[0].decodedBody).toContain('cid:img1');
+    expect(res.messages[0].decodedBody).not.toContain('data:image/png');
   });
 
   it('fil sans messages → résultat vide', async () => {
@@ -221,7 +203,13 @@ describe('GmailThreads.get / parseThread', () => {
       gmail: makeFakeGmail({ 'users.threads.get': () => data({}) }),
     });
     const res = await new GmailThreads(asT(t), noMessages(), noLabels()).get('empty');
-    expect(res).toEqual({ messages: [], latest: undefined, hasUnread: false, totalReplies: 0, labels: [] });
+    expect(res).toEqual({
+      messages: [],
+      latest: undefined,
+      hasUnread: false,
+      totalReplies: 0,
+      labels: [],
+    });
   });
 });
 
@@ -248,7 +236,15 @@ describe('GmailThreads.getMany — batch + parse', () => {
 describe('GmailThreads.markAsRead / markAsUnread', () => {
   it('markAsRead retire UNREAD des messages non lus des fils', async () => {
     const meta = new Map<string, gmail_v1.Schema$Thread>([
-      ['t1', { messages: [{ id: 'a', labelIds: ['UNREAD'] }, { id: 'b', labelIds: [] }] }],
+      [
+        't1',
+        {
+          messages: [
+            { id: 'a', labelIds: ['UNREAD'] },
+            { id: 'b', labelIds: [] },
+          ],
+        },
+      ],
     ]);
     const labels = noLabels();
     const t = makeFakeTransport({ batchThreadsGet: async () => meta });
@@ -258,7 +254,15 @@ describe('GmailThreads.markAsRead / markAsUnread', () => {
 
   it('markAsUnread ajoute UNREAD aux messages lus', async () => {
     const meta = new Map<string, gmail_v1.Schema$Thread>([
-      ['t1', { messages: [{ id: 'a', labelIds: ['UNREAD'] }, { id: 'b', labelIds: [] }] }],
+      [
+        't1',
+        {
+          messages: [
+            { id: 'a', labelIds: ['UNREAD'] },
+            { id: 'b', labelIds: [] },
+          ],
+        },
+      ],
     ]);
     const labels = noLabels();
     const t = makeFakeTransport({ batchThreadsGet: async () => meta });

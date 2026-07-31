@@ -17,14 +17,15 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { refreshActiveQueriesAfterAccountSwitch } from '@/lib/account-switch-cache';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useActiveConnection, useConnections } from '@/hooks/use-connections';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { hashKey, useMutation, useQueryClient } from '@tanstack/react-query';
 import type { ForceSyncSnapshot } from '@/lib/force-sync-hold-selector';
+import { setActiveConnectionId } from '@/lib/active-connection-store';
 import { activateForceSyncHoldAtom } from '@/store/force-sync-hold';
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { trpcClient, useTRPC } from '@/providers/query-provider';
 import { useDoState } from '@/components/mail/use-do-state';
 import { useSearchValue } from '@/hooks/use-search-value';
 import type { InfiniteData } from '@tanstack/react-query';
@@ -32,7 +33,6 @@ import { useLoading } from '../context/loading-context';
 import { signOut, useSession } from '@/lib/auth-client';
 import { AddConnectionDialog } from '../connection/add';
 import { CircleCheck, ThreeDots } from '../icons/icons';
-import { useTRPC } from '@/providers/query-provider';
 import { useSidebar } from '@/components/ui/sidebar';
 import { useBilling } from '@/hooks/use-billing';
 import { SunIcon } from '../icons/animated/sun';
@@ -179,17 +179,23 @@ export function NavUser() {
       // sans ce reset, la vue du nouveau compte rejouerait la requête `q` de
       // l'ancien (contrat compte-actif atomique).
       setSearchValue({ value: '', highlight: '', folder: '' });
-      await setDefaultConnection({ connectionId });
       const targetConnection = data?.connections.find(
         (connection) => connection.id === connectionId,
       );
       if (!targetConnection) throw new Error('The selected account is no longer available');
 
-      // Move the account identity and connection-owned live stats together.
-      // This prevents an old websocket payload (for example admin's Inbox=0)
-      // from being rendered below the newly selected Thomas identity.
-      const activeConnectionKey = trpc.connections.getDefault.queryKey();
-      queryClient.setQueryData(activeConnectionKey, targetConnection);
+      // Stoppe les vols en cours du compte quitté avant le basculement serveur.
+      // Le cache du compte n'est PLUS purgé (ni clear ni idbClear) : chaque
+      // compte garde son QueryClient et son persister isolés dans le pool, et
+      // la fence epoch du transport rejette toute réponse tardive qui aurait
+      // chevauché le switch.
+      await queryClient.cancelQueries();
+      await setDefaultConnection({ connectionId });
+
+      // Bascule le store client APRÈS le commit serveur : le provider swappe
+      // vers le QueryClient/persister du compte cible (chaud si déjà visité) et
+      // l'epoch avancé invalide les réponses parties avant ce point.
+      setActiveConnectionId(connectionId);
       setDoState({
         connectionId,
         isSyncing: false,
@@ -198,24 +204,10 @@ export function NavUser() {
         counts: [],
         shards: 0,
       });
-      // Do not clear the live QueryClient here. `clear()` detaches the mounted
-      // observers, so the following refetch used to match zero queries: the nav
-      // could show Thomas while Inbox still held admin's empty result until a
-      // later focus/websocket event. Keep the full-screen switch overlay visible
-      // while every mounted account-scoped read is invalidated and refetched.
-      await idbClear().catch((error) => log.warn('Failed to clear account cache:', error));
-      await refreshActiveQueriesAfterAccountSwitch(queryClient, {
-        infiniteQueryKey: trpc.mail.listThreads.infiniteQueryKey(),
-      });
 
-      let confirmedConnection = queryClient.getQueryData<{ id: string } | null>(
-        activeConnectionKey,
-      );
-      if (confirmedConnection?.id !== connectionId) {
-        confirmedConnection = await queryClient.fetchQuery(
-          trpc.connections.getDefault.queryOptions(void 0, { staleTime: 0 }),
-        );
-      }
+      // Confirmation via le client tRPC vanilla : le QueryClient de ce closure
+      // est celui de l'ANCIEN compte, il ne doit plus recevoir d'écriture.
+      const confirmedConnection = await trpcClient.connections.getDefault.query();
       if (confirmedConnection?.id !== connectionId) {
         throw new Error('The active account did not change after refreshing account data');
       }
@@ -236,6 +228,7 @@ export function NavUser() {
       error: 'Error signing out',
       async finally() {
         queryClient.clear();
+        setActiveConnectionId(null);
         await idbClear();
         window.location.href = '/login';
       },

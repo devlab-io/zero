@@ -4,12 +4,12 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '../ui/dropdown-menu';
-import { shouldFetchMessageAttachments, useAttachments } from '@/hooks/use-attachments';
 import { formatDate, formatTime, shouldShowSeparateTime } from '@/lib/date-utils';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Forward, Printer, Reply, ReplyAll, ThreeDots } from '../icons/icons';
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
 import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover';
+import { useFetchAttachmentBodies } from '@/hooks/use-attachments';
 import { CopyIcon, HardDriveDownload, Lock } from 'lucide-react';
 import type { Sender, ParsedMessage, Attachment } from '@/types';
 import { useActiveConnection } from '@/hooks/use-connections';
@@ -67,9 +67,31 @@ const cleanNameDisplay = (name?: string) => {
 const MailDisplay = ({ emailData, index, totalEmails, demo, threadAttachments }: Props) => {
   const [isCollapsed, setIsCollapsed] = useState<boolean>(false);
   const { data: threadData } = useThread(emailData.threadId ?? null);
-  const { data: messageAttachments } = useAttachments(emailData.id, {
-    enabled: shouldFetchMessageAttachments(emailData.attachments),
-  });
+  // Plus aucun fetch de corps de pièces jointes au rendu (l'ancien useAttachments
+  // par message déclenchait un waterfall getMessageAttachments sur chaque thread
+  // ouvert). Les puces se dessinent depuis les métadonnées du thread ; les corps
+  // sont téléchargés au clic via fetchAttachmentBodies.
+  const messageAttachments = useMemo(
+    () => (emailData.attachments ?? []).filter((attachment) => attachment.attachmentId),
+    [emailData.attachments],
+  );
+  const fetchAttachmentBodies = useFetchAttachmentBodies();
+  const withAttachmentBody = useCallback(
+    async (
+      attachment: { attachmentId: string },
+      action: (full: Attachment) => void | Promise<void>,
+    ) => {
+      try {
+        const bodies = await fetchAttachmentBodies(emailData.id);
+        const full = bodies.find((item) => item.attachmentId === attachment.attachmentId);
+        if (!full) throw new Error('Attachment not found');
+        await action(full);
+      } catch {
+        toast.error(m['common.mailDisplay.failedToOpenAttachment']());
+      }
+    },
+    [emailData.id, fetchAttachmentBodies],
+  );
   //   const [unsubscribed, setUnsubscribed] = useState(false);
   //   const [isUnsubscribing, setIsUnsubscribing] = useState(false);
   const [preventCollapse, setPreventCollapse] = useState(false);
@@ -553,10 +575,21 @@ const MailDisplay = ({ emailData, index, totalEmails, demo, threadAttachments }:
                                   onClick={(e) => {
                                     e.stopPropagation();
                                     e.preventDefault();
-                                    handleDownloadAllAttachments(
-                                      emailData.subject || 'email',
-                                      messageAttachments || [],
-                                    )();
+                                    void (async () => {
+                                      try {
+                                        const bodies = await fetchAttachmentBodies(emailData.id);
+                                        await handleDownloadAllAttachments(
+                                          emailData.subject || 'email',
+                                          // Les images CID inline du corps ne sont pas des
+                                          // pièces jointes téléchargeables.
+                                          bodies.filter((item) => !item.contentId),
+                                        )();
+                                      } catch {
+                                        toast.error(
+                                          m['common.mailDisplay.failedToDownloadAttachment'](),
+                                        );
+                                      }
+                                    })();
                                   }}
                                 >
                                   <HardDriveDownload className="fill-iconLight dark:text-iconDark dark:fill-iconLight mr-2 h-4 w-4" />
@@ -697,7 +730,7 @@ const MailDisplay = ({ emailData, index, totalEmails, demo, threadAttachments }:
                       >
                         <button
                           className="flex cursor-pointer items-center gap-1 rounded-[5px] bg-[#FAFAFA] px-1.5 py-1 text-sm font-medium hover:bg-[#F0F0F0] dark:bg-[#262626] dark:hover:bg-[#303030]"
-                          onClick={() => openAttachment(attachment)}
+                          onClick={() => void withAttachmentBody(attachment, openAttachment)}
                         >
                           {getFileIcon(attachment.filename)}
                           <span className="max-w-[15ch] truncate text-sm text-black dark:text-white">
@@ -708,7 +741,7 @@ const MailDisplay = ({ emailData, index, totalEmails, demo, threadAttachments }:
                           </span>
                         </button>
                         <button
-                          onClick={() => downloadAttachment(attachment)}
+                          onClick={() => void withAttachmentBody(attachment, downloadAttachment)}
                           className="flex cursor-pointer items-center gap-1 rounded-[5px] px-1.5 py-1 text-sm"
                         >
                           <HardDriveDownload className="text-muted-foreground dark:text-muted-foreground h-4 w-4 fill-[#FAFAFA] dark:fill-[#262626]" />

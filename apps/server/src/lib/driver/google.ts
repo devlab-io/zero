@@ -2,11 +2,11 @@ import type { IOutgoingMessage, Label } from '../../types';
 import type { MailManager, ManagerConfig } from './types';
 import { GmailTransport } from './google-transport';
 import { GmailMessages } from './google-messages';
-import { GmailLabels } from './google-labels';
-import { GmailThreads } from './google-threads';
-import { GmailDrafts } from './google-drafts';
-import { GmailAccount } from './google-account';
 import type { CreateDraftData } from '../schemas';
+import { GmailThreads } from './google-threads';
+import { GmailAccount } from './google-account';
+import { GmailLabels } from './google-labels';
+import { GmailDrafts } from './google-drafts';
 
 /**
  * GoogleMailManager — point d'entrée du driver Google.
@@ -91,8 +91,8 @@ export class GoogleMailManager implements MailManager {
   public getAttachment(messageId: string, attachmentId: string) {
     return this.messages.getAttachment(messageId, attachmentId);
   }
-  public getMessageAttachments(messageId: string) {
-    return this.messages.getMessageAttachments(messageId);
+  public getMessageAttachments(messageId: string, options?: { inlineOnly?: boolean }) {
+    return this.messages.getMessageAttachments(messageId, options);
   }
   public create(data: IOutgoingMessage) {
     return this.messages.create(data);

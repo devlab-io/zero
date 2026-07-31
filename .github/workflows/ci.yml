@@ -17,7 +17,7 @@ env:
   # its error count is compared to the frozen baseline, but the step never fails
   # the build. Flip to "true" (one-line edit) to make a typecheck regression above
   # baseline a hard gate — the orchestrator's call at the end of wave 1.
-  TYPECHECK_BLOCKING: "false"
+  TYPECHECK_BLOCKING: 'false'
 
 jobs:
   verify:
@@ -109,6 +109,10 @@ jobs:
           --no-banner --redact --exit-code 1
 
       - name: Build mail frontend
+        # CLOUDFLARE_ENV est requis par la garde build env (apps/mail/lib/build-env.ts) :
+        # sans lui le bundle embarquerait un backend `undefined` en silence.
+        env:
+          CLOUDFLARE_ENV: local
         run: pnpm --filter @zero/mail build
 
       - name: Bundle Worker without deploying (server)

@@ -1,12 +1,11 @@
-import { findHtmlBody, fromBinary } from './utils';
 import { findAttachments, parseMessage } from './google-parse';
 import type { GmailTransport } from './google-transport';
 import type { GmailMessages } from './google-messages';
 import type { GmailLabels } from './google-labels';
-import type { ParsedMessage } from '../../types';
+import { findHtmlBody, fromBinary } from './utils';
 import type { gmail_v1 } from '@googleapis/gmail';
+import type { ParsedMessage } from '../../types';
 import { cleanSearchValue } from '../utils';
-import { logger } from '../logger';
 import * as he from 'he';
 
 export function normalizeSearch(folder: string, q: string) {
@@ -94,7 +93,9 @@ export class GmailThreads {
 
         return {
           threads: threads
-            .filter((thread): thread is typeof thread & { id: string } => typeof thread.id === 'string')
+            .filter(
+              (thread): thread is typeof thread & { id: string } => typeof thread.id === 'string',
+            )
             .map((thread) => ({
               id: thread.id,
               historyId: thread.historyId ?? null,
@@ -135,7 +136,9 @@ export class GmailThreads {
    * compteur du transport agrège le cycle. `batchThreadsGet` échoue explicitement plutôt que
    * de rendre un sous-ensemble silencieux. Clé = threadId, valeur = thread parsé.
    */
-  public async getMany(ids: string[]): Promise<Map<string, Awaited<ReturnType<typeof this.parseThread>>>> {
+  public async getMany(
+    ids: string[],
+  ): Promise<Map<string, Awaited<ReturnType<typeof this.parseThread>>>> {
     const raw = await this.t.batchThreadsGet(ids, 'full');
     const out = new Map<string, Awaited<ReturnType<typeof this.parseThread>>>();
     await Promise.all(
@@ -160,109 +163,70 @@ export class GmailThreads {
     const labels = new Set<string>();
     const messages: ParsedMessage[] = await Promise.all(
       data.messages.map(async (message) => {
-            const bodyData =
-              message.payload?.body?.data ||
-              (message.payload?.parts ? findHtmlBody(message.payload.parts) : '') ||
-              message.payload?.parts?.[0]?.body?.data ||
-              '';
+        const bodyData =
+          message.payload?.body?.data ||
+          (message.payload?.parts ? findHtmlBody(message.payload.parts) : '') ||
+          message.payload?.parts?.[0]?.body?.data ||
+          '';
 
-            const decodedBody = bodyData
-              ? he
-                  .decode(fromBinary(bodyData))
-                  .replace(/<[^>]*>/g, '')
-                  .trim() === fromBinary(bodyData).trim()
-                ? he.decode(fromBinary(bodyData).replace(/\n/g, '<br>'))
-                : he.decode(fromBinary(bodyData))
-              : '';
+        const decodedBody = bodyData
+          ? he
+              .decode(fromBinary(bodyData))
+              .replace(/<[^>]*>/g, '')
+              .trim() === fromBinary(bodyData).trim()
+            ? he.decode(fromBinary(bodyData).replace(/\n/g, '<br>'))
+            : he.decode(fromBinary(bodyData))
+          : '';
 
-            let processedBody = decodedBody;
-            if (message.payload?.parts) {
-              const inlineImages = message.payload.parts.filter((part) => {
-                const contentDisposition =
-                  part.headers?.find((h) => h.name?.toLowerCase() === 'content-disposition')
-                    ?.value || '';
-                const isInline = contentDisposition.toLowerCase().includes('inline');
-                const hasContentId = part.headers?.some(
-                  (h) => h.name?.toLowerCase() === 'content-id',
-                );
-                return isInline && hasContentId;
-              });
+        // Les images CID inline ne sont PLUS téléchargées ici : l'ancienne boucle
+        // `await getAttachment` par image rendait le chemin froid 4-7 s sur les
+        // newsletters. Les refs `cid:` restent telles quelles dans le corps ; le
+        // client les résout à la demande via mail.getMessageAttachments
+        // (inlineOnly) après le premier paint.
+        const processedBody = decodedBody;
 
-              for (const part of inlineImages) {
-                const contentId = part.headers?.find(
-                  (h) => h.name?.toLowerCase() === 'content-id',
-                )?.value;
-                if (contentId && part.body?.attachmentId && message.id) {
-                  try {
-                    const imageData = await this.messages.getAttachment(
-                      message.id,
-                      part.body.attachmentId,
-                    );
-                    if (imageData) {
-                      const cleanContentId = contentId.replace(/[<>]/g, '');
-
-                      const escapedContentId = cleanContentId.replace(
-                        /[.*+?^${}()|[\]\\]/g,
-                        '\\$&',
-                      );
-                      processedBody = processedBody.replace(
-                        new RegExp(`cid:${escapedContentId}`, 'g'),
-                        `data:${part.mimeType};base64,${imageData}`,
-                      );
-                    }
-                  } catch (error) {
-                    logger.debug('Failed to inline Gmail image attachment', {
-                      messageId: message.id,
-                      attachmentId: part.body?.attachmentId,
-                      error,
-                    });
-                  }
-                }
-              }
+        const parsedData = parseMessage(message);
+        if (parsedData.tags) {
+          parsedData.tags.forEach((tag) => {
+            if (tag.id) {
+              if (labels.has(tag.id)) return;
+              labels.add(tag.id);
             }
+          });
+        }
 
-            const parsedData = parseMessage(message);
-            if (parsedData.tags) {
-              parsedData.tags.forEach((tag) => {
-                if (tag.id) {
-                  if (labels.has(tag.id)) return;
-                  labels.add(tag.id);
-                }
-              });
-            }
+        // Only store attachment metadata, not the actual attachment data
+        const attachmentParts = message.payload?.parts
+          ? findAttachments(message.payload.parts)
+          : [];
 
-            // Only store attachment metadata, not the actual attachment data
-            const attachmentParts = message.payload?.parts
-              ? findAttachments(message.payload.parts)
-              : [];
+        const attachments = attachmentParts.map((part) => ({
+          filename: part.filename || '',
+          mimeType: part.mimeType || '',
+          size: Number(part.body?.size || 0),
+          attachmentId: part.body?.attachmentId || '',
+          headers:
+            part.headers?.map((h) => ({
+              name: h.name ?? '',
+              value: h.value ?? '',
+            })) ?? [],
+          body: '', // Empty body - fetch on demand with getMessageAttachments
+        }));
 
-            const attachments = attachmentParts.map((part) => ({
-              filename: part.filename || '',
-              mimeType: part.mimeType || '',
-              size: Number(part.body?.size || 0),
-              attachmentId: part.body?.attachmentId || '',
-              headers:
-                part.headers?.map((h) => ({
-                  name: h.name ?? '',
-                  value: h.value ?? '',
-                })) ?? [],
-              body: '', // Empty body - fetch on demand with getMessageAttachments
-            }));
+        const fullEmailData = {
+          ...parsedData,
+          body: '',
+          processedHtml: '',
+          blobUrl: '',
+          decodedBody: processedBody,
+          attachments,
+        };
 
-            const fullEmailData = {
-              ...parsedData,
-              body: '',
-              processedHtml: '',
-              blobUrl: '',
-              decodedBody: processedBody,
-              attachments,
-            };
+        if (fullEmailData.unread) hasUnread = true;
 
-            if (fullEmailData.unread) hasUnread = true;
-
-            return fullEmailData;
-          }),
-        );
+        return fullEmailData;
+      }),
+    );
 
     return {
       labels: Array.from(labels).map((id) => ({ id, name: id })),

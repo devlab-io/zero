@@ -164,11 +164,11 @@ export class ZeroDriver extends DurableObject<ZeroEnv> {
     return await this.driver.getEmailAliases();
   }
 
-  async getMessageAttachments(messageId: string) {
+  async getMessageAttachments(messageId: string, options?: { inlineOnly?: boolean }) {
     if (!this.driver) {
       throw new Error('No driver available');
     }
-    return await this.driver.getMessageAttachments(messageId);
+    return await this.driver.getMessageAttachments(messageId, options);
   }
 
   async getRawEmail(messageId: string) {

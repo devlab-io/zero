@@ -796,18 +796,25 @@ export const mailRouter = router({
     .input(
       z.object({
         messageId: z.string(),
+        // inlineOnly : ne renvoyer que les images CID inline du corps (les refs
+        // `cid:` ne sont plus inlinées au sync — le reader les résout ici sans
+        // payer le téléchargement des vraies pièces jointes du message).
+        inlineOnly: z.boolean().optional(),
       }),
     )
     .query(async ({ ctx, input }) => {
       const { activeConnection } = ctx;
       const executionCtx = getContext<HonoContext>().executionCtx;
       const { stub: agent } = await getZeroAgent(activeConnection.id, executionCtx);
-      return agent.getMessageAttachments(input.messageId) as Promise<
+      return agent.getMessageAttachments(input.messageId, {
+        inlineOnly: input.inlineOnly,
+      }) as Promise<
         {
           filename: string;
           mimeType: string;
           size: number;
           attachmentId: string;
+          contentId: string | null;
           headers: {
             name: string;
             value: string;

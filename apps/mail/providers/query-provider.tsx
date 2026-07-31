@@ -1,4 +1,12 @@
 import {
+  getActiveConnectionId,
+  getConnectionEpoch,
+  isStaleConnectionResponse,
+  setActiveConnectionId,
+  subscribeActiveConnection,
+  StaleConnectionResponseError,
+} from '@/lib/active-connection-store';
+import {
   PersistQueryClientProvider,
   type PersistedClient,
   type Persister,
@@ -10,34 +18,38 @@ import {
 } from '@/lib/cache-owner-hint';
 import { QueryCache, QueryClient, hashKey, type InfiniteData } from '@tanstack/react-query';
 import { selectQueriesForPersistence, shouldPersistQuery } from '@/lib/query-persistence';
+import { useEffect, useMemo, useSyncExternalStore, type PropsWithChildren } from 'react';
 import { readRetryDelay, shouldRetryRead } from '@/lib/query-retry';
-import { useEffect, useMemo, type PropsWithChildren } from 'react';
 import { createTRPCContext } from '@trpc/tanstack-react-query';
 import { createTRPCClient, httpBatchLink } from '@trpc/client';
+import { acquireQueryClient } from '@/lib/query-client-pool';
 import { signOut, useSession } from '@/lib/auth-client';
 import type { AppRouter } from '@zero/server/trpc';
 import { CACHE_BURST_KEY } from '@/lib/constants';
+import { useQuery } from '@tanstack/react-query';
 import { get, set, del, keys } from 'idb-keyval';
 import superjson from 'superjson';
 import { log } from '@/lib/log';
 
 const QUERY_CACHE_PREFIX = 'zero-query-cache';
 
-// Purge persisted query caches that do not belong to the current user+account:
+// Purge persisted query caches that do not belong to the current USER:
 // - on logout (anonymous owner): every persisted cache is removed;
-// - on account/user switch: caches of other owners are removed.
-// Runs once per owner per session. Only runs once the session has resolved so a
-// cold load never wipes the real user's cache before auth completes.
+// - on user switch: caches of other users are removed.
+// Caches of the current user's OTHER connections are KEPT on purpose: the
+// admin→Thomas→admin switch must find admin's cache intact (per-account
+// isolation, Shortwave parity). Runs once per owner per session, only once the
+// session has resolved so a cold load never wipes a cache before auth completes.
 const purgedOwners = new Set<string>();
-function purgeForeignQueryCaches(currentKey: string, isAuthenticated: boolean) {
-  if (purgedOwners.has(currentKey)) return;
-  purgedOwners.add(currentKey);
+function purgeForeignQueryCaches(currentUserPrefix: string, isAuthenticated: boolean) {
+  if (purgedOwners.has(currentUserPrefix)) return;
+  purgedOwners.add(currentUserPrefix);
   void keys()
     .then((allKeys) =>
       Promise.all(
         allKeys.flatMap((key) => {
           if (typeof key !== 'string' || !key.startsWith(QUERY_CACHE_PREFIX)) return [];
-          if (isAuthenticated && key === currentKey) return [];
+          if (isAuthenticated && key.startsWith(currentUserPrefix)) return [];
           return [del(key)];
         }),
       ),
@@ -104,24 +116,15 @@ export const makeQueryClient = (cacheOwner: string) =>
     },
   });
 
-const browserQueryClient = {
-  queryClient: null,
-  activeCacheOwner: null,
-} as {
-  queryClient: QueryClient | null;
-  activeCacheOwner: string | null;
-};
+// Voir lib/query-client-pool.ts : un QueryClient retenu par compte — caches
+// isolés et chauds, admin→Thomas→admin instantané au retour.
+const queryClientPool = new Map<string, QueryClient>();
 
 const getQueryClient = (cacheOwner: string) => {
   if (typeof window === 'undefined') {
     return makeQueryClient(cacheOwner);
-  } else {
-    if (!browserQueryClient.queryClient || browserQueryClient.activeCacheOwner !== cacheOwner) {
-      browserQueryClient.queryClient = makeQueryClient(cacheOwner);
-      browserQueryClient.activeCacheOwner = cacheOwner;
-    }
-    return browserQueryClient.queryClient;
   }
+  return acquireQueryClient(cacheOwner, makeQueryClient, queryClientPool);
 };
 
 const getUrl = () => import.meta.env.VITE_PUBLIC_BACKEND_URL + '/api/trpc';
@@ -135,8 +138,16 @@ export const trpcClient = createTRPCClient<AppRouter>({
       transformer: superjson,
       url: getUrl(),
       methodOverride: 'POST',
-      fetch: (url, options) =>
-        fetch(url, { ...options, credentials: 'include' }).then((res) => {
+      fetch: (url, options) => {
+        // Fence epoch : une réponse dont l'émission précède un switch de compte
+        // ne doit alimenter AUCUN cache — le serveur résout le compte via le
+        // cookie de connexion active, donc une réponse qui a chevauché le
+        // basculement peut porter les données de n'importe quel côté.
+        const issuedEpoch = getConnectionEpoch();
+        return fetch(url, { ...options, credentials: 'include' }).then((res) => {
+          if (isStaleConnectionResponse(issuedEpoch, getConnectionEpoch())) {
+            throw new StaleConnectionResponseError();
+          }
           const currentPath = new URL(window.location.href).pathname;
           const redirectPath = res.headers.get('X-Zero-Redirect');
           if (!!redirectPath && redirectPath !== currentPath) {
@@ -144,17 +155,44 @@ export const trpcClient = createTRPCClient<AppRouter>({
             res.headers.delete('X-Zero-Redirect');
           }
           return res;
-        }),
+        });
+      },
     }),
   ],
 });
 
 type TrpcHook = ReturnType<typeof useTRPC>;
-export function QueryProvider({
-  children,
-  connectionId,
-}: PropsWithChildren<{ connectionId: string | null }>) {
+
+// Rapproche le store client de la vérité serveur : si la connexion active
+// serveur diffère du hint local (switch fait ailleurs, connexion révoquée), le
+// store bascule — le provider swappe alors client/persister et l'epoch avancé
+// rejette les réponses parties sous l'ancienne hypothèse.
+function ActiveConnectionBridge() {
+  const trpc = useTRPC();
+  const { data } = useQuery(
+    trpc.connections.getDefault.queryOptions(void 0, {
+      meta: { noGlobalError: true },
+    }),
+  );
+  useEffect(() => {
+    if (data?.id && data.id !== getActiveConnectionId()) {
+      setActiveConnectionId(data.id);
+    }
+  }, [data?.id]);
+  return null;
+}
+
+export function QueryProvider({ children }: PropsWithChildren) {
   const { data: session, isPending: isSessionPending } = useSession();
+  // Connexion active réelle (store client, hydraté du hint localStorage au boot,
+  // mis à jour par le switch de compte et la bridge serveur). L'ancien montage
+  // avec connectionId={null} figeait le scope sur `user-default` : aucun compte
+  // n'était réellement isolé.
+  const connectionId = useSyncExternalStore(
+    subscribeActiveConnection,
+    getActiveConnectionId,
+    () => null,
+  );
   const resolvedCacheOwner = `${session?.user.id ?? 'anonymous'}-${connectionId ?? 'default'}`;
 
   // Devlab (perf) : pendant que useSession() résout, cacheOwner valait
@@ -186,13 +224,16 @@ export function QueryProvider({
     else clearCacheOwnerHint();
   }, [isSessionPending, resolvedCacheOwner, session?.user.id]);
 
-  // Purge other users'/accounts' persisted caches on switch, and all of them on
-  // logout — but only once the session has resolved, so a cold load never wipes
-  // the signed-in user's cache before auth completes.
+  // Purge des caches persistés des AUTRES utilisateurs (tous sur logout). Les
+  // caches des autres connexions du même utilisateur sont conservés : c'est ce
+  // qui rend admin→Thomas→admin instantané au retour.
   useEffect(() => {
     if (isSessionPending) return;
-    purgeForeignQueryCaches(`zero-query-cache-${cacheOwner}`, Boolean(session?.user.id));
-  }, [isSessionPending, cacheOwner, session?.user.id]);
+    purgeForeignQueryCaches(
+      `${QUERY_CACHE_PREFIX}-${session?.user.id ?? 'anonymous'}-`,
+      Boolean(session?.user.id),
+    );
+  }, [isSessionPending, session?.user.id]);
 
   return (
     <PersistQueryClientProvider
@@ -232,6 +273,7 @@ export function QueryProvider({
       }}
     >
       <TRPCProvider trpcClient={trpcClient} queryClient={queryClient}>
+        {session?.user.id ? <ActiveConnectionBridge /> : null}
         {children}
       </TRPCProvider>
     </PersistQueryClientProvider>

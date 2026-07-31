@@ -1309,12 +1309,14 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
         getMessageAttachments: import("@trpc/server").TRPCQueryProcedure<{
             input: {
                 messageId: string;
+                inlineOnly?: boolean | undefined;
             };
             output: {
                 filename: string;
                 mimeType: string;
                 size: number;
                 attachmentId: string;
+                contentId: string | null;
                 headers: {
                     name: string;
                     value: string;

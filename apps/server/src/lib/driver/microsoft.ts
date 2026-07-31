@@ -79,7 +79,10 @@ export class OutlookMailManager implements MailManager {
   public getRawEmail(_id: string): Promise<string> {
     return Promise.reject(new Error('getRawEmail not implemented for Outlook driver'));
   }
-  public getMessageAttachments(_id: string): ReturnType<MailManager['getMessageAttachments']> {
+  public getMessageAttachments(
+    _id: string,
+    _options?: { inlineOnly?: boolean },
+  ): ReturnType<MailManager['getMessageAttachments']> {
     return Promise.reject(new Error('getMessageAttachments not implemented for Outlook driver'));
   }
   public getEmailAliases() {

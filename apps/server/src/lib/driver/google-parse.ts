@@ -305,3 +305,40 @@ export function findAttachments(
 
   return results;
 }
+
+/**
+ * Extrait le Content-ID nettoyé (`<logo@x>` → `logo@x`) d'une part MIME, ou null.
+ * Exporté pour que driver et tests partagent la même normalisation que les refs
+ * `cid:` laissées dans le corps par parseThread.
+ */
+export function partContentId(part: gmail_v1.Schema$MessagePart): string | null {
+  const raw = part.headers?.find((h) => h.name?.toLowerCase() === 'content-id')?.value;
+  return raw ? raw.replace(/[<>]/g, '') : null;
+}
+
+/**
+ * Parts d'images inline référencées par `cid:` dans le corps HTML : disposition
+ * inline + Content-ID + attachmentId. Complément exact de findAttachments (qui
+ * les exclut) — c'est la population que parseThread ne télécharge plus au sync.
+ */
+export function findInlineImageParts(
+  parts: gmail_v1.Schema$MessagePart[],
+): gmail_v1.Schema$MessagePart[] {
+  let results: gmail_v1.Schema$MessagePart[] = [];
+
+  for (const part of parts) {
+    const contentDisposition =
+      part.headers?.find((h) => h.name?.toLowerCase() === 'content-disposition')?.value || '';
+    const isInline = contentDisposition.toLowerCase().includes('inline');
+
+    if (isInline && partContentId(part) && part.body?.attachmentId) {
+      results.push(part);
+    }
+
+    if (part.parts && Array.isArray(part.parts)) {
+      results = results.concat(findInlineImageParts(part.parts));
+    }
+  }
+
+  return results;
+}

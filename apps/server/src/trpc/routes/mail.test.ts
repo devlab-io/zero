@@ -214,7 +214,7 @@ describe('mail router — lectures simples', () => {
   it('getEmailAliases / getMessageAttachments / getRawEmail délèguent', async () => {
     expect(await call('getEmailAliases')).toEqual([{ email: 'me@x.co', primary: true }]);
     await call('getMessageAttachments', { messageId: 'm9' });
-    expect(stub.getMessageAttachments).toHaveBeenCalledWith('m9');
+    expect(stub.getMessageAttachments).toHaveBeenCalledWith('m9', { inlineOnly: undefined });
     expect(await call('getRawEmail', { id: 'x' })).toBe('RAW');
     expect(stub.getRawEmail).toHaveBeenCalledWith('x');
   });

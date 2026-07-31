@@ -47,6 +47,10 @@ function extractHttpStatus(error: unknown): number | null {
  */
 export function shouldRetryRead(failureCount: number, error: unknown): boolean {
   if (failureCount >= READ_RETRY_MAX) return false;
+  // Une réponse rejetée par la fence de switch de compte est définitive pour
+  // CETTE requête : le compte a changé sous elle ; le client du nouveau compte
+  // relance les siennes.
+  if ((error as { name?: unknown } | null)?.name === 'StaleConnectionResponseError') return false;
   const status = extractHttpStatus(error);
   if (status !== null && status >= 400 && status < 500 && !RETRYABLE_CLIENT_STATUSES.has(status)) {
     return false;

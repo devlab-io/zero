@@ -2,8 +2,10 @@ import { emailContentQueryKey, resolveEmailContentTheme } from '@/lib/email-cont
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { defaultUserSettings } from '@zero/server/schemas';
+import { useInlineImages } from '@/hooks/use-attachments';
 import { useTRPC } from '@/providers/query-provider';
 import { getBrowserTimezone } from '@/lib/timezones';
+import { resolveCidImages } from '@/lib/cid-images';
 import { useSettings } from '@/hooks/use-settings';
 import { m } from '@/paraglide/messages';
 import { useTheme } from 'next-themes';
@@ -110,11 +112,26 @@ export function MailContent({ id, html, senderEmail }: MailContentProps) {
     shadowRootRef.current.innerHTML = processedData.html;
   }, [processedData]);
 
+  // Résolution lazy des images CID : uniquement si le corps rendu en contient.
+  const hasCidImages = useMemo(
+    () => Boolean(processedData?.html.includes('src="cid:')),
+    [processedData],
+  );
+  const { data: inlineImages } = useInlineImages(id, hasCidImages);
+
+  useEffect(() => {
+    if (!shadowRootRef.current || !processedData || !inlineImages?.length) return;
+    resolveCidImages(shadowRootRef.current, inlineImages);
+  }, [processedData, inlineImages]);
+
   const handleImageError = useCallback(
     (e: Event) => {
       const target = e.target as HTMLImageElement;
       if (target.tagName === 'IMG') {
-        if (!(isTrustedSender || temporaryImagesEnabled)) {
+        // Une ref `cid:` en attente de résolution n'est pas une image distante
+        // bloquée : on la masque le temps du fetch inline, sans lever le bandeau.
+        const isPendingCid = (target.getAttribute('src') ?? '').startsWith('cid:');
+        if (!isPendingCid && !(isTrustedSender || temporaryImagesEnabled)) {
           setCspViolation(true);
         }
         target.style.display = 'none';

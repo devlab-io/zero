@@ -1,4 +1,9 @@
-import { findAttachments, parseOutgoing } from './google-parse';
+import {
+  findAttachments,
+  findInlineImageParts,
+  parseOutgoing,
+  partContentId,
+} from './google-parse';
 import type { GmailTransport } from './google-transport';
 import type { IOutgoingMessage } from '../../types';
 import { fromBase64Url } from './utils';
@@ -30,7 +35,7 @@ export class GmailMessages {
     );
   }
 
-  public async getMessageAttachments(messageId: string) {
+  public async getMessageAttachments(messageId: string, options?: { inlineOnly?: boolean }) {
     return this.t.withErrorHandler(
       'getMessageAttachments',
       async () => {
@@ -42,8 +47,14 @@ export class GmailMessages {
             }),
           { retry: true },
         );
+        // Les images CID inline (exclues de findAttachments) sont servies ici à la
+        // demande depuis que parseThread ne les télécharge plus au sync. `inlineOnly`
+        // permet au reader de résoudre les refs `cid:` du corps sans télécharger les
+        // vraies pièces jointes (potentiellement lourdes) du même message.
+        const parts = res.data.payload?.parts ?? [];
+        const inlineParts = findInlineImageParts(parts);
         const attachmentParts = (
-          res.data.payload?.parts ? findAttachments(res.data.payload.parts) : []
+          options?.inlineOnly ? inlineParts : [...findAttachments(parts), ...inlineParts]
         ).filter((part) => !!part.body?.attachmentId);
 
         // Un seul round-trip batch pour toutes les pièces jointes du message (issue #31),
@@ -52,7 +63,10 @@ export class GmailMessages {
         // `batchAttachmentsGet` renvoie un tableau COMPLET (ordre préservé) ou lève sur échec
         // — aucune PJ perdue en silence.
         const datas = await this.t.batchAttachmentsGet(
-          attachmentParts.map((part) => ({ messageId, attachmentId: part.body?.attachmentId ?? '' })),
+          attachmentParts.map((part) => ({
+            messageId,
+            attachmentId: part.body?.attachmentId ?? '',
+          })),
         );
 
         return attachmentParts.map((part, i) => ({
@@ -60,6 +74,7 @@ export class GmailMessages {
           mimeType: part.mimeType || '',
           size: Number(part.body?.size || 0),
           attachmentId: part.body?.attachmentId || '',
+          contentId: partContentId(part),
           headers:
             part.headers?.map((h) => ({
               name: h.name ?? '',

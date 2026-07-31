@@ -12,7 +12,7 @@ import { Outlet } from 'react-router';
 // The nesting mirrors what the root providers used to enforce.
 export default function Layout() {
   return (
-    <QueryProvider connectionId={null}>
+    <QueryProvider>
       <JotaiProvider>
         <SidebarProvider>
           <LoadingProvider>

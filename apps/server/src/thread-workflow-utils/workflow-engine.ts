@@ -14,12 +14,12 @@
  * Reuse or distribution of this file requires a license from Zero Email Inc.
  */
 
-import { logger } from '../lib/logger';
 import type { IGetThreadResponse } from '../lib/driver/types';
 import { workflowFunctions } from './workflow-functions';
 import { shouldGenerateDraft } from './index';
-import { connection } from '../db/schema';
 import { initTracing } from '../lib/tracing';
+import { connection } from '../db/schema';
+import { logger } from '../lib/logger';
 
 export type WorkflowContext = {
   connectionId: string;
@@ -28,7 +28,16 @@ export type WorkflowContext = {
   foundConnection: typeof connection.$inferSelect;
   results?: Map<string, unknown>;
   env?: unknown;
+  /**
+   * Origine de l'exécution. Absent ou 'automatic' = pipeline d'arrivée de
+   * message (Pub/Sub) ; 'user' = action explicite. Le résumé IA n'est produit
+   * QUE sur action utilisateur (parité Shortwave sans IA).
+   */
+  trigger?: 'automatic' | 'user';
 };
+
+/** Condition des steps IA opt-in : jamais exécutés par le pipeline automatique. */
+export const isUserTriggered = (context: WorkflowContext): boolean => context.trigger === 'user';
 
 export type WorkflowStep = {
   id: string;
@@ -73,8 +82,8 @@ export class WorkflowEngine {
       attributes: {
         'workflow.name': workflowName,
         'connection.id': context.connectionId,
-        'thread.id': context.threadId
-      }
+        'thread.id': context.threadId,
+      },
     });
 
     const results = new Map<string, unknown>(existingResults || []);
@@ -92,12 +101,14 @@ export class WorkflowEngine {
             'step.id': step.id,
             'step.name': step.name,
             'step.enabled': step.enabled,
-            'workflow.name': workflowName
-          }
+            'workflow.name': workflowName,
+          },
         });
 
         try {
-          const shouldExecute = step.condition ? await step.condition({ ...context, results }) : true;
+          const shouldExecute = step.condition
+            ? await step.condition({ ...context, results })
+            : true;
           if (!shouldExecute) {
             logger.info(`[WORKFLOW_ENGINE] Condition not met for step: ${step.name}`);
             stepSpan.setAttributes({ 'step.condition_met': false });
@@ -114,7 +125,7 @@ export class WorkflowEngine {
         } catch (error) {
           const errorObj = error instanceof Error ? error : new Error(String(error));
           logger.error(`[WORKFLOW_ENGINE] Error in step ${step.name}:`, errorObj);
-          
+
           stepSpan.recordException(errorObj);
           stepSpan.setStatus({ code: 2, message: errorObj.message });
 
@@ -129,9 +140,9 @@ export class WorkflowEngine {
         }
       }
 
-      workflowSpan.setAttributes({ 
+      workflowSpan.setAttributes({
         'workflow.steps_completed': results.size,
-        'workflow.errors_count': errors.size
+        'workflow.errors_count': errors.size,
       });
     } finally {
       workflowSpan.end();
@@ -300,6 +311,10 @@ export const createDefaultWorkflows = (): WorkflowEngine => {
         name: 'Check Existing Summary',
         description: 'Checks if a thread summary already exists',
         enabled: true,
+        // Condition en TÊTE de workflow : son échec `break` toute la chaîne de
+        // steps (moteur, L~105), donc aucune étape résumé — Vectorize, IA,
+        // upsert — ne tourne sur le pipeline automatique d'arrivée de message.
+        condition: isUserTriggered,
         action: workflowFunctions.checkExistingSummary,
       },
       {
