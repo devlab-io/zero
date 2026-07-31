@@ -1,8 +1,12 @@
 import {
+  QUERY_PERSIST_MAX_AGE_MS,
   selectQueriesForPersistence,
   shouldPersistQuery,
   type PersistableQuery,
 } from './query-persistence';
+import { persistQueryClientRestore } from '@tanstack/react-query-persist-client';
+import { dehydrate, QueryClient } from '@tanstack/react-query';
+import { MAIL_LIST_STALE_MS } from './mail-list-query';
 import { describe, expect, it } from 'vitest';
 
 function query(
@@ -44,5 +48,68 @@ describe('query persistence policy', () => {
 
     expect(selected).toHaveLength(3);
     expect(selected.map((item) => item.state.dataUpdatedAt)).toEqual([4, 3, 2]);
+  });
+
+  it('le snapshot persisté survit à plusieurs jours sans session (borne ≥ 7 jours)', () => {
+    // Élimine la classe de cold boot multi-jour (cause POSSIBLE — non prouvée —
+    // du spinner Drafts observé au premier clic post-reload, CUA r7). La
+    // fraîcheur est gérée par la réconciliation stale-only, pas par l'expiration.
+    expect(QUERY_PERSIST_MAX_AGE_MS).toBeGreaterThanOrEqual(7 * 24 * 60 * 60 * 1000);
+  });
+});
+
+describe('restore persistant réel — maxAge (r7b, sémantique de la lib vérifiée)', () => {
+  const DRAFTS_KEY = [
+    ['mail', 'listThreads'],
+    { input: { q: '', folder: 'draft', labelIds: [] }, type: 'infinite' },
+  ];
+  const draftsData = {
+    pages: [{ threads: [{ id: 'draft-row' }], nextPageToken: null }],
+    pageParams: [''],
+  };
+
+  const makePersisted = (ageMs: number) => {
+    const source = new QueryClient();
+    source.setQueryData(DRAFTS_KEY, draftsData, { updatedAt: Date.now() - ageMs });
+    return {
+      timestamp: Date.now() - ageMs,
+      buster: 'test-buster',
+      clientState: dehydrate(source),
+    };
+  };
+
+  const makePersister = (persisted: ReturnType<typeof makePersisted>) => ({
+    persistClient: async () => {},
+    restoreClient: async () => persisted,
+    removeClient: async () => {},
+  });
+
+  it('un snapshot Drafts âgé de 25 h est REJETÉ à maxAge 24 h (cold boot du lendemain garanti)', async () => {
+    const queryClient = new QueryClient();
+    await persistQueryClientRestore({
+      queryClient,
+      persister: makePersister(makePersisted(25 * 60 * 60 * 1000)),
+      maxAge: 24 * 60 * 60 * 1000,
+      buster: 'test-buster',
+    });
+    expect(queryClient.getQueryData(DRAFTS_KEY)).toBeUndefined();
+  });
+
+  it('le même snapshot de 25 h est RESTAURÉ à 7 jours, et reste stale pour la réconciliation 5 min', async () => {
+    const queryClient = new QueryClient();
+    await persistQueryClientRestore({
+      queryClient,
+      persister: makePersister(makePersisted(25 * 60 * 60 * 1000)),
+      maxAge: QUERY_PERSIST_MAX_AGE_MS,
+      buster: 'test-buster',
+    });
+    // Le snapshot Drafts est disponible au premier clic…
+    expect(queryClient.getQueryData(DRAFTS_KEY)).toEqual(draftsData);
+    // …et son âge est préservé : bien au-delà du staleTime de 5 min, donc le
+    // contrat stale-only (mail-list-query.test.ts) déclenchera UNE
+    // réconciliation d'arrière-plan à l'entrée du dossier — la borne 7 jours
+    // ne rend aucun snapshot « frais », elle ne fait que le garder peignable.
+    const dataUpdatedAt = queryClient.getQueryState(DRAFTS_KEY)?.dataUpdatedAt ?? 0;
+    expect(Date.now() - dataUpdatedAt).toBeGreaterThan(MAIL_LIST_STALE_MS);
   });
 });

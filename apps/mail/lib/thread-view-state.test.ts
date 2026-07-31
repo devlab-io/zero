@@ -1,4 +1,8 @@
-import { selectThreadShellRow, selectThreadViewState } from './thread-view-state';
+import {
+  selectThreadShellRow,
+  selectThreadViewState,
+  shouldMarkThreadShellReady,
+} from './thread-view-state';
 import { describe, expect, it } from 'vitest';
 
 // Issue #34, check point 3 (barème A9): a failed thread fetch shows a FINITE
@@ -56,5 +60,37 @@ describe('selectThreadShellRow — shell optimiste d’ouverture (CUA échecs 3-
   it('fil hors liste ou sans sélection → pas de shell', () => {
     expect(selectThreadShellRow([rich], 'absent')).toBeUndefined();
     expect(selectThreadShellRow([rich], null)).toBeUndefined();
+  });
+});
+
+describe('shouldMarkThreadShellReady — jalon « ouverture perçue » (r7b)', () => {
+  const rich = { id: 't1', subject: 'Relevé BDT' };
+  const base = {
+    threadState: 'loading' as const,
+    threadId: 't1',
+    shellRow: rich,
+    lastMarkedId: null,
+  };
+
+  it('shell réellement peint (ligne riche, corps en vol) → marque', () => {
+    expect(shouldMarkThreadShellReady(base)).toBe(true);
+  });
+
+  it('SANS shell row (squelette nu : ligne mince ou fil hors liste) → JAMAIS de marque', () => {
+    // Marquer ici déclarerait à tort la cible <300 ms « shell projection peint ».
+    expect(shouldMarkThreadShellReady({ ...base, shellRow: undefined })).toBe(false);
+  });
+
+  it('hors chargement (ready/error/no-selection) → pas de marque', () => {
+    expect(shouldMarkThreadShellReady({ ...base, threadState: 'ready' })).toBe(false);
+    expect(shouldMarkThreadShellReady({ ...base, threadState: 'error' })).toBe(false);
+    expect(
+      shouldMarkThreadShellReady({ ...base, threadState: 'no-selection', threadId: null }),
+    ).toBe(false);
+  });
+
+  it('une seule marque par fil ; un nouveau fil re-marque', () => {
+    expect(shouldMarkThreadShellReady({ ...base, lastMarkedId: 't1' })).toBe(false);
+    expect(shouldMarkThreadShellReady({ ...base, lastMarkedId: 't0' })).toBe(true);
   });
 });

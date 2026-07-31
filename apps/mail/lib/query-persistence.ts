@@ -1,6 +1,23 @@
 const DETAIL_QUERY_BUDGET_BYTES = 8 * 1024 * 1024;
 const SINGLE_DETAIL_QUERY_LIMIT_BYTES = 3 * 1024 * 1024;
 
+/**
+ * Durée de vie du cache persisté (restore au boot). r7b — cadrage honnête :
+ * à 24 h, persistQueryClient jette le snapshot ENTIER (Drafts compris) dès
+ * qu'un jour passe sans session — un cold boot multi-jour GARANTI, prouvé par
+ * le test de restore réel ci-contre (snapshot de 25 h rejeté à 24 h, restauré
+ * à 7 jours). C'est une CAUSE POSSIBLE du spinner Drafts observé au premier
+ * clic post-reload (1 158 ms, CUA r7), pas une cause certaine : l'âge du
+ * snapshot IndexedDB de ce run n'a pas été observé. Sept jours ÉLIMINENT
+ * cette classe de cold boot ; la fraîcheur reste gouvernée par le contrat
+ * stale-only à l'entrée de dossier (mail-list-query, 5 min) qui réconcilie
+ * tout snapshot restauré en arrière-plan, la taille par les budgets ci-dessus
+ * + le trim des pages au restore, et le shell neutre P0 est inchangé : le
+ * restore ne démarre qu'après confirmation de l'identité
+ * (query-provider.shell.test.tsx).
+ */
+export const QUERY_PERSIST_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+
 export type PersistableQuery = {
   queryKey: readonly unknown[];
   state: {

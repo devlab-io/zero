@@ -237,6 +237,15 @@ export const MailList = memo(
         // an entire tall viewport at once could monopolise the mailbox Durable
         // Object and make list pagination feel frozen. A newer scroll generation
         // or an active page fetch cancels the remaining speculative batches.
+        //
+        // r7 (mesuré) : cette borne crée une FENÊTRE de couverture (~5 lots
+        // séquentiels ≈ 1,5-2,5 s après stabilisation du scroll) — un clic dans
+        // la fenêtre sur une ligne pas encore atteinte paie un RTT openThread
+        // (1 626 ms corps complet vs 601/585 ms chaud). C'est le compromis
+        // délibéré (contre-revue r6) : l'élargir concurrencerait la pagination.
+        // L'« ouverture perçue » reste <300 ms via le shell projection
+        // (thread:open → thread:shell-ready) + hover/pointerdown prefetch qui
+        // font prendre de l'avance à la requête du fil cliqué.
         const completed = await prefetchThreadIdsInBatches(
           plan.ids,
           (id) => prefetchThread(id).catch(() => undefined),

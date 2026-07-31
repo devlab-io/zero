@@ -13,6 +13,12 @@
 const MEASURE_FROM: Record<string, string> = {
   'search:results-settled': 'search:applied',
   'thread:body-ready': 'thread:open',
+  // r7 : « ouverture perçue » = le shell projection (sujet/expéditeur +
+  // squelette) est peint, avant le corps. C'est la mesure honnête de la cible
+  // <300 ms sur une ouverture profonde à froid : le corps complet reste borné
+  // par un RTT openThread quand la file de réchauffage (2 en vol, délibérément
+  // bornée pour ne pas concurrencer la pagination) n'a pas atteint la ligne.
+  'thread:shell-ready': 'thread:open',
   // `send:dispatched` = la requête quitte le composer verrouillé ;
   // `send:confirmed` = le serveur a accepté/enfilé. L'écart mesure exactement
   // la round-trip qui bloque encore la fermeture tant qu'aucune outbox durable
@@ -25,6 +31,7 @@ export function markStage(
     | 'search:applied'
     | 'search:results-settled'
     | 'thread:open'
+    | 'thread:shell-ready'
     | 'thread:body-ready'
     | 'send:dispatched'
     | 'send:confirmed',

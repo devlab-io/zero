@@ -18,7 +18,11 @@ import {
   hashKey,
   type InfiniteData,
 } from '@tanstack/react-query';
-import { selectQueriesForPersistence, shouldPersistQuery } from '@/lib/query-persistence';
+import {
+  QUERY_PERSIST_MAX_AGE_MS,
+  selectQueriesForPersistence,
+  shouldPersistQuery,
+} from '@/lib/query-persistence';
 import { useEffect, useMemo, useSyncExternalStore, type PropsWithChildren } from 'react';
 import { seedMailListPageSizeMigration } from '@/lib/mail-list-cache-migration';
 import { readCacheOwnerHint, resolveCacheOwner } from '@/lib/cache-owner-hint';
@@ -263,7 +267,10 @@ export function QueryProvider({ children }: PropsWithChildren) {
       persistOptions={{
         persister,
         buster: CACHE_BURST_KEY,
-        maxAge: 1000 * 60 * 60 * 24, // 24 hours
+        // r7b : 24 h jetait le snapshot entier après un jour sans session —
+        // classe de cold boot multi-jour éliminée (cause POSSIBLE du spinner
+        // Drafts observé, non certaine) — voir QUERY_PERSIST_MAX_AGE_MS.
+        maxAge: QUERY_PERSIST_MAX_AGE_MS,
         dehydrateOptions: { shouldDehydrateQuery: shouldPersistQuery },
       }}
       onSuccess={() => {

@@ -17,10 +17,14 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import {
+  selectThreadShellRow,
+  selectThreadViewState,
+  shouldMarkThreadShellReady,
+} from '@/lib/thread-view-state';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { resolveActiveThreadIndex, useAdjacentThreadPrefetch } from '@/hooks/use-thread-prefetch';
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { selectThreadShellRow, selectThreadViewState } from '@/lib/thread-view-state';
 import { useOptimisticThreadState } from '@/components/mail/optimistic-thread-state';
 import { preloadComposeSurface } from '@/components/create/compose-surface';
 import { useOptimisticActions } from '@/hooks/use-optimistic-actions';
@@ -338,6 +342,28 @@ export function ThreadDisplay() {
   // (projection). Peints immédiatement au-dessus du squelette : l'ouverture et
   // l'avance post-archive montrent le fil cible sans attendre le corps.
   const optimisticShellRow = useMemo(() => selectThreadShellRow(items, id), [items, id]);
+
+  // Jalon perf r7 : « ouverture perçue » = le shell projection est RÉELLEMENT
+  // peint (sujet/expéditeur d'une ligne riche — r7b : jamais marqué sur un
+  // squelette nu). Décision pure testée : shouldMarkThreadShellReady. Posé
+  // APRÈS le paint (effect), une fois par fil — le corps complet, lui, reste
+  // mesuré par thread:body-ready et borné par un RTT openThread sur un fil
+  // non réchauffé.
+  const shellMarkedIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (
+      !shouldMarkThreadShellReady({
+        threadState,
+        threadId: id,
+        shellRow: optimisticShellRow,
+        lastMarkedId: shellMarkedIdRef.current,
+      })
+    ) {
+      return;
+    }
+    shellMarkedIdRef.current = id;
+    markStage('thread:shell-ready');
+  }, [threadState, id, optimisticShellRow]);
 
   return (
     <div

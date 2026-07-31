@@ -19,6 +19,13 @@ describe('markStage — jalons perf par étapes', () => {
     expect(measures).toHaveLength(1);
     expect(measures[0].duration).toBeGreaterThanOrEqual(0);
 
+    // r7 : « ouverture perçue » — le shell projection peint avant le corps.
+    markStage('thread:open');
+    markStage('thread:shell-ready');
+    expect(
+      performance.getEntriesByName('zero:thread:open->thread:shell-ready', 'measure'),
+    ).toHaveLength(1);
+
     markStage('search:applied');
     markStage('search:results-settled');
     expect(

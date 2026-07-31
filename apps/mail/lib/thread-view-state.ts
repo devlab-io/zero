@@ -24,6 +24,28 @@ export function selectThreadShellRow<T extends { id: string; subject?: string }>
   return row?.subject ? row : undefined;
 }
 
+/**
+ * Décision pure du jalon perf `thread:shell-ready` (r7b) : la marque ne doit
+ * tomber QUE si le shell projection est réellement peint — sujet/expéditeur
+ * présents via une ligne riche — pendant le chargement du corps. Un squelette
+ * nu (ligne mince : recherche Gmail, fil hors liste) ne compte PAS comme
+ * « ouverture perçue » ; le mesurer déclarerait la cible <300 ms à tort.
+ * Une seule marque par fil (lastMarkedId).
+ */
+export function shouldMarkThreadShellReady(input: {
+  threadState: ThreadViewState;
+  threadId: string | null;
+  shellRow: { id: string; subject?: string } | undefined;
+  lastMarkedId: string | null;
+}): boolean {
+  return (
+    input.threadState === 'loading' &&
+    !!input.threadId &&
+    !!input.shellRow &&
+    input.lastMarkedId !== input.threadId
+  );
+}
+
 export interface ThreadViewStateInput {
   /** A thread is selected (threadId present). */
   hasSelection: boolean;
