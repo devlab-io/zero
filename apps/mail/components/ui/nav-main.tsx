@@ -4,15 +4,12 @@ import { Collapsible, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { useCommandPalette } from '../context/command-palette-context.jsx';
 import { pendingFolderNavigationAtom } from '@/store/folder-navigation';
 import { useActiveConnection } from '@/hooks/use-connections';
-import { useMutation, useQuery } from '@tanstack/react-query';
-import Intercom, { show } from '@intercom/messenger-js-sdk';
-import { MessageSquare, OldPhone } from '../icons/icons';
 import { useSidebar } from '../context/sidebar-context';
 import { useTRPC } from '@/providers/query-provider';
+import { useMutation } from '@tanstack/react-query';
 import { type NavItem } from '@/config/navigation';
 import type { Label as LabelType } from '@/types';
 import { Link, useLocation } from 'react-router';
-import { m } from '../../paraglide/messages.js';
 import { lazy, Suspense } from 'react';
 import { flushSync } from 'react-dom';
 import { useSetAtom } from 'jotai';
@@ -70,19 +67,6 @@ export function NavMain({ items }: NavMainProps) {
   const searchParams = new URLSearchParams();
 
   const trpc = useTRPC();
-  const { data: intercomToken } = useQuery(trpc.user.getIntercomToken.queryOptions());
-
-  React.useEffect(() => {
-    // Devlab: Intercom was hardcoded to the editor's workspace ('aavenrba'),
-    // identifying every self-host user against THEIR support console. Opt-in now.
-    const intercomAppId = import.meta.env.VITE_PUBLIC_INTERCOM_APP_ID as string | undefined;
-    if (intercomToken && intercomAppId) {
-      Intercom({
-        app_id: intercomAppId,
-        intercom_user_jwt: intercomToken,
-      });
-    }
-  }, [intercomToken]);
 
   const { mutateAsync: createLabel } = useMutation(trpc.labels.create.mutationOptions());
 
@@ -201,27 +185,6 @@ export function NavMain({ items }: NavMainProps) {
   return (
     <SidebarGroup className={`${state !== 'collapsed' ? '' : 'mt-1'} space-y-2.5 py-0 md:px-0`}>
       <SidebarMenu>
-        {isBottomNav ? (
-          <>
-            <SidebarMenuButton
-              onClick={() => show()}
-              tooltip={state === 'collapsed' ? m['common.commandPalette.groups.help']() : undefined}
-              className="hover:bg-subtleWhite flex cursor-pointer items-center dark:hover:bg-[#202020]"
-            >
-              <OldPhone className="relative mr-2.5 h-2 w-2 fill-[#8F8F8F]" />
-              <p className="relative bottom-0.5 mt-0.5 truncate text-[13px]">Live Support</p>
-            </SidebarMenuButton>
-            <NavItem
-              key={'feedback'}
-              isActive={isUrlActive('https://feedback.0.email')}
-              href={'https://feedback.0.email'}
-              url={'https://feedback.0.email'}
-              icon={MessageSquare}
-              target={'_blank'}
-              title={m['navigation.sidebar.feedback']()}
-            />
-          </>
-        ) : null}
         {items.map((section) => (
           <Collapsible
             key={section.title}
