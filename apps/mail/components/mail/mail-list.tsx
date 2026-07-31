@@ -1,7 +1,7 @@
+import { selectNextThreadIds, useInitialThreadPrefetch } from '@/hooks/use-thread-prefetch';
 import { focusedIndexAtom, useMailNavigation } from '@/hooks/use-mail-navigation';
 import { useOptimisticActions } from '@/hooks/use-optimistic-actions';
 import { memo, useCallback, useEffect, useMemo, useRef } from 'react';
-import { selectNextThreadIds } from '@/hooks/use-thread-prefetch';
 import { shouldLoadNextMailPage } from '@/lib/mail-pagination';
 import { useMailSelection } from '@/hooks/use-mail-selection';
 import { useMailListData } from '@/hooks/use-mail-list-data';
@@ -143,6 +143,10 @@ export const MailList = memo(
     );
 
     const isFiltering = searchValue.value.trim().length > 0;
+    useInitialThreadPrefetch(
+      items,
+      folder !== FOLDERS.DRAFT && !isLoading && !isRestoring && !isFiltering,
+    );
 
     useEffect(() => {
       if (isFiltering && !isLoading) {

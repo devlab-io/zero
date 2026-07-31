@@ -1,4 +1,8 @@
-import { selectNextThreadIds, shouldPrefetchThreadBodies } from './use-thread-prefetch';
+import {
+  selectInitialThreadIds,
+  selectNextThreadIds,
+  shouldPrefetchThreadBodies,
+} from './use-thread-prefetch';
 import { describe, expect, it } from 'vitest';
 
 describe('targeted thread prefetch', () => {
@@ -6,6 +10,11 @@ describe('targeted thread prefetch', () => {
     expect(shouldPrefetchThreadBodies({ saveData: true })).toBe(false);
     expect(shouldPrefetchThreadBodies({ effectiveType: '2g' })).toBe(false);
     expect(shouldPrefetchThreadBodies({ effectiveType: '4g' })).toBe(true);
+  });
+
+  it('warms only the first three unique list rows on a cold inbox', () => {
+    expect(selectInitialThreadIds(['a', 'b', 'a', 'c', 'd'])).toEqual(['a', 'b', 'c']);
+    expect(selectInitialThreadIds([])).toEqual([]);
   });
 
   it('selects only the two unique threads after the active one', () => {

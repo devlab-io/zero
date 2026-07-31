@@ -2,6 +2,7 @@ import { usePrefetchThread } from '@/hooks/use-threads';
 import { useEffect, useMemo } from 'react';
 
 const PREFETCH_COUNT = 2;
+const INITIAL_PREFETCH_COUNT = 3;
 
 export type NetworkInformation = {
   saveData?: boolean;
@@ -29,6 +30,31 @@ export function selectNextThreadIds(
   if (currentIndex === -1) return [];
 
   return [...new Set(ids.slice(currentIndex + 1).filter(Boolean))].slice(0, PREFETCH_COUNT);
+}
+
+export function selectInitialThreadIds(ids: readonly string[]): string[] {
+  return [...new Set(ids.filter(Boolean))].slice(0, INITIAL_PREFETCH_COUNT);
+}
+
+/**
+ * Warm only the first three inbox rows once the lightweight list is ready.
+ * This covers the first cold click after boot/account switch without reviving
+ * the former per-row request storm; React Query deduplicates later hover/click
+ * and adjacent-thread prefetches against the same cache keys.
+ */
+export function useInitialThreadPrefetch(threads: readonly { id: string }[], enabled: boolean) {
+  const prefetchThread = usePrefetchThread();
+  const selectedIds = useMemo(
+    () => selectInitialThreadIds(threads.map((thread) => thread.id)),
+    [threads],
+  );
+
+  useEffect(() => {
+    const connection = (navigator as Navigator & { connection?: NetworkInformation }).connection;
+    if (!enabled || !shouldPrefetchThreadBodies(connection) || selectedIds.length === 0) return;
+
+    void Promise.all(selectedIds.map((id) => prefetchThread(id).catch(() => undefined)));
+  }, [enabled, prefetchThread, selectedIds]);
 }
 
 /**
