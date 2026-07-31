@@ -1,4 +1,5 @@
 import {
+  prefetchThreadIdsInBatches,
   selectNextThreadIds,
   selectVisibleThreadIds,
   shouldPrefetchThreadBodies,
@@ -65,6 +66,8 @@ export const MailList = memo(
     const parentRef = useRef<HTMLDivElement>(null);
     const vListRef = useRef<VListHandle>(null);
     const visiblePrefetchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const visiblePrefetchGenerationRef = useRef(0);
+    const listPageBusyRef = useRef(isLoading || isRestoring || isFetchingNextPage);
     const lastVisiblePrefetchKeyRef = useRef('');
 
     useEffect(() => {
@@ -179,51 +182,81 @@ export const MailList = memo(
     const filteredItems = useMemo(() => items.filter((item) => item.id), [items]);
     const isFolderTransitionMasked = shouldMaskPendingMailFolder(pendingFolder, folder);
 
-    const prefetchVisibleThreads = useCallback(() => {
-      const list = vListRef.current;
-      const connection = (
-        navigator as Navigator & { connection?: { saveData?: boolean; effectiveType?: string } }
-      ).connection;
-      if (
-        !list ||
-        folder === FOLDERS.DRAFT ||
-        isLoading ||
-        isRestoring ||
-        isFiltering ||
-        !shouldPrefetchThreadBodies(connection)
-      ) {
-        return;
+    useEffect(() => {
+      const isListPageBusy = isLoading || isRestoring || isFetchingNextPage;
+      listPageBusyRef.current = isListPageBusy;
+      if (!isListPageBusy) return;
+
+      // The lightweight list always wins over speculative bodies. Invalidate
+      // the current generation so an already-running queue stops after its
+      // current two-request batch instead of delaying the next list page.
+      visiblePrefetchGenerationRef.current += 1;
+      if (visiblePrefetchTimerRef.current !== null) {
+        clearTimeout(visiblePrefetchTimerRef.current);
+        visiblePrefetchTimerRef.current = null;
       }
+    }, [isFetchingNextPage, isLoading, isRestoring]);
 
-      const ids = selectVisibleThreadIds(
-        filteredItems.map((item) => item.id),
-        list.findStartIndex(),
-        list.findEndIndex(),
-      );
-      const rangeKey = ids.join(':');
-      if (!rangeKey || rangeKey === lastVisiblePrefetchKeyRef.current) return;
+    const prefetchVisibleThreads = useCallback(
+      async (generation: number) => {
+        const list = vListRef.current;
+        const connection = (
+          navigator as Navigator & { connection?: { saveData?: boolean; effectiveType?: string } }
+        ).connection;
+        if (
+          !list ||
+          folder === FOLDERS.DRAFT ||
+          listPageBusyRef.current ||
+          isFiltering ||
+          !shouldPrefetchThreadBodies(connection)
+        ) {
+          return;
+        }
 
-      lastVisiblePrefetchKeyRef.current = rangeKey;
-      void Promise.all(ids.map((id) => prefetchThread(id).catch(() => undefined)));
-    }, [filteredItems, folder, isFiltering, isLoading, isRestoring, prefetchThread]);
+        const ids = selectVisibleThreadIds(
+          filteredItems.map((item) => item.id),
+          list.findStartIndex(),
+          list.findEndIndex(),
+        );
+        const rangeKey = ids.join(':');
+        if (!rangeKey || rangeKey === lastVisiblePrefetchKeyRef.current) return;
+
+        // Keep at most two body reads in flight. Production showed that warming
+        // an entire tall viewport at once could monopolise the mailbox Durable
+        // Object and make list pagination feel frozen. A newer scroll generation
+        // or an active page fetch cancels the remaining speculative batches.
+        const completed = await prefetchThreadIdsInBatches(
+          ids,
+          (id) => prefetchThread(id).catch(() => undefined),
+          () => generation === visiblePrefetchGenerationRef.current && !listPageBusyRef.current,
+        );
+
+        if (completed) {
+          lastVisiblePrefetchKeyRef.current = rangeKey;
+        }
+      },
+      [filteredItems, folder, isFiltering, prefetchThread],
+    );
 
     const scheduleVisibleThreadPrefetch = useCallback(() => {
+      const generation = visiblePrefetchGenerationRef.current + 1;
+      visiblePrefetchGenerationRef.current = generation;
       if (visiblePrefetchTimerRef.current !== null) {
         clearTimeout(visiblePrefetchTimerRef.current);
       }
 
       // Wait only long enough to collapse a stream of scroll events. Starting
-      // one batch for the final viewport avoids warming every row raced past by
-      // a fast scroll while still getting the displayed bodies into cache before
-      // the user chooses one.
+      // a bounded queue for the final viewport avoids warming every row raced
+      // past by a fast scroll while still getting displayed bodies into cache.
       visiblePrefetchTimerRef.current = setTimeout(() => {
         visiblePrefetchTimerRef.current = null;
-        prefetchVisibleThreads();
+        void prefetchVisibleThreads(generation);
       }, 40);
     }, [prefetchVisibleThreads]);
 
     useEffect(() => {
       lastVisiblePrefetchKeyRef.current = '';
+      visiblePrefetchGenerationRef.current += 1;
       return () => {
         if (visiblePrefetchTimerRef.current !== null) {
           clearTimeout(visiblePrefetchTimerRef.current);
@@ -376,20 +409,26 @@ export const MailList = memo(
                   className="scrollbar-none flex-1 overflow-x-hidden"
                   onScroll={() => {
                     if (!vListRef.current) return;
-                    scheduleVisibleThreadPrefetch();
                     const endIndex = vListRef.current.findEndIndex();
-                    if (
-                      shouldLoadNextMailPage({
-                        // Start the next lightweight list page early enough that
-                        // a fast scroll never reaches an unloaded boundary.
-                        remainingItems: Math.abs(filteredItems.length - 1 - endIndex),
-                        isLoading,
-                        isFetchingNextPage,
-                        hasNextPage,
-                      })
-                    ) {
+                    const shouldLoadNextPage = shouldLoadNextMailPage({
+                      // Start the next lightweight list page early enough that
+                      // a fast scroll never reaches an unloaded boundary.
+                      remainingItems: Math.abs(filteredItems.length - 1 - endIndex),
+                      isLoading,
+                      isFetchingNextPage,
+                      hasNextPage,
+                    });
+                    if (shouldLoadNextPage) {
+                      visiblePrefetchGenerationRef.current += 1;
+                      if (visiblePrefetchTimerRef.current !== null) {
+                        clearTimeout(visiblePrefetchTimerRef.current);
+                        visiblePrefetchTimerRef.current = null;
+                      }
                       void loadMore();
+                      return;
                     }
+
+                    scheduleVisibleThreadPrefetch();
                   }}
                 >
                   {vListRenderer}

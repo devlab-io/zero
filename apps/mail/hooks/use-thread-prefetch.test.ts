@@ -1,4 +1,5 @@
 import {
+  prefetchThreadIdsInBatches,
   selectInitialThreadIds,
   selectNextThreadIds,
   selectVisibleThreadIds,
@@ -47,5 +48,38 @@ describe('targeted thread prefetch', () => {
     expect(selectVisibleThreadIds(['a', 'a', 'b', 'c'], -2, 1)).toEqual(['a', 'b', 'c']);
     expect(selectVisibleThreadIds(['a', 'b'], 5, 7)).toEqual([]);
     expect(selectVisibleThreadIds([], 0, 0)).toEqual([]);
+  });
+
+  it('limits visible body reads to batches of two', async () => {
+    let active = 0;
+    let maxActive = 0;
+    const completed = await prefetchThreadIdsInBatches(
+      ['a', 'b', 'c', 'd', 'e'],
+      async () => {
+        active += 1;
+        maxActive = Math.max(maxActive, active);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        active -= 1;
+      },
+      () => true,
+    );
+
+    expect(completed).toBe(true);
+    expect(maxActive).toBe(2);
+  });
+
+  it('stops speculative batches when list pagination takes priority', async () => {
+    const prefetched: string[] = [];
+    let checks = 0;
+    const completed = await prefetchThreadIdsInBatches(
+      ['a', 'b', 'c', 'd'],
+      async (id) => {
+        prefetched.push(id);
+      },
+      () => checks++ === 0,
+    );
+
+    expect(completed).toBe(false);
+    expect(prefetched).toEqual(['a', 'b']);
   });
 });

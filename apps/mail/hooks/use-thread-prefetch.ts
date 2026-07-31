@@ -4,6 +4,7 @@ import { useEffect, useMemo } from 'react';
 const PREFETCH_COUNT = 2;
 const INITIAL_PREFETCH_COUNT = 3;
 const VISIBLE_PREFETCH_AHEAD_COUNT = 2;
+const VISIBLE_PREFETCH_BATCH_SIZE = 2;
 
 export type NetworkInformation = {
   saveData?: boolean;
@@ -65,6 +66,19 @@ export function selectVisibleThreadIds(
   );
 
   return [...new Set(ids.slice(start, end + 1).filter(Boolean))];
+}
+
+export async function prefetchThreadIdsInBatches(
+  ids: readonly string[],
+  prefetch: (id: string) => Promise<unknown>,
+  shouldContinue: () => boolean,
+): Promise<boolean> {
+  for (let index = 0; index < ids.length; index += VISIBLE_PREFETCH_BATCH_SIZE) {
+    if (!shouldContinue()) return false;
+    await Promise.all(ids.slice(index, index + VISIBLE_PREFETCH_BATCH_SIZE).map(prefetch));
+  }
+
+  return shouldContinue();
 }
 
 /**
