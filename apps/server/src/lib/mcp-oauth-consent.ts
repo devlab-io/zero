@@ -19,23 +19,23 @@ export const MCP_CONSENT_SUBMISSION_SCRIPT = `(() => {
   const decision = document.querySelector('input[name="decision"]');
   if (!form || !decision) return;
   form.addEventListener('submit', (event) => {
+    event.preventDefault();
     if (form.dataset.submitting === 'true') {
-      event.preventDefault();
       return;
     }
     const value = event.submitter?.dataset?.decision;
     if (value !== 'accept' && value !== 'deny') {
-      event.preventDefault();
       return;
     }
     decision.value = value;
     form.dataset.submitting = 'true';
     for (const button of form.querySelectorAll('button')) button.setAttribute('aria-disabled', 'true');
+    form.submit();
   });
 })();`;
 
 // sha256 of MCP_CONSENT_SUBMISSION_SCRIPT, base64 encoded. A test prevents drift.
-export const MCP_CONSENT_SCRIPT_CSP_HASH = "'sha256-ddk5dH8dG6H7i+DFnxeaxB0O9nX7LoVSCKkvhZTlhaY='";
+export const MCP_CONSENT_SCRIPT_CSP_HASH = "'sha256-/B1vMuPRyBeSo3LEhybFooKMQradZfSeyrJ0YO50Cfs='";
 
 const scopeCopy: Record<McpScope, { title: string; description: string }> = {
   openid: {

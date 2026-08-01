@@ -124,6 +124,7 @@ describe('MCP OAuth explicit consent boundary', () => {
     }));
     const form = {
       dataset: {} as Record<string, string>,
+      submit: vi.fn(),
       addEventListener: (_type: string, listener: typeof submit) => {
         submit = listener;
       },
@@ -140,10 +141,11 @@ describe('MCP OAuth explicit consent boundary', () => {
       preventDefault: vi.fn(),
     };
     submit?.(first);
-    expect(first.preventDefault).not.toHaveBeenCalled();
+    expect(first.preventDefault).toHaveBeenCalledOnce();
     expect(decision.value).toBe('accept');
     expect(form.dataset.submitting).toBe('true');
     expect(buttons.every((button) => button.attributes['aria-disabled'] === 'true')).toBe(true);
+    expect(form.submit).toHaveBeenCalledOnce();
 
     const duplicate = {
       submitter: { dataset: { decision: 'accept' } },
@@ -151,6 +153,7 @@ describe('MCP OAuth explicit consent boundary', () => {
     };
     submit?.(duplicate);
     expect(duplicate.preventDefault).toHaveBeenCalledOnce();
+    expect(form.submit).toHaveBeenCalledOnce();
   });
 
   it('blocks callback and token exchange until the signed-in user explicitly consents', async () => {
