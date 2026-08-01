@@ -1,8 +1,10 @@
 import { EmptyStateIcon } from '../icons/empty-state-svg';
+import { InboxDashboard } from './inbox-dashboard';
 import { useIsMobile } from '@/hooks/use-mobile';
+import { cn, FOLDERS } from '@/lib/utils';
+import { useParams } from 'react-router';
 import { Mail } from '../icons/icons';
 import { useQueryState } from 'nuqs';
-import { cn } from '@/lib/utils';
 
 // #44 (gate A8): the inbox "no thread selected" empty state, extracted so it renders EAGERLY
 // while the heavy thread reader (ThreadDisplay + MailDisplay/message-list/reply-composer/…) is
@@ -11,7 +13,13 @@ import { cn } from '@/lib/utils';
 // const false there, so it is dropped here).
 export function ThreadEmptyState() {
   const isMobile = useIsMobile();
+  const params = useParams<{ folder: string }>();
+  const folder = params?.folder ?? FOLDERS.INBOX;
   const [, setIsComposeOpen] = useQueryState('isComposeOpen');
+
+  if (folder === FOLDERS.INBOX) {
+    return <InboxDashboard onCompose={() => setIsComposeOpen('true')} />;
+  }
 
   return (
     <div className={cn('flex flex-col', isMobile ? 'h-full' : 'h-[calc(100dvh-19px)] rounded-xl')}>
