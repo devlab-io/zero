@@ -155,7 +155,7 @@
         },
         {
           "tag": "v10",
-          "new_classes": ["TeamThreadRealtime"],
+          "new_sqlite_classes": ["TeamThreadRealtime"],
         },
       ],
 
@@ -374,7 +374,7 @@
         },
         {
           "tag": "v2",
-          "new_classes": ["TeamThreadRealtime"],
+          "new_sqlite_classes": ["TeamThreadRealtime"],
         },
       ],
       "observability": {
@@ -596,7 +596,7 @@
         },
         {
           "tag": "v2",
-          "new_classes": ["TeamThreadRealtime"],
+          "new_sqlite_classes": ["TeamThreadRealtime"],
         },
       ],
       "vars": {

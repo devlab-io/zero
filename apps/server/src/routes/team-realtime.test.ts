@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 // Canal realtime P2 : le DO n'accepte que les upgrades DÉJÀ autorisés par la
@@ -77,6 +79,18 @@ beforeEach(() => {
     resolveTeamThreadAccess: harness.resolveTeamThreadAccess,
   });
   harness.resolveTeamThreadAccess.mockResolvedValue({ id: 'tt-1' });
+});
+
+describe('configuration Durable Object — stockage SQLite requis', () => {
+  it('déclare TeamThreadRealtime en new_sqlite_classes dans chaque environnement', () => {
+    const wrangler = readFileSync(
+      decodeURIComponent(new URL('../../wrangler.jsonc', import.meta.url).pathname),
+      'utf8',
+    );
+
+    expect(wrangler).not.toContain('"new_classes": ["TeamThreadRealtime"]');
+    expect(wrangler.match(/"new_sqlite_classes": \["TeamThreadRealtime"\]/g)).toHaveLength(3);
+  });
 });
 
 describe('route d’upgrade — handshake refusé sans ACL', () => {
