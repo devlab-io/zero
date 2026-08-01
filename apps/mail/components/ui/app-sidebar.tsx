@@ -8,6 +8,7 @@ import {
 import { Sidebar, SidebarContent, SidebarFooter, SidebarHeader } from '@/components/ui/sidebar';
 // import { useMutation } from '@tanstack/react-query';
 import { ComposeSurface, preloadComposeSurface } from '../create/compose-surface';
+import { SidebarThemeSwitch } from '@/components/theme/sidebar-theme-switcher';
 import { navigationConfig, bottomNavItems } from '@/config/navigation';
 import { preloadThreadReader } from '../mail/mail-lazy-surfaces';
 import React, { useEffect, useMemo, useState } from 'react';
@@ -210,6 +211,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         )}
 
         <SidebarFooter className={`px-0 pb-0 ${state === 'collapsed' ? 'md:px-2' : 'md:px-4'}`}>
+          <SidebarThemeSwitch />
           <NavMain items={bottomNavItems} />
         </SidebarFooter>
       </Sidebar>
