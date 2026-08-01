@@ -56,6 +56,18 @@ describe('live-draft-registry — strict in-memory seam', () => {
     handle.unregister();
   });
 
+  it('readLiveDraft returns a DEEP COPY: mutating the result never alters the store', () => {
+    const handle = registerLiveDraft('key-copy');
+    handle.publish(snapshot({ to: ['a@x.test'], bodyHtml: '<p>original</p>' }));
+    const first = readLiveDraft('key-copy')!;
+    first.to.push('intrus@x.test');
+    first.bodyHtml = '<p>muté</p>';
+    const second = readLiveDraft('key-copy')!;
+    expect(second.to).toEqual(['a@x.test']);
+    expect(second.bodyHtml).toBe('<p>original</p>');
+    handle.unregister();
+  });
+
   it('owner generations: a NEW instance supersedes; the old cleanup is non-destructive', () => {
     const old = registerLiveDraft('key-owner');
     old.publish(snapshot({ bodyHtml: '<p>ancien</p>' }));

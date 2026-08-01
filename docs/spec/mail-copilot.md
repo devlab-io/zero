@@ -284,6 +284,16 @@ aucune donnée de brouillon dans la conversation persistée, les logs, les
 steps, les citations. Indicateur discret « brouillon en cours inclus ».
 Panneau utilisable en petite largeur (dvh + wrap, sans redesign).
 
+**Scope-fix (revue 02bis)** : TOUS les seams composeur — autosave/restore
+durable, registre live, insert handler, lecture Ask Reta — sont partitionnés
+par owner `{userId, connectionId}` via `ownedDraftStorageKey` (v2, owner
+OBLIGATOIRE, jamais optionnel fail-open) : la clé bare `compose` ne peut
+plus entrer en collision entre comptes d'un même appareil. Owner non résolu
+= fail-closed intégral (aucune lecture/écriture, aucun registre). **Rupture
+sûre des clés legacy v1** : ambiguës (sans owner), elles ne sont plus JAMAIS
+lues ni écrites, ni migrées automatiquement, ni supprimées — récupérables
+manuellement dans localStorage. `readLiveDraft` retourne une copie profonde.
+
 **Restant** : compteurs d'usage.
 **Tranche 3** : BYOK (prérequis ci-dessus) ; propositions vers `draft_outbox`
 /`/queue` ; récupération sémantique (Vectorize/AutoRAG) si activée ; mobile.

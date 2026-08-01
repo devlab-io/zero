@@ -1,13 +1,14 @@
-import { useCallback, useEffect, useMemo, useRef } from 'react';
 import {
   clearLocalDraft,
   draftHasContent,
-  draftStorageKey,
   loadLocalDraft,
+  ownedDraftStorageKey,
   saveLocalDraft,
   type ComposerDraftScope,
+  type DraftOwner,
   type StoredComposerDraft,
 } from '@/lib/draft-storage';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { registerComposerFlush } from '@/lib/composer-flush';
 
 const MAX_RESTORE_AGE_MS = 7 * 24 * 60 * 60 * 1000;
@@ -25,15 +26,25 @@ export interface ComposerDraftPersistence {
  * Durable composer persistence (issue #34, check point 5). Writes a localStorage
  * snapshot on every change and flushes the latest on pagehide / visibility-hidden /
  * unmount, so a draft survives unmount, reload and a failed server autosave.
+ *
+ * OWNER-PARTITIONED (scope-fix 2026-08-01): the key carries {userId,
+ * connectionId} — two accounts on one device can never share a slot (the old
+ * bare `compose` key collided). While the owner is NOT resolved the hook is
+ * FAIL-CLOSED: nothing is read, written or cleared — never a legacy unscoped
+ * fallback (v1 keys stay untouched for manual recovery).
  */
-export function useComposerDraftPersistence(scope: ComposerDraftScope): ComposerDraftPersistence {
+export function useComposerDraftPersistence(
+  owner: DraftOwner | null,
+  scope: ComposerDraftScope,
+): ComposerDraftPersistence {
   const key = useMemo(
-    () => draftStorageKey(scope),
+    () => (owner ? ownedDraftStorageKey(owner, scope) : null),
     // scope is a fresh object each render; key depends only on its identifiers.
-    [scope.threadId, scope.draftId, scope.replyId],
+    [owner?.userId, owner?.connectionId, scope.threadId, scope.draftId, scope.replyId],
   );
 
   const restored = useMemo(() => {
+    if (!key) return null; // owner unresolved: no shared-key read, ever
     const draft = loadLocalDraft(key);
     if (!draft || !draftHasContent(draft)) return null;
     if (Date.now() - draft.savedAt > MAX_RESTORE_AGE_MS) {
@@ -47,6 +58,7 @@ export function useComposerDraftPersistence(scope: ComposerDraftScope): Composer
 
   const update = useCallback(
     (snapshot: StoredComposerDraft) => {
+      if (!key) return; // fail-closed
       latestRef.current = snapshot;
       if (draftHasContent(snapshot)) saveLocalDraft(key, snapshot);
     },
@@ -55,10 +67,11 @@ export function useComposerDraftPersistence(scope: ComposerDraftScope): Composer
 
   const clear = useCallback(() => {
     latestRef.current = null;
-    clearLocalDraft(key);
+    if (key) clearLocalDraft(key);
   }, [key]);
 
   useEffect(() => {
+    if (!key) return;
     const flush = () => {
       const snapshot = latestRef.current;
       if (snapshot && draftHasContent(snapshot)) saveLocalDraft(key, snapshot);

@@ -102,7 +102,17 @@ export function hasLiveComposer(scopeKey: string): boolean {
   return registry.has(scopeKey);
 }
 
-/** The current live snapshot, or null (registered but nothing published yet). */
+/**
+ * The current live snapshot, or null (registered but nothing published yet).
+ * Returns a DEEP COPY: a caller mutating the result can never alter the store.
+ */
 export function readLiveDraft(scopeKey: string): LiveDraftSnapshot | null {
-  return registry.get(scopeKey)?.snapshot ?? null;
+  const snapshot = registry.get(scopeKey)?.snapshot;
+  if (!snapshot) return null;
+  return {
+    ...snapshot,
+    to: [...snapshot.to],
+    cc: [...snapshot.cc],
+    bcc: [...snapshot.bcc],
+  };
 }

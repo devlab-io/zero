@@ -1,12 +1,13 @@
-import { beforeEach, describe, expect, it } from 'vitest';
 import {
   clearLocalDraft,
   draftHasContent,
   draftStorageKey,
   loadLocalDraft,
+  ownedDraftStorageKey,
   saveLocalDraft,
   type StoredComposerDraft,
 } from './draft-storage';
+import { beforeEach, describe, expect, it } from 'vitest';
 
 // Issue #34, check point 5: a draft survives unmount, pagehide/reload AND a failed
 // server autosave. localStorage durability is independent of the network.
@@ -81,5 +82,37 @@ describe('draftHasContent', () => {
     expect(draftHasContent(sample({ message: '<p></p>', subject: '', to: [] }))).toBe(false);
     expect(draftHasContent(sample({ message: '', subject: 'S', to: [] }))).toBe(true);
     expect(draftHasContent(sample({ message: '', subject: '', to: ['x@y.co'] }))).toBe(true);
+  });
+});
+
+describe('ownedDraftStorageKey — mandatory account partition (scope-fix)', () => {
+  it('partitions the SAME scope across owners and versions the format', () => {
+    const scope = {};
+    const keyA = ownedDraftStorageKey({ userId: 'u1', connectionId: 'ca' }, scope);
+    const keyB = ownedDraftStorageKey({ userId: 'u1', connectionId: 'cb' }, scope);
+    const keyOtherUser = ownedDraftStorageKey({ userId: 'u2', connectionId: 'ca' }, scope);
+    expect(keyA).not.toBe(keyB);
+    expect(keyA).not.toBe(keyOtherUser);
+    expect(keyA).toContain(':v2:');
+    // …and never collides with the legacy unscoped key.
+    expect(keyA).not.toBe(draftStorageKey(scope));
+  });
+
+  it('THROWS on an unresolved owner — never an optional fail-open parameter', () => {
+    expect(() => ownedDraftStorageKey({ userId: '', connectionId: 'ca' }, {})).toThrow(
+      'resolved owner',
+    );
+    expect(() => ownedDraftStorageKey({ userId: 'u1', connectionId: '' }, {})).toThrow(
+      'resolved owner',
+    );
+  });
+
+  it('carries the scope identifiers like the legacy format did', () => {
+    const key = ownedDraftStorageKey(
+      { userId: 'u1', connectionId: 'ca' },
+      { threadId: 't1', replyId: 'r1' },
+    );
+    expect(key).toContain('t=t1');
+    expect(key).toContain('r=r1');
   });
 });

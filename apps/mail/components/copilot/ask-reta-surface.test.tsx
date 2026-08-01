@@ -1,8 +1,8 @@
+import { draftStorageKey, ownedDraftStorageKey, saveLocalDraft } from '@/lib/draft-storage';
 import { askRetaConversationKey } from '@/lib/ask-reta-conversation-storage';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ButtonHTMLAttributes, InputHTMLAttributes } from 'react';
 import { registerComposerInsertHandler } from '@/lib/composer-insert';
-import { draftStorageKey, saveLocalDraft } from '@/lib/draft-storage';
 import { registerLiveDraft } from '@/lib/live-draft-registry';
 import { askRetaConversationAtom } from './ask-reta-state';
 import { createRoot, type Root } from 'react-dom/client';
@@ -115,6 +115,11 @@ const render = () => {
   });
 };
 
+// Owned keys (scope-fix): every composer seam is partitioned by the account.
+const OWNER_A = { userId: 'user-1', connectionId: 'conn-a' } as const;
+const ownedKeyA = (scope: Parameters<typeof ownedDraftStorageKey>[1]) =>
+  ownedDraftStorageKey(OWNER_A, scope);
+
 const baseResult = (answer: string) => ({
   answer,
   citations: [],
@@ -179,7 +184,7 @@ describe('AskRetaSurface — LIVE draft context (slice 2bis)', () => {
     harness.queryStore.threadId = 'thread-9';
     // A live composer is mounted on the exact scope; the durable autosave is
     // BEHIND (stale localStorage) — the live registry must win.
-    saveLocalDraft(draftStorageKey({ threadId: 'thread-9' }), {
+    saveLocalDraft(ownedKeyA({ threadId: 'thread-9' }), {
       to: ['old@x.test'],
       cc: [],
       bcc: [],
@@ -187,7 +192,7 @@ describe('AskRetaSurface — LIVE draft context (slice 2bis)', () => {
       message: '<p>vieux contenu</p>',
       savedAt: Date.now(),
     });
-    const live = registerLiveDraft(draftStorageKey({ threadId: 'thread-9' }));
+    const live = registerLiveDraft(ownedKeyA({ threadId: 'thread-9' }));
     live.publish({ to: ['client@x.test'], subject: 'Objet', bodyHtml: '<p>alpha</p>' });
 
     render();
@@ -205,7 +210,7 @@ describe('AskRetaSurface — LIVE draft context (slice 2bis)', () => {
 
   it('a mounted-but-EMPTY live composer is the truth: no stale local fallback', async () => {
     harness.queryStore.threadId = 'thread-9';
-    saveLocalDraft(draftStorageKey({ threadId: 'thread-9' }), {
+    saveLocalDraft(ownedKeyA({ threadId: 'thread-9' }), {
       to: ['old@x.test'],
       cc: [],
       bcc: [],
@@ -213,7 +218,7 @@ describe('AskRetaSurface — LIVE draft context (slice 2bis)', () => {
       message: '<p>vieux</p>',
       savedAt: Date.now(),
     });
-    const live = registerLiveDraft(draftStorageKey({ threadId: 'thread-9' }));
+    const live = registerLiveDraft(ownedKeyA({ threadId: 'thread-9' }));
     live.publish({ to: [], subject: '', bodyHtml: '' });
 
     render();
@@ -224,7 +229,7 @@ describe('AskRetaSurface — LIVE draft context (slice 2bis)', () => {
 
   it('live snapshots never leak across scopes (thread-a composer, thread-b ask)', async () => {
     harness.queryStore.threadId = 'thread-b';
-    const live = registerLiveDraft(draftStorageKey({ threadId: 'thread-a' }));
+    const live = registerLiveDraft(ownedKeyA({ threadId: 'thread-a' }));
     live.publish({ to: [], subject: 'secret de A', bodyHtml: '<p>brouillon de A</p>' });
 
     render();
@@ -235,7 +240,7 @@ describe('AskRetaSurface — LIVE draft context (slice 2bis)', () => {
 
   it('the live body NEVER lands in Ask Reta localStorage', async () => {
     harness.queryStore.threadId = 'thread-9';
-    const live = registerLiveDraft(draftStorageKey({ threadId: 'thread-9' }));
+    const live = registerLiveDraft(ownedKeyA({ threadId: 'thread-9' }));
     live.publish({ to: [], subject: '', bodyHtml: '<p>CORPS-LIVE-CONFIDENTIEL</p>' });
 
     render();
@@ -248,11 +253,127 @@ describe('AskRetaSurface — LIVE draft context (slice 2bis)', () => {
   });
 });
 
+describe('AskRetaSurface — OWNER partition of every composer seam (scope-fix)', () => {
+  const draftOf = (call: number) =>
+    (
+      harness.streamAskReta.mock.calls[call]![0] as {
+        input: { context: { draft?: { subject?: string; body?: string } } };
+      }
+    ).input.context.draft;
+  const OWNER_B = { userId: 'user-1', connectionId: 'conn-b' } as const;
+
+  it("BARE-scope live draft of account A never reaches account B's ask", async () => {
+    // A's bare composer publishes under A's OWNED bare key…
+    const live = registerLiveDraft(ownedKeyA({}));
+    live.publish({ to: [], subject: 'secret bare de A', bodyHtml: '<p>brouillon bare de A</p>' });
+    // …while the panel runs under connection B.
+    harness.connectionId = 'conn-b';
+    render();
+    await askQuestion('Question de B');
+    expect(draftOf(0)).toBeUndefined();
+    live.unregister();
+  });
+
+  it("BARE-scope DURABLE draft of account A never reaches account B's ask", async () => {
+    saveLocalDraft(ownedKeyA({}), {
+      to: ['a@x.test'],
+      cc: [],
+      bcc: [],
+      subject: 'durable bare de A',
+      message: '<p>corps durable de A</p>',
+      savedAt: Date.now(),
+    });
+    harness.connectionId = 'conn-b';
+    render();
+    await askQuestion('Question de B');
+    expect(draftOf(0)).toBeUndefined();
+  });
+
+  it('the SAME scope on two connections resolves to two distinct drafts', async () => {
+    const liveA = registerLiveDraft(ownedKeyA({ threadId: 'thread-9' }));
+    liveA.publish({ to: [], subject: 'brouillon de A', bodyHtml: '<p>contenu A</p>' });
+    const liveB = registerLiveDraft(ownedDraftStorageKey(OWNER_B, { threadId: 'thread-9' }));
+    liveB.publish({ to: [], subject: 'brouillon de B', bodyHtml: '<p>contenu B</p>' });
+    harness.queryStore.threadId = 'thread-9';
+
+    render();
+    await askQuestion('Question sous A');
+    expect(draftOf(0)?.body).toBe('<p>contenu A</p>');
+
+    act(() => {
+      harness.connectionId = 'conn-b';
+    });
+    render();
+    await askQuestion('Question sous B');
+    expect(draftOf(1)?.body).toBe('<p>contenu B</p>');
+    liveA.unregister();
+    liveB.unregister();
+  });
+
+  it('LEGACY unscoped keys are never read (ambiguous owner: safe break)', async () => {
+    harness.queryStore.threadId = 'thread-9';
+    saveLocalDraft(draftStorageKey({ threadId: 'thread-9' }), {
+      to: ['legacy@x.test'],
+      cc: [],
+      bcc: [],
+      subject: 'clé legacy v1',
+      message: '<p>contenu legacy</p>',
+      savedAt: Date.now(),
+    });
+    render();
+    await askQuestion('Question');
+    expect(draftOf(0)).toBeUndefined();
+    // Untouched: recoverable manually, never migrated nor deleted.
+    expect(localStorage.getItem(draftStorageKey({ threadId: 'thread-9' }))).not.toBeNull();
+  });
+
+  it("an insert handler of another owner is never reached; the snapshot lands under A's key", async () => {
+    harness.streamAskReta.mockResolvedValueOnce({
+      answer: 'askReta.proposalOnly',
+      citations: [],
+      steps: [],
+      model: 'llama-4-scout',
+      proposal: { kind: 'new', to: 'client@x.test', subject: 'Objet', bodyHtml: '<p>Corps</p>' },
+    });
+    const foreignHandler = vi.fn(() => 'inserted' as const);
+    const unregister = registerComposerInsertHandler(
+      ownedDraftStorageKey(OWNER_B, {}),
+      foreignHandler,
+    );
+
+    render();
+    await askQuestion('Prépare un mail');
+    const button = [...container.querySelectorAll('button')].find((b) =>
+      b.textContent?.includes('openInComposer'),
+    )!;
+    act(() => {
+      button.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    expect(foreignHandler).not.toHaveBeenCalled();
+    expect(localStorage.getItem(ownedKeyA({}))).toContain('Corps');
+    expect(localStorage.getItem(ownedDraftStorageKey(OWNER_B, {}))).toBeNull();
+    unregister();
+  });
+
+  it('owner not hydrated: fail-closed — no read, no indicator, no crash', async () => {
+    harness.connectionId = undefined;
+    const live = registerLiveDraft(ownedKeyA({}));
+    live.publish({ to: [], subject: 's', bodyHtml: '<p>quelque chose</p>' });
+    render();
+    expect(container.textContent).not.toContain('askReta.draftIncluded');
+    // Submit is blocked by the hydration gate; nothing was read.
+    await askQuestion('rapide');
+    expect(harness.streamAskReta).not.toHaveBeenCalled();
+    live.unregister();
+  });
+});
+
 describe('AskRetaSurface — context capture (unchanged in slice 2)', () => {
   it('sends the open thread AND the draft persisted under the EXACT composer scope', async () => {
     harness.queryStore.threadId = 'thread-9';
     harness.queryStore.activeReplyId = 'msg-3';
-    saveLocalDraft(draftStorageKey({ threadId: 'thread-9', replyId: 'msg-3' }), {
+    saveLocalDraft(ownedKeyA({ threadId: 'thread-9', replyId: 'msg-3' }), {
       to: ['client@x.test'],
       cc: [],
       bcc: [],
@@ -669,7 +790,7 @@ describe('AskRetaSurface — proposals (slice-1 behaviour preserved)', () => {
   it('live-inserts a NEW proposal into the bare-scope composer with the recipient', async () => {
     harness.streamAskReta.mockResolvedValueOnce(proposalResult('new'));
     const handler = vi.fn(() => 'inserted' as const);
-    const unregister = registerComposerInsertHandler(draftStorageKey({}), handler);
+    const unregister = registerComposerInsertHandler(ownedKeyA({}), handler);
 
     render();
     await askQuestion('Prépare un mail');
@@ -688,7 +809,7 @@ describe('AskRetaSurface — proposals (slice-1 behaviour preserved)', () => {
     harness.streamAskReta.mockResolvedValueOnce(proposalResult('new'));
     const replyHandler = vi.fn(() => 'inserted' as const);
     const unregister = registerComposerInsertHandler(
-      draftStorageKey({ threadId: 'thread-9', replyId: 'msg-3' }),
+      ownedKeyA({ threadId: 'thread-9', replyId: 'msg-3' }),
       replyHandler,
     );
 
@@ -697,7 +818,7 @@ describe('AskRetaSurface — proposals (slice-1 behaviour preserved)', () => {
     clickInsert();
 
     expect(replyHandler).not.toHaveBeenCalled();
-    const snapshot = JSON.parse(localStorage.getItem(draftStorageKey({}))!) as { to: string[] };
+    const snapshot = JSON.parse(localStorage.getItem(ownedKeyA({}))!) as { to: string[] };
     expect(snapshot.to).toEqual(['client@x.test']);
     expect(harness.purge).toHaveBeenCalledWith({ threadId: null });
     expect(harness.queryStore.isComposeOpen).toBe('true');

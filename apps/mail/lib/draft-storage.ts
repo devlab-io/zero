@@ -23,8 +23,20 @@ export interface ComposerDraftScope {
 }
 
 const KEY_PREFIX = 'zero:composer-draft:';
+const OWNED_KEY_VERSION = 'v2';
 
-/** Stable, scope-derived key so each composer instance owns exactly one snapshot slot. */
+/** The account partition every composer seam MUST carry (scope-fix 2026-08-01). */
+export type DraftOwner = { userId: string; connectionId: string };
+
+/**
+ * LEGACY unscoped key (v1) — kept ONLY as documentation of the old format.
+ * SAFE BREAK: these keys never contained the account, so the bare `compose`
+ * slot collided across users/connections on a shared device. The app no
+ * longer READS or WRITES them anywhere (composer autosave/restore, live
+ * registry, insert seam, Ask Reta); existing v1 entries are left INTACT in
+ * localStorage for manual recovery — never migrated (ambiguous owner) and
+ * never deleted.
+ */
 export function draftStorageKey(scope: ComposerDraftScope): string {
   const parts = [
     scope.draftId ? `d=${scope.draftId}` : '',
@@ -32,6 +44,23 @@ export function draftStorageKey(scope: ComposerDraftScope): string {
     scope.replyId ? `r=${scope.replyId}` : '',
   ].filter(Boolean);
   return `${KEY_PREFIX}${parts.length ? parts.join('&') : 'compose'}`;
+}
+
+/**
+ * OWNED key (v2): partitioned by {userId, connectionId} — the owner is
+ * MANDATORY, never optional (an optional owner would fail open onto a shared
+ * key). Same-scope drafts of two accounts are structurally distinct entries.
+ */
+export function ownedDraftStorageKey(owner: DraftOwner, scope: ComposerDraftScope): string {
+  if (!owner.userId || !owner.connectionId) {
+    throw new Error('ownedDraftStorageKey requires a fully resolved owner');
+  }
+  const parts = [
+    scope.draftId ? `d=${scope.draftId}` : '',
+    scope.threadId ? `t=${scope.threadId}` : '',
+    scope.replyId ? `r=${scope.replyId}` : '',
+  ].filter(Boolean);
+  return `${KEY_PREFIX}${OWNED_KEY_VERSION}:u=${owner.userId}:c=${owner.connectionId}:${parts.length ? parts.join('&') : 'compose'}`;
 }
 
 function getStore(): Storage | null {

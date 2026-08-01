@@ -1,9 +1,10 @@
 import {
   draftHasContent,
-  draftStorageKey,
   loadLocalDraft,
+  ownedDraftStorageKey,
   saveLocalDraft,
   type ComposerDraftScope,
+  type DraftOwner,
 } from '@/lib/draft-storage';
 import {
   askRetaConversationAtom,
@@ -60,17 +61,18 @@ const boundDraftContext = (draft: { subject: string; to: string; body: string })
 };
 
 /**
- * Current unsent draft — read ONCE at submit time (slice 2bis):
- * 1. the LIVE registry for the exact composer scope wins: it is what was JUST
+ * Current unsent draft — read ONCE at submit time (slice 2bis, scope-fix):
+ * the key is OWNED ({userId, connectionId} + composer scope) — an unresolved
+ * owner reads NOTHING (fail-closed, never a legacy unscoped key).
+ * 1. the LIVE registry for the exact owned scope wins: it is what was JUST
  *    typed, ahead of any lagging autosave. A mounted-but-empty composer is
  *    the truth too (no fallback to a stale local snapshot).
  * 2. the durable local snapshot is the fallback ONLY when no live composer is
- *    mounted for that scope.
- * The scope mirrors email-composer's persistence key ({threadId, draftId,
- * replyId: activeReplyId}).
+ *    mounted for that owned scope.
  */
-const readComposerDraftContext = (scope: ComposerDraftScope) => {
-  const scopeKey = draftStorageKey(scope);
+const readComposerDraftContext = (owner: DraftOwner | null, scope: ComposerDraftScope) => {
+  if (!owner) return undefined;
+  const scopeKey = ownedDraftStorageKey(owner, scope);
   if (hasLiveComposer(scopeKey)) {
     const live = readLiveDraft(scopeKey);
     if (!live) return undefined;
@@ -229,8 +231,12 @@ export function AskRetaSurface() {
     ]);
     setQuestion('');
 
-    // Single read per submit, on the composer's exact scope key.
-    const draftContext = readComposerDraftContext(composerScope);
+    // Single read per submit, on the composer's exact OWNED scope key —
+    // isHydrated guarantees userId/connectionId are resolved here.
+    const draftContext = readComposerDraftContext(
+      userId && connectionId ? { userId, connectionId } : null,
+      composerScope,
+    );
 
     const controller = new AbortController();
     // Run guard (revue 2026-08-01): a LATE settlement of an old-scope stream
@@ -383,8 +389,12 @@ export function AskRetaSurface() {
   const openProposalInComposer = (payload: AskRetaAssistantPayload) => {
     const proposal = payload.proposal;
     if (!proposal) return;
+    // Owned keys only (scope-fix): without a resolved owner, no insert target
+    // and no snapshot write — never a shared/legacy key.
+    if (!userId || !connectionId) return;
+    const owner: DraftOwner = { userId, connectionId };
     const isReply = proposal.kind === 'reply';
-    const scopeKey = draftStorageKey(isReply ? composerScope : composeScope);
+    const scopeKey = ownedDraftStorageKey(owner, isReply ? composerScope : composeScope);
     const insertPayload: ComposerInsertPayload = {
       subject: proposal.subject,
       to: proposal.to,
@@ -688,11 +698,14 @@ export function AskRetaSurface() {
 
       {/* Small render-time hint: the live composer's current draft will ride
           along with the next ask (read once at submit, live registry first). */}
-      {isHydrated && hasLiveComposer(draftStorageKey(composerScope)) && (
-        <p className="text-muted-foreground border-t px-3 pt-2 text-[11px]">
-          {m['common.askReta.draftIncluded']()}
-        </p>
-      )}
+      {isHydrated &&
+        userId &&
+        connectionId &&
+        hasLiveComposer(ownedDraftStorageKey({ userId, connectionId }, composerScope)) && (
+          <p className="text-muted-foreground border-t px-3 pt-2 text-[11px]">
+            {m['common.askReta.draftIncluded']()}
+          </p>
+        )}
       <form
         className="flex flex-wrap gap-2 border-t p-3 sm:flex-nowrap"
         onSubmit={(event) => {
