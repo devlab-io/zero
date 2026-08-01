@@ -72,6 +72,8 @@ export interface MailManager {
     nextPageToken: string | null;
   }>;
   count(): Promise<{ count?: number; label?: string }[]>;
+  /** Exact provider totals for the four mailbox counters shown in the primary navigation. */
+  getMailboxCounts(): Promise<{ inbox: number; drafts: number; sent: number }>;
   getTokens(
     code: string,
   ): Promise<{ tokens: { access_token?: string; refresh_token?: string; expiry_date?: number } }>;

@@ -10,24 +10,22 @@ import { Sidebar, SidebarContent, SidebarFooter, SidebarHeader } from '@/compone
 import { ComposeSurface, preloadComposeSurface } from '../create/compose-surface';
 import { SidebarThemeSwitch } from '@/components/theme/sidebar-theme-switcher';
 import { navigationConfig, bottomNavItems } from '@/config/navigation';
+import { useMailboxOverview } from '@/hooks/use-mailbox-overview';
 import { preloadThreadReader } from '../mail/mail-lazy-surfaces';
 import React, { useEffect, useMemo, useState } from 'react';
-import { useTRPC } from '@/providers/query-provider';
 import { useSidebar } from '@/components/ui/sidebar';
 import { PencilCompose, X } from '../icons/icons';
-import { useQuery } from '@tanstack/react-query';
 import { useBilling } from '@/hooks/use-billing';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { Button } from '@/components/ui/button';
 import { useSession } from '@/lib/auth-client';
-import { useStats } from '@/hooks/use-stats';
 import { useLocation } from 'react-router';
-import { cn, FOLDERS } from '@/lib/utils';
 import { m } from '@/paraglide/messages';
 // import { Video } from 'lucide-react';
 import { NavUser } from './nav-user';
 import { NavMain } from './nav-main';
 import { useQueryState } from 'nuqs';
+import { cn } from '@/lib/utils';
 // import { toast } from 'sonner';
 
 // #44 (gate A8): the compose surface (CreateEmail, which statically pulled posthog-js) is
@@ -48,7 +46,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
     }
     return true;
   });
-  const { data: stats } = useStats();
+  const { data: mailboxOverview } = useMailboxOverview();
   // CUA 2026-07-30: warm the compose waterfall once the boot path is idle, so the `c`
   // hotkey (no hover intent) opens without the Suspense spinner. Idle-time prefetch only.
   useEffect(() => {
@@ -69,14 +67,6 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   }, []);
   const location = useLocation();
   const { data: session } = useSession();
-  const trpc = useTRPC();
-  const { data: pendingQueueItems } = useQuery(
-    trpc.outbox.list.queryOptions(
-      { status: 'draft_ready' },
-      { enabled: !!session?.user?.id, staleTime: 15_000 },
-    ),
-  );
-  const pendingQueueCount = pendingQueueItems?.length ?? 0;
   const { currentSection, navItems } = useMemo(() => {
     // Find which section we're in based on the pathname
     const section = Object.entries(navigationConfig).find(([, config]) =>
@@ -90,31 +80,12 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         items: section.items.map((item) => ({ ...item })),
       }));
 
-      if (currentSection === 'mail' && stats && stats.length) {
-        if (items[0]?.items[0]) {
-          items[0].items[0].badge =
-            stats.find((stat) => stat.label?.toLowerCase() === FOLDERS.INBOX)?.count ?? 0;
-        }
-        if (items[0]?.items[3]) {
-          items[0].items[3].badge =
-            stats.find((stat) => stat.label?.toLowerCase() === FOLDERS.SENT)?.count ?? 0;
-        }
-      }
-      if (currentSection === 'mail' && pendingQueueCount > 0) {
-        const queueItem = items.flatMap((item) => item.items).find((item) => item.id === 'queue');
-        if (queueItem) {
-          const BaseIcon = queueItem.icon;
-          queueItem.icon = React.forwardRef<SVGSVGElement, React.SVGProps<SVGSVGElement>>(
-            ({ className, ...iconProps }, ref) => (
-              <span className={cn('relative inline-flex shrink-0', className)}>
-                <BaseIcon {...iconProps} ref={ref} className="h-4 w-4" />
-                <span className="absolute -right-2 -top-2 flex h-4 min-w-4 items-center justify-center rounded-full bg-emerald-600 px-1 text-[10px] font-semibold leading-none text-white">
-                  {pendingQueueCount > 99 ? '99+' : pendingQueueCount}
-                </span>
-              </span>
-            ),
-          );
-          queueItem.icon.displayName = 'QueueNavIconWithBadge';
+      if (currentSection === 'mail' && mailboxOverview) {
+        const counts = mailboxOverview.folders;
+        for (const item of items.flatMap((section) => section.items)) {
+          if (item.id && item.id in counts) {
+            item.badge = counts[item.id as keyof typeof counts];
+          }
         }
       }
 
@@ -125,7 +96,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         navItems: [],
       };
     }
-  }, [location.pathname, stats, pendingQueueCount]);
+  }, [location.pathname, mailboxOverview]);
 
   const showComposeButton = currentSection === 'mail';
   const { state } = useSidebar();

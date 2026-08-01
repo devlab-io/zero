@@ -24,7 +24,6 @@ const LabelDialog = lazy(() =>
 import { Button } from '@/components/ui/button';
 import { useLabels } from '@/hooks/use-labels';
 import { Badge } from '@/components/ui/badge';
-import { useStats } from '@/hooks/use-stats';
 import SidebarLabels from './sidebar-labels';
 import { useCallback, useRef } from 'react';
 import { BASE_URL } from '@/lib/constants';
@@ -255,7 +254,6 @@ function NavItem(item: NavItemProps & { href: string }) {
   const prefetchMailFolder = usePrefetchMailFolder();
   const setPendingFolder = useSetAtom(pendingFolderNavigationAtom);
   const currentLocation = useLocation();
-  const { data: stats } = useStats();
   const { clearAllFilters } = useCommandPalette();
 
   const { state, setOpenMobile } = useSidebar();
@@ -327,14 +325,11 @@ function NavItem(item: NavItemProps & { href: string }) {
             <p className="relative bottom-px mt-0.5 min-w-0 flex-1 truncate text-[13px]">
               {item.title}
             </p>
-            {stats &&
-              stats.some((stat) => stat.label?.toLowerCase() === item.id?.toLowerCase()) && (
-                <Badge className="text-muted-foreground ml-auto shrink-0 rounded-full border-none bg-transparent">
-                  {stats
-                    .find((stat) => stat.label?.toLowerCase() === item.id?.toLowerCase())
-                    ?.count?.toLocaleString() || '0'}
-                </Badge>
-              )}
+            {item.badge !== undefined ? (
+              <Badge className="text-muted-foreground ml-auto shrink-0 rounded-full border-none bg-transparent tabular-nums">
+                {item.badge.toLocaleString()}
+              </Badge>
+            ) : null}
           </Link>
         </SidebarMenuButton>
       </CollapsibleTrigger>

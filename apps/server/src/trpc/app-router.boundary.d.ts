@@ -744,6 +744,27 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
         errorShape: import("@trpc/server").TRPCDefaultErrorShape;
         transformer: true;
     }, import("@trpc/server").TRPCDecorateCreateRouterOptions<{
+        mailboxOverview: import("@trpc/server").TRPCQueryProcedure<{
+            input: {
+                connectionId: string;
+                todayStartMs: number;
+                weekStartMs: number;
+            };
+            output: {
+                folders: {
+                    queue: number;
+                    inbox: number;
+                    drafts: number;
+                    sent: number;
+                };
+                activity: {
+                    processedToday: number;
+                    processedWeek: number;
+                    estimatedMinutesSaved: number;
+                };
+            };
+            meta: object;
+        }>;
         suggestRecipients: import("@trpc/server").TRPCQueryProcedure<{
             input: {
                 query?: string | undefined;

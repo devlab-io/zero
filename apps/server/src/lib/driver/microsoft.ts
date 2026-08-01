@@ -239,6 +239,22 @@ export class OutlookMailManager implements MailManager {
       { email: this.config.auth?.email },
     );
   }
+  public getMailboxCounts() {
+    return this.withErrorHandler('getMailboxCounts', async () => {
+      const client = await this.graphClient;
+      const [inbox, drafts, sent] = await Promise.all(
+        ['inbox', 'drafts', 'sentitems'].map((folder) =>
+          client.api(`/me/mailfolders/${folder}`).select('totalItemCount').get(),
+        ),
+      );
+
+      return {
+        inbox: Number(inbox.totalItemCount ?? 0),
+        drafts: Number(drafts.totalItemCount ?? 0),
+        sent: Number(sent.totalItemCount ?? 0),
+      };
+    });
+  }
   public async list(params: {
     folder: string;
     query?: string;

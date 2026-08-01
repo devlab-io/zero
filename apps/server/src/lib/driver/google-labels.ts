@@ -26,6 +26,28 @@ export class GmailLabels {
 
   constructor(private readonly t: GmailTransport) {}
 
+  /**
+   * The sidebar needs total threads, not unread threads. Fetch only the three
+   * well-known labels so this stays a small, constant-cost request even for
+   * accounts with hundreds of custom labels.
+   */
+  public getMailboxCounts() {
+    return this.t.withErrorHandler('getMailboxCounts', async () => {
+      const labelIds = ['INBOX', 'DRAFT', 'SENT'] as const;
+      const [inbox, drafts, sent] = await Promise.all(
+        labelIds.map((id) =>
+          this.t.execute((gmail) => gmail.users.labels.get({ userId: 'me', id })),
+        ),
+      );
+
+      return {
+        inbox: Number(inbox.data.threadsTotal ?? 0),
+        drafts: Number(drafts.data.threadsTotal ?? 0),
+        sent: Number(sent.data.threadsTotal ?? 0),
+      };
+    });
+  }
+
   public count() {
     return this.t.withErrorHandler(
       'count',

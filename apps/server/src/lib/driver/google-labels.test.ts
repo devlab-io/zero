@@ -1,5 +1,5 @@
-import { describe, expect, it, vi } from 'vitest';
 import type { GmailTransport } from './google-transport';
+import { describe, expect, it } from 'vitest';
 import type { Label } from '../../types';
 
 // google-labels ne dépend que de google-label-color-map + effect (purs). Aucune feuille
@@ -15,7 +15,8 @@ describe('GmailLabels.count — agrégation Effect (labels + archive)', () => {
   it('compte par label (unread) sauf sent/drafts (total) + archive', async () => {
     const t = makeFakeTransport({
       gmail: makeFakeGmail({
-        'users.labels.list': () => data({ labels: [{ id: 'INBOX' }, { id: 'SENT' }, { id: 'DRAFT' }] }),
+        'users.labels.list': () =>
+          data({ labels: [{ id: 'INBOX' }, { id: 'SENT' }, { id: 'DRAFT' }] }),
         'users.threads.list': () => data({ resultSizeEstimate: 7 }), // archive
         'users.labels.get': (p) => {
           if (p.id === 'INBOX') return data({ name: 'Inbox', threadsUnread: 3, threadsTotal: 50 });
@@ -58,6 +59,29 @@ describe('GmailLabels.count — agrégation Effect (labels + archive)', () => {
   });
 });
 
+describe('GmailLabels.getMailboxCounts', () => {
+  it('fetches only the three core labels and always returns total threads', async () => {
+    const requested: string[] = [];
+    const t = makeFakeTransport({
+      gmail: makeFakeGmail({
+        'users.labels.get': (p) => {
+          requested.push(String(p.id));
+          if (p.id === 'INBOX') return data({ threadsUnread: 3, threadsTotal: 50 });
+          if (p.id === 'DRAFT') return data({ threadsUnread: 0, threadsTotal: 4 });
+          return data({ threadsUnread: 0, threadsTotal: 10 });
+        },
+      }),
+    });
+
+    await expect(new GmailLabels(asT(t)).getMailboxCounts()).resolves.toEqual({
+      inbox: 50,
+      drafts: 4,
+      sent: 10,
+    });
+    expect(requested.sort()).toEqual(['DRAFT', 'INBOX', 'SENT']);
+  });
+});
+
 describe('GmailLabels.getUserLabels / getLabel', () => {
   it('mappe les labels et remplace les null par des chaînes vides', async () => {
     const t = makeFakeTransport({
@@ -65,7 +89,12 @@ describe('GmailLabels.getUserLabels / getLabel', () => {
         'users.labels.list': () =>
           data({
             labels: [
-              { id: 'l1', name: 'Projet', type: 'user', color: { backgroundColor: '#16a766', textColor: '#ffffff' } },
+              {
+                id: 'l1',
+                name: 'Projet',
+                type: 'user',
+                color: { backgroundColor: '#16a766', textColor: '#ffffff' },
+              },
               { id: 'l2' }, // tout null
             ],
           }),
@@ -79,14 +108,23 @@ describe('GmailLabels.getUserLabels / getLabel', () => {
       color: { textColor: '#D1F0D9', backgroundColor: '#12341D' }, // mappé
     });
     // mapGoogleLabelColor({bg:'',text:''}) : garde bg/text falsy → renvoie l'objet vide tel quel.
-    expect(out[1]).toEqual({ id: 'l2', name: '', type: '', color: { backgroundColor: '', textColor: '' } });
+    expect(out[1]).toEqual({
+      id: 'l2',
+      name: '',
+      type: '',
+      color: { backgroundColor: '', textColor: '' },
+    });
   });
 
   it('getLabel renvoie un Label complet avec couleur mappée', async () => {
     const t = makeFakeTransport({
       gmail: makeFakeGmail({
         'users.labels.get': () =>
-          data({ name: 'Clients', type: 'user', color: { backgroundColor: '#16a766', textColor: '#ffffff' } }),
+          data({
+            name: 'Clients',
+            type: 'user',
+            color: { backgroundColor: '#16a766', textColor: '#ffffff' },
+          }),
       }),
     });
     const out = await new GmailLabels(asT(t)).getLabel('lX');
@@ -114,7 +152,11 @@ describe('GmailLabels.createLabel / updateLabel / deleteLabel', () => {
       name: 'Devis',
       color: { backgroundColor: '#12341D', textColor: '#D1F0D9' },
     });
-    const rb = params?.requestBody as { name?: string; labelListVisibility?: string; color?: unknown };
+    const rb = params?.requestBody as {
+      name?: string;
+      labelListVisibility?: string;
+      color?: unknown;
+    };
     expect(rb?.name).toBe('Devis');
     expect(rb?.labelListVisibility).toBe('labelShow');
     expect(rb?.color).toEqual({ backgroundColor: '#16a766', textColor: '#ffffff' });
@@ -131,7 +173,7 @@ describe('GmailLabels.createLabel / updateLabel / deleteLabel', () => {
       }),
     });
     await new GmailLabels(asT(t)).createLabel({ name: 'Sans couleur' });
-    expect((params?.requestBody as { color?: unknown }).color).toBeUndefined();
+    expect((params?.requestBody as { color?: unknown } | undefined)?.color).toBeUndefined();
   });
 
   it('updateLabel envoie id + nom + couleur convertie', async () => {
@@ -144,10 +186,15 @@ describe('GmailLabels.createLabel / updateLabel / deleteLabel', () => {
         },
       }),
     });
-    const label: Label = { id: 'l1', name: 'Maj', color: { backgroundColor: '#12341D', textColor: '#D1F0D9' }, type: 'user' };
+    const label: Label = {
+      id: 'l1',
+      name: 'Maj',
+      color: { backgroundColor: '#12341D', textColor: '#D1F0D9' },
+      type: 'user',
+    };
     await new GmailLabels(asT(t)).updateLabel('l1', label);
     expect(params?.id).toBe('l1');
-    expect((params?.requestBody as { color?: unknown }).color).toEqual({
+    expect((params?.requestBody as { color?: unknown } | undefined)?.color).toEqual({
       backgroundColor: '#16a766',
       textColor: '#ffffff',
     });

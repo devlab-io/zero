@@ -146,6 +146,7 @@ const stub = {
   getEmailAliases: vi.fn(async () => [{ email: 'me@x.co', primary: true }]),
   getMessageAttachments: vi.fn(async () => [{ filename: 'f', attachmentId: 'a' }]),
   getRawEmail: vi.fn(async () => 'RAW'),
+  getMailboxCounts: vi.fn(async () => ({ inbox: 50, drafts: 4, sent: 10 })),
   sendDraft: vi.fn(async () => {}),
   create: vi.fn(async () => {}),
   reloadFolder: vi.fn(async () => {}),
@@ -206,6 +207,17 @@ beforeEach(() => {
 });
 
 describe('mail router — lectures simples', () => {
+  it('mailboxOverview rejects a stale account key before reading provider data', async () => {
+    await expect(
+      call('mailboxOverview', {
+        connectionId: 'previous-account',
+        todayStartMs: Date.now(),
+        weekStartMs: Date.now(),
+      }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    expect(stub.getMailboxCounts).not.toHaveBeenCalled();
+  });
+
   it('suggestRecipients délègue au stub', async () => {
     const r = await call('suggestRecipients', { query: 'jo', limit: 5 });
     expect(stub.suggestRecipients).toHaveBeenCalledWith('jo', 5);

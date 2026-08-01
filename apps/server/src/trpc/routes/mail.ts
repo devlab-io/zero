@@ -18,6 +18,7 @@ import {
   deleteAllSpam,
 } from '../../lib/server-utils';
 import { IGetThreadResponseSchema, type IGetThreadsResponse } from '../../lib/driver/types';
+import { buildMailboxOverview, getMailboxActivity } from '../../lib/mailbox-overview';
 import { activeDriverProcedure, router, privateProcedure } from '../trpc';
 import { processEmailHtml } from '../../lib/email-processor';
 import { previewSearchText } from '../../lib/search-preview';
@@ -52,6 +53,34 @@ const withSendDb = async <T>(callback: (db: DB) => Promise<T>) => {
 };
 
 export const mailRouter = router({
+  mailboxOverview: activeDriverProcedure
+    .input(
+      z.object({
+        connectionId: z.string().min(1),
+        todayStartMs: z.number().int().nonnegative(),
+        weekStartMs: z.number().int().nonnegative(),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      if (input.connectionId !== ctx.activeConnection.id) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'Active connection changed' });
+      }
+
+      const executionCtx = getContext<HonoContext>().executionCtx;
+      const { stub: agent } = await getZeroAgent(ctx.activeConnection.id, executionCtx);
+      const [folders, activity] = await Promise.all([
+        agent.getMailboxCounts(),
+        withSendDb((db) =>
+          getMailboxActivity(db, {
+            connectionId: ctx.activeConnection.id,
+            todayStart: new Date(input.todayStartMs),
+            weekStart: new Date(input.weekStartMs),
+          }),
+        ),
+      ]);
+
+      return buildMailboxOverview(folders, activity);
+    }),
   suggestRecipients: activeDriverProcedure
     .input(
       z.object({

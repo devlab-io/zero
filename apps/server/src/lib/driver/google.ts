@@ -108,6 +108,9 @@ export class GoogleMailManager implements MailManager {
   public count() {
     return this.labels.count();
   }
+  public getMailboxCounts() {
+    return this.labels.getMailboxCounts();
+  }
   public getUserLabels() {
     return this.labels.getUserLabels();
   }

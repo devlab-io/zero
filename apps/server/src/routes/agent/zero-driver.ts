@@ -375,6 +375,13 @@ export class ZeroDriver extends DurableObject<ZeroEnv> {
     return folders.map((f) => ({ label: f, count: resultMap.get(f.toUpperCase()) ?? 0 }));
   }
 
+  async getMailboxCounts() {
+    if (!this.driver) {
+      throw new Error('No driver available');
+    }
+    return this.driver.getMailboxCounts();
+  }
+
   async deleteThread(id: string) {
     await this.db.delete(threads).where(eq(threads.threadId, id));
     this.invalidateRecipientCache();
