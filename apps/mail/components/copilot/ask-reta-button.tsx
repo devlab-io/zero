@@ -70,7 +70,7 @@ export function AskRetaButton() {
         </button>
       </DialogTrigger>
 
-      <DialogContent className="flex h-[80vh] w-full max-w-2xl flex-col overflow-hidden border p-0 shadow-lg">
+      <DialogContent className="flex h-[85dvh] w-[95vw] max-w-2xl flex-col overflow-hidden border p-0 shadow-lg sm:h-[80vh] sm:w-full">
         {/* Non-empty a11y title/description, visually hidden (the panel renders its own header). */}
         <DialogTitle className="sr-only">{m['common.askReta.title']()}</DialogTitle>
         <DialogDescription className="sr-only">{m['common.askReta.subtitle']()}</DialogDescription>

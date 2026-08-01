@@ -17,6 +17,7 @@ import {
   saveAskRetaConversation,
 } from '@/lib/ask-reta-conversation-storage';
 import { insertIntoComposer, type ComposerInsertPayload } from '@/lib/composer-insert';
+import { hasLiveComposer, readLiveDraft } from '@/lib/live-draft-registry';
 import { AskRetaStreamError, streamAskReta } from '@/lib/ask-reta-stream';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useReplyStatePurge } from '@/hooks/use-reply-state-purge';
@@ -49,20 +50,43 @@ const HISTORY_TURNS = 6;
 const HISTORY_TURN_CHARS = 2_000;
 const DRAFT_CONTEXT_CHARS = 8_000;
 
+const boundDraftContext = (draft: { subject: string; to: string; body: string }) => {
+  const bounded = {
+    subject: draft.subject.slice(0, 500) || undefined,
+    to: draft.to.slice(0, 500) || undefined,
+    body: draft.body.slice(0, DRAFT_CONTEXT_CHARS) || undefined,
+  };
+  return bounded.subject || bounded.to || bounded.body ? bounded : undefined;
+};
+
 /**
- * Current unsent draft, as durably persisted by the composer (issue #34 seam).
- * The scope MUST mirror email-composer's persistence key ({threadId, draftId,
- * replyId: activeReplyId}) — the bare compose key would miss the draft or the
- * reply actually being edited. Read once per submit.
+ * Current unsent draft — read ONCE at submit time (slice 2bis):
+ * 1. the LIVE registry for the exact composer scope wins: it is what was JUST
+ *    typed, ahead of any lagging autosave. A mounted-but-empty composer is
+ *    the truth too (no fallback to a stale local snapshot).
+ * 2. the durable local snapshot is the fallback ONLY when no live composer is
+ *    mounted for that scope.
+ * The scope mirrors email-composer's persistence key ({threadId, draftId,
+ * replyId: activeReplyId}).
  */
 const readComposerDraftContext = (scope: ComposerDraftScope) => {
-  const snapshot = loadLocalDraft(draftStorageKey(scope));
+  const scopeKey = draftStorageKey(scope);
+  if (hasLiveComposer(scopeKey)) {
+    const live = readLiveDraft(scopeKey);
+    if (!live) return undefined;
+    return boundDraftContext({
+      subject: live.subject,
+      to: live.to.join(', '),
+      body: live.bodyHtml,
+    });
+  }
+  const snapshot = loadLocalDraft(scopeKey);
   if (!snapshot || !draftHasContent(snapshot)) return undefined;
-  return {
-    subject: snapshot.subject.slice(0, 500) || undefined,
-    to: snapshot.to.join(', ').slice(0, 500) || undefined,
-    body: snapshot.message.slice(0, DRAFT_CONTEXT_CHARS) || undefined,
-  };
+  return boundDraftContext({
+    subject: snapshot.subject,
+    to: snapshot.to.join(', '),
+    body: snapshot.message,
+  });
 };
 
 export function AskRetaSurface() {
@@ -470,7 +494,8 @@ export function AskRetaSurface() {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center justify-between gap-2 border-b p-4">
+      {/* flex-wrap: the model select + clear stay reachable at small widths. */}
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b p-3 sm:p-4">
         <div className="flex items-center gap-2">
           <Sparkles className="h-4 w-4" aria-hidden="true" />
           <div>
@@ -661,8 +686,15 @@ export function AskRetaSurface() {
         )}
       </div>
 
+      {/* Small render-time hint: the live composer's current draft will ride
+          along with the next ask (read once at submit, live registry first). */}
+      {isHydrated && hasLiveComposer(draftStorageKey(composerScope)) && (
+        <p className="text-muted-foreground border-t px-3 pt-2 text-[11px]">
+          {m['common.askReta.draftIncluded']()}
+        </p>
+      )}
       <form
-        className="flex gap-2 border-t p-3"
+        className="flex flex-wrap gap-2 border-t p-3 sm:flex-nowrap"
         onSubmit={(event) => {
           event.preventDefault();
           void submit();

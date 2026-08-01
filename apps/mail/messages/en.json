@@ -92,6 +92,7 @@
       "stop": "Stop",
       "cancelled": "Request cancelled",
       "answerReady": "Answer received",
+      "draftIncluded": "Current draft will be included",
       "replay": "Replay",
       "searchQueryLabel": "Search query",
       "threadsFound": "threads found"

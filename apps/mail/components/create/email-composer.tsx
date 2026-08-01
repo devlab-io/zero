@@ -3,6 +3,7 @@ import { createDraftSaveLifecycle } from '@/lib/draft-save-lifecycle';
 import { registerComposerInsertHandler } from '@/lib/composer-insert';
 import { resolveComposerChord } from '@/lib/hotkeys/composer-chords';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { registerLiveDraft } from '@/lib/live-draft-registry';
 import { resolveComposerEscape } from '@/lib/composer-escape';
 import { useEmailAliases } from '@/hooks/use-email-aliases';
 import { ScheduleSendPicker } from './schedule-send-picker';
@@ -188,6 +189,40 @@ export function EmailComposer({
     placeholder: 'Start your email here',
     autofocus,
   });
+
+  // LIVE draft seam (slice 2bis): publish the CURRENT content — memory only,
+  // no storage — so Ask Reta reads what was JUST typed, never a lagging
+  // autosave. Registration is owner-aware: a stale unmount cannot remove a
+  // newer instance of the same scope. Autosave/restore are untouched.
+  const liveDraftRef = useRef<ReturnType<typeof registerLiveDraft> | null>(null);
+  useEffect(() => {
+    const scopeKey = draftStorageKey({ threadId, draftId, replyId: activeReplyId });
+    const handle = registerLiveDraft(scopeKey);
+    liveDraftRef.current = handle;
+    return () => {
+      if (liveDraftRef.current === handle) liveDraftRef.current = null;
+      handle.unregister();
+    };
+  }, [threadId, draftId, activeReplyId]);
+  useEffect(() => {
+    if (!editor || editor.isDestroyed) return;
+    const publish = () => {
+      liveDraftRef.current?.publish({
+        to: getValues('to') ?? [],
+        cc: getValues('cc') ?? [],
+        bcc: getValues('bcc') ?? [],
+        subject: getValues('subject') ?? '',
+        bodyHtml: editor.getHTML(),
+      });
+    };
+    publish(); // current state at (re)mount / scope change
+    // Editor updates do not re-render the form: listen to the editor itself.
+    editor.on('update', publish);
+    return () => {
+      editor.off('update', publish);
+    };
+    // Recipient/subject changes re-run this effect (watch values in deps).
+  }, [editor, toEmails, ccEmails, bccEmails, subjectInput, threadId, draftId, activeReplyId]);
 
   // Ask Reta live-insert seam (spec docs/spec/mail-copilot.md): this composer
   // instance accepts a proposal under its EXACT persistence scope key. Without

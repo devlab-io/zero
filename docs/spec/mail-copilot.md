@@ -268,8 +268,23 @@ r9 ; tests serveur + client.
   vrai DOM) ; région `aria-live polite/atomic` compacte (réflexion →
   dernière étape → réponse reçue).
 
-**Tranche 2bis (restant)** : contexte brouillon systématique (seam composeur
-dédié pour un draft ouvert non persisté), compteurs d'usage, mobile.
+**Tranche 2bis — livrée (2026-08-01) : contexte du brouillon RÉELLEMENT
+ouvert.** Registre mémoire strict `lib/live-draft-registry.ts` (aucun
+localStorage/IndexedDB/réseau), keyed par la clé de scope exacte du
+composeur, snapshot borné (destinataires ≤ 20×200, sujet ≤ 500, corps
+≤ 120 k, révision/savedAt — jamais de pièce jointe binaire), générations
+d'owner : un unmount périmé ne détruit jamais l'instance plus récente du
+même scope. `EmailComposer` publie le contenu ACTUEL à chaque changement de
+formulaire ET à chaque update éditeur (`editor.on('update')`) —
+autosave/restauration inchangés. Ask Reta lit UNE fois au submit : registre
+live prioritaire (un composeur monté mais vide est la vérité — pas de repli
+sur un autosave périmé), repli local uniquement sans composeur vivant.
+Contexte serveur borné inchangé (8 k corps), non fiable pour plan/synthèse ;
+aucune donnée de brouillon dans la conversation persistée, les logs, les
+steps, les citations. Indicateur discret « brouillon en cours inclus ».
+Panneau utilisable en petite largeur (dvh + wrap, sans redesign).
+
+**Restant** : compteurs d'usage.
 **Tranche 3** : BYOK (prérequis ci-dessus) ; propositions vers `draft_outbox`
 /`/queue` ; récupération sémantique (Vectorize/AutoRAG) si activée ; mobile.
 

@@ -92,6 +92,7 @@
       "stop": "Arrêter",
       "cancelled": "Requête annulée",
       "answerReady": "Réponse reçue",
+      "draftIncluded": "Le brouillon en cours sera inclus",
       "replay": "Rejouer",
       "searchQueryLabel": "Requête de recherche",
       "threadsFound": "fils trouvés"

@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ButtonHTMLAttributes, InputHTMLAttributes } from 'react';
 import { registerComposerInsertHandler } from '@/lib/composer-insert';
 import { draftStorageKey, saveLocalDraft } from '@/lib/draft-storage';
+import { registerLiveDraft } from '@/lib/live-draft-registry';
 import { askRetaConversationAtom } from './ask-reta-state';
 import { createRoot, type Root } from 'react-dom/client';
 import { AskRetaSurface } from './ask-reta-surface';
@@ -164,6 +165,87 @@ afterEach(() => {
     root.unmount();
   });
   container.remove();
+});
+
+describe('AskRetaSurface — LIVE draft context (slice 2bis)', () => {
+  const draftOf = (call: number) =>
+    (
+      harness.streamAskReta.mock.calls[call]![0] as {
+        input: { context: { draft?: { subject?: string; to?: string; body?: string } } };
+      }
+    ).input.context.draft;
+
+  it("submit BEFORE autosave: the server receives 'alpha'; after more typing, 'alphabeta'", async () => {
+    harness.queryStore.threadId = 'thread-9';
+    // A live composer is mounted on the exact scope; the durable autosave is
+    // BEHIND (stale localStorage) — the live registry must win.
+    saveLocalDraft(draftStorageKey({ threadId: 'thread-9' }), {
+      to: ['old@x.test'],
+      cc: [],
+      bcc: [],
+      subject: 'AUTOSAVE EN RETARD',
+      message: '<p>vieux contenu</p>',
+      savedAt: Date.now(),
+    });
+    const live = registerLiveDraft(draftStorageKey({ threadId: 'thread-9' }));
+    live.publish({ to: ['client@x.test'], subject: 'Objet', bodyHtml: '<p>alpha</p>' });
+
+    render();
+    await askQuestion('Question 1');
+    expect(draftOf(0)?.body).toBe('<p>alpha</p>');
+    expect(draftOf(0)?.subject).toBe('Objet');
+    expect(draftOf(0)?.subject).not.toBe('AUTOSAVE EN RETARD');
+
+    // The user keeps typing — the next ask carries the newest content.
+    live.publish({ to: ['client@x.test'], subject: 'Objet', bodyHtml: '<p>alphabeta</p>' });
+    await askQuestion('Question 2');
+    expect(draftOf(1)?.body).toBe('<p>alphabeta</p>');
+    live.unregister();
+  });
+
+  it('a mounted-but-EMPTY live composer is the truth: no stale local fallback', async () => {
+    harness.queryStore.threadId = 'thread-9';
+    saveLocalDraft(draftStorageKey({ threadId: 'thread-9' }), {
+      to: ['old@x.test'],
+      cc: [],
+      bcc: [],
+      subject: 'VIEUX',
+      message: '<p>vieux</p>',
+      savedAt: Date.now(),
+    });
+    const live = registerLiveDraft(draftStorageKey({ threadId: 'thread-9' }));
+    live.publish({ to: [], subject: '', bodyHtml: '' });
+
+    render();
+    await askQuestion('Question');
+    expect(draftOf(0)).toBeUndefined();
+    live.unregister();
+  });
+
+  it('live snapshots never leak across scopes (thread-a composer, thread-b ask)', async () => {
+    harness.queryStore.threadId = 'thread-b';
+    const live = registerLiveDraft(draftStorageKey({ threadId: 'thread-a' }));
+    live.publish({ to: [], subject: 'secret de A', bodyHtml: '<p>brouillon de A</p>' });
+
+    render();
+    await askQuestion('Question sur B');
+    expect(draftOf(0)).toBeUndefined();
+    live.unregister();
+  });
+
+  it('the live body NEVER lands in Ask Reta localStorage', async () => {
+    harness.queryStore.threadId = 'thread-9';
+    const live = registerLiveDraft(draftStorageKey({ threadId: 'thread-9' }));
+    live.publish({ to: [], subject: '', bodyHtml: '<p>CORPS-LIVE-CONFIDENTIEL</p>' });
+
+    render();
+    await askQuestion('Question avec brouillon');
+    const askRetaKeys = Object.keys(localStorage).filter((key) => key.startsWith('zero:ask-reta:'));
+    for (const key of askRetaKeys) {
+      expect(localStorage.getItem(key)).not.toContain('CORPS-LIVE-CONFIDENTIEL');
+    }
+    live.unregister();
+  });
 });
 
 describe('AskRetaSurface — context capture (unchanged in slice 2)', () => {
