@@ -123,6 +123,11 @@ export function AskRetaSurface() {
   // ZERO paint of a stale scope: until hydration lands, the panel renders an
   // empty conversation — A's turns are never visible on B, not even one frame.
   const visibleConversation = isHydrated ? conversation : [];
+  // SINGLE display source for the asking state (review 02-3): on B's
+  // pre-effect frame isAsking can still be true from A's run — every visual
+  // branch (progression AND the Stop/Send switch) keys on this, never on
+  // isAsking alone.
+  const visibleAsking = isHydrated && isAsking;
   // Compact aria-live announcement (polite/atomic): thinking → latest step →
   // answer ready / error. Screen readers follow the ask without spam.
   const [announcement, setAnnouncement] = useState('');
@@ -637,7 +642,7 @@ export function AskRetaSurface() {
             </div>
           </div>
         ))}
-        {isAsking && isHydrated && (
+        {visibleAsking && (
           <div className="text-muted-foreground space-y-1 text-xs">
             <div className="flex items-center gap-2">
               <LoaderCircle className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
@@ -673,7 +678,7 @@ export function AskRetaSurface() {
           className="h-9"
           autoFocus
         />
-        {isAsking ? (
+        {visibleAsking ? (
           <Button
             type="button"
             size="sm"

@@ -7,6 +7,7 @@ import { askRetaConversationAtom } from './ask-reta-state';
 import { createRoot, type Root } from 'react-dom/client';
 import { AskRetaSurface } from './ask-reta-surface';
 import { getDefaultStore } from 'jotai';
+import { flushSync } from 'react-dom';
 import { act } from 'react';
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -412,6 +413,48 @@ describe('AskRetaSurface — scope switch purges EVERYTHING (review 02-2)', () =
     ).toBe(false);
     const liveRegion = container.querySelector('[aria-live="polite"]');
     expect(liveRegion?.textContent ?? '').toBe('');
+  });
+});
+
+describe('AskRetaSurface — PRE-EFFECT frame of a scope switch (review 02-3)', () => {
+  it("B's very first committed frame never shows A's Stop button nor progression", async () => {
+    // A has an ask in flight: Stop is visible, isAsking is true.
+    harness.streamAskReta.mockImplementationOnce(() => new Promise(() => {}));
+    render();
+    await askQuestion('question de A en vol');
+    expect(
+      [...container.querySelectorAll('button')].some((b) =>
+        b.textContent?.includes('askReta.stop'),
+      ),
+    ).toBe(true);
+
+    // Switch to B and commit SYNCHRONOUSLY: flushSync commits the DOM but the
+    // PASSIVE effects (the scope-switch purge) have NOT run yet — this is the
+    // exact frame the previous act()-based tests could never observe.
+    const actEnv = globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean };
+    actEnv.IS_REACT_ACT_ENVIRONMENT = false;
+    try {
+      harness.connectionId = 'conn-b';
+      flushSync(() => {
+        root.render(<AskRetaSurface />);
+      });
+      // isAsking is STILL true (no effect ran) — yet nothing of A paints:
+      // the form must show Send, not A's Stop, and no progression block.
+      const buttons = [...container.querySelectorAll('button')];
+      expect(buttons.some((b) => b.textContent?.includes('askReta.stop'))).toBe(false);
+      expect(buttons.some((b) => b.textContent?.includes('askReta.send'))).toBe(true);
+      expect(container.textContent).not.toContain('askReta.thinking');
+    } finally {
+      actEnv.IS_REACT_ACT_ENVIRONMENT = true;
+    }
+
+    // After the effects flush, the purge makes state and display consistent.
+    await act(async () => {});
+    expect(
+      [...container.querySelectorAll('button')].some((b) =>
+        b.textContent?.includes('askReta.stop'),
+      ),
+    ).toBe(false);
   });
 });
 
