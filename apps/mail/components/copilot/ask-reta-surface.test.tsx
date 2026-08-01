@@ -13,11 +13,49 @@ import { act } from 'react';
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
+const defaultCatalogue = () => ({
+  selectedModelId: 'workers-ai:llama-4-scout',
+  vaultAvailable: true,
+  consentVersion: '2026-08-01',
+  models: [
+    {
+      id: 'workers-ai:llama-4-scout',
+      provider: 'workers-ai',
+      label: 'Llama 4 Scout (Workers AI)',
+      requiresCredential: false,
+      configured: true,
+    },
+    {
+      id: 'workers-ai:llama-3.3-70b',
+      provider: 'workers-ai',
+      label: 'Llama 3.3 70B (Workers AI)',
+      requiresCredential: false,
+      configured: true,
+    },
+    {
+      id: 'anthropic:claude-fable-5',
+      provider: 'anthropic',
+      label: 'Claude Fable 5 (Anthropic)',
+      requiresCredential: true,
+      configured: true,
+    },
+    {
+      id: 'openai:gpt-5.2',
+      provider: 'openai',
+      label: 'GPT-5.2 (OpenAI)',
+      requiresCredential: true,
+      configured: false,
+    },
+  ],
+});
+
 const harness = vi.hoisted(() => ({
   streamAskReta: vi.fn(),
   fetchQuery: vi.fn(),
   draftsMutateAsync: vi.fn(),
-  settingsMutateAsync: vi.fn(),
+  selectModelMutateAsync: vi.fn(),
+  invalidateQueries: vi.fn(async () => {}),
+  catalogue: undefined as unknown,
   toastSuccess: vi.fn(),
   toastError: vi.fn(),
   toastPlain: vi.fn(),
@@ -45,31 +83,38 @@ vi.mock('@/providers/query-provider', () => ({
   useTRPC: () => ({
     copilot: {
       searchPreview: { queryOptions: (input: unknown) => ({ kind: 'searchPreview', input }) },
+      modelCatalog: {
+        queryOptions: () => ({ kind: 'modelCatalog' }),
+        queryKey: () => ['copilot', 'modelCatalog'],
+      },
+      selectModel: { mutationOptions: () => ({ kind: 'selectModel' }) },
     },
     drafts: {
       create: { mutationOptions: () => ({ kind: 'drafts' }) },
       list: { queryKey: () => ['drafts'] },
     },
-    settings: {
-      save: { mutationOptions: () => ({ kind: 'settings' }) },
-      get: { queryKey: () => ['settings'] },
-    },
   }),
 }));
 
 vi.mock('@tanstack/react-query', () => ({
+  useQuery: (options: { kind: string }) =>
+    options.kind === 'modelCatalog' ? { data: harness.catalogue } : { data: undefined },
   useMutation: (options: { kind: string }) =>
     options.kind === 'drafts'
       ? { isPending: false, mutateAsync: harness.draftsMutateAsync }
-      : { isPending: false, mutateAsync: harness.settingsMutateAsync },
+      : { isPending: false, mutateAsync: harness.selectModelMutateAsync },
   useQueryClient: () => ({
-    invalidateQueries: vi.fn(async () => {}),
+    invalidateQueries: harness.invalidateQueries,
     fetchQuery: harness.fetchQuery,
   }),
 }));
 
-vi.mock('@/hooks/use-settings', () => ({
-  useSettings: () => ({ data: { settings: { askRetaModel: 'llama-4-scout' } } }),
+// The manager is a SEPARATE lazy chunk; the surface tests only assert its
+// mount/unmount contract — the real dialog has its own dedicated test file.
+vi.mock('./model-manager', () => ({
+  ModelManagerDialog: (props: { open: boolean }) => (
+    <div data-testid="model-manager" data-open={String(props.open)} />
+  ),
 }));
 
 vi.mock('@/hooks/use-reply-state-purge', () => ({
@@ -157,8 +202,10 @@ beforeEach(() => {
   harness.streamAskReta.mockResolvedValue(baseResult('Réponse.'));
   harness.fetchQuery.mockReset();
   harness.draftsMutateAsync.mockReset();
-  harness.settingsMutateAsync.mockReset();
-  harness.settingsMutateAsync.mockResolvedValue({ success: true });
+  harness.selectModelMutateAsync.mockReset();
+  harness.selectModelMutateAsync.mockResolvedValue({ selectedModelId: 'workers-ai:llama-3.3-70b' });
+  harness.invalidateQueries.mockClear();
+  harness.catalogue = defaultCatalogue();
   harness.toastSuccess.mockClear();
   harness.toastError.mockClear();
   harness.toastPlain.mockClear();
@@ -860,11 +907,11 @@ describe('AskRetaSurface — proposals (slice-1 behaviour preserved)', () => {
     expect(harness.toastError).toHaveBeenCalledWith('common.actions.errorTryAgainLater');
 
     harness.toastError.mockClear();
-    harness.settingsMutateAsync.mockRejectedValueOnce(new Error('offline'));
+    harness.selectModelMutateAsync.mockRejectedValueOnce(new Error('offline'));
     const select = container.querySelector('select')!;
     const setValue = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')!.set!;
     await act(async () => {
-      setValue.call(select, 'llama-3.3-70b');
+      setValue.call(select, 'workers-ai:llama-3.3-70b');
       select.dispatchEvent(new Event('change', { bubbles: true }));
     });
     expect(harness.toastError).toHaveBeenCalledWith('common.actions.errorTryAgainLater');
@@ -901,5 +948,70 @@ describe('AskRetaSurface — reload safety', () => {
         b.textContent?.includes('askReta.createDraft'),
       ),
     ).toBe(false);
+  });
+});
+
+describe('AskRetaSurface — model catalogue select (slice 3B)', () => {
+  const modelSelect = () =>
+    container.querySelector('select#ask-reta-model') as unknown as HTMLSelectElement;
+  const option = (id: string) =>
+    modelSelect().querySelector(`option[value="${id}"]`) as HTMLOptionElement;
+  const changeModel = async (id: string) => {
+    const select = modelSelect();
+    const setValue = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')!.set!;
+    await act(async () => {
+      setValue.call(select, id);
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+  };
+
+  it('renders the SERVER catalogue grouped by provider — selection is the server truth', () => {
+    render();
+    const select = modelSelect();
+    expect(select.value).toBe('workers-ai:llama-4-scout');
+    const groups = [...select.querySelectorAll('optgroup')].map((group) => group.label);
+    expect(groups).toEqual(['Workers AI', 'OpenAI', 'Anthropic']);
+    // Configured BYOK models selectable; unconfigured VISIBLE but disabled
+    // (the manage button is the configure path).
+    expect(option('anthropic:claude-fable-5').disabled).toBe(false);
+    expect(option('openai:gpt-5.2').disabled).toBe(true);
+    expect(option('openai:gpt-5.2').textContent).toContain('askReta.notConfigured');
+  });
+
+  it('changing the model fires selectModel THEN atomically refreshes the catalogue', async () => {
+    render();
+    await changeModel('workers-ai:llama-3.3-70b');
+    expect(harness.selectModelMutateAsync).toHaveBeenCalledWith({
+      modelId: 'workers-ai:llama-3.3-70b',
+    });
+    expect(harness.invalidateQueries).toHaveBeenCalledWith({
+      queryKey: ['copilot', 'modelCatalog'],
+    });
+  });
+
+  it('vault unavailable: BYOK options disabled even when configured — Workers stay selectable', () => {
+    harness.catalogue = { ...defaultCatalogue(), vaultAvailable: false };
+    render();
+    expect(option('anthropic:claude-fable-5').disabled).toBe(true);
+    expect(option('workers-ai:llama-3.3-70b').disabled).toBe(false);
+  });
+
+  it('“Manage models” opens the lazy manager; an account/connection switch CLOSES it', async () => {
+    render();
+    const manage = [...container.querySelectorAll('button')].find((button) =>
+      button.textContent?.includes('askReta.manageModels'),
+    )!;
+    await act(async () => {
+      manage.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await act(async () => {}); // lazy chunk resolution
+    expect(
+      container.querySelector('[data-testid="model-manager"]')?.getAttribute('data-open'),
+    ).toBe('true');
+
+    // Account switch: the manager (and any ephemeral card state) dies with A.
+    harness.connectionId = 'conn-b';
+    render();
+    expect(container.querySelector('[data-testid="model-manager"]')).toBeNull();
   });
 });

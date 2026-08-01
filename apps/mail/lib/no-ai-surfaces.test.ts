@@ -92,20 +92,25 @@ describe('contrat r8 — aucune surface IA exposée', () => {
             const routeCalls = source.match(/(?:trpc|trpcClient)\.ai\.([A-Za-z0-9_]+)/g) ?? [];
             if (routeCalls.every((call) => call === 'trpc.ai.rewriteEmail')) continue;
           }
-          // r9 : dans components/copilot/**, seules les routes copilot nominatives
-          // (ask, searchPreview — le replay borné de la tranche 2) sont admises.
+          // r9 : dans components/copilot/**, seules les routes copilot NOMINATIVES
+          // sont admises — ask + searchPreview (tranche 2) et les quatre routes
+          // BYOK de la tranche 3B (catalogue/sélection/gestion de clés). Toute
+          // autre route copilot, même depuis la surface, fait échouer le garde.
           if (
             relative.startsWith(ASK_RETA_SANCTIONED_DIR) &&
             pattern.source === /trpc\.copilot\.|trpcClient\.copilot\./.source
           ) {
+            const sanctioned = new Set([
+              'trpc.copilot.ask',
+              'trpc.copilot.searchPreview',
+              'trpc.copilot.modelCatalog',
+              'trpc.copilot.selectModel',
+              'trpc.copilot.setCredential',
+              'trpc.copilot.deleteCredential',
+            ]);
             const copilotCalls =
               source.match(/(?:trpc|trpcClient)\.copilot\.([A-Za-z0-9_]+)/g) ?? [];
-            if (
-              copilotCalls.every(
-                (call) => call === 'trpc.copilot.ask' || call === 'trpc.copilot.searchPreview',
-              )
-            )
-              continue;
+            if (copilotCalls.every((call) => sanctioned.has(call))) continue;
           }
           // r9 (tranche 2) : le transport stream n'est licite que dans la surface.
           if (

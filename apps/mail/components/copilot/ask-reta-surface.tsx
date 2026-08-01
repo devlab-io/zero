@@ -18,15 +18,14 @@ import {
   saveAskRetaConversation,
 } from '@/lib/ask-reta-conversation-storage';
 import { insertIntoComposer, type ComposerInsertPayload } from '@/lib/composer-insert';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { hasLiveComposer, readLiveDraft } from '@/lib/live-draft-registry';
 import { AskRetaStreamError, streamAskReta } from '@/lib/ask-reta-stream';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { useReplyStatePurge } from '@/hooks/use-reply-state-purge';
 import { useActiveConnection } from '@/hooks/use-connections';
 import { LoaderCircle, Sparkles, Trash2 } from 'lucide-react';
 import { useTRPC } from '@/providers/query-provider';
-import { useEffect, useRef, useState } from 'react';
-import { useSettings } from '@/hooks/use-settings';
 import { Button } from '@/components/ui/button';
 import { useSession } from '@/lib/auth-client';
 import { Input } from '@/components/ui/input';
@@ -42,9 +41,20 @@ import { toast } from 'sonner';
  * consequential action (open composer, save Gmail draft) is an explicit click.
  */
 
-const ASK_RETA_MODELS: { key: string; label: () => string }[] = [
-  { key: 'llama-4-scout', label: () => m['common.askReta.modelFast']() },
-  { key: 'llama-3.3-70b', label: () => m['common.askReta.modelDeep']() },
+// Slice 3B: the model list is the SERVER catalogue (copilot.modelCatalog) —
+// nothing static, no settings.save side channel. The manager dialog is a
+// separate lazy chunk so key management never weighs on the shell.
+const ModelManagerDialog = lazy(() =>
+  import('./model-manager').then((mod) => ({ default: mod.ModelManagerDialog })),
+);
+
+const MODEL_PROVIDER_GROUPS: { provider: string; label: string }[] = [
+  { provider: 'workers-ai', label: 'Workers AI' },
+  { provider: 'openai', label: 'OpenAI' },
+  { provider: 'anthropic', label: 'Anthropic' },
+  { provider: 'gemini', label: 'Google' },
+  { provider: 'moonshot', label: 'Moonshot' },
+  { provider: 'zai', label: 'Z.AI' },
 ];
 
 const HISTORY_TURNS = 6;
@@ -110,9 +120,13 @@ export function AskRetaSurface() {
   const composeScope: ComposerDraftScope = {};
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  const { data: settingsData } = useSettings();
-  const settingsSave = useMutation(trpc.settings.save.mutationOptions());
   const createDraft = useMutation(trpc.drafts.create.mutationOptions());
+  // Server catalogue = single source of truth for models AND the selection
+  // (slice 3B). Query cache is already owner/connection-partitioned upstream.
+  const modelCatalogQuery = useQuery(trpc.copilot.modelCatalog.queryOptions());
+  const modelCatalog = modelCatalogQuery.data;
+  const selectModel = useMutation(trpc.copilot.selectModel.mutationOptions());
+  const [manageOpen, setManageOpen] = useState(false);
 
   // Slice-2 streaming state: steps arrive live. Stop aborts the fetch, which
   // stops the server transport/pipeline immediately (late results discarded);
@@ -187,6 +201,10 @@ export function AskRetaSurface() {
     setLiveSteps([]);
     setQuestion('');
     setAnnouncement('');
+    // Slice 3B: the model manager dies with the scope too — its cards hold
+    // ephemeral secret state that must never survive an account switch (the
+    // dialog is ALSO keyed on the owner, this close is the first barrier).
+    setManageOpen(false);
     // 3. Barrier down: saves AND submits disabled until hydration is observed.
     loadedScopeRef.current = nextScope;
     conversationScopeRef.current = null;
@@ -213,9 +231,7 @@ export function AskRetaSurface() {
     saveAskRetaConversation(scope.userId, scope.connectionId, conversation);
   }, [conversation]);
 
-  const modelKey =
-    (settingsData?.settings as { askRetaModel?: string } | undefined)?.askRetaModel ??
-    'llama-4-scout';
+  const selectedModelId = modelCatalog?.selectedModelId ?? 'workers-ai:llama-4-scout';
 
   const submit = async () => {
     const trimmed = question.trim();
@@ -519,27 +535,67 @@ export function AskRetaSurface() {
           </label>
           <select
             id="ask-reta-model"
-            value={modelKey}
-            disabled={settingsSave.isPending}
+            value={selectedModelId}
+            disabled={!modelCatalog || selectModel.isPending}
             onChange={(event) => {
-              void settingsSave
-                .mutateAsync({ askRetaModel: event.target.value as never })
+              // Server is the source of truth: mutate, then atomically
+              // refresh the catalogue (selection + configured flags).
+              void selectModel
+                .mutateAsync({ modelId: event.target.value })
                 .then(() =>
-                  queryClient.invalidateQueries({ queryKey: trpc.settings.get.queryKey() }),
+                  queryClient.invalidateQueries({
+                    queryKey: trpc.copilot.modelCatalog.queryKey(),
+                  }),
                 )
-                .catch((error) => {
-                  log.error('Ask Reta model save failed', error);
+                .catch(() => {
                   toast.error(m['common.actions.errorTryAgainLater']());
                 });
             }}
-            className="bg-background h-7 rounded border px-1 text-xs"
+            className="bg-background h-7 max-w-[11rem] rounded border px-1 text-xs"
           >
-            {ASK_RETA_MODELS.map((model) => (
-              <option key={model.key} value={model.key}>
-                {model.label()}
-              </option>
-            ))}
+            {MODEL_PROVIDER_GROUPS.map((group) => {
+              const models =
+                modelCatalog?.models.filter((model) => model.provider === group.provider) ?? [];
+              if (!models.length) return null;
+              return (
+                <optgroup key={group.provider} label={group.label}>
+                  {models.map((model) => {
+                    // Configured models are selectable; the rest stay VISIBLE
+                    // but disabled — the manage button is the configure path.
+                    const locked =
+                      model.requiresCredential &&
+                      (!model.configured || !modelCatalog?.vaultAvailable);
+                    return (
+                      <option key={model.id} value={model.id} disabled={locked}>
+                        {model.label}
+                        {locked ? ` — ${m['common.askReta.notConfigured']()}` : ''}
+                      </option>
+                    );
+                  })}
+                </optgroup>
+              );
+            })}
           </select>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-7 px-2 text-xs"
+            onClick={() => setManageOpen(true)}
+          >
+            {m['common.askReta.manageModels']()}
+          </Button>
+          {manageOpen && userId && connectionId ? (
+            <Suspense fallback={null}>
+              <ModelManagerDialog
+                // Keyed on the owner: an account/connection switch can never
+                // carry a card's ephemeral secret state across.
+                key={`${userId}:${connectionId}`}
+                open={manageOpen}
+                onOpenChange={setManageOpen}
+              />
+            </Suspense>
+          ) : null}
           <Button
             type="button"
             variant="ghost"

@@ -371,6 +371,28 @@ sous A, même sans le remount parent. Le soak de robustesse n'utilise plus
 que des clés v2 ownées : hors tests de compatibilité dédiés, aucune clé
 legacy v1 n'est lue ni écrite nulle part.
 
+**Tranche 3B — livrée (2026-08-01) : UI BYOK dans Ask Reta.** Le sélecteur de
+modèle est branché sur `copilot.modelCatalog`/`selectModel` (plus de liste
+statique ni de settings.save) : groupes par provider (Workers AI/OpenAI/
+Anthropic/Google/Moonshot/Z.AI), `selectedModelId` serveur = source de
+vérité, invalidation atomique du catalogue après mutation, modèles non
+configurés VISIBLES mais désactivés (le bouton « Gérer les modèles » est le
+chemin de configuration). Dialog `components/copilot/model-manager.tsx` en
+chunk lazy séparé (~11 kB) : cartes par provider BYOK avec état
+« Configurée » SEUL (jamais de statut vérifié/suffixe/longueur), champ
+password durci (autocomplete/autocapitalize off, spellCheck false), clé en
+état ÉPHÉMÈRE de la carte uniquement — effacée sur succès/erreur/fermeture/
+unmount, jamais dans URL/localStorage/query cache/toast/log/DOM après le
+flux ; consentement egress EXPLICITE (checkbox + libellé exact en/fr : seuls
+question + extraits bornés + brouillon courant partent vers l'endpoint fixe
+du fournisseur choisi, jamais la boîte entière) requis avant setCredential
+(littéraux `acceptsMailboxEgress`/`consentVersion` du catalogue).
+`vaultAvailable=false` → message admin fixe, Workers seuls sélectionnables.
+Bascule de compte/connexion : le manager est fermé par la purge de scope ET
+keyé sur l'owner — aucun état de A ne survit sous B. Garde r9 étendu
+nominativement aux quatre routes BYOK, toujours restreintes à
+`components/copilot/**`.
+
 **Restant** : compteurs d'usage.
 **Tranche 3** : BYOK (prérequis ci-dessus) ; propositions vers `draft_outbox`
 /`/queue` ; récupération sémantique (Vectorize/AutoRAG) si activée ; mobile.
