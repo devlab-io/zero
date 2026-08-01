@@ -29,10 +29,14 @@ import { z } from 'zod';
  * - EXACT-origin allowlist + explicit CSRF header, checked BEFORE the body is
  *   read or any connection resolved — the root CORS accepts any COOKIE_DOMAIN
  *   subdomain, so a cookie-sharing sibling worker must die here with a 403.
- * - REAL preemptive cancel: `enable_request_signal` (wrangler) makes the
- *   request signal fire on client disconnect; a LOCAL AbortController is tied
- *   to it, to the ReadableStream cancel path (consumer gone) and to a
- *   hard-deadline timer; the pipeline receives that local signal.
+ * - Cancellation contract (EXACT, review 02-cancel-contract):
+ *   `enable_request_signal` makes the request signal fire on disconnect; a
+ *   LOCAL AbortController (fed by it, by the stream-cancel path and by the
+ *   canonical deadline) interrupts the TRANSPORT AND THE PIPELINE immediately
+ *   — no further step, no further dependency call, late results discarded.
+ *   A provider/DO operation ALREADY DISPATCHED may still run to completion
+ *   on the Cloudflare side (env.AI.run and DO RPC have no abort API); we
+ *   never claim it is killed — only abandoned and ignored.
  * - Server-side event discipline: every NDJSON event is runtime-validated /
  *   truncated to schema bounds and size-capped BEFORE write, and writes go
  *   through a TransformStream writer so consumer backpressure is honored.

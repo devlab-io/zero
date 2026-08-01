@@ -8,6 +8,7 @@ import { getThread, getThreadsFromDB, getZeroAgent, getZeroDB } from '../server-
 import { buildMailboxOverview, getMailboxActivity } from '../mailbox-overview';
 import { workersAiModel, type WorkersAiBinding } from './model';
 import type { AskRetaDeps } from './pipeline';
+import { guardWithSignal } from './errors';
 import { env } from 'cloudflare:workers';
 import { createDb } from '../../db';
 
@@ -39,32 +40,39 @@ export async function createAskRetaDeps(params: {
     (stored?.settings as { askRetaModel?: unknown } | undefined)?.askRetaModel,
   );
 
+  // DO RPC calls have NO abort contract: a dispatched RPC may complete on its
+  // shard regardless. Cooperative discipline only — never dispatch after
+  // abort, discard a late result after abort (review 02-cancel-contract).
   const deps: AskRetaDeps = {
     // Structural narrowing: the generated Ai<AiModels> run() overloads reject a
     // string-typed model id; the catalogue only holds valid @cf/meta ids.
     model: workersAiModel(env.AI as unknown as WorkersAiBinding, modelKey),
-    overview: async () => {
-      const now = Date.now();
-      // Fixed UTC windows (supplementary signal only; folder counts are exact).
-      const todayStart = new Date(new Date(now).setUTCHours(0, 0, 0, 0));
-      const weekStart = new Date(now - 7 * 24 * 60 * 60 * 1000);
-      const { db: sendDb, conn } = createDb(env.HYPERDRIVE.connectionString);
-      try {
-        const [folders, activity] = await Promise.all([
-          agent.getMailboxCounts(),
-          getMailboxActivity(sendDb, { connectionId, todayStart, weekStart }),
-        ]);
-        return buildMailboxOverview(folders, activity);
-      } finally {
-        executionCtx.waitUntil(conn.end());
-      }
-    },
+    overview: () =>
+      guardWithSignal(signal, async () => {
+        const now = Date.now();
+        // Fixed UTC windows (supplementary signal only; folder counts are exact).
+        const todayStart = new Date(new Date(now).setUTCHours(0, 0, 0, 0));
+        const weekStart = new Date(now - 7 * 24 * 60 * 60 * 1000);
+        const { db: sendDb, conn } = createDb(env.HYPERDRIVE.connectionString);
+        try {
+          const [folders, activity] = await Promise.all([
+            agent.getMailboxCounts(),
+            getMailboxActivity(sendDb, { connectionId, todayStart, weekStart }),
+          ]);
+          return buildMailboxOverview(folders, activity);
+        } finally {
+          executionCtx.waitUntil(conn.end());
+        }
+      }),
     // Multi-shard helpers (revue Codex 2026-08-01): the ZeroDriver stub is ONE
     // shard — searching through it silently misses every other shard. No folder
     // default either: the contract is the WHOLE active mailbox.
-    searchThreads: async ({ query, folder, maxResults }) =>
-      await getThreadsFromDB(connectionId, { q: query, folder, maxResults }),
-    readThread: async (threadId) => (await getThread(connectionId, threadId)).result,
+    searchThreads: ({ query, folder, maxResults }) =>
+      guardWithSignal(signal, () =>
+        getThreadsFromDB(connectionId, { q: query, folder, maxResults }),
+      ),
+    readThread: (threadId) =>
+      guardWithSignal(signal, async () => (await getThread(connectionId, threadId)).result),
     signal,
     onStep,
   };

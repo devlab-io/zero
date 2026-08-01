@@ -2,8 +2,10 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "zero-server",
   "compatibility_date": "2025-05-01",
-  // enable_request_signal: Request.signal fires on client disconnect (CF docs) —
-  // required for the REAL preemptive cancel of the Ask Reta stream (slice 2 review).
+  // enable_request_signal: Request.signal fires on client disconnect (CF docs).
+  // Ask Reta uses it to stop its transport/pipeline immediately; a provider
+  // operation already dispatched (env.AI.run, DO RPC) is NOT killed — its
+  // result is discarded (see lib/ask-reta/errors.ts for the exact contract).
   "compatibility_flags": ["nodejs_compat", "enable_request_signal"],
   "main": "src/main.ts",
   "env": {

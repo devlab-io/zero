@@ -217,14 +217,20 @@ r9 ; tests serveur + client.
   serveur — jamais le websocket legacy). Une ligne JSON par événement
   (`step`/`result`/`error`), deps partagées avec `copilot.ask`
   (`lib/ask-reta/deps.ts`), mêmes rate limits fail-closed (y compris
-  `searchPreview`). **Cancel préemptif RÉEL** (revue 02) : flag wrangler
-  `enable_request_signal`, AbortController local nourri par le signal
-  requête + `writer.closed` (cancel lecteur sans écriture ultérieure) +
-  deadline **canonique 45 s** (la même que la race du pipeline — revue 02-2 :
-  une rejection de race seule laissait l'opération sous-jacente courir) via
-  l'autorité possédée `lib/ask-reta/cancellation.ts`, abort sur
+  `searchPreview`). **Contrat d'annulation EXACT** (revues 02/02-2/
+  02-cancel-contract) : flag wrangler `enable_request_signal`,
+  AbortController local nourri par le signal requête + `writer.closed`
+  (cancel lecteur sans écriture ultérieure) + deadline **canonique 45 s**
+  via l'autorité possédée `lib/ask-reta/cancellation.ts`, abort sur
   AskRetaAbortedError, dispose sur CHAQUE sortie y compris échec avant
-  Response ; ressources fermées, signal passé au pipeline. Le **terminal**
+  Response. Portée honnête : **transport et pipeline interrompus
+  immédiatement** (aucune étape/appel suivant, résultat tardif jeté) ; une
+  opération provider/DO **déjà dispatchée peut continuer côté Cloudflare**
+  (env.AI.run et les RPC DO n'ont pas d'API d'abort) — jamais présentée
+  comme tuée. `RetaModel.abortMode` explicite : Workers AI = `cooperative`
+  (signal vérifié avant dispatch et après await), BYOK fetch futur =
+  `native` (signal passé à fetch). Même discipline coopérative sur
+  overview/search/read (`guardWithSignal`). Le **terminal**
   est borné déterministiquement (`boundResult` : steps/citations/métadonnées
   tronquées) — un terminal encore invalide émet un `ask_failed` explicite,
   jamais une fermeture silencieuse. **Gate

@@ -24,6 +24,7 @@ const scriptedModel = (responses: string[]): RetaModel & { calls: number } => {
   const state = { calls: 0 };
   return {
     key: 'llama-4-scout',
+    abortMode: 'cooperative',
     get calls() {
       return state.calls;
     },
@@ -416,6 +417,7 @@ describe('runAskReta — abort & deadline', () => {
     let modelSettled = false;
     const slowModel: RetaModel = {
       key: 'llama-4-scout',
+      abortMode: 'cooperative',
       complete: vi.fn(
         () =>
           new Promise<string>((resolve) =>
@@ -440,6 +442,7 @@ describe('runAskReta — abort & deadline', () => {
     let modelSettled = false;
     const slowModel: RetaModel = {
       key: 'llama-4-scout',
+      abortMode: 'cooperative',
       complete: vi.fn(
         () =>
           new Promise<string>((resolve) =>
@@ -457,6 +460,41 @@ describe('runAskReta — abort & deadline', () => {
     // The rejection came from the timer race, not from waiting the model out.
     expect(modelSettled).toBe(false);
     expect(Date.now() - started).toBeLessThan(80);
+  });
+
+  it('cancel during a SLOW dependency: immediate rejection, NO next call, late result ignored', async () => {
+    const controller = new AbortController();
+    let releaseSearch!: (value: ThreadsResponse) => void;
+    const hangingSearch = vi.fn(
+      () => new Promise<ThreadsResponse>((resolve) => (releaseSearch = resolve)),
+    );
+    const model = scriptedModel([planJson, synthesisJson]);
+    const deps = makeDeps(model, { signal: controller.signal, searchThreads: hangingSearch });
+
+    const pending = runAskReta(deps, input());
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    controller.abort();
+    await expect(pending).rejects.toBeInstanceOf(AskRetaAbortedError);
+
+    // The abandoned DO call settles LATE: nothing follows — no read, no synthesis.
+    releaseSearch({ threads: [searchRow(1)], nextPageToken: null });
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(hangingSearch).toHaveBeenCalledTimes(1);
+    expect(deps.readThread).not.toHaveBeenCalled();
+    expect(model.calls).toBe(1); // the plan call only — synthesis never dispatched
+  });
+
+  it('a LATE REJECTION of an abandoned dependency never surfaces as unhandled', async () => {
+    // Vitest fails the run on unhandled rejections: this test passing IS the proof.
+    const model = scriptedModel([planJson, synthesisJson]);
+    let rejectSearch!: (error: Error) => void;
+    const failingSearch = vi.fn(
+      () => new Promise<ThreadsResponse>((_, reject) => (rejectSearch = reject)),
+    );
+    const deps = makeDeps(model, { deadlineMs: 10, searchThreads: failingSearch });
+    await expect(runAskReta(deps, input())).rejects.toThrow('deadline exceeded');
+    rejectSearch(new Error('late DO failure after abandonment'));
+    await new Promise((resolve) => setTimeout(resolve, 10));
   });
 
   it('retries synthesis once, then fails without leaking content', async () => {

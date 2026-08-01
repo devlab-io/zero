@@ -23,6 +23,7 @@ import {
 import type { IGetThreadResponse, ThreadsResponse } from '@zero/types';
 import { normalizeEmailRewriteHtml } from '../rewrite-email';
 import { extractJsonObject, type RetaModel } from './model';
+import { AskRetaAbortedError } from './errors';
 import sanitizeHtml from 'sanitize-html';
 import { logger } from '../logger';
 import { z } from 'zod';
@@ -53,12 +54,9 @@ export interface AskRetaDeps {
   onStep?: (step: AskRetaStep) => void;
 }
 
-export class AskRetaAbortedError extends Error {
-  constructor(reason: 'aborted' | 'deadline' = 'aborted') {
-    super(reason === 'deadline' ? 'Ask Reta deadline exceeded' : 'Ask Reta request aborted');
-    this.name = 'AskRetaAbortedError';
-  }
-}
+// Re-exported for existing consumers; the class (and the honest cancellation
+// contract) lives in ./errors.
+export { AskRetaAbortedError } from './errors';
 
 /** Canonical Ask Reta wall-clock budget — shared by the pipeline race AND the
  * transport-level AbortController (review 02-2: a race rejection alone left
@@ -75,9 +73,11 @@ const checkBudget = (budget: Budget) => {
 };
 
 /**
- * PREEMPTIVE budget (re-review Codex 2026-08-01, P2): the awaited work races
- * the deadline timer, so a slow model/dep call is interrupted the moment the
- * budget expires — not merely detected after it eventually resolves.
+ * Budget race — honest contract (review 02-cancel-contract): on deadline or
+ * abort, THE PIPELINE'S WAIT is interrupted immediately (no further step, no
+ * further dependency call, late results discarded). The dependency ALREADY
+ * DISPATCHED is not killed when its API has no abort contract (Workers AI,
+ * DO RPC): it may run to completion on the Cloudflare side — abandoned here.
  */
 const withBudget = async <T>(budget: Budget, run: () => Promise<T>): Promise<T> => {
   checkBudget(budget);
@@ -87,9 +87,8 @@ const withBudget = async <T>(budget: Budget, run: () => Promise<T>): Promise<T> 
   const expiry = new Promise<never>((_, reject) => {
     timer = setTimeout(() => reject(new AskRetaAbortedError('deadline')), remaining);
   });
-  // Abort preempts too (re-review 3, P2): the signal joins the race via a
-  // once-listener, so a cancelled request interrupts a slow model call
-  // immediately instead of waiting it out.
+  // The abort signal joins the race via a once-listener: the WAIT ends
+  // immediately on cancel instead of sitting out the dependency.
   const aborted = new Promise<never>((_, reject) => {
     const signal = budget.signal;
     if (!signal) return; // never settles — the race ignores it
@@ -98,7 +97,11 @@ const withBudget = async <T>(budget: Budget, run: () => Promise<T>): Promise<T> 
     removeAbortListener = () => signal.removeEventListener('abort', onAbort);
   });
   try {
-    const result = await Promise.race([run(), expiry, aborted]);
+    const running = run();
+    // The abandoned dependency may settle (or FAIL) long after the race is
+    // lost — its late rejection must never surface as unhandled.
+    running.catch(() => {});
+    const result = await Promise.race([running, expiry, aborted]);
     if (budget.signal?.aborted) throw new AskRetaAbortedError('aborted');
     return result;
   } finally {

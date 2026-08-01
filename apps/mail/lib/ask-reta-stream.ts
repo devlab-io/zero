@@ -3,9 +3,13 @@
  *
  * Talks to the authenticated `/api/ask-reta` endpoint (session cookie,
  * ownership resolved server-side). Steps arrive progressively via `onStep`;
- * the promise resolves with the final deterministic result. Cancel is
- * PREEMPTIVE: aborting the given signal aborts the fetch, which fires the
- * server-side request signal and interrupts the pipeline mid-call.
+ * the promise resolves with the final deterministic result.
+ *
+ * Cancellation contract (exact): aborting the given signal aborts the fetch,
+ * which fires the server-side request signal — the transport and the
+ * pipeline stop immediately (no further step, late results discarded). A
+ * provider operation already dispatched server-side (Workers AI inference,
+ * DO RPC) may still run to completion there; its output is never delivered.
  */
 
 import type { AskRetaAssistantPayload, AskRetaStepView } from '@/components/copilot/ask-reta-state';

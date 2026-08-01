@@ -1,12 +1,22 @@
 import { ASK_RETA_MODELS, type AskRetaModelKey } from './schema';
+import { AskRetaAbortedError } from './errors';
 
 /**
  * Injectable model seam. Slice 1 ships Workers AI only (no external
  * credentials); BYOK providers (spec, slice ≥ 3) implement the same interface
  * behind the envelope-encryption + host-allowlist prerequisites.
+ *
+ * Cancellation capability (review 02-cancel-contract) is EXPLICIT:
+ * - 'cooperative': the provider API is NOT abortable (env.AI.run ignores the
+ *   signal). The implementation checks the signal before dispatch and after
+ *   the await — a dispatched inference may still run to completion on the
+ *   provider side; its result is discarded, never displayed.
+ * - 'native': the provider call itself honors the signal (fetch-based BYOK
+ *   passes it to fetch, aborting the HTTP request for real).
  */
 export interface RetaModel {
   readonly key: AskRetaModelKey;
+  readonly abortMode: 'native' | 'cooperative';
   complete(params: {
     system: string;
     user: string;
@@ -29,8 +39,12 @@ export type WorkersAiBinding = {
 
 export const workersAiModel = (ai: WorkersAiBinding, key: AskRetaModelKey): RetaModel => ({
   key,
-  async complete({ system, user, maxTokens, temperature }) {
-    // Workers AI has no native abort; the pipeline checks its signal between steps.
+  // env.AI.run ignores AbortSignal: cancellation here is COOPERATIVE only —
+  // refuse to dispatch after abort, discard a late result after abort. The
+  // dispatched inference itself may run to completion on Cloudflare's side.
+  abortMode: 'cooperative',
+  async complete({ system, user, maxTokens, temperature, signal }) {
+    if (signal?.aborted) throw new AskRetaAbortedError('aborted');
     const response = await ai.run(ASK_RETA_MODELS[key], {
       messages: [
         { role: 'system', content: system },
@@ -39,6 +53,7 @@ export const workersAiModel = (ai: WorkersAiBinding, key: AskRetaModelKey): Reta
       max_tokens: maxTokens,
       temperature,
     });
+    if (signal?.aborted) throw new AskRetaAbortedError('aborted');
     if (typeof response === 'string') return response;
     if (
       response &&

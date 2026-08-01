@@ -88,8 +88,9 @@ export function AskRetaSurface() {
   const settingsSave = useMutation(trpc.settings.save.mutationOptions());
   const createDraft = useMutation(trpc.drafts.create.mutationOptions());
 
-  // Slice-2 streaming state: steps arrive live; Stop aborts PREEMPTIVELY
-  // (fetch abort → server request signal → pipeline race interruption).
+  // Slice-2 streaming state: steps arrive live. Stop aborts the fetch, which
+  // stops the server transport/pipeline immediately (late results discarded);
+  // a provider call already dispatched server-side may finish there unused.
   const [isAsking, setIsAsking] = useState(false);
   const [liveSteps, setLiveSteps] = useState<AskRetaStepView[]>([]);
   const abortRef = useRef<AbortController | null>(null);
