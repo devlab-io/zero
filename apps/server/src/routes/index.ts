@@ -10,6 +10,7 @@ import { getZeroDB, verifyToken } from '../lib/server-utils';
 import { ThinkingMCP } from '../lib/sequential-thinking';
 import { contextStorage } from 'hono/context-storage';
 import { createLocalJWKSet, jwtVerify } from 'jose';
+import { askRetaStreamRouter } from './ask-reta';
 import { trpcServer } from '@hono/trpc-server';
 import { invariant } from '../lib/invariant';
 import { initTracing } from '../lib/tracing';
@@ -199,6 +200,9 @@ export const api = new Hono<HonoContext>()
   .route('/ai', aiRouter)
   .route('/autumn', autumnApi)
   .route('/public', publicRouter)
+  // Ask Reta NDJSON stream (slice 2) — behind the session middleware above;
+  // active connection resolved server-side inside the handler.
+  .route('/ask-reta', askRetaStreamRouter)
   .on(['GET', 'POST', 'OPTIONS'], '/auth/*', (c) => {
     return c.var.auth.handler(c.req.raw);
   })

@@ -205,6 +205,16 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
             output: import("../lib/ask-reta/schema").AskRetaResult;
             meta: object;
         }>;
+        searchPreview: import("@trpc/server").TRPCQueryProcedure<{
+            input: {
+                query: string;
+                folder?: string | undefined;
+            };
+            output: {
+                threads: import("../lib/ask-reta/schema").AskRetaStepThread[];
+            };
+            meta: object;
+        }>;
     }>>;
     bimi: import("@trpc/server").TRPCBuiltRouter<{
         ctx: {

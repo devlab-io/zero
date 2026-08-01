@@ -49,6 +49,8 @@ export interface AskRetaDeps {
   signal?: AbortSignal;
   /** Wall-clock budget for the whole ask; expired → AskRetaAbortedError. */
   deadlineMs?: number;
+  /** Streaming hook: fired as each retrieval step COMPLETES (slice 2). */
+  onStep?: (step: AskRetaStep) => void;
 }
 
 export class AskRetaAbortedError extends Error {
@@ -330,6 +332,16 @@ const executePlan = async (
   };
   let topResultIds: string[] = [];
 
+  // Streamed as it completes; a listener failure must never break the ask.
+  const pushStep = (step: AskRetaStep) => {
+    gathered.steps.push(step);
+    try {
+      deps.onStep?.(step);
+    } catch {
+      logger.warn('[ask-reta] onStep listener failed');
+    }
+  };
+
   for (const action of plan.actions) {
     checkBudget(budget);
 
@@ -337,7 +349,7 @@ const executePlan = async (
       const overview = await withBudget(budget, () => deps.overview());
       checkBudget(budget);
       gathered.overviewJson = JSON.stringify(overview);
-      gathered.steps.push({ kind: 'overview', detail: 'exact mailbox counts', sourceRefs: [] });
+      pushStep({ kind: 'overview', detail: 'exact mailbox counts', sourceRefs: [] });
     } else if (action.type === 'search') {
       const response = await withBudget(budget, () =>
         deps.searchThreads({
@@ -362,10 +374,21 @@ const executePlan = async (
         checkBudget(budget);
         refs.push(source.ref);
       }
-      gathered.steps.push({
+      pushStep({
         kind: 'search',
         detail: `"${action.query}"${action.folder ? ` in ${action.folder}` : ''} → ${rows.length} threads`,
         sourceRefs: refs,
+        // The EXACT metadata set + the visible/replayable query (slice 2).
+        search: {
+          query: action.query,
+          ...(action.folder ? { folder: action.folder } : {}),
+          threads: rows.map((row) => ({
+            threadId: row.id,
+            subject: row.subject ?? '(no subject)',
+            sender: formatSender(row.sender),
+            date: row.receivedOn ?? 'unknown',
+          })),
+        },
       });
     } else {
       const targets =
@@ -385,7 +408,7 @@ const executePlan = async (
           gathered.validatedOpenThreadId = threadId;
         }
       }
-      gathered.steps.push({
+      pushStep({
         kind: 'read_thread',
         detail:
           action.target === 'open'

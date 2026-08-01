@@ -127,6 +127,18 @@ const globalShortcuts: Shortcut[] = [
     type: 'single',
     preventDefault: true,
   }),
+  // Shortwave parity (spec docs/spec/mail-copilot.md, slice 2): Y asks Reta
+  // about the current thread (the panel picks the open-thread context up),
+  // Mod+J opens Ask Reta globally. Both are input/composer-safe via the
+  // shared isTypingOrModalTarget guard.
+  shortcut(['y'], 'askRetaThread', 'Ask Reta about the current thread', 'global', {
+    type: 'single',
+    preventDefault: true,
+  }),
+  shortcut(['mod', 'j'], 'askRetaOpen', 'Open Ask Reta', 'global', {
+    type: 'combination',
+    preventDefault: true,
+  }),
   shortcut(['/'], 'search', 'Search email', 'global', { type: 'single', preventDefault: true }),
   shortcut(['mod', 'k'], 'commandPalette', 'Open command palette', 'global', {
     type: 'combination',

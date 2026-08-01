@@ -65,6 +65,7 @@ export function CommandPaletteDialog({
   clearAllFilters,
 }: CommandPaletteDialogProps) {
   const [, setIsComposeOpen] = useQueryState('isComposeOpen');
+  const [, setIsAskRetaOpen] = useQueryState('isAskRetaOpen');
   const [currentView, setCurrentView] = useState<CommandView>('main');
   const [selectedDateFilter, setSelectedDateFilter] = useState<string | null>(null);
   const [selectedDate, setSelectedDate] = useState<Date | undefined>(undefined);
@@ -352,6 +353,7 @@ export function CommandPaletteDialog({
 
     const makeOnClick = (target: PaletteCommandTarget): (() => unknown) => {
       if (target.kind === 'compose') return () => setIsComposeOpen('true');
+      if (target.kind === 'askReta') return () => setIsAskRetaOpen('true');
       return () => setCurrentView(target.view);
     };
 

@@ -210,11 +210,36 @@ AI) ; propositions : copier / insérer dans le composeur / créer un brouillon
 Gmail (clic explicite, route `drafts.create` existante) ; i18n en/fr ; garde
 r9 ; tests serveur + client.
 
-**Tranche 2** : streaming SSE + états d'étape vivants ; entrée palette de
-commandes + raccourci (parité Cmd-J/Y) ; persistance des conversations ;
-contexte brouillon systématique (seam composeur dédié) ; « ensemble exact
-d'emails » cliquable par étape de recherche (requête éditable — parité
-Shortwave) ; compteurs d'usage.
+**Tranche 2 — livrée (2026-08-01)** :
+
+- **Streaming des étapes** : POST NDJSON authentifié `/api/ask-reta` (monté
+  derrière le middleware session de l'app `api`, connexion active résolue
+  serveur — jamais le websocket legacy). Une ligne JSON par événement
+  (`step`/`result`/`error`), deps partagées avec `copilot.ask`
+  (`lib/ask-reta/deps.ts`), mêmes rate limits fail-closed. **Cancel
+  préemptif** : abort fetch client → signal requête → race du pipeline. La
+  réponse finale reste extractive/déterministe — aucune prose modèle. Le
+  consumer borne buffer et flux (262 k/1 M chars) et mappe AbortError.
+- **Raccourcis parité Shortwave** : `Y` (Ask Reta, contexte fil courant) et
+  `Mod+J` (ouverture globale) — registre shortcuts + manifest + parité
+  clavier + Settings shortcuts + palette de commandes ; garde
+  `isTypingOrModalTarget` (aucun conflit inputs/composeur).
+- **Étapes search exposées** : chaque étape porte l'ensemble EXACT de fils
+  métadonnées (cliquables, navigation avec purge reply-state) + requête
+  visible/éditable/**rejouable** via `copilot.searchPreview` (mêmes caps,
+  même helper multi-shards, folder du step préservé).
+- **Conversations persistantes privacy-first** : device-local uniquement
+  (localStorage), scopées user+connexion active, cap 40 tours / rétention
+  7 j, clear effectif. **Projection versionnée stricte** : proposal (HTML de
+  brouillon) JAMAIS persisté — aucune action draft ne réapparaît au reload ;
+  validation profonde + bornes au load (store falsifié/oversize jeté).
+  Barrière d'hydratation : saves ET submits désactivés jusqu'à observation
+  du contenu hydraté ; flush de l'ancien scope avant bascule ; abort du
+  stream en vol ; garde de run (writes tardifs d'un ancien scope = no-op) —
+  A→B→A prouvé sans fuite au commit près.
+
+**Tranche 2bis (restant)** : contexte brouillon systématique (seam composeur
+dédié pour un draft ouvert non persisté), compteurs d'usage, mobile.
 **Tranche 3** : BYOK (prérequis ci-dessus) ; propositions vers `draft_outbox`
 /`/queue` ; récupération sémantique (Vectorize/AutoRAG) si activée ; mobile.
 

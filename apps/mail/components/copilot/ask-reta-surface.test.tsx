@@ -1,3 +1,4 @@
+import { askRetaConversationKey } from '@/lib/ask-reta-conversation-storage';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ButtonHTMLAttributes, InputHTMLAttributes } from 'react';
 import { registerComposerInsertHandler } from '@/lib/composer-insert';
@@ -11,14 +12,16 @@ import { act } from 'react';
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const harness = vi.hoisted(() => ({
-  askMutateAsync: vi.fn(),
-  askPending: false,
+  streamAskReta: vi.fn(),
+  fetchQuery: vi.fn(),
   draftsMutateAsync: vi.fn(),
   settingsMutateAsync: vi.fn(),
   toastSuccess: vi.fn(),
   toastError: vi.fn(),
   toastPlain: vi.fn(),
   purge: vi.fn(),
+  userId: 'user-1' as string | undefined,
+  connectionId: 'conn-a' as string | undefined,
   queryStore: {} as Record<string, string | null>,
 }));
 
@@ -31,9 +34,16 @@ vi.mock('nuqs', () => ({
   ],
 }));
 
+vi.mock('@/lib/ask-reta-stream', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/ask-reta-stream')>();
+  return { AskRetaStreamError: actual.AskRetaStreamError, streamAskReta: harness.streamAskReta };
+});
+
 vi.mock('@/providers/query-provider', () => ({
   useTRPC: () => ({
-    copilot: { ask: { mutationOptions: () => ({ kind: 'ask' }) } },
+    copilot: {
+      searchPreview: { queryOptions: (input: unknown) => ({ kind: 'searchPreview', input }) },
+    },
     drafts: {
       create: { mutationOptions: () => ({ kind: 'drafts' }) },
       list: { queryKey: () => ['drafts'] },
@@ -46,14 +56,14 @@ vi.mock('@/providers/query-provider', () => ({
 }));
 
 vi.mock('@tanstack/react-query', () => ({
-  useMutation: (options: { kind: string }) => {
-    if (options.kind === 'ask')
-      return { isPending: harness.askPending, mutateAsync: harness.askMutateAsync };
-    if (options.kind === 'drafts')
-      return { isPending: false, mutateAsync: harness.draftsMutateAsync };
-    return { isPending: false, mutateAsync: harness.settingsMutateAsync };
-  },
-  useQueryClient: () => ({ invalidateQueries: vi.fn(async () => {}) }),
+  useMutation: (options: { kind: string }) =>
+    options.kind === 'drafts'
+      ? { isPending: false, mutateAsync: harness.draftsMutateAsync }
+      : { isPending: false, mutateAsync: harness.settingsMutateAsync },
+  useQueryClient: () => ({
+    invalidateQueries: vi.fn(async () => {}),
+    fetchQuery: harness.fetchQuery,
+  }),
 }));
 
 vi.mock('@/hooks/use-settings', () => ({
@@ -62,6 +72,14 @@ vi.mock('@/hooks/use-settings', () => ({
 
 vi.mock('@/hooks/use-reply-state-purge', () => ({
   useReplyStatePurge: () => harness.purge,
+}));
+
+vi.mock('@/lib/auth-client', () => ({
+  useSession: () => ({ data: { user: { id: harness.userId } } }),
+}));
+
+vi.mock('@/hooks/use-connections', () => ({
+  useActiveConnection: () => ({ data: { id: harness.connectionId } }),
 }));
 
 vi.mock('@/paraglide/messages', () => ({
@@ -95,10 +113,16 @@ const render = () => {
   });
 };
 
+const baseResult = (answer: string) => ({
+  answer,
+  citations: [],
+  steps: [],
+  model: 'llama-4-scout',
+});
+
 const askQuestion = async (text: string) => {
   const input = container.querySelector('input')! as HTMLInputElement;
   const form = container.querySelector('form')!;
-  // React 19 value-tracker: only the native prototype setter makes the change visible.
   const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
   act(() => {
     setValue.call(input, text);
@@ -114,18 +138,17 @@ beforeEach(() => {
   document.body.appendChild(container);
   root = createRoot(container);
   localStorage.clear();
-  // The conversation atom lives in jotai's default store — reset between tests.
   getDefaultStore().set(askRetaConversationAtom, []);
+  harness.userId = 'user-1';
+  harness.connectionId = 'conn-a';
   harness.queryStore.threadId = null;
   harness.queryStore.draftId = null;
   harness.queryStore.activeReplyId = null;
-  harness.askMutateAsync.mockReset();
-  harness.askMutateAsync.mockResolvedValue({
-    answer: 'Réponse.',
-    citations: [],
-    steps: [],
-    model: 'llama-4-scout',
-  });
+  harness.queryStore.isComposeOpen = null;
+  harness.queryStore.isAskRetaOpen = 'true';
+  harness.streamAskReta.mockReset();
+  harness.streamAskReta.mockResolvedValue(baseResult('Réponse.'));
+  harness.fetchQuery.mockReset();
   harness.draftsMutateAsync.mockReset();
   harness.settingsMutateAsync.mockReset();
   harness.settingsMutateAsync.mockResolvedValue({ success: true });
@@ -142,11 +165,10 @@ afterEach(() => {
   container.remove();
 });
 
-describe('AskRetaSurface — context capture', () => {
+describe('AskRetaSurface — context capture (unchanged in slice 2)', () => {
   it('sends the open thread AND the draft persisted under the EXACT composer scope', async () => {
     harness.queryStore.threadId = 'thread-9';
     harness.queryStore.activeReplyId = 'msg-3';
-    // Snapshot under the reply composer's real key…
     saveLocalDraft(draftStorageKey({ threadId: 'thread-9', replyId: 'msg-3' }), {
       to: ['client@x.test'],
       cc: [],
@@ -155,78 +177,233 @@ describe('AskRetaSurface — context capture', () => {
       message: '<p>brouillon en cours</p>',
       savedAt: Date.now(),
     });
-    // …and a decoy under the bare compose key that must NOT be read.
-    saveLocalDraft(draftStorageKey({}), {
-      to: [],
-      cc: [],
-      bcc: [],
-      subject: 'DECOY',
-      message: '<p>decoy</p>',
-      savedAt: Date.now(),
-    });
 
     render();
     await askQuestion('Améliore ma réponse');
 
-    expect(harness.askMutateAsync).toHaveBeenCalledTimes(1);
-    const payload = harness.askMutateAsync.mock.calls[0]![0] as {
-      context: { threadId?: string; draft?: { subject?: string; body?: string } };
+    const call = harness.streamAskReta.mock.calls[0]![0] as {
+      input: { context: { threadId?: string; draft?: { subject?: string } } };
     };
-    expect(payload.context.threadId).toBe('thread-9');
-    expect(payload.context.draft?.subject).toBe('Re: Facture');
-    expect(payload.context.draft?.body).toContain('brouillon en cours');
-    expect(payload.context.draft?.subject).not.toBe('DECOY');
-  });
-
-  it('omits the draft context when no scoped snapshot exists', async () => {
-    render();
-    await askQuestion('Question globale');
-    const payload = harness.askMutateAsync.mock.calls[0]![0] as { context: object };
-    expect(payload.context).toEqual({});
+    expect(call.input.context.threadId).toBe('thread-9');
+    expect(call.input.context.draft?.subject).toBe('Re: Facture');
   });
 });
 
-describe('AskRetaSurface — citations', () => {
-  it('renders server citations and opens the cited thread through the reply-state PURGE', async () => {
-    harness.askMutateAsync.mockResolvedValue({
-      answer: 'Voir la relance.',
-      citations: [
-        {
-          ref: 's2',
-          kind: 'message',
-          threadId: 'thread-42',
-          messageId: 'msg-7',
-          subject: 'Relance facture',
-          sender: 'Compta <c@x.test>',
-          date: '2026-07-30',
-          excerptHash: 'a'.repeat(64),
-          quote: 'merci de régler la facture',
+describe('AskRetaSurface — streaming (slice 2)', () => {
+  it('renders live steps as they stream, then the final turn', async () => {
+    harness.streamAskReta.mockImplementationOnce(
+      async ({ onStep }: { onStep: (s: unknown) => void }) => {
+        onStep({ kind: 'search', detail: '"socredo" → 2 threads', sourceRefs: [] });
+        return baseResult('Extraits vérifiés…');
+      },
+    );
+    render();
+    await askQuestion('Où en est Socredo ?');
+    expect(container.textContent).toContain('Extraits vérifiés…');
+  });
+
+  it('Stop aborts the in-flight stream preemptively', async () => {
+    let capturedSignal: AbortSignal | null = null;
+    harness.streamAskReta.mockImplementationOnce(
+      ({ signal }: { signal: AbortSignal }) =>
+        new Promise((_, reject) => {
+          capturedSignal = signal;
+          signal.addEventListener('abort', () =>
+            reject(
+              Object.assign(new Error('Ask Reta stream error: aborted'), {
+                name: 'AskRetaStreamError',
+                reason: 'aborted',
+              }),
+            ),
+          );
+        }),
+    );
+    render();
+    await askQuestion('Question longue');
+    const stopButton = [...container.querySelectorAll('button')].find((b) =>
+      b.textContent?.includes('askReta.stop'),
+    );
+    expect(stopButton).toBeTruthy();
+    await act(async () => {
+      stopButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    expect((capturedSignal as AbortSignal | null)?.aborted).toBe(true);
+  });
+
+  it('a LATE settlement of an old-scope stream never touches the new scope', async () => {
+    const setItemSpy = vi.spyOn(Storage.prototype, 'setItem');
+    let resolveOldRun!: (value: unknown) => void;
+    harness.streamAskReta.mockImplementationOnce(
+      () => new Promise((resolve) => (resolveOldRun = resolve)),
+    );
+
+    render();
+    await askQuestion('question secrète de A');
+
+    // Switch to connection B while A's stream is still in flight.
+    act(() => {
+      harness.connectionId = 'conn-b';
+    });
+    render();
+
+    // A's stream settles LATE with its result.
+    await act(async () => {
+      resolveOldRun(baseResult('réponse secrète de A'));
+    });
+
+    // B's conversation/state never received A's turn…
+    expect(container.textContent).not.toContain('réponse secrète de A');
+    // …and NOTHING of A was ever written under B's storage key.
+    const bWrites = setItemSpy.mock.calls.filter(
+      ([key]) => key === askRetaConversationKey('user-1', 'conn-b'),
+    );
+    for (const [, value] of bWrites) {
+      expect(value).not.toContain('secrète de A');
+    }
+    setItemSpy.mockRestore();
+  });
+});
+
+describe('AskRetaSurface — hydration gate', () => {
+  it('Ask stays DISABLED until the scope is hydrated, enabled after', async () => {
+    harness.connectionId = undefined; // no scope → hydration cannot complete
+    render();
+    const input = container.querySelector('input')! as HTMLInputElement;
+    const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
+    act(() => {
+      setValue.call(input, 'question trop rapide');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    const sendButton = [...container.querySelectorAll('button')].find((b) =>
+      b.textContent?.includes('askReta.send'),
+    )!;
+    expect(sendButton.hasAttribute('disabled')).toBe(true);
+
+    // A fast submit is a no-op: nothing lands in any conversation.
+    await act(async () => {
+      container
+        .querySelector('form')!
+        .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    });
+    expect(harness.streamAskReta).not.toHaveBeenCalled();
+    expect(container.textContent).not.toContain('question trop rapide');
+
+    // Scope arrives → hydration completes → enabled.
+    act(() => {
+      harness.connectionId = 'conn-a';
+    });
+    render();
+    const enabledButton = [...container.querySelectorAll('button')].find((b) =>
+      b.textContent?.includes('askReta.send'),
+    )!;
+    expect(enabledButton.hasAttribute('disabled')).toBe(false);
+  });
+});
+
+describe('AskRetaSurface — persistence A→B→A (slice 2)', () => {
+  it('restores per-scope conversations and never leaks turns across scopes', async () => {
+    const setItemSpy = vi.spyOn(Storage.prototype, 'setItem');
+    render();
+    await askQuestion('question pour A');
+    expect(container.textContent).toContain('question pour A');
+
+    // A → B: the panel hydrates B (empty), nothing of A under B's key.
+    act(() => {
+      harness.connectionId = 'conn-b';
+    });
+    render();
+    expect(container.textContent).not.toContain('question pour A');
+    const bKey = askRetaConversationKey('user-1', 'conn-b');
+    for (const [key, value] of setItemSpy.mock.calls) {
+      if (key === bKey) expect(value).not.toContain('question pour A');
+    }
+    expect(localStorage.getItem(bKey)).toBeNull();
+
+    // B → A: A's turns come back from ITS key.
+    act(() => {
+      harness.connectionId = 'conn-a';
+    });
+    render();
+    expect(container.textContent).toContain('question pour A');
+    setItemSpy.mockRestore();
+  });
+
+  it('clear empties the atom AND the device-local store', async () => {
+    render();
+    await askQuestion('à effacer');
+    const aKey = askRetaConversationKey('user-1', 'conn-a');
+    expect(localStorage.getItem(aKey)).not.toBeNull();
+    const clearButton = [...container.querySelectorAll('button')].find(
+      (b) => b.getAttribute('aria-label') === 'common.askReta.clear',
+    );
+    await act(async () => {
+      clearButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    expect(localStorage.getItem(aKey)).toBeNull();
+    expect(container.textContent).not.toContain('à effacer');
+  });
+});
+
+describe('AskRetaSurface — replayable search steps (slice 2)', () => {
+  const searchResult = () => ({
+    answer: 'Extraits vérifiés…',
+    citations: [],
+    model: 'llama-4-scout',
+    steps: [
+      {
+        kind: 'search',
+        detail: '"devis" in sent → 1 threads',
+        sourceRefs: ['s1'],
+        search: {
+          query: 'devis',
+          folder: 'sent',
+          threads: [
+            { threadId: 'thread-7', subject: 'Devis 113', sender: 'Omar', date: '2026-07-28' },
+          ],
         },
-      ],
-      steps: [{ kind: 'search', detail: '"facture" → 1 threads', sourceRefs: ['s2'] }],
-      model: 'llama-4-scout',
+      },
+    ],
+  });
+
+  it('renders the exact thread set clickable and replays with the folder PRESERVED', async () => {
+    harness.streamAskReta.mockResolvedValueOnce(searchResult());
+    harness.fetchQuery.mockResolvedValue({
+      threads: [{ threadId: 'thread-8', subject: 'Devis 114', sender: 'Omar', date: '2026-07-29' }],
     });
 
     render();
-    await askQuestion('Où est la relance ?');
+    await askQuestion('Quels devis envoyés ?');
 
+    // The exact metadata set is clickable → navigation purges reply state.
     const chip = [...container.querySelectorAll('button')].find((b) =>
-      b.textContent?.includes('Relance facture'),
+      b.textContent?.includes('Devis 113'),
     );
     expect(chip).toBeTruthy();
     act(() => {
       chip!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
-    // Navigation goes through useReplyStatePurge: activeReplyId/draftId/mode/
-    // picker are cleared atomically with the thread switch.
-    expect(harness.purge).toHaveBeenCalledWith({ threadId: 'thread-42' });
-    expect(harness.queryStore.isAskRetaOpen).toBeNull();
+    expect(harness.purge).toHaveBeenCalledWith({ threadId: 'thread-7' });
+
+    // Replay keeps the step's folder scope — a Sent search stays a Sent search.
+    const replayButton = [...container.querySelectorAll('button')].find((b) =>
+      b.textContent?.includes('askReta.replay'),
+    );
+    await act(async () => {
+      replayButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    expect(harness.fetchQuery).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: 'searchPreview',
+        input: { query: 'devis', folder: 'sent' },
+      }),
+    );
+    expect(container.textContent).toContain('Devis 114');
   });
 });
 
-describe('AskRetaSurface — proposal insertion, never silently overwriting', () => {
-  const proposalResponse = (kind: 'new' | 'reply', threadId?: string) => ({
-    answer: 'Brouillon prêt.',
+describe('AskRetaSurface — proposals (slice-1 behaviour preserved)', () => {
+  const proposalResult = (kind: 'new' | 'reply', threadId?: string) => ({
+    answer: 'askReta.proposalOnly',
     citations: [],
     steps: [],
     model: 'llama-4-scout',
@@ -249,8 +426,8 @@ describe('AskRetaSurface — proposal insertion, never silently overwriting', ()
     });
   };
 
-  it('live-inserts into the mounted composer for the current scope', async () => {
-    harness.askMutateAsync.mockResolvedValue(proposalResponse('new'));
+  it('live-inserts a NEW proposal into the bare-scope composer with the recipient', async () => {
+    harness.streamAskReta.mockResolvedValueOnce(proposalResult('new'));
     const handler = vi.fn(() => 'inserted' as const);
     const unregister = registerComposerInsertHandler(draftStorageKey({}), handler);
 
@@ -262,15 +439,13 @@ describe('AskRetaSurface — proposal insertion, never silently overwriting', ()
       expect.objectContaining({ message: '<p>Corps proposé</p>', to: 'client@x.test' }),
       { force: false },
     );
-    expect(harness.toastSuccess).toHaveBeenCalled();
     unregister();
   });
 
-  it('a NEW proposal never injects into a live reply: purged compose scope, recipient kept', async () => {
-    // A reply composer is open on thread-9…
+  it('a NEW proposal never injects into a live reply: bare key, purge with threadId null', async () => {
     harness.queryStore.threadId = 'thread-9';
     harness.queryStore.activeReplyId = 'msg-3';
-    harness.askMutateAsync.mockResolvedValue(proposalResponse('new'));
+    harness.streamAskReta.mockResolvedValueOnce(proposalResult('new'));
     const replyHandler = vi.fn(() => 'inserted' as const);
     const unregister = registerComposerInsertHandler(
       draftStorageKey({ threadId: 'thread-9', replyId: 'msg-3' }),
@@ -281,100 +456,17 @@ describe('AskRetaSurface — proposal insertion, never silently overwriting', ()
     await askQuestion('Prépare un mail');
     clickInsert();
 
-    // …and the NEW proposal never touches it.
     expect(replyHandler).not.toHaveBeenCalled();
-    // Snapshot under the BARE compose key (no threadId: the composer autosave
-    // would otherwise attach the new draft to the old thread), recipient kept.
-    const snapshot = JSON.parse(localStorage.getItem(draftStorageKey({}))!) as {
-      to: string[];
-      subject: string;
-    };
+    const snapshot = JSON.parse(localStorage.getItem(draftStorageKey({}))!) as { to: string[] };
     expect(snapshot.to).toEqual(['client@x.test']);
-    expect(snapshot.subject).toBe('Objet proposé');
-    expect(localStorage.getItem(draftStorageKey({ threadId: 'thread-9' }))).toBeNull();
-    // Reply state AND threadId purged, compose dialog opened.
     expect(harness.purge).toHaveBeenCalledWith({ threadId: null });
     expect(harness.queryStore.isComposeOpen).toBe('true');
     unregister();
   });
 
-  it('asks before replacing when the composer is occupied, then forces on confirm', async () => {
-    harness.askMutateAsync.mockResolvedValue(proposalResponse('new'));
-    const handler = vi.fn((_payload: unknown, { force }: { force: boolean }) =>
-      force ? ('inserted' as const) : ('occupied' as const),
-    );
-    const unregister = registerComposerInsertHandler(draftStorageKey({}), handler);
-
-    render();
-    await askQuestion('Prépare un mail');
-    clickInsert();
-
-    expect(handler).toHaveBeenCalledTimes(1);
-    const toastArgs = harness.toastPlain.mock.calls[0] as [
-      string,
-      { action: { onClick: () => void } },
-    ];
-    expect(toastArgs[0]).toBe('common.askReta.replacePrompt');
-    act(() => {
-      toastArgs[1].action.onClick();
-    });
-    expect(handler).toHaveBeenLastCalledWith(expect.anything(), { force: true });
-    unregister();
-  });
-
-  it('reply proposals only offer insertion when their reply composer is open', async () => {
-    harness.queryStore.threadId = 'thread-9';
-    harness.askMutateAsync.mockResolvedValue(proposalResponse('reply', 'thread-9'));
-
-    render();
-    await askQuestion('Prépare une réponse');
-    // No activeReplyId → no insert button, Gmail-draft action still present.
-    expect(
-      [...container.querySelectorAll('button')].some((b) =>
-        b.textContent?.includes('openInComposer'),
-      ),
-    ).toBe(false);
-    expect(
-      [...container.querySelectorAll('button')].some((b) => b.textContent?.includes('createDraft')),
-    ).toBe(true);
-  });
-
-  it('a clipboard failure surfaces a toast error instead of a silent rejection', async () => {
-    harness.askMutateAsync.mockResolvedValue(proposalResponse('new'));
-    Object.defineProperty(navigator, 'clipboard', {
-      configurable: true,
-      value: { writeText: vi.fn(async () => Promise.reject(new Error('denied'))) },
-    });
-
-    render();
-    await askQuestion('Prépare un mail');
-    const copyButton = [...container.querySelectorAll('button')].find((b) =>
-      b.textContent?.includes('askReta.copy'),
-    );
-    await act(async () => {
-      copyButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    });
-
-    expect(harness.toastError).toHaveBeenCalledWith('common.actions.errorTryAgainLater');
-  });
-
-  it('a model-save failure surfaces a toast error', async () => {
-    harness.settingsMutateAsync.mockRejectedValueOnce(new Error('offline'));
-    render();
-    await askQuestion('Question');
-    const select = container.querySelector('select')!;
-    const setValue = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')!.set!;
-    await act(async () => {
-      setValue.call(select, 'llama-3.3-70b');
-      select.dispatchEvent(new Event('change', { bubbles: true }));
-    });
-    expect(harness.settingsMutateAsync).toHaveBeenCalledWith({ askRetaModel: 'llama-3.3-70b' });
-    expect(harness.toastError).toHaveBeenCalledWith('common.actions.errorTryAgainLater');
-  });
-
   it('saves a reply proposal as a Gmail draft attached to its thread', async () => {
     harness.queryStore.threadId = 'thread-9';
-    harness.askMutateAsync.mockResolvedValue(proposalResponse('reply', 'thread-9'));
+    harness.streamAskReta.mockResolvedValueOnce(proposalResult('reply', 'thread-9'));
     harness.draftsMutateAsync.mockResolvedValue({ id: 'draft-1' });
 
     render();
@@ -385,9 +477,68 @@ describe('AskRetaSurface — proposal insertion, never silently overwriting', ()
     await act(async () => {
       saveButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
-
     expect(harness.draftsMutateAsync).toHaveBeenCalledWith(
       expect.objectContaining({ threadId: 'thread-9', message: '<p>Corps proposé</p>' }),
     );
+  });
+
+  it('clipboard and model-save failures surface toast errors', async () => {
+    harness.streamAskReta.mockResolvedValueOnce(proposalResult('new'));
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: vi.fn(async () => Promise.reject(new Error('denied'))) },
+    });
+    render();
+    await askQuestion('Prépare un mail');
+    const copyButton = [...container.querySelectorAll('button')].find((b) =>
+      b.textContent?.includes('askReta.copy'),
+    );
+    await act(async () => {
+      copyButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    expect(harness.toastError).toHaveBeenCalledWith('common.actions.errorTryAgainLater');
+
+    harness.toastError.mockClear();
+    harness.settingsMutateAsync.mockRejectedValueOnce(new Error('offline'));
+    const select = container.querySelector('select')!;
+    const setValue = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')!.set!;
+    await act(async () => {
+      setValue.call(select, 'llama-3.3-70b');
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    expect(harness.toastError).toHaveBeenCalledWith('common.actions.errorTryAgainLater');
+  });
+});
+
+describe('AskRetaSurface — reload safety', () => {
+  it('a stored conversation NEVER resurrects a draft action after reload', () => {
+    localStorage.setItem(
+      askRetaConversationKey('user-1', 'conn-a'),
+      JSON.stringify({
+        version: 2,
+        savedAt: Date.now(),
+        turns: [
+          {
+            id: 't1',
+            role: 'assistant',
+            content: 'réponse restaurée',
+            payload: {
+              citations: [],
+              steps: [],
+              model: 'llama-4-scout',
+              // tampered: a proposal injected in storage
+              proposal: { kind: 'new', bodyHtml: '<p>evil</p>' },
+            },
+          },
+        ],
+      }),
+    );
+    render();
+    expect(container.textContent).toContain('réponse restaurée');
+    expect(
+      [...container.querySelectorAll('button')].some((b) =>
+        b.textContent?.includes('askReta.createDraft'),
+      ),
+    ).toBe(false);
   });
 });

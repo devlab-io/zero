@@ -43,6 +43,12 @@ const FORBIDDEN_PATTERNS: Array<{ pattern: RegExp; why: string }> = [
     pattern: /trpc\.copilot\.|trpcClient\.copilot\./,
     why: 'appel client copilot.* hors de la surface Ask Reta sanctionnée',
   },
+  // r9 (tranche 2) : le transport stream Ask Reta est lui aussi nominatif —
+  // ni le module client ni l'endpoint ne s'importent hors de la surface.
+  {
+    pattern: /ask-reta-stream|\/api\/ask-reta/,
+    why: 'transport Ask Reta hors de la surface sanctionnée',
+  },
   { pattern: /Try Natural Language/, why: 'section NL du command palette' },
   { pattern: /parseNaturalLanguageSearch/, why: 'interprétation langage naturel' },
   { pattern: /generateSearchQuery/, why: 'réécriture IA de la recherche' },
@@ -86,14 +92,27 @@ describe('contrat r8 — aucune surface IA exposée', () => {
             const routeCalls = source.match(/(?:trpc|trpcClient)\.ai\.([A-Za-z0-9_]+)/g) ?? [];
             if (routeCalls.every((call) => call === 'trpc.ai.rewriteEmail')) continue;
           }
-          // r9 : dans components/copilot/**, seuls les appels copilot.ask sont admis.
+          // r9 : dans components/copilot/**, seules les routes copilot nominatives
+          // (ask, searchPreview — le replay borné de la tranche 2) sont admises.
           if (
             relative.startsWith(ASK_RETA_SANCTIONED_DIR) &&
             pattern.source === /trpc\.copilot\.|trpcClient\.copilot\./.source
           ) {
             const copilotCalls =
               source.match(/(?:trpc|trpcClient)\.copilot\.([A-Za-z0-9_]+)/g) ?? [];
-            if (copilotCalls.every((call) => call === 'trpc.copilot.ask')) continue;
+            if (
+              copilotCalls.every(
+                (call) => call === 'trpc.copilot.ask' || call === 'trpc.copilot.searchPreview',
+              )
+            )
+              continue;
+          }
+          // r9 (tranche 2) : le transport stream n'est licite que dans la surface.
+          if (
+            relative.startsWith(ASK_RETA_SANCTIONED_DIR) &&
+            pattern.source === /ask-reta-stream|\/api\/ask-reta/.source
+          ) {
+            continue;
           }
           if (pattern.test(source)) {
             offenders.push(`${file.replace(APP_ROOT, '')} → ${why} (${pattern})`);

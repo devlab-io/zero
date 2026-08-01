@@ -5,17 +5,30 @@ import {
   saveLocalDraft,
   type ComposerDraftScope,
 } from '@/lib/draft-storage';
-import { askRetaConversationAtom, type AskRetaAssistantPayload } from './ask-reta-state';
+import {
+  askRetaConversationAtom,
+  type AskRetaAssistantPayload,
+  type AskRetaStepView,
+  type AskRetaTurn,
+} from './ask-reta-state';
+import {
+  clearAskRetaConversation,
+  loadAskRetaConversation,
+  saveAskRetaConversation,
+} from '@/lib/ask-reta-conversation-storage';
 import { insertIntoComposer, type ComposerInsertPayload } from '@/lib/composer-insert';
+import { AskRetaStreamError, streamAskReta } from '@/lib/ask-reta-stream';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useReplyStatePurge } from '@/hooks/use-reply-state-purge';
+import { useActiveConnection } from '@/hooks/use-connections';
 import { LoaderCircle, Sparkles, Trash2 } from 'lucide-react';
 import { useTRPC } from '@/providers/query-provider';
+import { useEffect, useRef, useState } from 'react';
 import { useSettings } from '@/hooks/use-settings';
 import { Button } from '@/components/ui/button';
+import { useSession } from '@/lib/auth-client';
 import { Input } from '@/components/ui/input';
 import { m } from '@/paraglide/messages';
-import { useRef, useState } from 'react';
 import { useQueryState } from 'nuqs';
 import { log } from '@/lib/log';
 import { useAtom } from 'jotai';
@@ -74,7 +87,86 @@ export function AskRetaSurface() {
   const { data: settingsData } = useSettings();
   const settingsSave = useMutation(trpc.settings.save.mutationOptions());
   const createDraft = useMutation(trpc.drafts.create.mutationOptions());
-  const ask = useMutation(trpc.copilot.ask.mutationOptions());
+
+  // Slice-2 streaming state: steps arrive live; Stop aborts PREEMPTIVELY
+  // (fetch abort → server request signal → pipeline race interruption).
+  const [isAsking, setIsAsking] = useState(false);
+  const [liveSteps, setLiveSteps] = useState<AskRetaStepView[]>([]);
+  const abortRef = useRef<AbortController | null>(null);
+  useEffect(() => () => abortRef.current?.abort(), []);
+
+  // Slice-2 persistence: DEVICE-LOCAL, scoped user+activeConnection, with a
+  // REAL hydration barrier (revue 2026-08-01). Hazard: on a scope switch both
+  // effects can run in ONE commit while the atom still holds the OLD scope's
+  // turns — an unguarded save would write A's turns under B's key. Contract:
+  // - `conversationScopeRef` names the scope the CURRENT atom content belongs
+  //   to; saves happen ONLY when it matches the loaded scope.
+  // - On switch: flush the old scope FIRST, abort any in-flight ask, disable
+  //   saves (scope ref → null), hydrate; the save effect re-enables saves only
+  //   when it observes the exact hydrated array (reference equality).
+  const { data: session } = useSession();
+  const userId = session?.user?.id;
+  const { data: activeConnectionData } = useActiveConnection();
+  const connectionId = activeConnectionData?.id;
+
+  type ConversationScope = { userId: string; connectionId: string };
+  const sameScope = (a: ConversationScope | null, b: ConversationScope | null) =>
+    !!a && !!b && a.userId === b.userId && a.connectionId === b.connectionId;
+  const scopeKeyOf = (scope: ConversationScope) => `${scope.userId}::${scope.connectionId}`;
+
+  // Re-renderable hydration flag: submitting is DISABLED until the atom holds
+  // the current scope's hydrated turns — a fast click at mount/switch can
+  // never append a question to the wrong scope's conversation.
+  const [hydratedScopeKey, setHydratedScopeKey] = useState<string | null>(null);
+  const isHydrated =
+    !!userId && !!connectionId && hydratedScopeKey === scopeKeyOf({ userId, connectionId });
+
+  const loadedScopeRef = useRef<ConversationScope | null>(null);
+  const conversationScopeRef = useRef<ConversationScope | null>(null);
+  const conversationRef = useRef<AskRetaTurn[]>(conversation);
+  conversationRef.current = conversation;
+  const pendingHydrationRef = useRef<{ scope: ConversationScope; turns: AskRetaTurn[] } | null>(
+    null,
+  );
+
+  useEffect(() => {
+    if (!userId || !connectionId) return;
+    const nextScope: ConversationScope = { userId, connectionId };
+    if (sameScope(loadedScopeRef.current, nextScope)) return;
+
+    // 1. Flush the OLD scope before anything else — its turns are still in the atom.
+    const previous = loadedScopeRef.current;
+    if (previous && sameScope(conversationScopeRef.current, previous)) {
+      saveAskRetaConversation(previous.userId, previous.connectionId, conversationRef.current);
+    }
+    // 2. An in-flight ask belongs to the old scope: abort it, drop live steps.
+    abortRef.current?.abort();
+    setLiveSteps([]);
+    // 3. Barrier down: saves AND submits disabled until hydration is observed.
+    loadedScopeRef.current = nextScope;
+    conversationScopeRef.current = null;
+    setHydratedScopeKey(null);
+    const turns = loadAskRetaConversation(userId, connectionId);
+    pendingHydrationRef.current = { scope: nextScope, turns };
+    setConversation(turns);
+  }, [userId, connectionId, setConversation]);
+
+  useEffect(() => {
+    const pending = pendingHydrationRef.current;
+    if (pending) {
+      // Barrier up ONLY on the exact hydrated array — an old-scope value that
+      // sneaks into the same commit can never be saved under the new key.
+      if (conversation === pending.turns) {
+        conversationScopeRef.current = pending.scope;
+        pendingHydrationRef.current = null;
+        setHydratedScopeKey(scopeKeyOf(pending.scope));
+      }
+      return;
+    }
+    const scope = conversationScopeRef.current;
+    if (!scope || !sameScope(scope, loadedScopeRef.current)) return;
+    saveAskRetaConversation(scope.userId, scope.connectionId, conversation);
+  }, [conversation]);
 
   const modelKey =
     (settingsData?.settings as { askRetaModel?: string } | undefined)?.askRetaModel ??
@@ -82,7 +174,7 @@ export function AskRetaSurface() {
 
   const submit = async () => {
     const trimmed = question.trim();
-    if (!trimmed || ask.isPending) return;
+    if (!trimmed || isAsking || !isHydrated) return;
 
     const history = conversation
       .slice(-HISTORY_TURNS)
@@ -97,15 +189,36 @@ export function AskRetaSurface() {
     // Single read per submit, on the composer's exact scope key.
     const draftContext = readComposerDraftContext(composerScope);
 
+    const controller = new AbortController();
+    // Run guard (revue 2026-08-01): a LATE settlement of an old-scope stream
+    // must never touch the state of a newer run — the switch effect replaces
+    // `loadedScopeRef.current` with a fresh object, so reference equality
+    // pins both the run (controller) and the scope it was started under.
+    const scopeAtSubmit = loadedScopeRef.current;
+    const isCurrentRun = () =>
+      abortRef.current === controller && loadedScopeRef.current === scopeAtSubmit;
+
+    abortRef.current = controller;
+    setIsAsking(true);
+    setLiveSteps([]);
+
     try {
-      const result = await ask.mutateAsync({
-        question: trimmed,
-        history,
-        context: {
-          ...(threadId ? { threadId } : {}),
-          ...(draftContext ? { draft: draftContext } : {}),
+      const result = await streamAskReta({
+        input: {
+          question: trimmed,
+          history,
+          context: {
+            ...(threadId ? { threadId } : {}),
+            ...(draftContext ? { draft: draftContext } : {}),
+          },
+        },
+        signal: controller.signal,
+        onStep: (step) => {
+          if (!isCurrentRun()) return;
+          setLiveSteps((prev) => [...prev, { ...step, id: crypto.randomUUID() }]);
         },
       });
+      if (!isCurrentRun()) return;
       setConversation((prev) => [
         ...prev,
         {
@@ -118,18 +231,69 @@ export function AskRetaSurface() {
             steps: result.steps.map((step) => ({ ...step, id: crypto.randomUUID() })),
             model: result.model,
           },
-        },
+        } satisfies AskRetaTurn,
       ]);
       requestAnimationFrame(() => {
         scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
       });
     } catch (error) {
-      log.error('Ask Reta failed', error);
-      toast.error(m['common.askReta.error']());
-      setConversation((prev) => [
-        ...prev,
-        { id: crypto.randomUUID(), role: 'assistant', content: m['common.askReta.error']() },
-      ]);
+      if (!isCurrentRun()) return; // stale run: no toast, no turn, no state
+      if (error instanceof AskRetaStreamError && error.reason === 'aborted') {
+        toast(m['common.askReta.cancelled']());
+      } else {
+        log.error('Ask Reta failed', error);
+        toast.error(m['common.askReta.error']());
+        setConversation((prev) => [
+          ...prev,
+          { id: crypto.randomUUID(), role: 'assistant', content: m['common.askReta.error']() },
+        ]);
+      }
+    } finally {
+      // Only the CURRENT run may reset the shared streaming state.
+      if (abortRef.current === controller) {
+        setIsAsking(false);
+        setLiveSteps([]);
+        abortRef.current = null;
+      }
+    }
+  };
+
+  /** Replay an edited search query — same caps, same read-only path, same folder. */
+  const replaySearch = async (
+    turnId: string,
+    stepId: string,
+    query: string,
+    folder: string | undefined,
+  ) => {
+    try {
+      const preview = await queryClient.fetchQuery(
+        // The step's folder scope is PRESERVED: replaying a Sent-scoped search
+        // must not silently widen to the whole mailbox.
+        trpc.copilot.searchPreview.queryOptions({ query, ...(folder ? { folder } : {}) }),
+      );
+      setConversation((prev) =>
+        prev.map((turn) => {
+          if (turn.id !== turnId || !turn.payload) return turn;
+          return {
+            ...turn,
+            payload: {
+              ...turn.payload,
+              steps: turn.payload.steps.map((step) =>
+                step.id !== stepId || !step.search
+                  ? step
+                  : {
+                      ...step,
+                      detail: `"${query}"${folder ? ` in ${folder}` : ''} → ${preview.threads.length} threads`,
+                      search: { ...step.search, query, threads: preview.threads },
+                    },
+              ),
+            },
+          };
+        }),
+      );
+    } catch (error) {
+      log.error('Ask Reta search replay failed', error);
+      toast.error(m['common.actions.errorTryAgainLater']());
     }
   };
 
@@ -303,7 +467,11 @@ export function AskRetaSurface() {
             variant="ghost"
             size="icon"
             aria-label={m['common.askReta.clear']()}
-            onClick={() => setConversation([])}
+            onClick={() => {
+              setConversation([]);
+              // Effective clear: the device-local store is removed, not just the atom.
+              if (userId && connectionId) clearAskRetaConversation(userId, connectionId);
+            }}
             className="h-7 w-7"
           >
             <Trash2 className="h-3.5 w-3.5" />
@@ -329,10 +497,21 @@ export function AskRetaSurface() {
               <p className="whitespace-pre-wrap">{turn.content}</p>
 
               {turn.payload?.steps && turn.payload.steps.length > 0 && (
-                <ul className="text-muted-foreground mt-2 space-y-0.5 text-[11px]">
-                  {turn.payload.steps.map((step) => (
-                    <li key={step.id}>· {step.detail}</li>
-                  ))}
+                <ul className="text-muted-foreground mt-2 space-y-1 text-[11px]">
+                  {turn.payload.steps.map((step) =>
+                    step.search ? (
+                      <AskRetaSearchStep
+                        key={step.id}
+                        step={step}
+                        onOpenThread={openCitation}
+                        onReplay={(query) =>
+                          replaySearch(turn.id, step.id, query, step.search?.folder)
+                        }
+                      />
+                    ) : (
+                      <li key={step.id}>· {step.detail}</li>
+                    ),
+                  )}
                 </ul>
               )}
 
@@ -407,10 +586,20 @@ export function AskRetaSurface() {
             </div>
           </div>
         ))}
-        {ask.isPending && (
-          <div className="text-muted-foreground flex items-center gap-2 text-xs">
-            <LoaderCircle className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
-            {m['common.askReta.thinking']()}
+        {isAsking && (
+          <div className="text-muted-foreground space-y-1 text-xs">
+            <div className="flex items-center gap-2">
+              <LoaderCircle className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+              {m['common.askReta.thinking']()}
+            </div>
+            {/* Steps stream in as the pipeline completes them (slice 2). */}
+            {liveSteps.length > 0 && (
+              <ul className="space-y-0.5 pl-5 text-[11px]">
+                {liveSteps.map((step) => (
+                  <li key={step.id}>· {step.detail}</li>
+                ))}
+              </ul>
+            )}
           </div>
         )}
       </div>
@@ -430,16 +619,96 @@ export function AskRetaSurface() {
           className="h-9"
           autoFocus
         />
-        <Button
-          type="submit"
-          size="sm"
-          className="h-9"
-          disabled={ask.isPending || !question.trim()}
-        >
-          {m['common.askReta.send']()}
-        </Button>
+        {isAsking ? (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-9"
+            onClick={() => abortRef.current?.abort()}
+          >
+            {m['common.askReta.stop']()}
+          </Button>
+        ) : (
+          <Button
+            type="submit"
+            size="sm"
+            className="h-9"
+            disabled={!question.trim() || !isHydrated}
+          >
+            {m['common.askReta.send']()}
+          </Button>
+        )}
       </form>
     </div>
+  );
+}
+
+/**
+ * A search step: the exact metadata thread set the search returned, each
+ * thread clickable, with the query visible, editable and replayable (same
+ * caps, same read-only path — copilot.searchPreview).
+ */
+function AskRetaSearchStep({
+  step,
+  onOpenThread,
+  onReplay,
+}: {
+  step: AskRetaStepView;
+  onOpenThread: (threadId: string) => void;
+  onReplay: (query: string) => Promise<void>;
+}) {
+  const [query, setQuery] = useState(step.search?.query ?? '');
+  const [replaying, setReplaying] = useState(false);
+  if (!step.search) return <li>· {step.detail}</li>;
+
+  return (
+    <li className="space-y-1">
+      <div className="flex items-center gap-1.5">
+        <span aria-hidden="true">·</span>
+        <Input
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          aria-label={m['common.askReta.searchQueryLabel']()}
+          className="h-6 max-w-[240px] px-1.5 text-[11px]"
+        />
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          className="h-6 px-1.5 text-[11px]"
+          disabled={replaying || !query.trim()}
+          onClick={() => {
+            setReplaying(true);
+            void onReplay(query.trim()).finally(() => setReplaying(false));
+          }}
+        >
+          {replaying ? (
+            <LoaderCircle className="h-3 w-3 animate-spin" aria-hidden="true" />
+          ) : (
+            m['common.askReta.replay']()
+          )}
+        </Button>
+        <span className="text-muted-foreground">
+          {step.search.threads.length} {m['common.askReta.threadsFound']()}
+        </span>
+      </div>
+      {step.search.threads.length > 0 && (
+        <div className="flex flex-wrap gap-1 pl-3">
+          {step.search.threads.map((thread) => (
+            <button
+              key={thread.threadId}
+              type="button"
+              onClick={() => onOpenThread(thread.threadId)}
+              title={`${thread.sender} — ${thread.date}`}
+              className="bg-background hover:bg-accent max-w-[220px] truncate rounded-full border px-2 py-0.5 text-[11px] transition-colors"
+            >
+              {thread.subject}
+            </button>
+          ))}
+        </div>
+      )}
+    </li>
   );
 }
 

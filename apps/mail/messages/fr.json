@@ -88,7 +88,12 @@
       "modelDeep": "Llama 3.3 70B · approfondi",
       "error": "Reta n'a pas pu répondre. Réessayez.",
       "draftCreated": "Brouillon enregistré dans Gmail",
-      "empty": "Posez n'importe quelle question sur votre boîte — Reta répond avec des sources."
+      "empty": "Posez n'importe quelle question sur votre boîte — Reta répond avec des sources.",
+      "stop": "Arrêter",
+      "cancelled": "Requête annulée",
+      "replay": "Rejouer",
+      "searchQueryLabel": "Requête de recherche",
+      "threadsFound": "fils trouvés"
     },
     "commandPalette": {
       "title": "Palette de commandes",
@@ -703,6 +708,8 @@
         "description": "Consultez et personnalisez les raccourcis clavier pour des actions rapides.",
         "actions": {
           "newEmail": "Nouveau courriel",
+          "askRetaThread": "Demander à Reta sur le fil courant",
+          "askRetaOpen": "Ouvrir Ask Reta",
           "sendEmail": "Envoyer le courriel",
           "reply": "Répondre",
           "replyAll": "Répondre à tous",

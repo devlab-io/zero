@@ -168,11 +168,31 @@ export type AskRetaCitation = Omit<AskRetaSource, 'excerpt' | 'kind' | 'messageI
   quote: string;
 };
 
+/** Metadata row of a search step — the exact thread set the search returned. */
+export type AskRetaStepThread = {
+  threadId: string;
+  subject: string;
+  sender: string;
+  date: string;
+};
+
 export type AskRetaStep = {
   kind: 'overview' | 'search' | 'read_thread';
   detail: string;
   sourceRefs: string[];
+  /** Search steps only: visible/replayable query + the exact metadata set. */
+  search?: {
+    query: string;
+    folder?: string;
+    threads: AskRetaStepThread[];
+  };
 };
+
+/** NDJSON events of the slice-2 streaming transport (one JSON object per line). */
+export type AskRetaStreamEvent =
+  | { type: 'step'; step: AskRetaStep }
+  | { type: 'result'; result: AskRetaResult }
+  | { type: 'error'; message: string };
 
 export type AskRetaProposal = {
   kind: 'reply' | 'new';

@@ -6,13 +6,14 @@ import {
   Mail,
   Paperclip,
   Search,
+  Sparkles,
   Star,
   Tag,
   User,
   Users,
 } from 'lucide-react';
-import { Pencil2 } from '../icons/icons';
 import type { ComponentType } from 'react';
+import { Pencil2 } from '../icons/icons';
 
 /**
  * Command registry — machine-readable, data-only surface of the command palette.
@@ -84,7 +85,10 @@ export type CommandView = 'main' | 'search' | 'filter' | 'dateRange' | 'labels' 
  * Declarative target for a static palette command. The palette component maps it
  * to a concrete handler; the registry stays behaviour-agnostic.
  */
-export type PaletteCommandTarget = { kind: 'compose' } | { kind: 'view'; view: CommandView };
+export type PaletteCommandTarget =
+  | { kind: 'compose' }
+  | { kind: 'askReta' }
+  | { kind: 'view'; view: CommandView };
 
 export interface PaletteCommand {
   id: string;
@@ -112,6 +116,15 @@ export const PALETTE_COMMANDS: PaletteCommand[] = [
     group: 'mail',
     scope: 'command-palette',
     target: { kind: 'compose' },
+  },
+  {
+    id: 'ask-reta',
+    title: 'Ask Reta',
+    icon: Sparkles,
+    shortcut: 'mod+j',
+    group: 'mail',
+    scope: 'command-palette',
+    target: { kind: 'askReta' },
   },
   {
     id: 'search',

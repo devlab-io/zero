@@ -2,11 +2,12 @@ import {
   useCommandPalette,
   preloadCommandPalette,
 } from '@/components/context/command-palette-context';
+import { preloadAskRetaSurface } from '@/components/copilot/ask-reta-button';
 import { preloadComposeSurface } from '@/components/create/compose-surface';
-import { useSidebar } from '@/components/context/sidebar-context';
 import { useOptimisticActions } from '@/hooks/use-optimistic-actions';
-import { GLOBAL_HANDLED_ACTIONS } from './handler-manifest';
+import { useSidebar } from '@/components/context/sidebar-context';
 import { enhancedKeyboardShortcuts } from '@/config/shortcuts';
+import { GLOBAL_HANDLED_ACTIONS } from './handler-manifest';
 import { useShortcuts } from './use-hotkey-utils';
 import { useNavigate } from 'react-router';
 import { useTheme } from 'next-themes';
@@ -17,6 +18,7 @@ export function GlobalHotkeys() {
   const { theme, setTheme } = useTheme();
   const { toggleSidebar } = useSidebar();
   const [, setComposeOpen] = useQueryState('isComposeOpen');
+  const [, setAskRetaOpen] = useQueryState('isAskRetaOpen');
   const { clearAllFilters } = useCommandPalette();
   const [, setIsCommandPaletteOpen] = useQueryState('isCommandPaletteOpen');
   const { undoLastAction } = useOptimisticActions();
@@ -28,6 +30,17 @@ export function GlobalHotkeys() {
     newEmail: () => {
       preloadComposeSurface();
       setComposeOpen('true');
+    },
+    // Shortwave parity: Y = ask about the current thread (the panel reads the
+    // open-thread context from the URL), Mod+J = open Ask Reta. Same
+    // warm-at-keydown pattern as compose.
+    askRetaThread: () => {
+      preloadAskRetaSurface();
+      setAskRetaOpen('true');
+    },
+    askRetaOpen: () => {
+      preloadAskRetaSurface();
+      setAskRetaOpen('true');
     },
     // `/` opens the command palette — Zero's fast lexical search surface (its dialog
     // auto-focuses the search input). There is no standalone /mail/search route.

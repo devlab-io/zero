@@ -1,34 +1,30 @@
 import {
   askRetaInputSchema,
-  askRetaModelKeys,
-  DEFAULT_ASK_RETA_MODEL,
-  type AskRetaModelKey,
+  askRetaLimits,
   type AskRetaResult,
+  type AskRetaStepThread,
 } from '../../lib/ask-reta/schema';
-import { getThread, getThreadsFromDB, getZeroAgent, getZeroDB } from '../../lib/server-utils';
-import { buildMailboxOverview, getMailboxActivity } from '../../lib/mailbox-overview';
 import { activeDriverProcedure, createRateLimiterMiddleware, router } from '../trpc';
-import { workersAiModel, type WorkersAiBinding } from '../../lib/ask-reta/model';
-import { runAskReta, type AskRetaDeps } from '../../lib/ask-reta/pipeline';
+import { createAskRetaDeps } from '../../lib/ask-reta/deps';
+import { getThreadsFromDB } from '../../lib/server-utils';
+import { runAskReta } from '../../lib/ask-reta/pipeline';
+import type { ThreadsResponse } from '@zero/types';
 import { getContext } from 'hono/context-storage';
 import { Ratelimit } from '@upstash/ratelimit';
 import { type HonoContext } from '../../ctx';
-import { env } from 'cloudflare:workers';
-import { createDb } from '../../db';
+import { z } from 'zod';
+
+const formatSender = (sender?: { name?: string; email?: string }) =>
+  sender ? `${sender.name ?? ''} <${sender.email ?? 'unknown'}>`.trim() : 'unknown';
 
 /**
- * Ask Reta (spec docs/spec/mail-copilot.md, slice 1). The ONLY sanctioned
- * client entry: components/copilot/** — enforced by the r9 guard test in
+ * Ask Reta (spec docs/spec/mail-copilot.md). The ONLY sanctioned client
+ * surface is components/copilot/** — enforced by the r9 guard test in
  * apps/mail. Connection ownership comes exclusively from the request context;
  * no connection id is ever accepted from the client. The dependency surface
- * handed to the pipeline is read-only: nothing here can mutate a mailbox.
+ * handed to the pipeline (lib/ask-reta/deps.ts, shared with the slice-2
+ * NDJSON stream) is read-only: nothing here can mutate a mailbox.
  */
-
-const resolveModelKey = (value: unknown): AskRetaModelKey =>
-  askRetaModelKeys.includes(value as AskRetaModelKey)
-    ? (value as AskRetaModelKey)
-    : DEFAULT_ASK_RETA_MODEL;
-
 export const copilotRouter = router({
   ask: activeDriverProcedure
     .use(
@@ -45,48 +41,47 @@ export const copilotRouter = router({
     .mutation(async ({ ctx, input }): Promise<AskRetaResult> => {
       const { activeConnection, sessionUser } = ctx;
       const executionCtx = getContext<HonoContext>().executionCtx;
-      const { stub: agent } = await getZeroAgent(activeConnection.id, executionCtx);
 
-      const db = await getZeroDB(sessionUser.id);
-      const stored = await db.findUserSettings();
-      const modelKey = resolveModelKey(
-        (stored?.settings as { askRetaModel?: unknown } | undefined)?.askRetaModel,
-      );
-
-      const deps: AskRetaDeps = {
-        // Structural narrowing: the generated Ai<AiModels> run() overloads reject a
-        // string-typed model id; the catalogue only holds valid @cf/meta ids.
-        model: workersAiModel(env.AI as unknown as WorkersAiBinding, modelKey),
-        overview: async () => {
-          const now = Date.now();
-          // Fixed UTC windows (supplementary signal only; folder counts are exact).
-          const todayStart = new Date(new Date(now).setUTCHours(0, 0, 0, 0));
-          const weekStart = new Date(now - 7 * 24 * 60 * 60 * 1000);
-          const { db: sendDb, conn } = createDb(env.HYPERDRIVE.connectionString);
-          try {
-            const [folders, activity] = await Promise.all([
-              agent.getMailboxCounts(),
-              getMailboxActivity(sendDb, {
-                connectionId: activeConnection.id,
-                todayStart,
-                weekStart,
-              }),
-            ]);
-            return buildMailboxOverview(folders, activity);
-          } finally {
-            executionCtx.waitUntil(conn.end());
-          }
-        },
-        // Multi-shard helpers (revue Codex 2026-08-01): the ZeroDriver stub is
-        // ONE shard — searching through it silently misses every other shard.
-        // No folder default either: the contract is the WHOLE active mailbox.
-        searchThreads: async ({ query, folder, maxResults }) =>
-          await getThreadsFromDB(activeConnection.id, { q: query, folder, maxResults }),
-        readThread: async (threadId) => (await getThread(activeConnection.id, threadId)).result,
+      const { deps, modelKey } = await createAskRetaDeps({
+        userId: sessionUser.id,
+        connectionId: activeConnection.id,
+        executionCtx,
         signal: ctx.c.req.raw.signal,
-      };
+      });
 
       const result = await runAskReta(deps, input);
       return { ...result, model: modelKey };
+    }),
+
+  /**
+   * Replayable search preview (slice 2): the SAME semantics as a pipeline
+   * search step — whole active mailbox by default (multi-shard helper, no
+   * folder default), same hard cap, metadata only. Powers the editable
+   * query replay in the panel's step display.
+   */
+  searchPreview: activeDriverProcedure
+    .input(
+      z.object({
+        query: z.string().trim().min(1).max(300),
+        folder: z.string().trim().max(40).optional(),
+      }),
+    )
+    .query(async ({ ctx, input }): Promise<{ threads: AskRetaStepThread[] }> => {
+      const response = await getThreadsFromDB(ctx.activeConnection.id, {
+        q: input.query,
+        folder: input.folder,
+        maxResults: askRetaLimits.searchResults,
+      });
+      // The projection rows carry the rich metadata at runtime; the driver
+      // type is the thin superset (same coercion as the pipeline dep).
+      const rows = response.threads as ThreadsResponse['threads'];
+      return {
+        threads: rows.slice(0, askRetaLimits.searchResults).map((row) => ({
+          threadId: row.id,
+          subject: row.subject ?? '(no subject)',
+          sender: formatSender(row.sender),
+          date: row.receivedOn ?? 'unknown',
+        })),
+      };
     }),
 });

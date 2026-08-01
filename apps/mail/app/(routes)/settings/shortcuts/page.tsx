@@ -9,6 +9,8 @@ import { type ReactNode } from 'react';
 // Literal lookups keep the paraglide catalog tree-shakable (no dynamic `m[...]` access).
 const actionLabels: Record<string, () => string> = {
   newEmail: m['pages.settings.shortcuts.actions.newEmail'],
+  askRetaThread: m['pages.settings.shortcuts.actions.askRetaThread'],
+  askRetaOpen: m['pages.settings.shortcuts.actions.askRetaOpen'],
   sendEmail: m['pages.settings.shortcuts.actions.sendEmail'],
   reply: m['pages.settings.shortcuts.actions.reply'],
   replyAll: m['pages.settings.shortcuts.actions.replyAll'],

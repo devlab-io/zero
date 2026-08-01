@@ -12,6 +12,8 @@
 /** `global` scope — bound by GlobalHotkeys via useShortcuts. */
 export const GLOBAL_HANDLED_ACTIONS = [
   'newEmail',
+  'askRetaThread',
+  'askRetaOpen',
   'search',
   'commandPalette',
   'helpWithShortcuts',

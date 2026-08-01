@@ -88,7 +88,12 @@
       "modelDeep": "Llama 3.3 70B · deep",
       "error": "Reta could not answer. Try again.",
       "draftCreated": "Draft saved to Gmail",
-      "empty": "Ask anything about your mailbox — Reta answers with sources."
+      "empty": "Ask anything about your mailbox — Reta answers with sources.",
+      "stop": "Stop",
+      "cancelled": "Request cancelled",
+      "replay": "Replay",
+      "searchQueryLabel": "Search query",
+      "threadsFound": "threads found"
     },
     "commandPalette": {
       "title": "Command Palette",
@@ -703,6 +708,8 @@
         "description": "View and customize keyboard shortcuts for quick actions.",
         "actions": {
           "newEmail": "New Email",
+          "askRetaThread": "Ask Reta about the current thread",
+          "askRetaOpen": "Open Ask Reta",
           "sendEmail": "Send Email",
           "reply": "Reply",
           "replyAll": "Reply All",

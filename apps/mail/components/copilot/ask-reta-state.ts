@@ -27,12 +27,25 @@ export type AskRetaProposalView = {
   threadId?: string;
 };
 
+export type AskRetaStepThreadView = {
+  threadId: string;
+  subject: string;
+  sender: string;
+  date: string;
+};
+
 export type AskRetaStepView = {
   /** Client-assigned render identity (the server step carries none). */
   id: string;
   kind: 'overview' | 'search' | 'read_thread';
   detail: string;
   sourceRefs: string[];
+  /** Search steps: exact metadata thread set + visible/replayable query (slice 2). */
+  search?: {
+    query: string;
+    folder?: string;
+    threads: AskRetaStepThreadView[];
+  };
 };
 
 export type AskRetaAssistantPayload = {
