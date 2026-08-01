@@ -142,7 +142,12 @@ async function providerFetch(params: {
     throw new RetaProviderError(params.provider, 'network');
   }
   throwIfAborted(params.signal);
-  if (!response.ok) throw new RetaProviderError(params.provider, 'http');
+  if (!response.ok) {
+    // Release the error body WITHOUT reading it — nothing provider-derived
+    // is buffered or surfaced; cancellation is best-effort.
+    await response.body?.cancel().catch(() => {});
+    throw new RetaProviderError(params.provider, 'http');
+  }
   return readBoundedJson(response, params.provider, params.signal);
 }
 

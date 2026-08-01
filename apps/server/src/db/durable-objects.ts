@@ -4,6 +4,13 @@
 // are unchanged; main.ts re-exports them so the wrangler `ZERO_DB` binding and
 // exported-class surface are identical. No routing logic lives here.
 import {
+  deleteRetaCredentialTx,
+  selectRetaModelTx,
+  type SelectRetaModelParams,
+  type SelectRetaModelResult,
+  type VaultTxStore,
+} from '../lib/ask-reta/vault-transactions';
+import {
   account,
   connection,
   note,
@@ -210,6 +217,23 @@ export class DbRpcDO extends RpcTarget {
       resetModelIds,
       fallbackModelId,
     );
+  }
+
+  async selectRetaModel(params: SelectRetaModelParams): Promise<SelectRetaModelResult> {
+    return await this.mainDo.selectRetaModel(this.userId, params);
+  }
+
+  async rewrapRetaByokCredential(
+    provider: string,
+    params: {
+      id: string;
+      expectedKekVersion: string;
+      wrappedDek: string;
+      wrapIv: string;
+      kekVersion: string;
+    },
+  ): Promise<boolean> {
+    return await this.mainDo.rewrapRetaByokCredential(this.userId, provider, params);
   }
 }
 
@@ -484,14 +508,128 @@ export class ZeroDB extends DurableObject<ZeroEnv> {
     });
   }
 
-  /** Status only — NEVER envelope fields (no ciphertext/iv/wrappedDek/...). */
+  /**
+   * Status only — NEVER envelope fields (no ciphertext/iv/wrappedDek/...).
+   * consentVersion is part of the status: a credential stored under an OLDER
+   * consent is NOT usable ("configured" requires the current consent).
+   */
   async listRetaByokCredentialStatus(
     userId: string,
-  ): Promise<{ provider: string; updatedAt: Date }[]> {
+  ): Promise<{ provider: string; consentVersion: string; updatedAt: Date }[]> {
     return await this.db.query.retaByokCredential.findMany({
       where: eq(retaByokCredential.userId, userId),
-      columns: { provider: true, updatedAt: true },
+      columns: { provider: true, consentVersion: true, updatedAt: true },
     });
+  }
+
+  /**
+   * Drizzle binding of the transactional vault core (release-fix 3A):
+   * credential row first (FOR UPDATE / DELETE), then settings (FOR UPDATE) —
+   * the fixed lock order that serializes select vs delete.
+   */
+  private vaultTxStore(
+    tx: Parameters<Parameters<DB['transaction']>[0]>[0],
+    userId: string,
+  ): VaultTxStore {
+    return {
+      lockCredential: async (provider) => {
+        const rows = await tx
+          .select({
+            id: retaByokCredential.id,
+            provider: retaByokCredential.provider,
+            kekVersion: retaByokCredential.kekVersion,
+            consentVersion: retaByokCredential.consentVersion,
+          })
+          .from(retaByokCredential)
+          .where(
+            and(eq(retaByokCredential.userId, userId), eq(retaByokCredential.provider, provider)),
+          )
+          .for('update');
+        return rows[0] ?? null;
+      },
+      deleteCredential: async (provider) => {
+        await tx
+          .delete(retaByokCredential)
+          .where(
+            and(eq(retaByokCredential.userId, userId), eq(retaByokCredential.provider, provider)),
+          );
+      },
+      lockSettings: async () => {
+        const rows = await tx
+          .select({ settings: userSettings.settings })
+          .from(userSettings)
+          .where(eq(userSettings.userId, userId))
+          .for('update');
+        return rows[0] ?? null;
+      },
+      writeSettings: async (settings) => {
+        await tx
+          .insert(userSettings)
+          .values({
+            id: crypto.randomUUID(),
+            userId,
+            settings,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          })
+          .onConflictDoUpdate({
+            target: userSettings.userId,
+            set: { settings, updatedAt: new Date() },
+          });
+      },
+    };
+  }
+
+  /**
+   * Eligibility + selection in ONE transaction (TOCTOU fix): the credential
+   * is checked (existence + CURRENT consent + openable KEK version) under a
+   * row lock, and the settings write happens in the same transaction — a
+   * concurrent delete can never leave an orphan BYOK selection.
+   */
+  async selectRetaModel(
+    userId: string,
+    params: SelectRetaModelParams,
+  ): Promise<SelectRetaModelResult> {
+    return await this.db.transaction(async (tx) =>
+      selectRetaModelTx(this.vaultTxStore(tx, userId), params),
+    );
+  }
+
+  /**
+   * CAS persistence of a lazy KEK rewrap: only wrappedDek/wrapIv/kekVersion
+   * move (ciphertext + iv are IMMUTABLE here), and only if the row still
+   * carries the expected old version — a concurrent rewrap loses the CAS
+   * harmlessly (the caller reloads). Returns whether the row was updated.
+   */
+  async rewrapRetaByokCredential(
+    userId: string,
+    provider: string,
+    params: {
+      id: string;
+      expectedKekVersion: string;
+      wrappedDek: string;
+      wrapIv: string;
+      kekVersion: string;
+    },
+  ): Promise<boolean> {
+    const updated = await this.db
+      .update(retaByokCredential)
+      .set({
+        wrappedDek: params.wrappedDek,
+        wrapIv: params.wrapIv,
+        kekVersion: params.kekVersion,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(retaByokCredential.id, params.id),
+          eq(retaByokCredential.userId, userId),
+          eq(retaByokCredential.provider, provider),
+          eq(retaByokCredential.kekVersion, params.expectedKekVersion),
+        ),
+      )
+      .returning({ id: retaByokCredential.id });
+    return updated.length > 0;
   }
 
   /**
@@ -531,10 +669,11 @@ export class ZeroDB extends DurableObject<ZeroEnv> {
   }
 
   /**
-   * Delete + model reset in ONE transaction: if the stored selection points
-   * at the removed provider (resetModelIds = that provider's catalogue ids,
-   * server-owned), it falls back to the Workers default — a selection whose
-   * credential vanished can never survive the deletion.
+   * Delete + model reset in ONE transaction, SAME lock order as
+   * selectRetaModel (credential row first, then settings): any interleaving
+   * with a concurrent selection serializes into either a valid selection
+   * later reset by the delete, or a delete observed by the select — never a
+   * surviving orphan selection.
    */
   async deleteRetaByokCredentialAndResetModel(
     userId: string,
@@ -542,32 +681,13 @@ export class ZeroDB extends DurableObject<ZeroEnv> {
     resetModelIds: string[],
     fallbackModelId: string,
   ) {
-    await this.db.transaction(async (tx) => {
-      await tx
-        .delete(retaByokCredential)
-        .where(
-          and(eq(retaByokCredential.userId, userId), eq(retaByokCredential.provider, provider)),
-        );
-      const row = await tx.query.userSettings.findFirst({
-        where: eq(userSettings.userId, userId),
-      });
-      const current = row?.settings as
-        | (typeof defaultUserSettings & { askRetaModel?: unknown })
-        | undefined;
-      if (
-        current &&
-        typeof current.askRetaModel === 'string' &&
-        resetModelIds.includes(current.askRetaModel)
-      ) {
-        await tx
-          .update(userSettings)
-          .set({
-            settings: { ...current, askRetaModel: fallbackModelId },
-            updatedAt: new Date(),
-          })
-          .where(eq(userSettings.userId, userId));
-      }
-    });
+    await this.db.transaction(async (tx) =>
+      deleteRetaCredentialTx(this.vaultTxStore(tx, userId), {
+        provider,
+        resetModelIds,
+        fallbackModelId,
+      }),
+    );
   }
 
   async createConnection(

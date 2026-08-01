@@ -1,5 +1,6 @@
 import {
   decodeKek,
+  decodeKekRing,
   decryptApiKey,
   encryptApiKey,
   MAX_API_KEY_BYTES,
@@ -205,6 +206,33 @@ describe('decodeKek — deployment secret validation', () => {
 
   it('rejects garbage that is not base64url', () => {
     expect(() => decodeKek('!!!not-base64url!!!')).toThrow();
+  });
+});
+
+describe('decodeKekRing — deployment-owned key ring', () => {
+  const secretV1 = Buffer.from(new Uint8Array(32).fill(1)).toString('base64url');
+  const secretV2 = Buffer.from(new Uint8Array(32).fill(2)).toString('base64url');
+
+  it('defaults the active version to v1 for compatibility', () => {
+    const ring = decodeKekRing({ RETA_BYOK_KEK_V1: secretV1 });
+    expect(ring?.activeVersion).toBe('v1');
+    expect(Array.from(ring!.keys.keys())).toEqual(['v1']);
+  });
+
+  it('activates v2 explicitly while still holding v1 (rotation window)', () => {
+    const ring = decodeKekRing({
+      RETA_BYOK_KEK_V1: secretV1,
+      RETA_BYOK_KEK_V2: secretV2,
+      RETA_BYOK_KEK_ACTIVE: 'v2',
+    });
+    expect(ring?.activeVersion).toBe('v2');
+    expect(Array.from(ring!.keys.keys()).sort()).toEqual(['v1', 'v2']);
+  });
+
+  it('fails CLOSED (null) when the active version has no secret, when a secret is malformed, or when empty', () => {
+    expect(decodeKekRing({ RETA_BYOK_KEK_V1: secretV1, RETA_BYOK_KEK_ACTIVE: 'v2' })).toBeNull();
+    expect(decodeKekRing({ RETA_BYOK_KEK_V1: 'garbage!!' })).toBeNull();
+    expect(decodeKekRing({})).toBeNull();
   });
 });
 

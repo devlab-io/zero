@@ -13,16 +13,10 @@ import {
   type AskRetaResult,
   type AskRetaStepThread,
 } from '../../lib/ask-reta/schema';
-import {
-  decodeKek,
-  encryptApiKey,
-  RETA_BYOK_KEK_VERSION,
-  zeroize,
-} from '../../lib/ask-reta/byok-crypto';
+import { decodeKekRing, encryptApiKey, zeroizeKekRing } from '../../lib/ask-reta/byok-crypto';
 import { activeDriverProcedure, createRateLimiterMiddleware, router } from '../trpc';
 import { AskRetaAbortedError, runAskReta } from '../../lib/ask-reta/pipeline';
 import { createAskRetaCancellation } from '../../lib/ask-reta/cancellation';
-import { defaultUserSettings, userSettingsSchema } from '../../lib/schemas';
 import { getThreadsFromDB, getZeroDB } from '../../lib/server-utils';
 import { createAskRetaDeps } from '../../lib/ask-reta/deps';
 import type { ThreadsResponse } from '@zero/types';
@@ -41,6 +35,21 @@ const byokProviderSchema = z.enum(['openai', 'anthropic', 'gemini', 'moonshot', 
 
 const vaultUnavailable = () =>
   new TRPCError({ code: 'PRECONDITION_FAILED', message: 'BYOK vault unavailable' });
+
+const kekRingSecrets = () => ({
+  RETA_BYOK_KEK_V1: env.RETA_BYOK_KEK_V1,
+  RETA_BYOK_KEK_V2: env.RETA_BYOK_KEK_V2,
+  RETA_BYOK_KEK_ACTIVE: env.RETA_BYOK_KEK_ACTIVE,
+});
+
+/** Ring metadata only — the decoded keys are zeroized before returning. */
+const kekRingInfo = (): { activeVersion: string; versions: string[] } | null => {
+  const ring = decodeKekRing(kekRingSecrets());
+  if (!ring) return null;
+  const info = { activeVersion: ring.activeVersion, versions: Array.from(ring.keys.keys()) };
+  zeroizeKekRing(ring);
+  return info;
+};
 
 /**
  * Ask Reta (spec docs/spec/mail-copilot.md). The ONLY sanctioned client
@@ -145,12 +154,17 @@ export const copilotRouter = router({
       db.findUserSettings(),
       db.listRetaByokCredentialStatus(),
     ]);
-    const configured = new Set(credentials.map((c) => c.provider));
+    // "Configured" requires the CURRENT consent version: a credential stored
+    // under an older consent is unusable until re-consent (release-fix 3A).
+    const configured = new Set(
+      credentials
+        .filter((c) => c.consentVersion === RETA_BYOK_CONSENT_VERSION)
+        .map((c) => c.provider),
+    );
     const selected = resolveSelectedEntry(
       (stored?.settings as { askRetaModel?: unknown } | undefined)?.askRetaModel,
     );
-    const vaultAvailable =
-      typeof env.RETA_BYOK_KEK_V1 === 'string' && env.RETA_BYOK_KEK_V1.length > 0;
+    const vaultAvailable = kekRingInfo() !== null;
     return {
       selectedModelId: selected.id,
       vaultAvailable,
@@ -189,22 +203,17 @@ export const copilotRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }): Promise<{ ok: true }> => {
-      const kekSecret = env.RETA_BYOK_KEK_V1;
-      if (!kekSecret) throw vaultUnavailable();
-      let kek: Uint8Array;
-      try {
-        kek = decodeKek(kekSecret);
-      } catch {
-        throw vaultUnavailable();
-      }
+      // New envelopes are always wrapped under the ring's ACTIVE version.
+      const ring = decodeKekRing(kekRingSecrets());
+      if (!ring) throw vaultUnavailable();
       try {
         // AAD binds the envelope to THIS user+provider+row id: moved to any
         // other row/user/provider it fails closed at decrypt.
         const credentialId = crypto.randomUUID();
         const envelope = await encryptApiKey({
           apiKey: input.apiKey,
-          kek,
-          kekVersion: RETA_BYOK_KEK_VERSION,
+          kek: ring.keys.get(ring.activeVersion)!,
+          kekVersion: ring.activeVersion,
           aad: {
             userId: ctx.sessionUser.id,
             provider: input.provider,
@@ -220,7 +229,7 @@ export const copilotRouter = router({
         });
         return { ok: true };
       } finally {
-        zeroize(kek);
+        zeroizeKekRing(ring);
       }
     }),
 
@@ -271,22 +280,26 @@ export const copilotRouter = router({
         throw new TRPCError({ code: 'BAD_REQUEST', message: 'Unknown Ask Reta model' });
       }
       const db = await getZeroDB(ctx.sessionUser.id);
+      let supportedKekVersions: string[] = [];
       if (entry.requiresCredential) {
-        if (!env.RETA_BYOK_KEK_V1) throw vaultUnavailable();
-        // Existence check via the status list — the envelope itself never
-        // enters this route's scope.
-        const status = await db.listRetaByokCredentialStatus();
-        if (!status.some((s) => s.provider === entry.provider)) {
-          throw new TRPCError({
-            code: 'PRECONDITION_FAILED',
-            message: 'Provider not configured',
-          });
-        }
+        const ring = kekRingInfo();
+        if (!ring) throw vaultUnavailable();
+        supportedKekVersions = ring.versions;
       }
-      const stored = await db.findUserSettings();
-      const parsed = userSettingsSchema.safeParse(stored?.settings ?? {});
-      const base = parsed.success ? parsed.data : defaultUserSettings;
-      await db.updateUserSettings({ ...base, askRetaModel: entry.id });
+      // Eligibility + selection happen in ONE ZeroDB transaction (TOCTOU
+      // fix): the credential (existence + CURRENT consent + openable KEK
+      // version) is checked under a row lock in the same transaction as the
+      // settings write — a concurrent delete cannot leave an orphan
+      // selection. The envelope never enters this route's scope.
+      const result = await db.selectRetaModel({
+        modelId: entry.id,
+        provider: entry.requiresCredential ? entry.provider : null,
+        requiredConsentVersion: RETA_BYOK_CONSENT_VERSION,
+        supportedKekVersions,
+      });
+      if (!result.ok) {
+        throw new TRPCError({ code: 'PRECONDITION_FAILED', message: 'Provider not configured' });
+      }
       return { selectedModelId: entry.id };
     }),
 });

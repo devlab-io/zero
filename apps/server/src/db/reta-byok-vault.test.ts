@@ -58,6 +58,8 @@ describe('DbRpcDO vault façade — user scoping is STRUCTURAL', () => {
       listRetaByokCredentialStatus: vi.fn(async () => []),
       replaceRetaByokCredential: vi.fn(async () => {}),
       deleteRetaByokCredentialAndResetModel: vi.fn(async () => {}),
+      selectRetaModel: vi.fn(async () => ({ ok: true as const })),
+      rewrapRetaByokCredential: vi.fn(async () => true),
     };
     return { mainDo, facade: new DbRpcDO(mainDo as never, userId) };
   };
@@ -90,6 +92,25 @@ describe('DbRpcDO vault façade — user scoping is STRUCTURAL', () => {
       ['openai:gpt-5.2'],
       'fallback',
     );
+
+    const selectParams = {
+      modelId: 'openai:gpt-5.2',
+      provider: 'openai',
+      requiredConsentVersion: '2026-08-01',
+      supportedKekVersions: ['v1'],
+    };
+    await facade.selectRetaModel(selectParams);
+    expect(mainDo.selectRetaModel).toHaveBeenCalledWith('user-a', selectParams);
+
+    const casParams = {
+      id: 'row-1',
+      expectedKekVersion: 'v1',
+      wrappedDek: 'w2',
+      wrapIv: 'wi2',
+      kekVersion: 'v2',
+    };
+    await facade.rewrapRetaByokCredential('openai', casParams);
+    expect(mainDo.rewrapRetaByokCredential).toHaveBeenCalledWith('user-a', 'openai', casParams);
   });
 
   it("two façades never cross: A's calls carry user-a, B's carry user-b", async () => {

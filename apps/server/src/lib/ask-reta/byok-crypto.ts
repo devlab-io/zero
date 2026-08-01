@@ -34,9 +34,54 @@ export type ByokAad = {
   credentialId: string;
 };
 
-/** Current KEK version — envelopes wrapped under another version fail closed
- * until rewrapped (rewrapEnvelope) under this one. */
+/** Initial KEK version label — the ring's default active version. */
 export const RETA_BYOK_KEK_VERSION = 'v1';
+
+/**
+ * Deployment-owned KEK ring (operational rotation, release-fix 3A).
+ * Secrets: RETA_BYOK_KEK_V1 / RETA_BYOK_KEK_V2 (each base64url, exactly
+ * 32 bytes) + RETA_BYOK_KEK_ACTIVE naming the version NEW envelopes are
+ * wrapped under (default 'v1' for compatibility). The runtime can OPEN any
+ * version present in the ring and lazily rewraps rows to the active one
+ * (see runbook docs/runbooks/reta-byok-kek-rotation.md). A ring whose active
+ * version has no secret is a misconfiguration → null → vault fails closed
+ * (Workers models unaffected).
+ */
+export type KekRingSecrets = {
+  RETA_BYOK_KEK_V1?: string;
+  RETA_BYOK_KEK_V2?: string;
+  RETA_BYOK_KEK_ACTIVE?: string;
+};
+
+export type KekRing = {
+  activeVersion: string;
+  /** Decoded keys by version — caller MUST zeroizeKekRing() when done. */
+  keys: Map<string, Uint8Array>;
+};
+
+export function decodeKekRing(secrets: KekRingSecrets): KekRing | null {
+  const keys = new Map<string, Uint8Array>();
+  try {
+    if (secrets.RETA_BYOK_KEK_V1) keys.set('v1', decodeKek(secrets.RETA_BYOK_KEK_V1));
+    if (secrets.RETA_BYOK_KEK_V2) keys.set('v2', decodeKek(secrets.RETA_BYOK_KEK_V2));
+  } catch {
+    // A malformed secret poisons the whole ring: fail closed, zeroize what
+    // was already decoded.
+    for (const key of keys.values()) zeroize(key);
+    return null;
+  }
+  if (keys.size === 0) return null;
+  const activeVersion = secrets.RETA_BYOK_KEK_ACTIVE || RETA_BYOK_KEK_VERSION;
+  if (!keys.has(activeVersion)) {
+    for (const key of keys.values()) zeroize(key);
+    return null;
+  }
+  return { activeVersion, keys };
+}
+
+export function zeroizeKekRing(ring: KekRing): void {
+  for (const key of ring.keys.values()) zeroize(key);
+}
 
 const FORMAT_VERSION = 1;
 const PAYLOAD_BYTES = 8192;

@@ -209,6 +209,20 @@ types). **Jamais** le transport websocket legacy.
     modèle. Déchiffrement en scope minimal, buffers zéroïsés en finally
     (best-effort). Anthropic « where legally configured » : clé API Console
     uniquement, jamais de détournement d'abonnement consommateur.
+  - **Release-fix 3A (2026-08-01)** : (1) porte de CONSENTEMENT versionnée —
+    `configured`, `selectModel` et `buildByokModel` exigent la version de
+    consentement COURANTE avant tout déchiffrement/egress ; un consentement
+    ancien = non configuré, re-consentement obligatoire. (2) Éligibilité +
+    sélection dans UNE transaction ZeroDB (`lib/ask-reta/vault-transactions.ts`,
+    verrous ligne credential PUIS settings, ordre identique côté delete) —
+    aucun interleaving select/delete ne peut laisser une sélection orpheline
+    (testé en concurrence réelle sur le cœur transactionnel). (3) Rotation KEK
+    OPÉRATIONNELLE : key-ring deployment-owned (`RETA_BYOK_KEK_V1`/`V2` +
+    `RETA_BYOK_KEK_ACTIVE`, défaut v1), nouvelles enveloppes wrappées sous la
+    version active, lazy TRUE-rewrap des lignes anciennes persisté par CAS
+    (ciphertext+iv intacts, clé jamais déchiffrée, CAS perdu → reload,
+    idempotent) — runbook `docs/runbooks/reta-byok-kek-rotation.md`. Corps
+    d'erreur HTTP provider annulé sans lecture.
 
 ### Sécurité (contrôles v1 obligatoires, tous testés)
 

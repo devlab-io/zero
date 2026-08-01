@@ -79,12 +79,17 @@ export type ZeroEnv = {
   /** Devlab: opt-in Dub attribution analytics — absent in self-host */
   DUB_API_KEY?: string;
   /**
-   * Ask Reta BYOK vault KEK v1 (slice 3A): Worker secret, base64url of
-   * EXACTLY 32 bytes. OPTIONAL — absent means the vault is unavailable
-   * (setCredential/decrypt fail closed with a fixed error); Workers AI
-   * models keep working without it. Never logged, never echoed.
+   * Ask Reta BYOK vault KEK ring (slice 3A + release-fix): Worker secrets,
+   * each base64url of EXACTLY 32 bytes. ALL OPTIONAL — no ring means the
+   * vault is unavailable (fail closed with a fixed error); Workers AI models
+   * keep working without it. RETA_BYOK_KEK_ACTIVE names the version new
+   * envelopes are wrapped under (default 'v1'); rows under another present
+   * version are lazily rewrapped at use (runbook
+   * docs/runbooks/reta-byok-kek-rotation.md). Never logged, never echoed.
    */
   RETA_BYOK_KEK_V1?: string;
+  RETA_BYOK_KEK_V2?: string;
+  RETA_BYOK_KEK_ACTIVE?: string;
   AI_SYSTEM_PROMPT: string;
   PERPLEXITY_API_KEY: string;
   TWILIO_ACCOUNT_SID: string;

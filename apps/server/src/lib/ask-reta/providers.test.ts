@@ -185,10 +185,21 @@ describe('adapter failure discipline — fixed errors, never a retry', () => {
     ).toThrow('workers-ai is not a fetch adapter');
   });
 
-  it('HTTP failure → FIXED RetaProviderError without status/body/url/key, called ONCE', async () => {
-    const { calls, fetchImpl } = capture(
-      new Response(`{"error":"quota exceeded, key ${API_KEY} invalid"}`, { status: 429 }),
-    );
+  it('HTTP failure → FIXED RetaProviderError without status/body/url/key, called ONCE, body CANCELLED unread', async () => {
+    let bodyCancelled = false;
+    const errorBody = new ReadableStream<Uint8Array>({
+      // Never enqueues: if the adapter tried to READ the error body it would
+      // hang forever — completing at all proves the body was not consumed.
+      pull() {},
+      cancel() {
+        bodyCancelled = true;
+      },
+    });
+    const calls: number[] = [];
+    const fetchImpl = vi.fn(async () => {
+      calls.push(1);
+      return new Response(errorBody, { status: 429 });
+    }) as unknown as typeof fetch;
     const failure = await make(fetchImpl)
       .complete(chat)
       .catch((error: unknown) => error);
@@ -196,10 +207,12 @@ describe('adapter failure discipline — fixed errors, never a retry', () => {
     const message = (failure as Error).message;
     expect(message).toBe('Ask Reta provider call failed (moonshot: http)');
     expect(message).not.toContain('429');
-    expect(message).not.toContain('quota');
     expect(message).not.toContain(API_KEY);
     expect(message).not.toContain('moonshot.ai');
     expect(calls).toHaveLength(1);
+    // The error body is RELEASED (cancelled) without ever being buffered —
+    // a read would have hung on the never-enqueueing stream above.
+    expect(bodyCancelled).toBe(true);
   });
 
   it('network failure → fixed error, called ONCE (no retry)', async () => {

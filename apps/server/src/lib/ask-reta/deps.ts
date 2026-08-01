@@ -1,9 +1,21 @@
-import { decodeKek, decryptApiKey, RETA_BYOK_KEK_VERSION, zeroize } from './byok-crypto';
+import {
+  decodeKekRing,
+  decryptApiKey,
+  rewrapEnvelope,
+  zeroize,
+  zeroizeKekRing,
+  type KekRing,
+  type KekRingSecrets,
+} from './byok-crypto';
+import {
+  resolveSelectedEntry,
+  RETA_BYOK_CONSENT_VERSION,
+  type RetaCatalogueEntry,
+} from './catalogue';
 import { getThread, getThreadsFromDB, getZeroAgent, getZeroDB } from '../server-utils';
 import { workersAiModel, type RetaModel, type WorkersAiBinding } from './model';
 import { buildMailboxOverview, getMailboxActivity } from '../mailbox-overview';
 import { createProviderModel, RetaVaultUnavailableError } from './providers';
-import { resolveSelectedEntry, type RetaCatalogueEntry } from './catalogue';
 import type { AskRetaDeps } from './pipeline';
 import type { AskRetaStep } from './schema';
 import { guardWithSignal } from './errors';
@@ -23,61 +35,124 @@ import { env } from '../../env';
  * fails with a FIXED error — never a silent fallback to another model.
  */
 
-type VaultReader = {
-  findRetaByokCredential(provider: string): Promise<
-    | {
-        id: string;
-        ciphertext: string;
-        iv: string;
-        wrappedDek: string;
-        wrapIv: string;
-        kekVersion: string;
-      }
-    | undefined
-  >;
+type VaultCredentialRow = {
+  id: string;
+  ciphertext: string;
+  iv: string;
+  wrappedDek: string;
+  wrapIv: string;
+  kekVersion: string;
+  consentVersion: string;
 };
+
+type VaultReader = {
+  findRetaByokCredential(provider: string): Promise<VaultCredentialRow | undefined>;
+  rewrapRetaByokCredential(
+    provider: string,
+    params: {
+      id: string;
+      expectedKekVersion: string;
+      wrappedDek: string;
+      wrapIv: string;
+      kekVersion: string;
+    },
+  ): Promise<boolean>;
+};
+
+/**
+ * Lazy operational KEK rotation: a row wrapped under a NON-active (but
+ * present) ring version is TRUE-rewrapped to the active one and persisted
+ * via CAS (WHERE id/user/provider/oldVersion — ciphertext+iv untouched). A
+ * lost CAS means another isolate already rotated: reload and continue.
+ * Idempotent and concurrency-safe; a row under a version ABSENT from the
+ * ring fails closed.
+ */
+async function rotateRowToActiveKek(params: {
+  vault: VaultReader;
+  ring: KekRing;
+  userId: string;
+  provider: string;
+  row: VaultCredentialRow;
+}): Promise<VaultCredentialRow> {
+  const { vault, ring, userId, provider, row } = params;
+  if (row.kekVersion === ring.activeVersion) return row;
+  const oldKek = ring.keys.get(row.kekVersion);
+  if (!oldKek) throw new RetaVaultUnavailableError();
+  const rotated = await rewrapEnvelope({
+    envelope: row,
+    oldKek,
+    newKek: ring.keys.get(ring.activeVersion)!,
+    newKekVersion: ring.activeVersion,
+    aad: { userId, provider, credentialId: row.id },
+  });
+  const persisted = await vault.rewrapRetaByokCredential(provider, {
+    id: row.id,
+    expectedKekVersion: row.kekVersion,
+    wrappedDek: rotated.wrappedDek,
+    wrapIv: rotated.wrapIv,
+    kekVersion: rotated.kekVersion,
+  });
+  if (persisted) {
+    return {
+      ...row,
+      wrappedDek: rotated.wrappedDek,
+      wrapIv: rotated.wrapIv,
+      kekVersion: rotated.kekVersion,
+    };
+  }
+  // CAS lost: a concurrent request rotated first — its persisted row wins.
+  const reloaded = await vault.findRetaByokCredential(provider);
+  if (!reloaded) throw new RetaVaultUnavailableError();
+  return reloaded;
+}
 
 export async function buildByokModel(params: {
   vault: VaultReader;
   userId: string;
   entry: RetaCatalogueEntry;
-  kekSecret: string | undefined;
+  kekSecrets: KekRingSecrets;
   fetchImpl?: typeof fetch;
 }): Promise<RetaModel> {
-  const { vault, userId, entry, kekSecret } = params;
-  if (!kekSecret) throw new RetaVaultUnavailableError();
-  const row = await vault.findRetaByokCredential(entry.provider);
-  if (!row) throw new RetaVaultUnavailableError();
-  // Version pinning: an envelope wrapped under a retired KEK fails closed
-  // until a rewrap migration re-wraps it — never a guessing loop over KEKs.
-  if (row.kekVersion !== RETA_BYOK_KEK_VERSION) throw new RetaVaultUnavailableError();
+  const { vault, userId, entry } = params;
+  const ring = decodeKekRing(params.kekSecrets);
+  if (!ring) throw new RetaVaultUnavailableError();
+  try {
+    let row = await vault.findRetaByokCredential(entry.provider);
+    if (!row) throw new RetaVaultUnavailableError();
+    // CONSENT GATE — before any decrypt and any egress: a credential stored
+    // under an older consent version is not usable until re-consent.
+    if (row.consentVersion !== RETA_BYOK_CONSENT_VERSION) {
+      throw new RetaVaultUnavailableError();
+    }
+    row = await rotateRowToActiveKek({ vault, ring, userId, provider: entry.provider, row });
+    if (row.consentVersion !== RETA_BYOK_CONSENT_VERSION) {
+      throw new RetaVaultUnavailableError();
+    }
+    const kek = ring.keys.get(row.kekVersion);
+    if (!kek) throw new RetaVaultUnavailableError();
 
-  let kek: Uint8Array;
-  try {
-    kek = decodeKek(kekSecret);
-  } catch {
-    throw new RetaVaultUnavailableError();
-  }
-  let keyBytes: Uint8Array | null = null;
-  try {
-    keyBytes = await decryptApiKey({
-      envelope: row,
-      kek,
-      aad: { userId, provider: entry.provider, credentialId: row.id },
-    });
-    // The decoded string lives only in the adapter closure for this request;
-    // the buffers are zeroized below (best-effort — JS strings cannot be).
-    const apiKey = new TextDecoder().decode(keyBytes);
-    // The adapter resolves the catalogue ITSELF from the internal id — no
-    // entry object crosses this boundary (nothing injectable).
-    return createProviderModel({ modelId: entry.id, apiKey, fetchImpl: params.fetchImpl });
-  } catch (error) {
-    if (error instanceof RetaVaultUnavailableError) throw error;
-    // Tampered/misbound envelope: fail closed, no crypto detail leaves here.
-    throw new RetaVaultUnavailableError();
+    let keyBytes: Uint8Array | null = null;
+    try {
+      keyBytes = await decryptApiKey({
+        envelope: row,
+        kek,
+        aad: { userId, provider: entry.provider, credentialId: row.id },
+      });
+      // The decoded string lives only in the adapter closure for this request;
+      // the buffers are zeroized below (best-effort — JS strings cannot be).
+      const apiKey = new TextDecoder().decode(keyBytes);
+      // The adapter resolves the catalogue ITSELF from the internal id — no
+      // entry object crosses this boundary (nothing injectable).
+      return createProviderModel({ modelId: entry.id, apiKey, fetchImpl: params.fetchImpl });
+    } catch (error) {
+      if (error instanceof RetaVaultUnavailableError) throw error;
+      // Tampered/misbound envelope: fail closed, no crypto detail leaves here.
+      throw new RetaVaultUnavailableError();
+    } finally {
+      if (keyBytes) zeroize(keyBytes);
+    }
   } finally {
-    if (keyBytes) zeroize(keyBytes);
-    zeroize(kek);
+    zeroizeKekRing(ring);
   }
 }
 
@@ -104,7 +179,16 @@ export async function createAskRetaDeps(params: {
           key: entry.id,
           upstreamModel: entry.upstreamModel,
         })
-      : await buildByokModel({ vault: db, userId, entry, kekSecret: env.RETA_BYOK_KEK_V1 });
+      : await buildByokModel({
+          vault: db,
+          userId,
+          entry,
+          kekSecrets: {
+            RETA_BYOK_KEK_V1: env.RETA_BYOK_KEK_V1,
+            RETA_BYOK_KEK_V2: env.RETA_BYOK_KEK_V2,
+            RETA_BYOK_KEK_ACTIVE: env.RETA_BYOK_KEK_ACTIVE,
+          },
+        });
 
   // DO RPC calls have NO abort contract: a dispatched RPC may complete on its
   // shard regardless. Cooperative discipline only — never dispatch after
