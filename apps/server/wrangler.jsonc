@@ -2,7 +2,9 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "zero-server",
   "compatibility_date": "2025-05-01",
-  "compatibility_flags": ["nodejs_compat"],
+  // enable_request_signal: Request.signal fires on client disconnect (CF docs) —
+  // required for the REAL preemptive cancel of the Ask Reta stream (slice 2 review).
+  "compatibility_flags": ["nodejs_compat", "enable_request_signal"],
   "main": "src/main.ts",
   "env": {
     "local": {

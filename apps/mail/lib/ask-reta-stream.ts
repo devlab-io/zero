@@ -55,7 +55,9 @@ export async function streamAskReta(params: {
     const response = await doFetch(`${base}/api/ask-reta`, {
       method: 'POST',
       credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
+      // The CSRF header forces a CORS preflight and is REQUIRED by the route
+      // (exact-origin allowlist + explicit header, slice-2 review).
+      headers: { 'Content-Type': 'application/json', 'X-Ask-Reta-Csrf': '1' },
       body: JSON.stringify(params.input),
       signal: params.signal,
     });

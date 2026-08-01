@@ -17,23 +17,28 @@ const input = { question: 'q', history: [], context: {} };
 describe('streamAskReta — NDJSON consumer', () => {
   it('delivers steps progressively then resolves with the final result', async () => {
     const steps: unknown[] = [];
+    const fetchImpl = vi.fn(async () =>
+      ndjsonResponse([
+        JSON.stringify({ type: 'step', step: { kind: 'search', detail: 'd1', sourceRefs: [] } }),
+        JSON.stringify({
+          type: 'result',
+          result: { answer: 'A', citations: [], steps: [], model: 'llama-4-scout' },
+        }),
+      ]),
+    );
     const result = await streamAskReta({
       input,
       signal: new AbortController().signal,
       onStep: (step) => steps.push(step),
       backendUrl: 'http://backend.test',
-      fetchImpl: vi.fn(async () =>
-        ndjsonResponse([
-          JSON.stringify({ type: 'step', step: { kind: 'search', detail: 'd1', sourceRefs: [] } }),
-          JSON.stringify({
-            type: 'result',
-            result: { answer: 'A', citations: [], steps: [], model: 'llama-4-scout' },
-          }),
-        ]),
-      ),
+      fetchImpl,
     });
     expect(steps).toHaveLength(1);
     expect(result.model).toBe('llama-4-scout');
+    // CSRF header + credentials: the route's origin gate depends on both.
+    const [, init] = fetchImpl.mock.calls[0]! as unknown as [string, RequestInit];
+    expect((init.headers as Record<string, string>)['X-Ask-Reta-Csrf']).toBe('1');
+    expect(init.credentials).toBe('include');
   });
 
   it('maps a fetch AbortError to AskRetaStreamError(aborted)', async () => {

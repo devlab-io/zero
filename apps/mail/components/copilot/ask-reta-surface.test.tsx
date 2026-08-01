@@ -300,6 +300,55 @@ describe('AskRetaSurface — hydration gate', () => {
   });
 });
 
+describe('AskRetaSurface — review hardening', () => {
+  it('ZERO paint before hydration: a stale atom is never rendered', () => {
+    // Hydration cannot complete (no connection) while the atom still holds
+    // another scope's turns — the gate must render an EMPTY conversation.
+    harness.connectionId = undefined;
+    getDefaultStore().set(askRetaConversationAtom, [
+      { id: 'stale', role: 'assistant', content: 'tour périmé du scope A' },
+    ]);
+    render();
+    expect(container.textContent).not.toContain('tour périmé du scope A');
+    expect(container.textContent).toContain('askReta.empty');
+  });
+
+  it('clear during a SLOW stream aborts first: no late turn, streaming state reset', async () => {
+    let resolveRun!: (value: unknown) => void;
+    let capturedSignal: AbortSignal | null = null;
+    harness.streamAskReta.mockImplementationOnce(
+      ({ signal }: { signal: AbortSignal }) =>
+        new Promise((resolve) => {
+          capturedSignal = signal;
+          resolveRun = resolve;
+        }),
+    );
+    render();
+    await askQuestion('question lente');
+
+    const clearButton = [...container.querySelectorAll('button')].find(
+      (b) => b.getAttribute('aria-label') === 'common.askReta.clear',
+    )!;
+    await act(async () => {
+      clearButton.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    // Abort fired BEFORE the state clear; the Stop button is gone.
+    expect((capturedSignal as AbortSignal | null)?.aborted).toBe(true);
+    expect(
+      [...container.querySelectorAll('button')].some((b) =>
+        b.textContent?.includes('askReta.stop'),
+      ),
+    ).toBe(false);
+
+    // The slow stream settles LATE: nothing lands, storage stays empty.
+    await act(async () => {
+      resolveRun(baseResult('réponse tardive'));
+    });
+    expect(container.textContent).not.toContain('réponse tardive');
+    expect(localStorage.getItem(askRetaConversationKey('user-1', 'conn-a'))).toBeNull();
+  });
+});
+
 describe('AskRetaSurface — persistence A→B→A (slice 2)', () => {
   it('restores per-scope conversations and never leaks turns across scopes', async () => {
     const setItemSpy = vi.spyOn(Storage.prototype, 'setItem');

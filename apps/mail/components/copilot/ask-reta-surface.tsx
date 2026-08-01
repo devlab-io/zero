@@ -120,6 +120,12 @@ export function AskRetaSurface() {
   const [hydratedScopeKey, setHydratedScopeKey] = useState<string | null>(null);
   const isHydrated =
     !!userId && !!connectionId && hydratedScopeKey === scopeKeyOf({ userId, connectionId });
+  // ZERO paint of a stale scope: until hydration lands, the panel renders an
+  // empty conversation — A's turns are never visible on B, not even one frame.
+  const visibleConversation = isHydrated ? conversation : [];
+  // Compact aria-live announcement (polite/atomic): thinking → latest step →
+  // answer ready / error. Screen readers follow the ask without spam.
+  const [announcement, setAnnouncement] = useState('');
 
   const loadedScopeRef = useRef<ConversationScope | null>(null);
   const conversationScopeRef = useRef<ConversationScope | null>(null);
@@ -201,6 +207,7 @@ export function AskRetaSurface() {
     abortRef.current = controller;
     setIsAsking(true);
     setLiveSteps([]);
+    setAnnouncement(m['common.askReta.thinking']());
 
     try {
       const result = await streamAskReta({
@@ -216,6 +223,7 @@ export function AskRetaSurface() {
         onStep: (step) => {
           if (!isCurrentRun()) return;
           setLiveSteps((prev) => [...prev, { ...step, id: crypto.randomUUID() }]);
+          setAnnouncement(step.detail);
         },
       });
       if (!isCurrentRun()) return;
@@ -233,6 +241,7 @@ export function AskRetaSurface() {
           },
         } satisfies AskRetaTurn,
       ]);
+      setAnnouncement(m['common.askReta.answerReady']());
       requestAnimationFrame(() => {
         scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
       });
@@ -240,9 +249,11 @@ export function AskRetaSurface() {
       if (!isCurrentRun()) return; // stale run: no toast, no turn, no state
       if (error instanceof AskRetaStreamError && error.reason === 'aborted') {
         toast(m['common.askReta.cancelled']());
+        setAnnouncement(m['common.askReta.cancelled']());
       } else {
         log.error('Ask Reta failed', error);
         toast.error(m['common.askReta.error']());
+        setAnnouncement(m['common.askReta.error']());
         setConversation((prev) => [
           ...prev,
           { id: crypto.randomUUID(), role: 'assistant', content: m['common.askReta.error']() },
@@ -265,11 +276,30 @@ export function AskRetaSurface() {
     query: string,
     folder: string | undefined,
   ) => {
+    // Server contract: canonical folder enum only. A step folder always comes
+    // from that enum; anything else (tampered storage) is dropped, not sent.
+    const CANONICAL_FOLDERS = [
+      'inbox',
+      'sent',
+      'archive',
+      'spam',
+      'trash',
+      'bin',
+      'draft',
+      'snoozed',
+    ] as const;
+    type CanonicalFolder = (typeof CANONICAL_FOLDERS)[number];
+    const canonicalFolder = CANONICAL_FOLDERS.includes(folder as CanonicalFolder)
+      ? (folder as CanonicalFolder)
+      : undefined;
     try {
       const preview = await queryClient.fetchQuery(
         // The step's folder scope is PRESERVED: replaying a Sent-scoped search
         // must not silently widen to the whole mailbox.
-        trpc.copilot.searchPreview.queryOptions({ query, ...(folder ? { folder } : {}) }),
+        trpc.copilot.searchPreview.queryOptions({
+          query,
+          ...(canonicalFolder ? { folder: canonicalFolder } : {}),
+        }),
       );
       setConversation((prev) =>
         prev.map((turn) => {
@@ -468,6 +498,14 @@ export function AskRetaSurface() {
             size="icon"
             aria-label={m['common.askReta.clear']()}
             onClick={() => {
+              // Order matters (slice-2 review): kill the in-flight run FIRST —
+              // abort + invalidate the controller + reset streaming state — so
+              // a slow stream can never land a turn into the cleared state.
+              abortRef.current?.abort();
+              abortRef.current = null;
+              setIsAsking(false);
+              setLiveSteps([]);
+              setAnnouncement('');
               setConversation([]);
               // Effective clear: the device-local store is removed, not just the atom.
               if (userId && connectionId) clearAskRetaConversation(userId, connectionId);
@@ -479,13 +517,18 @@ export function AskRetaSurface() {
         </div>
       </div>
 
+      {/* Compact live region: thinking → latest step → answer ready. */}
+      <p aria-live="polite" aria-atomic="true" className="sr-only">
+        {announcement}
+      </p>
+
       <div ref={scrollRef} className="flex-1 space-y-4 overflow-y-auto p-4">
-        {conversation.length === 0 && (
+        {visibleConversation.length === 0 && (
           <p className="text-muted-foreground pt-8 text-center text-sm">
             {m['common.askReta.empty']()}
           </p>
         )}
-        {conversation.map((turn) => (
+        {visibleConversation.map((turn) => (
           <div key={turn.id} className={turn.role === 'user' ? 'flex justify-end' : ''}>
             <div
               className={

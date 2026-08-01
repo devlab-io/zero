@@ -120,6 +120,24 @@ describe('ask-reta conversation storage — strict versioned projection', () => 
     expect(backToA[0]?.content).toBe('secret de A');
   });
 
+  it('rejects a FUTURE savedAt beyond the short clock tolerance', () => {
+    const key = askRetaConversationKey('u1', 'c1');
+    saveAskRetaConversation('u1', 'c1', [turn('t1')]);
+    const stored = JSON.parse(localStorage.getItem(key)!) as { savedAt: number };
+    // A forged future stamp would defeat the TTL forever.
+    stored.savedAt = Date.now() + 10 * 60 * 1000;
+    localStorage.setItem(key, JSON.stringify(stored));
+    expect(loadAskRetaConversation('u1', 'c1')).toEqual([]);
+    expect(localStorage.getItem(key)).toBeNull();
+
+    // A small skew (clock drift) stays tolerated.
+    saveAskRetaConversation('u1', 'c1', [turn('t1')]);
+    const slight = JSON.parse(localStorage.getItem(key)!) as { savedAt: number };
+    slight.savedAt = Date.now() + 60 * 1000;
+    localStorage.setItem(key, JSON.stringify(slight));
+    expect(loadAskRetaConversation('u1', 'c1')).toHaveLength(1);
+  });
+
   it('enforces TTL, cap and effective clear', () => {
     const key = askRetaConversationKey('u1', 'c1');
     // TTL

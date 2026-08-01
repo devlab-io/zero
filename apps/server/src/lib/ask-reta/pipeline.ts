@@ -288,7 +288,8 @@ const readOneThread = async (
     thread = await withBudget(budget, () => deps.readThread(threadId));
   } catch (error) {
     if (error instanceof AskRetaAbortedError) throw error;
-    logger.warn('[ask-reta] readThread failed', { threadId });
+    // Never the raw thread id in logs — its length is enough to correlate.
+    logger.warn('[ask-reta] readThread failed', { threadIdLength: threadId.length });
     return { refs: [], found: false };
   }
   checkBudget(budget);

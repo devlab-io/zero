@@ -5,6 +5,7 @@ import {
 import { preloadAskRetaSurface } from '@/components/copilot/ask-reta-button';
 import { preloadComposeSurface } from '@/components/create/compose-surface';
 import { useOptimisticActions } from '@/hooks/use-optimistic-actions';
+import { shouldOpenAskRetaFromHotkey } from './ask-reta-hotkey-guard';
 import { useSidebar } from '@/components/context/sidebar-context';
 import { enhancedKeyboardShortcuts } from '@/config/shortcuts';
 import { GLOBAL_HANDLED_ACTIONS } from './handler-manifest';
@@ -33,12 +34,15 @@ export function GlobalHotkeys() {
     },
     // Shortwave parity: Y = ask about the current thread (the panel reads the
     // open-thread context from the URL), Mod+J = open Ask Reta. Same
-    // warm-at-keydown pattern as compose.
+    // warm-at-keydown pattern as compose. Y is guarded by the binder (single
+    // key); Mod+J is a chord the binder keeps live in dialogs, so it applies
+    // its own guard — never over an input, a dialog, or the open palette.
     askRetaThread: () => {
       preloadAskRetaSurface();
       setAskRetaOpen('true');
     },
     askRetaOpen: () => {
+      if (!shouldOpenAskRetaFromHotkey(document.activeElement)) return;
       preloadAskRetaSurface();
       setAskRetaOpen('true');
     },

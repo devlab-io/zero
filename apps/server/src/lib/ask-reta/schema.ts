@@ -64,6 +64,22 @@ export const askRetaInputSchema = z.object({
 
 export type AskRetaInput = z.infer<typeof askRetaInputSchema>;
 
+/**
+ * Canonical folder vocabulary (slice-2 review): the only folder values the
+ * planner or the replay may use — free strings never reach the search layer
+ * (and never the logs).
+ */
+export const askRetaFolderSchema = z.enum([
+  'inbox',
+  'sent',
+  'archive',
+  'spam',
+  'trash',
+  'bin',
+  'draft',
+  'snoozed',
+]);
+
 /** Model output 1 — the retrieval plan. Read-only actions ONLY, by construction. */
 export const askRetaPlanSchema = z.object({
   actions: z
@@ -73,7 +89,7 @@ export const askRetaPlanSchema = z.object({
         z.object({
           type: z.literal('search'),
           query: z.string().trim().min(1).max(300),
-          folder: z.string().trim().max(40).optional(),
+          folder: askRetaFolderSchema.optional(),
         }),
         z.object({
           type: z.literal('read_thread'),

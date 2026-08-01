@@ -91,6 +91,7 @@
       "empty": "Posez n'importe quelle question sur votre boîte — Reta répond avec des sources.",
       "stop": "Arrêter",
       "cancelled": "Requête annulée",
+      "answerReady": "Réponse reçue",
       "replay": "Rejouer",
       "searchQueryLabel": "Requête de recherche",
       "threadsFound": "fils trouvés"

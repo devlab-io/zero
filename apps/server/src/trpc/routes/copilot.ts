@@ -1,4 +1,5 @@
 import {
+  askRetaFolderSchema,
   askRetaInputSchema,
   askRetaLimits,
   type AskRetaResult,
@@ -60,10 +61,19 @@ export const copilotRouter = router({
    * query replay in the panel's step display.
    */
   searchPreview: activeDriverProcedure
+    .use(
+      createRateLimiterMiddleware({
+        limiter: Ratelimit.slidingWindow(60, '5m'),
+        generatePrefix: () => 'ratelimit:copilot-search-preview',
+        // Same posture as ask: strict userId key, fail-closed in production.
+        key: 'userId',
+        failClosed: true,
+      }),
+    )
     .input(
       z.object({
         query: z.string().trim().min(1).max(300),
-        folder: z.string().trim().max(40).optional(),
+        folder: askRetaFolderSchema.optional(),
       }),
     )
     .query(async ({ ctx, input }): Promise<{ threads: AskRetaStepThread[] }> => {

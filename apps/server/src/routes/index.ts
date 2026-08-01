@@ -252,7 +252,10 @@ export const app = new Hono<HonoContext>()
         return null;
       },
       credentials: true,
-      allowHeaders: ['Content-Type', 'Authorization'],
+      // X-Ask-Reta-Csrf: custom header of the Ask Reta stream — forces a CORS
+      // preflight and is verified by the route (exact-origin allowlist there;
+      // this domain-suffix CORS deliberately stays broader for legacy routes).
+      allowHeaders: ['Content-Type', 'Authorization', 'X-Ask-Reta-Csrf'],
       exposeHeaders: ['X-Zero-Redirect'],
     }),
   )

@@ -91,6 +91,7 @@
       "empty": "Ask anything about your mailbox — Reta answers with sources.",
       "stop": "Stop",
       "cancelled": "Request cancelled",
+      "answerReady": "Answer received",
       "replay": "Replay",
       "searchQueryLabel": "Search query",
       "threadsFound": "threads found"

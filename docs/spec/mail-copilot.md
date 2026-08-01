@@ -216,9 +216,19 @@ r9 ; tests serveur + client.
   derrière le middleware session de l'app `api`, connexion active résolue
   serveur — jamais le websocket legacy). Une ligne JSON par événement
   (`step`/`result`/`error`), deps partagées avec `copilot.ask`
-  (`lib/ask-reta/deps.ts`), mêmes rate limits fail-closed. **Cancel
-  préemptif** : abort fetch client → signal requête → race du pipeline. La
-  réponse finale reste extractive/déterministe — aucune prose modèle. Le
+  (`lib/ask-reta/deps.ts`), mêmes rate limits fail-closed (y compris
+  `searchPreview`). **Cancel préemptif RÉEL** (revue 02) : flag wrangler
+  `enable_request_signal`, AbortController local nourri par le signal
+  requête + `writer.closed` (cancel lecteur sans écriture ultérieure) +
+  deadline dure 60 s ; ressources fermées, signal passé au pipeline. **Gate
+  CSRF/origin AVANT le body** : allowlist d'origine EXACTE
+  (`VITE_PUBLIC_APP_URL`) + header `X-Ask-Reta-Csrf` — le CORS racine accepte
+  tout sous-domaine du COOKIE_DOMAIN, le sibling worker cookie-partagé meurt
+  ici en 403. Événements validés Zod au runtime (terminaux compris), tronqués
+  aux bornes du schéma et plafonnés en octets AVANT enqueue ; écritures via
+  writer TransformStream (backpressure honorée). Jamais de
+  threadId/folder brut en logs (longueur seule ; folder = enum canonique).
+  La réponse finale reste extractive/déterministe — aucune prose modèle. Le
   consumer borne buffer et flux (262 k/1 M chars) et mappe AbortError.
 - **Raccourcis parité Shortwave** : `Y` (Ask Reta, contexte fil courant) et
   `Mod+J` (ouverture globale) — registre shortcuts + manifest + parité
@@ -233,10 +243,17 @@ r9 ; tests serveur + client.
   7 j, clear effectif. **Projection versionnée stricte** : proposal (HTML de
   brouillon) JAMAIS persisté — aucune action draft ne réapparaît au reload ;
   validation profonde + bornes au load (store falsifié/oversize jeté).
+  `savedAt` futur rejeté au-delà d'une tolérance d'horloge courte (5 min).
   Barrière d'hydratation : saves ET submits désactivés jusqu'à observation
-  du contenu hydraté ; flush de l'ancien scope avant bascule ; abort du
-  stream en vol ; garde de run (writes tardifs d'un ancien scope = no-op) —
-  A→B→A prouvé sans fuite au commit près.
+  du contenu hydraté, et **zéro paint** d'un scope périmé
+  (`visibleConversation` vide tant que non hydraté) ; flush de l'ancien
+  scope avant bascule ; abort du stream en vol ; garde de run (writes
+  tardifs d'un ancien scope = no-op) ; **clear abort-first** (contrôleur
+  invalidé, état streaming remis à zéro AVANT la purge atom/store) — A→B→A
+  prouvé sans fuite au commit près. `Mod+J` gardé contre inputs/dialogs/
+  palette (le binder laisse les chords vivants — garde dédiée testée sur
+  vrai DOM) ; région `aria-live polite/atomic` compacte (réflexion →
+  dernière étape → réponse reçue).
 
 **Tranche 2bis (restant)** : contexte brouillon systématique (seam composeur
 dédié pour un draft ouvert non persisté), compteurs d'usage, mobile.

@@ -22,6 +22,9 @@ export const ASK_RETA_CONVERSATION_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 const STORAGE_VERSION = 2 as const;
 const MAX_RAW_CHARS = 200_000;
 const MAX_CONTENT_CHARS = 6_000;
+// A savedAt in the future is tampering or a broken clock — tolerate only a
+// short skew, then discard (a forged future stamp would defeat the TTL).
+const MAX_CLOCK_SKEW_MS = 5 * 60 * 1000;
 
 export const askRetaConversationKey = (userId: string, connectionId: string) =>
   `${KEY_PREFIX}${userId}:${connectionId}`;
@@ -140,7 +143,8 @@ export function loadAskRetaConversation(userId: string, connectionId: string): A
       store.removeItem(key);
       return [];
     }
-    if (Date.now() - parsed.data.savedAt > ASK_RETA_CONVERSATION_RETENTION_MS) {
+    const age = Date.now() - parsed.data.savedAt;
+    if (age > ASK_RETA_CONVERSATION_RETENTION_MS || age < -MAX_CLOCK_SKEW_MS) {
       store.removeItem(key);
       return [];
     }

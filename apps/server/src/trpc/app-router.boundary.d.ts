@@ -208,7 +208,7 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
         searchPreview: import("@trpc/server").TRPCQueryProcedure<{
             input: {
                 query: string;
-                folder?: string | undefined;
+                folder?: "draft" | "inbox" | "sent" | "archive" | "spam" | "trash" | "bin" | "snoozed" | undefined;
             };
             output: {
                 threads: import("../lib/ask-reta/schema").AskRetaStepThread[];
@@ -1314,7 +1314,7 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
                 error: null;
                 sendAt: null;
             } | {
-                status: "queued" | "sending" | "sent" | "cancelled" | "failed";
+                status: "sent" | "queued" | "sending" | "cancelled" | "failed";
                 error: string | null;
                 sendAt: number | null;
             };
@@ -1322,11 +1322,11 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
         }>;
         listSendJobs: import("@trpc/server").TRPCQueryProcedure<{
             input: {
-                statuses?: ("queued" | "sending" | "sent" | "cancelled" | "failed")[] | undefined;
+                statuses?: ("sent" | "queued" | "sending" | "cancelled" | "failed")[] | undefined;
             } | undefined;
             output: {
                 id: string;
-                status: "queued" | "sending" | "sent" | "cancelled" | "failed";
+                status: "sent" | "queued" | "sending" | "cancelled" | "failed";
                 error: string | null;
                 subject: string | null;
                 to: string[];
@@ -1371,7 +1371,7 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
                 error?: undefined;
             } | {
                 readonly success: false;
-                readonly error: "Too late to cancel (status: queued)" | "Too late to cancel (status: sending)" | "Too late to cancel (status: sent)" | "Too late to cancel (status: cancelled)" | "Too late to cancel (status: failed)";
+                readonly error: "Too late to cancel (status: sent)" | "Too late to cancel (status: queued)" | "Too late to cancel (status: sending)" | "Too late to cancel (status: cancelled)" | "Too late to cancel (status: failed)";
             } | {
                 readonly success: false;
                 readonly error: "Unauthorized: Cannot cancel another user's scheduled email";
@@ -1676,7 +1676,7 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
     }, import("@trpc/server").TRPCDecorateCreateRouterOptions<{
         list: import("@trpc/server").TRPCQueryProcedure<{
             input: {
-                status?: "queued" | "generating" | "draft_ready" | "approved" | "sending" | "sent" | "cancelled" | "failed" | undefined;
+                status?: "sent" | "queued" | "generating" | "draft_ready" | "approved" | "sending" | "cancelled" | "failed" | undefined;
             } | undefined;
             output: import("../lib/draft-outbox").DraftOutboxItem[];
             meta: object;
