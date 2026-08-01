@@ -113,6 +113,7 @@ describe('MCP OAuth explicit consent boundary', () => {
 
   it('allows the first explicit decision and blocks a double activation', () => {
     let submit: ((event: Record<string, unknown>) => void) | undefined;
+    let scheduledSubmit: (() => void) | undefined;
     const buttons = [
       { attributes: {} as Record<string, string> },
       { attributes: {} as Record<string, string> },
@@ -134,7 +135,12 @@ describe('MCP OAuth explicit consent boundary', () => {
     const document = {
       querySelector: (selector: string) => (selector === 'form' ? form : decision),
     };
-    runInNewContext(MCP_CONSENT_SUBMISSION_SCRIPT, { document });
+    runInNewContext(MCP_CONSENT_SUBMISSION_SCRIPT, {
+      document,
+      setTimeout: (callback: () => void) => {
+        scheduledSubmit = callback;
+      },
+    });
 
     const first = {
       submitter: { dataset: { decision: 'accept' } },
@@ -145,7 +151,7 @@ describe('MCP OAuth explicit consent boundary', () => {
     expect(decision.value).toBe('accept');
     expect(form.dataset.submitting).toBe('true');
     expect(buttons.every((button) => button.attributes['aria-disabled'] === 'true')).toBe(true);
-    expect(form.submit).toHaveBeenCalledOnce();
+    expect(form.submit).not.toHaveBeenCalled();
 
     const duplicate = {
       submitter: { dataset: { decision: 'accept' } },
@@ -153,6 +159,7 @@ describe('MCP OAuth explicit consent boundary', () => {
     };
     submit?.(duplicate);
     expect(duplicate.preventDefault).toHaveBeenCalledOnce();
+    scheduledSubmit?.();
     expect(form.submit).toHaveBeenCalledOnce();
   });
 
