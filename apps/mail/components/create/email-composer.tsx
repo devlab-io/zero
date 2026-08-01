@@ -44,6 +44,7 @@ import { computeArchiveAfterSend } from './send-and-archive';
 import type { ImageQuality } from '@/lib/image-compression';
 import { ComposerDialogs } from './email-composer.dialogs';
 import { ComposerHeader } from './email-composer.fields';
+import { insertQuotedReply } from '@/lib/thread-quote';
 import { TemplateButton } from './template-button';
 import { useHotkeys } from 'react-hotkeys-hook';
 import { useParams } from 'react-router';
@@ -62,6 +63,8 @@ export function EmailComposer({
   autofocus = false,
   settingsLoading = false,
   editorClassName,
+  quoteRequest,
+  onQuoteInserted,
 }: EmailComposerProps) {
   const { data: aliases } = useEmailAliases();
   const { data: settings } = useSettings();
@@ -86,6 +89,7 @@ export function EmailComposer({
   const { optimisticMoveThreadsTo } = useOptimisticActions();
   // Set by the send-and-archive handler; consumed once in proceedWithSend on success.
   const archiveAfterSendRef = useRef(false);
+  const insertedQuoteIdRef = useRef<string | null>(null);
   const [draftId, setDraftId] = useQueryState('draftId');
   const [showLeaveConfirmation, setShowLeaveConfirmation] = useState(false);
   const [scheduleAt, setScheduleAt] = useState<string>();
@@ -199,6 +203,27 @@ export function EmailComposer({
       editor.commands.focus();
     }
   }, [isComposeOpen, editor]);
+
+  useEffect(() => {
+    if (!editor) return;
+    const handleLinkShortcut = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+        setToggleToolbar(true);
+      }
+    };
+    editor.view.dom.addEventListener('keydown', handleLinkShortcut);
+    return () => editor.view.dom.removeEventListener('keydown', handleLinkShortcut);
+  }, [editor]);
+
+  useEffect(() => {
+    if (!editor || !quoteRequest || insertedQuoteIdRef.current === quoteRequest.id) return;
+
+    const inserted = insertQuotedReply(editor, quoteRequest);
+    if (!inserted) return;
+
+    insertedQuoteIdRef.current = quoteRequest.id;
+    onQuoteInserted?.(quoteRequest.id);
+  }, [editor, quoteRequest, onQuoteInserted]);
 
   // Prevent browser navigation/refresh when there's unsaved content
   useEffect(() => {
@@ -578,7 +603,9 @@ export function EmailComposer({
       {/* Bottom Actions */}
       <div className="inline-flex w-full shrink-0 items-end justify-between self-stretch rounded-b-2xl bg-[#FFFFFF] px-3 py-3 outline-white/5 dark:bg-[#202020]">
         <div className="flex flex-col items-start justify-start gap-2">
-          {toggleToolbar && <Toolbar editor={editor} />}
+          <div className={toggleToolbar ? 'block max-w-full' : 'hidden'}>
+            <Toolbar editor={editor} />
+          </div>
           <div className="flex items-center justify-start gap-2">
             <Button
               size={'xs'}
@@ -648,6 +675,8 @@ export function EmailComposer({
                     tabIndex={-1}
                     variant="ghost"
                     size="icon"
+                    aria-label="Formatting options"
+                    aria-expanded={toggleToolbar}
                     onClick={() => setToggleToolbar(!toggleToolbar)}
                     className={`h-auto w-auto rounded p-1.5 ${toggleToolbar ? 'bg-muted' : 'bg-background'} cursor-pointer border transition-colors hover:bg-gray-50 dark:hover:bg-[#404040]`}
                   >

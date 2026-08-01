@@ -4,22 +4,6 @@
 // packages; the few novel-specific helpers (AIHighlight, CustomKeymap, UpdatedImage,
 // UploadImagesPlugin, markdown-style HorizontalRule input rule, the pre-configured
 // Placeholder) are inlined 1:1 from novel@1.0.2 (Apache-2.0) so behavior is unchanged.
-import CharacterCount from '@tiptap/extension-character-count';
-import { Color } from '@tiptap/extension-color';
-import GlobalDragHandle from 'tiptap-extension-global-drag-handle';
-import Highlight from '@tiptap/extension-highlight';
-import TiptapHorizontalRule from '@tiptap/extension-horizontal-rule';
-import TiptapPlaceholder from '@tiptap/extension-placeholder';
-import StarterKit from '@tiptap/starter-kit';
-import { TaskItem } from '@tiptap/extension-task-item';
-import { TaskList } from '@tiptap/extension-task-list';
-import TextStyle from '@tiptap/extension-text-style';
-import TiptapImage from '@tiptap/extension-image';
-import TiptapLink from '@tiptap/extension-link';
-import TiptapUnderline from '@tiptap/extension-underline';
-import { Plugin, PluginKey } from '@tiptap/pm/state';
-import { Decoration, DecorationSet } from '@tiptap/pm/view';
-import { cx } from 'class-variance-authority';
 import {
   Extension,
   InputRule,
@@ -28,6 +12,22 @@ import {
   markPasteRule,
   mergeAttributes,
 } from '@tiptap/core';
+import TiptapHorizontalRule from '@tiptap/extension-horizontal-rule';
+import GlobalDragHandle from 'tiptap-extension-global-drag-handle';
+import CharacterCount from '@tiptap/extension-character-count';
+import TiptapPlaceholder from '@tiptap/extension-placeholder';
+import { Decoration, DecorationSet } from '@tiptap/pm/view';
+import TiptapUnderline from '@tiptap/extension-underline';
+import { TaskList } from '@tiptap/extension-task-list';
+import { TaskItem } from '@tiptap/extension-task-item';
+import TextStyle from '@tiptap/extension-text-style';
+import { Plugin, PluginKey } from '@tiptap/pm/state';
+import Highlight from '@tiptap/extension-highlight';
+import TiptapImage from '@tiptap/extension-image';
+import { Color } from '@tiptap/extension-color';
+import TiptapLink from '@tiptap/extension-link';
+import { cx } from 'class-variance-authority';
+import StarterKit from '@tiptap/starter-kit';
 
 // --- Inlined from novel: AIHighlight mark ---
 const AI_HIGHLIGHT_INPUT_REGEX = /(?:^|\s)((?:==)((?:[^~=]+))(?:==))$/;
@@ -162,9 +162,7 @@ const UploadImagesPlugin = ({ imageClass }: { imageClass: string }) =>
           const deco = Decoration.widget(pos + 1, placeholderEl, { id });
           set = set.add(tr.doc, [deco]);
         } else if (action?.remove) {
-          set = set.remove(
-            set.find(undefined, undefined, (spec) => spec.id == action.remove.id),
-          );
+          set = set.remove(set.find(undefined, undefined, (spec) => spec.id == action.remove.id));
         }
         return set;
       },
@@ -304,7 +302,8 @@ const starterKit = StarterKit.configure({
   },
   blockquote: {
     HTMLAttributes: {
-      class: cx('border-l-2 border-primary'),
+      class: cx('my-3 border-l-2 border-muted-foreground/40 pl-3 text-muted-foreground'),
+      style: 'border-left: 3px solid #d1d5db; margin: 12px 0; padding-left: 12px; color: #4b5563;',
     },
   },
   heading: {

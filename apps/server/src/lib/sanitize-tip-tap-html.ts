@@ -34,8 +34,19 @@ export const sanitizeTipTapHtml = async (
     allowedAttributes: {
       ...sanitizeHtml.defaults.allowedAttributes,
       img: ['src', 'alt', 'width', 'height', 'style'],
+      blockquote: ['style'],
     },
-    allowedSchemes: ['http', 'https', 'cid', 'data'],
+    allowedSchemes: ['http', 'https', 'mailto', 'tel', 'cid', 'data'],
+    transformTags: {
+      blockquote: (_tagName, attribs) => ({
+        tagName: 'blockquote',
+        attribs: {
+          ...attribs,
+          style:
+            'border-left: 3px solid #d1d5db; margin: 12px 0; padding-left: 12px; color: #4b5563;',
+        },
+      }),
+    },
   });
 
   const renderedHtml = await render(

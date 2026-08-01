@@ -1,3 +1,4 @@
+import type { QuotedMessageSelection, ThreadQuoteRequest } from '@/lib/thread-quote';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import type { Attachment, ParsedMessage } from '@/types';
 import MailDisplay from './mail-display';
@@ -28,6 +29,9 @@ interface MessageListProps {
    * thread-display (markThreadStageOnce).
    */
   onContentPainted?: () => void;
+  onQuoteSelection?: (selection: QuotedMessageSelection) => void;
+  quoteRequest?: ThreadQuoteRequest | null;
+  onQuoteInserted?: (id: string) => void;
 }
 
 export const MessageList = ({
@@ -39,6 +43,9 @@ export const MessageList = ({
   activeReplyId,
   isMobile,
   onContentPainted,
+  onQuoteSelection,
+  quoteRequest,
+  onQuoteInserted,
 }: MessageListProps) => (
   <ScrollArea className={cn('flex-1', isMobile ? 'h-[calc(100%-1px)]' : 'h-full')} type="auto">
     <div className="pb-4">
@@ -69,11 +76,16 @@ export const MessageList = ({
               totalEmails={totalReplies}
               threadAttachments={index === 0 ? allThreadAttachments : undefined}
               onContentPainted={isLastMessage ? onContentPainted : undefined}
+              onQuoteSelection={onQuoteSelection}
             />
             {isReplyingToThisMessage && !isLastMessage && (
               <div className="px-4 py-2" id={`reply-composer-${message.id}`}>
                 <Suspense fallback={null}>
-                  <ReplyCompose messageId={message.id} />
+                  <ReplyCompose
+                    messageId={message.id}
+                    quoteRequest={quoteRequest}
+                    onQuoteInserted={onQuoteInserted}
+                  />
                 </Suspense>
               </div>
             )}

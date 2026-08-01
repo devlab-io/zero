@@ -1,3 +1,4 @@
+import type { ThreadQuoteRequest } from '@/lib/thread-quote';
 import type { ParsedMessage } from '@/types';
 import { z } from 'zod';
 
@@ -41,6 +42,8 @@ export interface EmailComposerProps {
   autofocus?: boolean;
   settingsLoading?: boolean;
   editorClassName?: string;
+  quoteRequest?: ThreadQuoteRequest | null;
+  onQuoteInserted?: (id: string) => void;
 }
 
 export type ComposerFormValues = z.infer<typeof schema>;

@@ -11,23 +11,139 @@ import {
   Undo2,
   Redo2,
   TextQuote,
+  Link2,
+  Unlink,
+  RemoveFormatting,
+  Minus,
 } from 'lucide-react';
 
 import { TooltipContent, TooltipProvider, TooltipTrigger, Tooltip } from '../ui/tooltip';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { normalizeComposerLink } from '@/lib/composer-link';
 import { Separator } from '@/components/ui/separator';
+import { Input } from '@/components/ui/input';
 import { Button } from '../ui/button';
 
+import { useCallback, useEffect, useState } from 'react';
 import type { Editor } from '@tiptap/core';
 import { m } from '@/paraglide/messages';
+import { toast } from 'sonner';
+
+function LinkToolbarButton({ editor }: { editor: Editor }) {
+  const [open, setOpen] = useState(false);
+  const [href, setHref] = useState('');
+
+  const openLinkEditor = useCallback(() => {
+    setHref((editor.getAttributes('link').href as string | undefined) ?? '');
+    setOpen(true);
+  }, [editor]);
+
+  useEffect(() => {
+    const dom = editor.view.dom;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+        if (editor.state.selection.empty && !editor.isActive('link')) return;
+        event.preventDefault();
+        openLinkEditor();
+      }
+    };
+    dom.addEventListener('keydown', handleKeyDown);
+    return () => dom.removeEventListener('keydown', handleKeyDown);
+  }, [editor, openLinkEditor]);
+
+  const applyLink = () => {
+    const normalized = normalizeComposerLink(href);
+    if (!normalized) {
+      toast.error('Enter a valid link');
+      return;
+    }
+    editor.chain().focus().extendMarkRange('link').setLink({ href: normalized }).run();
+    setOpen(false);
+  };
+
+  const isActive = editor.isActive('link');
+  const canCreateLink = isActive || !editor.state.selection.empty;
+
+  return (
+    <Popover
+      open={open}
+      onOpenChange={(nextOpen) => {
+        if (nextOpen) openLinkEditor();
+        else setOpen(false);
+      }}
+    >
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <PopoverTrigger asChild>
+            <Button
+              type="button"
+              tabIndex={-1}
+              variant="ghost"
+              size="icon"
+              disabled={!canCreateLink}
+              aria-label="Add or edit link"
+              className={`h-auto w-auto rounded p-1.5 ${isActive ? 'bg-muted' : 'bg-background'}`}
+            >
+              <Link2 className="h-4 w-4" />
+            </Button>
+          </PopoverTrigger>
+        </TooltipTrigger>
+        <TooltipContent>Add link (⌘K)</TooltipContent>
+      </Tooltip>
+      <PopoverContent align="start" side="top" className="w-72 p-3">
+        <form
+          className="space-y-2"
+          onSubmit={(event) => {
+            event.preventDefault();
+            applyLink();
+          }}
+        >
+          <label htmlFor="composer-link" className="text-xs font-medium">
+            Link
+          </label>
+          <Input
+            id="composer-link"
+            value={href}
+            onChange={(event) => setHref(event.target.value)}
+            placeholder="https://example.com"
+            autoFocus
+            className="h-9"
+          />
+          <div className="flex items-center justify-between gap-2">
+            {isActive ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  editor.chain().focus().extendMarkRange('link').unsetLink().run();
+                  setOpen(false);
+                }}
+              >
+                <Unlink className="size-3.5" />
+                Remove
+              </Button>
+            ) : (
+              <span />
+            )}
+            <Button type="submit" size="sm">
+              Apply
+            </Button>
+          </div>
+        </form>
+      </PopoverContent>
+    </Popover>
+  );
+}
 
 export const Toolbar = ({ editor }: { editor: Editor | null }) => {
   if (!editor) return null;
 
   return (
-    <div className="flex gap-2 rounded border p-2 text-sm">
+    <div className="bg-background flex max-w-full gap-1 overflow-x-auto rounded-lg border p-1 text-sm shadow-sm">
       <TooltipProvider>
-        <div className="control-group overflow-x-auto">
-          <div className="button-group ml-0 flex flex-wrap gap-1">
+        <div className="control-group">
+          <div className="button-group ml-0 flex flex-nowrap items-center gap-1">
             <div className="mr-2 flex items-center gap-1">
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -179,6 +295,22 @@ export const Toolbar = ({ editor }: { editor: Editor | null }) => {
                 </TooltipTrigger>
                 <TooltipContent>{m['pages.createEmail.editor.menuBar.underline']()}</TooltipContent>
               </Tooltip>
+              <LinkToolbarButton editor={editor} />
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    type="button"
+                    tabIndex={-1}
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => editor.chain().focus().unsetAllMarks().clearNodes().run()}
+                    className="bg-background h-auto w-auto rounded p-1.5"
+                  >
+                    <RemoveFormatting className="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Clear formatting</TooltipContent>
+              </Tooltip>
             </div>
 
             <Separator orientation="vertical" className="relative right-1 top-0.5 h-6" />
@@ -232,6 +364,21 @@ export const Toolbar = ({ editor }: { editor: Editor | null }) => {
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent>Block Quote</TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    type="button"
+                    tabIndex={-1}
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => editor.chain().focus().setHorizontalRule().run()}
+                    className="bg-background h-auto w-auto rounded p-1.5"
+                  >
+                    <Minus className="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Divider</TooltipContent>
               </Tooltip>
             </div>
           </div>

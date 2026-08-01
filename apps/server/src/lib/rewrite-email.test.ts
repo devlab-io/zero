@@ -31,4 +31,14 @@ describe('normalizeEmailRewriteHtml', () => {
       '<p>Bonjour,</p><p>Merci &amp; à bientôt.</p>',
     );
   });
+
+  it('keeps attributed quotes and applies email-safe quote styling', () => {
+    const clean = normalizeEmailRewriteHtml(
+      '<p>Ma réponse</p><blockquote><p><strong>Alan</strong> wrote:</p><p>Texte exact.</p></blockquote>',
+    );
+
+    expect(clean).toContain('<strong>Alan</strong> wrote:');
+    expect(clean).toContain('<p>Texte exact.</p>');
+    expect(clean).toContain('border-left:3px solid #d1d5db');
+  });
 });

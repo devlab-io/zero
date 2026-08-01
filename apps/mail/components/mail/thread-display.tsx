@@ -26,6 +26,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { resolveActiveThreadIndex, useAdjacentThreadPrefetch } from '@/hooks/use-thread-prefetch';
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useOptimisticThreadState } from '@/components/mail/optimistic-thread-state';
+import type { QuotedMessageSelection, ThreadQuoteRequest } from '@/lib/thread-quote';
 import { preloadComposeSurface } from '@/components/create/compose-surface';
 import { useOptimisticActions } from '@/hooks/use-optimistic-actions';
 import { shouldExtendReaderPages } from '@/lib/mail-pagination';
@@ -192,6 +193,7 @@ export function ThreadDisplay() {
   const [mode, setMode] = useQueryState('mode');
   const [activeReplyId, setActiveReplyId] = useQueryState('activeReplyId');
   const [, setDraftId] = useQueryState('draftId');
+  const [quoteRequest, setQuoteRequest] = useState<ThreadQuoteRequest | null>(null);
 
   const openLatestReply = useCallback(
     (nextMode: ThreadReplyMode) => {
@@ -203,6 +205,30 @@ export function ThreadDisplay() {
     },
     [emailData?.latest?.id, setMode, setActiveReplyId],
   );
+
+  const handleQuoteSelection = useCallback(
+    (selection: QuotedMessageSelection) => {
+      setQuoteRequest({ ...selection, id: crypto.randomUUID() });
+      warmComposerChunks();
+      if (!mode || !activeReplyId) openLatestReply('replyAll');
+      else {
+        window.setTimeout(() => {
+          document
+            .getElementById(`reply-composer-${activeReplyId}`)
+            ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }, 0);
+      }
+    },
+    [mode, activeReplyId, openLatestReply],
+  );
+
+  const handleQuoteInserted = useCallback((requestId: string) => {
+    setQuoteRequest((current) => (current?.id === requestId ? null : current));
+  }, []);
+
+  useEffect(() => {
+    setQuoteRequest(null);
+  }, [id]);
 
   // Devlab: threads can be opened directly in reply/replyAll/forward mode from the
   // mail list (r / a / f). When a mode arrives without an explicit reply target,
@@ -654,6 +680,9 @@ export function ThreadDisplay() {
                   activeReplyId: activeReplyId || undefined,
                   isMobile,
                   onContentPainted: handleContentPainted,
+                  onQuoteSelection: handleQuoteSelection,
+                  quoteRequest,
+                  onQuoteInserted: handleQuoteInserted,
                 };
                 // Animations on → lazy motion wrapper (resolved on first thread render). The
                 // Suspense fallback is STRUCTURALLY EQUIVALENT to the resolved output: the animated
@@ -702,7 +731,11 @@ export function ThreadDisplay() {
                     id={`reply-composer-${activeReplyId}`}
                   >
                     <Suspense fallback={null}>
-                      <ReplyCompose messageId={activeReplyId} />
+                      <ReplyCompose
+                        messageId={activeReplyId}
+                        quoteRequest={quoteRequest}
+                        onQuoteInserted={handleQuoteInserted}
+                      />
                     </Suspense>
                   </div>
                 )}

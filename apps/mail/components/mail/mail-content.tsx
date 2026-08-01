@@ -1,3 +1,8 @@
+import {
+  resolveQuoteSelectionToolbar,
+  type QuoteSelectionToolbar,
+  type QuotedMessageSelection,
+} from '@/lib/thread-quote';
 import { emailContentQueryKey, resolveEmailContentTheme } from '@/lib/email-content-query';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
@@ -7,7 +12,9 @@ import { useInlineImages } from '@/hooks/use-attachments';
 import { useTRPC } from '@/providers/query-provider';
 import { getBrowserTimezone } from '@/lib/timezones';
 import { useSettings } from '@/hooks/use-settings';
+import { Copy, TextQuote } from 'lucide-react';
 import { m } from '@/paraglide/messages';
+import { createPortal } from 'react-dom';
 import { useTheme } from 'next-themes';
 import { cn } from '@/lib/utils';
 import { log } from '@/lib/log';
@@ -17,6 +24,8 @@ interface MailContentProps {
   id: string;
   html: string;
   senderEmail: string;
+  senderName?: string;
+  onQuoteSelection?: (selection: QuotedMessageSelection) => void;
   /**
    * r15a : posé après que le corps traité a RÉELLEMENT été injecté dans le
    * shadow DOM et qu'un frame a été présenté (double rAF) — c'est le jalon
@@ -25,7 +34,14 @@ interface MailContentProps {
   onContentPainted?: () => void;
 }
 
-export function MailContent({ id, html, senderEmail, onContentPainted }: MailContentProps) {
+export function MailContent({
+  id,
+  html,
+  senderEmail,
+  senderName,
+  onQuoteSelection,
+  onContentPainted,
+}: MailContentProps) {
   const { data, refetch } = useSettings();
   const queryClient = useQueryClient();
   const isTrustedSender = useMemo(
@@ -38,6 +54,7 @@ export function MailContent({ id, html, senderEmail, onContentPainted }: MailCon
   const shadowRootRef = useRef<ShadowRoot | null>(null);
   const { resolvedTheme } = useTheme();
   const trpc = useTRPC();
+  const [selectionToolbar, setSelectionToolbar] = useState<QuoteSelectionToolbar | null>(null);
 
   const { mutateAsync: saveUserSettings } = useMutation({
     ...trpc.settings.save.mutationOptions(),
@@ -105,6 +122,36 @@ export function MailContent({ id, html, senderEmail, onContentPainted }: MailCon
       }
     }
   }, [processedData]);
+
+  useEffect(() => {
+    const root = shadowRootRef.current;
+    if (!root || !processedData || !onQuoteSelection) return;
+
+    const readSelection = () => {
+      const shadowSelection = (
+        root as ShadowRoot & { getSelection?: () => Selection | null }
+      ).getSelection?.();
+      const selection = shadowSelection?.rangeCount ? shadowSelection : window.getSelection();
+      setSelectionToolbar(
+        resolveQuoteSelectionToolbar({ root, selection, viewportWidth: window.innerWidth }),
+      );
+    };
+
+    const clearSelectionToolbar = () => setSelectionToolbar(null);
+    root.addEventListener('mouseup', readSelection);
+    root.addEventListener('keyup', readSelection);
+    root.addEventListener('touchend', readSelection);
+    window.addEventListener('resize', clearSelectionToolbar);
+    window.addEventListener('scroll', clearSelectionToolbar, true);
+
+    return () => {
+      root.removeEventListener('mouseup', readSelection);
+      root.removeEventListener('keyup', readSelection);
+      root.removeEventListener('touchend', readSelection);
+      window.removeEventListener('resize', clearSelectionToolbar);
+      window.removeEventListener('scroll', clearSelectionToolbar, true);
+    };
+  }, [processedData, onQuoteSelection]);
 
   useEffect(() => {
     if (!hostRef.current || shadowRootRef.current) return;
@@ -204,6 +251,47 @@ export function MailContent({ id, html, senderEmail, onContentPainted }: MailCon
 
   return (
     <>
+      {selectionToolbar &&
+        typeof document !== 'undefined' &&
+        createPortal(
+          <div
+            role="toolbar"
+            aria-label="Selected text actions"
+            className="bg-popover text-popover-foreground fixed z-[100] flex -translate-x-1/2 items-center gap-1 rounded-lg border p-1 shadow-lg"
+            style={{ left: selectionToolbar.left, top: selectionToolbar.top }}
+            onMouseDown={(event) => event.preventDefault()}
+          >
+            <button
+              type="button"
+              className="hover:bg-accent flex h-8 items-center gap-1.5 rounded-md px-2 text-xs font-medium"
+              onClick={() => {
+                onQuoteSelection?.({
+                  messageId: id,
+                  text: selectionToolbar.text,
+                  authorName: senderName,
+                  authorEmail: senderEmail,
+                });
+                setSelectionToolbar(null);
+              }}
+            >
+              <TextQuote className="size-3.5" />
+              Quote in reply
+            </button>
+            <button
+              type="button"
+              aria-label="Copy selected text"
+              className="hover:bg-accent flex size-8 items-center justify-center rounded-md"
+              onClick={() => {
+                void navigator.clipboard.writeText(selectionToolbar.text);
+                toast.success('Copied');
+                setSelectionToolbar(null);
+              }}
+            >
+              <Copy className="size-3.5" />
+            </button>
+          </div>,
+          document.body,
+        )}
       {cspViolation && !isTrustedSender && !data?.settings?.externalImages && (
         <div className="flex items-center justify-start bg-amber-600/20 px-2 py-1 text-sm text-amber-600">
           <p>{m['common.actions.hiddenImagesWarning']()}</p>

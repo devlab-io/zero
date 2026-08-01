@@ -4,6 +4,7 @@ import { useReplyStatePurge } from '@/hooks/use-reply-state-purge';
 import { lazy, Suspense, useEffect, useMemo, useRef } from 'react';
 import { useActiveConnection } from '@/hooks/use-connections';
 import { useSendStatusWatch } from '@/hooks/use-send-status';
+import type { ThreadQuoteRequest } from '@/lib/thread-quote';
 import { useEmailAliases } from '@/hooks/use-email-aliases';
 import { markDraftAbandoned } from '@/lib/abandoned-drafts';
 import { interpretSendOutcome } from '@/lib/send-outcome';
@@ -38,9 +39,15 @@ const EmailComposer = lazy(() =>
 
 interface ReplyComposeProps {
   messageId?: string;
+  quoteRequest?: ThreadQuoteRequest | null;
+  onQuoteInserted?: (id: string) => void;
 }
 
-export default function ReplyCompose({ messageId }: ReplyComposeProps) {
+export default function ReplyCompose({
+  messageId,
+  quoteRequest,
+  onQuoteInserted,
+}: ReplyComposeProps) {
   const [mode] = useQueryState('mode');
   const { enableScope, disableScope } = useHotkeysContext();
   const { data: aliases } = useEmailAliases();
@@ -338,6 +345,8 @@ export default function ReplyCompose({ messageId }: ReplyComposeProps) {
           autofocus={true}
           settingsLoading={settingsLoading}
           replyingTo={replyToMessage?.sender.email}
+          quoteRequest={quoteRequest}
+          onQuoteInserted={onQuoteInserted}
         />
       </Suspense>
     </div>

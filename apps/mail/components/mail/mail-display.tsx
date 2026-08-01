@@ -10,6 +10,7 @@ import { Forward, Printer, Reply, ReplyAll, ThreeDots } from '../icons/icons';
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
 import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover';
 import { useFetchAttachmentBodies } from '@/hooks/use-attachments';
+import type { QuotedMessageSelection } from '@/lib/thread-quote';
 import { CopyIcon, HardDriveDownload, Lock } from 'lucide-react';
 import type { Sender, ParsedMessage, Attachment } from '@/types';
 import { useActiveConnection } from '@/hooks/use-connections';
@@ -52,6 +53,7 @@ type Props = {
   threadAttachments?: Attachment[];
   /** r15a : jalon content-painted, fourni uniquement pour le message actif. */
   onContentPainted?: () => void;
+  onQuoteSelection?: (selection: QuotedMessageSelection) => void;
 };
 
 const cleanEmailDisplay = (email?: string) => {
@@ -72,6 +74,7 @@ const MailDisplay = ({
   demo,
   threadAttachments,
   onContentPainted,
+  onQuoteSelection,
 }: Props) => {
   const [isCollapsed, setIsCollapsed] = useState<boolean>(false);
   const { data: threadData } = useThread(emailData.threadId ?? null);
@@ -700,6 +703,8 @@ const MailDisplay = ({
                     id={emailData.id}
                     html={emailData?.decodedBody}
                     senderEmail={emailData.sender.email}
+                    senderName={emailData.sender.name}
+                    onQuoteSelection={onQuoteSelection}
                     onContentPainted={onContentPainted}
                   />
                 ) : null}
