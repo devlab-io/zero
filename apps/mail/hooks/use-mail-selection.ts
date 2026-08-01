@@ -29,9 +29,9 @@ export function resolveMailSelectMode(
     ? (modifiers.ctrlKey && liveControl) || (modifiers.metaKey && liveMeta)
     : liveControl || liveMeta;
 
+  if (isAltPressed && isShiftPressed) return 'selectAllBelow';
   if (isShiftPressed && !isCtrlPressed) return 'range';
   if (isCtrlPressed) return 'mass';
-  if (isAltPressed && isShiftPressed) return 'selectAllBelow';
   return 'single';
 }
 
@@ -106,6 +106,7 @@ export function useMailSelection<T extends { id: string }>(
           }
           case 'range': {
             if (anchorIndex === null) {
+              setAnchorIndex(clickedIndex);
               return { ...mail, bulkSelected: [itemId] };
             }
             const start = Math.min(anchorIndex, clickedIndex);

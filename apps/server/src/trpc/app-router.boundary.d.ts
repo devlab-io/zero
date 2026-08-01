@@ -14,6 +14,23 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
             Variables: {
                 auth: {
                     api: {
+                        listUserAccounts: (input: {
+                            headers: Headers;
+                        }) => Promise<{
+                            accountId: string;
+                            providerId: string;
+                            scopes?: readonly string[] | null;
+                        }[]>;
+                        getAccessToken: (input: {
+                            body: {
+                                providerId: string;
+                                accountId?: string;
+                            };
+                            headers: Headers;
+                        }) => Promise<{
+                            accessToken?: string | null;
+                            scopes?: readonly string[] | null;
+                        }>;
                         signOut: (input: {
                             headers: Headers;
                         }) => Promise<unknown>;
@@ -55,6 +72,23 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
                 Variables: {
                     auth: {
                         api: {
+                            listUserAccounts: (input: {
+                                headers: Headers;
+                            }) => Promise<{
+                                accountId: string;
+                                providerId: string;
+                                scopes?: readonly string[] | null;
+                            }[]>;
+                            getAccessToken: (input: {
+                                body: {
+                                    providerId: string;
+                                    accountId?: string;
+                                };
+                                headers: Headers;
+                            }) => Promise<{
+                                accessToken?: string | null;
+                                scopes?: readonly string[] | null;
+                            }>;
                             signOut: (input: {
                                 headers: Headers;
                             }) => Promise<unknown>;
@@ -152,6 +186,23 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
                 Variables: {
                     auth: {
                         api: {
+                            listUserAccounts: (input: {
+                                headers: Headers;
+                            }) => Promise<{
+                                accountId: string;
+                                providerId: string;
+                                scopes?: readonly string[] | null;
+                            }[]>;
+                            getAccessToken: (input: {
+                                body: {
+                                    providerId: string;
+                                    accountId?: string;
+                                };
+                                headers: Headers;
+                            }) => Promise<{
+                                accessToken?: string | null;
+                                scopes?: readonly string[] | null;
+                            }>;
                             signOut: (input: {
                                 headers: Headers;
                             }) => Promise<unknown>;
@@ -200,6 +251,8 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
                         to?: string | undefined;
                         body?: string | undefined;
                     } | undefined;
+                    folder?: "inbox" | "sent" | "archive" | "spam" | "trash" | "bin" | "draft" | "snoozed" | undefined;
+                    selectedThreadIds?: string[] | undefined;
                 } | undefined;
             };
             output: import("../lib/ask-reta/schema").AskRetaResult;
@@ -208,7 +261,7 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
         searchPreview: import("@trpc/server").TRPCQueryProcedure<{
             input: {
                 query: string;
-                folder?: "draft" | "inbox" | "sent" | "archive" | "spam" | "trash" | "bin" | "snoozed" | undefined;
+                folder?: "inbox" | "sent" | "archive" | "spam" | "trash" | "bin" | "draft" | "snoozed" | undefined;
             };
             output: {
                 threads: import("../lib/ask-reta/schema").AskRetaStepThread[];
@@ -269,6 +322,23 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
                 Variables: {
                     auth: {
                         api: {
+                            listUserAccounts: (input: {
+                                headers: Headers;
+                            }) => Promise<{
+                                accountId: string;
+                                providerId: string;
+                                scopes?: readonly string[] | null;
+                            }[]>;
+                            getAccessToken: (input: {
+                                body: {
+                                    providerId: string;
+                                    accountId?: string;
+                                };
+                                headers: Headers;
+                            }) => Promise<{
+                                accessToken?: string | null;
+                                scopes?: readonly string[] | null;
+                            }>;
                             signOut: (input: {
                                 headers: Headers;
                             }) => Promise<unknown>;
@@ -347,6 +417,23 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
                 Variables: {
                     auth: {
                         api: {
+                            listUserAccounts: (input: {
+                                headers: Headers;
+                            }) => Promise<{
+                                accountId: string;
+                                providerId: string;
+                                scopes?: readonly string[] | null;
+                            }[]>;
+                            getAccessToken: (input: {
+                                body: {
+                                    providerId: string;
+                                    accountId?: string;
+                                };
+                                headers: Headers;
+                            }) => Promise<{
+                                accessToken?: string | null;
+                                scopes?: readonly string[] | null;
+                            }>;
                             signOut: (input: {
                                 headers: Headers;
                             }) => Promise<unknown>;
@@ -452,6 +539,23 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
                 Variables: {
                     auth: {
                         api: {
+                            listUserAccounts: (input: {
+                                headers: Headers;
+                            }) => Promise<{
+                                accountId: string;
+                                providerId: string;
+                                scopes?: readonly string[] | null;
+                            }[]>;
+                            getAccessToken: (input: {
+                                body: {
+                                    providerId: string;
+                                    accountId?: string;
+                                };
+                                headers: Headers;
+                            }) => Promise<{
+                                accessToken?: string | null;
+                                scopes?: readonly string[] | null;
+                            }>;
                             signOut: (input: {
                                 headers: Headers;
                             }) => Promise<unknown>;
@@ -506,6 +610,23 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
                 Variables: {
                     auth: {
                         api: {
+                            listUserAccounts: (input: {
+                                headers: Headers;
+                            }) => Promise<{
+                                accountId: string;
+                                providerId: string;
+                                scopes?: readonly string[] | null;
+                            }[]>;
+                            getAccessToken: (input: {
+                                body: {
+                                    providerId: string;
+                                    accountId?: string;
+                                };
+                                headers: Headers;
+                            }) => Promise<{
+                                accessToken?: string | null;
+                                scopes?: readonly string[] | null;
+                            }>;
                             signOut: (input: {
                                 headers: Headers;
                             }) => Promise<unknown>;
@@ -589,6 +710,23 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
                 Variables: {
                     auth: {
                         api: {
+                            listUserAccounts: (input: {
+                                headers: Headers;
+                            }) => Promise<{
+                                accountId: string;
+                                providerId: string;
+                                scopes?: readonly string[] | null;
+                            }[]>;
+                            getAccessToken: (input: {
+                                body: {
+                                    providerId: string;
+                                    accountId?: string;
+                                };
+                                headers: Headers;
+                            }) => Promise<{
+                                accessToken?: string | null;
+                                scopes?: readonly string[] | null;
+                            }>;
                             signOut: (input: {
                                 headers: Headers;
                             }) => Promise<unknown>;
@@ -644,6 +782,23 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
                 Variables: {
                     auth: {
                         api: {
+                            listUserAccounts: (input: {
+                                headers: Headers;
+                            }) => Promise<{
+                                accountId: string;
+                                providerId: string;
+                                scopes?: readonly string[] | null;
+                            }[]>;
+                            getAccessToken: (input: {
+                                body: {
+                                    providerId: string;
+                                    accountId?: string;
+                                };
+                                headers: Headers;
+                            }) => Promise<{
+                                accessToken?: string | null;
+                                scopes?: readonly string[] | null;
+                            }>;
                             signOut: (input: {
                                 headers: Headers;
                             }) => Promise<unknown>;
@@ -741,6 +896,23 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
                 Variables: {
                     auth: {
                         api: {
+                            listUserAccounts: (input: {
+                                headers: Headers;
+                            }) => Promise<{
+                                accountId: string;
+                                providerId: string;
+                                scopes?: readonly string[] | null;
+                            }[]>;
+                            getAccessToken: (input: {
+                                body: {
+                                    providerId: string;
+                                    accountId?: string;
+                                };
+                                headers: Headers;
+                            }) => Promise<{
+                                accessToken?: string | null;
+                                scopes?: readonly string[] | null;
+                            }>;
                             signOut: (input: {
                                 headers: Headers;
                             }) => Promise<unknown>;
@@ -827,6 +999,23 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
                 Variables: {
                     auth: {
                         api: {
+                            listUserAccounts: (input: {
+                                headers: Headers;
+                            }) => Promise<{
+                                accountId: string;
+                                providerId: string;
+                                scopes?: readonly string[] | null;
+                            }[]>;
+                            getAccessToken: (input: {
+                                body: {
+                                    providerId: string;
+                                    accountId?: string;
+                                };
+                                headers: Headers;
+                            }) => Promise<{
+                                accessToken?: string | null;
+                                scopes?: readonly string[] | null;
+                            }>;
                             signOut: (input: {
                                 headers: Headers;
                             }) => Promise<unknown>;
@@ -1305,6 +1494,7 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
                 isForward?: boolean | undefined;
                 originalMessage?: string | undefined;
                 draftId?: string | undefined;
+                sendAsStored?: boolean | undefined;
                 scheduleAt?: string | undefined;
                 clientSendId?: string | undefined;
             };
@@ -1473,6 +1663,11 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
             }[] & Disposable;
             meta: object;
         }>;
+        getUpcomingSnoozes: import("@trpc/server").TRPCQueryProcedure<{
+            input: void;
+            output: import("../lib/snooze-upcoming").UpcomingSnoozes;
+            meta: object;
+        }>;
         snoozeThreads: import("@trpc/server").TRPCMutationProcedure<{
             input: {
                 ids: string[];
@@ -1556,6 +1751,23 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
                 Variables: {
                     auth: {
                         api: {
+                            listUserAccounts: (input: {
+                                headers: Headers;
+                            }) => Promise<{
+                                accountId: string;
+                                providerId: string;
+                                scopes?: readonly string[] | null;
+                            }[]>;
+                            getAccessToken: (input: {
+                                body: {
+                                    providerId: string;
+                                    accountId?: string;
+                                };
+                                headers: Headers;
+                            }) => Promise<{
+                                accessToken?: string | null;
+                                scopes?: readonly string[] | null;
+                            }>;
                             signOut: (input: {
                                 headers: Headers;
                             }) => Promise<unknown>;
@@ -1686,6 +1898,23 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
                 Variables: {
                     auth: {
                         api: {
+                            listUserAccounts: (input: {
+                                headers: Headers;
+                            }) => Promise<{
+                                accountId: string;
+                                providerId: string;
+                                scopes?: readonly string[] | null;
+                            }[]>;
+                            getAccessToken: (input: {
+                                body: {
+                                    providerId: string;
+                                    accountId?: string;
+                                };
+                                headers: Headers;
+                            }) => Promise<{
+                                accessToken?: string | null;
+                                scopes?: readonly string[] | null;
+                            }>;
                             signOut: (input: {
                                 headers: Headers;
                             }) => Promise<unknown>;
@@ -1776,6 +2005,23 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
                 Variables: {
                     auth: {
                         api: {
+                            listUserAccounts: (input: {
+                                headers: Headers;
+                            }) => Promise<{
+                                accountId: string;
+                                providerId: string;
+                                scopes?: readonly string[] | null;
+                            }[]>;
+                            getAccessToken: (input: {
+                                body: {
+                                    providerId: string;
+                                    accountId?: string;
+                                };
+                                headers: Headers;
+                            }) => Promise<{
+                                accessToken?: string | null;
+                                scopes?: readonly string[] | null;
+                            }>;
                             signOut: (input: {
                                 headers: Headers;
                             }) => Promise<unknown>;
@@ -1816,8 +2062,8 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
                     keys: string[];
                     type: "single" | "combination";
                     scope: string;
-                    description: string;
                     action: string;
+                    description: string;
                     preventDefault?: boolean | undefined;
                 }[];
             };
@@ -1832,6 +2078,23 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
                 Variables: {
                     auth: {
                         api: {
+                            listUserAccounts: (input: {
+                                headers: Headers;
+                            }) => Promise<{
+                                accountId: string;
+                                providerId: string;
+                                scopes?: readonly string[] | null;
+                            }[]>;
+                            getAccessToken: (input: {
+                                body: {
+                                    providerId: string;
+                                    accountId?: string;
+                                };
+                                headers: Headers;
+                            }) => Promise<{
+                                accessToken?: string | null;
+                                scopes?: readonly string[] | null;
+                            }>;
                             signOut: (input: {
                                 headers: Headers;
                             }) => Promise<unknown>;
@@ -1877,6 +2140,8 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
                     colorTheme: "light" | "dark" | "system";
                     zeroSignature: boolean;
                     undoSendEnabled: boolean;
+                    confirmDirectDraftSend: boolean;
+                    predictiveWritingEnabled: boolean;
                     imageCompression: "low" | "medium" | "original";
                     autoRead: boolean;
                     animations: boolean;
@@ -1918,6 +2183,8 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
                 }[] | undefined;
                 defaultEmailAlias?: string | undefined;
                 undoSendEnabled?: boolean | undefined;
+                confirmDirectDraftSend?: boolean | undefined;
+                predictiveWritingEnabled?: boolean | undefined;
                 imageCompression?: "low" | "medium" | "original" | undefined;
                 autoRead?: boolean | undefined;
                 animations?: boolean | undefined;
@@ -1936,6 +2203,23 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
                 Variables: {
                     auth: {
                         api: {
+                            listUserAccounts: (input: {
+                                headers: Headers;
+                            }) => Promise<{
+                                accountId: string;
+                                providerId: string;
+                                scopes?: readonly string[] | null;
+                            }[]>;
+                            getAccessToken: (input: {
+                                body: {
+                                    providerId: string;
+                                    accountId?: string;
+                                };
+                                headers: Headers;
+                            }) => Promise<{
+                                accessToken?: string | null;
+                                scopes?: readonly string[] | null;
+                            }>;
                             signOut: (input: {
                                 headers: Headers;
                             }) => Promise<unknown>;
@@ -1984,6 +2268,713 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
             meta: object;
         }>;
     }>>;
+    teams: import("@trpc/server").TRPCBuiltRouter<{
+        ctx: {
+            c: import("hono").Context<{
+                Bindings: Record<string, unknown>;
+                Variables: {
+                    auth: {
+                        api: {
+                            listUserAccounts: (input: {
+                                headers: Headers;
+                            }) => Promise<{
+                                accountId: string;
+                                providerId: string;
+                                scopes?: readonly string[] | null;
+                            }[]>;
+                            getAccessToken: (input: {
+                                body: {
+                                    providerId: string;
+                                    accountId?: string;
+                                };
+                                headers: Headers;
+                            }) => Promise<{
+                                accessToken?: string | null;
+                                scopes?: readonly string[] | null;
+                            }>;
+                            signOut: (input: {
+                                headers: Headers;
+                            }) => Promise<unknown>;
+                            deleteUser: (input: {
+                                body: {
+                                    callbackURL: string;
+                                };
+                                headers: Headers;
+                                request: Request;
+                            }) => Promise<{
+                                success: boolean;
+                                message: string;
+                            }>;
+                        };
+                    };
+                    sessionUser?: {
+                        id: string;
+                        name: string;
+                        email: string;
+                    };
+                    traceId?: string;
+                    requestId?: string;
+                };
+            }>;
+            sessionUser?: {
+                id: string;
+                name: string;
+                email: string;
+            };
+        };
+        meta: object;
+        errorShape: import("@trpc/server").TRPCDefaultErrorShape;
+        transformer: true;
+    }, import("@trpc/server").TRPCDecorateCreateRouterOptions<{
+        create: import("@trpc/server").TRPCMutationProcedure<{
+            input: {
+                name: string;
+            };
+            output: {
+                id: string;
+                name: string;
+            } & Disposable;
+            meta: object;
+        }>;
+        list: import("@trpc/server").TRPCQueryProcedure<{
+            input: void;
+            output: {
+                teams: {
+                    id: string;
+                    name: string;
+                    role: "owner" | "member";
+                    prefs: {
+                        onComment: boolean;
+                        onMention: boolean;
+                        onAssignment: boolean;
+                    };
+                    createdAt: Date;
+                    memberCount: number;
+                }[] & Disposable;
+            };
+            meta: object;
+        }>;
+        rename: import("@trpc/server").TRPCMutationProcedure<{
+            input: {
+                name: string;
+                teamId: string;
+            };
+            output: {
+                success: boolean;
+            };
+            meta: object;
+        }>;
+        delete: import("@trpc/server").TRPCMutationProcedure<{
+            input: {
+                teamId: string;
+            };
+            output: {
+                success: boolean;
+            };
+            meta: object;
+        }>;
+        leave: import("@trpc/server").TRPCMutationProcedure<{
+            input: {
+                teamId: string;
+            };
+            output: {
+                success: boolean;
+            };
+            meta: object;
+        }>;
+        listMembers: import("@trpc/server").TRPCQueryProcedure<{
+            input: {
+                teamId: string;
+            };
+            output: {
+                members: {
+                    userId: string;
+                    role: "owner" | "member";
+                    name: string;
+                    email: string;
+                    image: string | null;
+                    joinedAt: Date;
+                }[] & Disposable;
+            };
+            meta: object;
+        }>;
+        removeMember: import("@trpc/server").TRPCMutationProcedure<{
+            input: {
+                userId: string;
+                teamId: string;
+            };
+            output: {
+                success: boolean;
+            };
+            meta: object;
+        }>;
+        updateMyPrefs: import("@trpc/server").TRPCMutationProcedure<{
+            input: {
+                teamId: string;
+                prefs: {
+                    onComment: boolean;
+                    onMention: boolean;
+                    onAssignment: boolean;
+                };
+            };
+            output: {
+                success: boolean;
+            };
+            meta: object;
+        }>;
+        invite: import("@trpc/server").TRPCMutationProcedure<{
+            input: {
+                email: string;
+                teamId: string;
+                role?: "owner" | "member" | undefined;
+            };
+            output: {
+                id: string;
+                email: string;
+                role: import("../lib/teams/team-store").TeamRole;
+            } & Disposable;
+            meta: object;
+        }>;
+        listInvites: import("@trpc/server").TRPCQueryProcedure<{
+            input: {
+                teamId: string;
+            };
+            output: {
+                invites: {
+                    id: string;
+                    email: string;
+                    role: "owner" | "member";
+                    status: "pending" | "accepted" | "declined" | "revoked";
+                    createdAt: Date;
+                    invitedByName: string;
+                }[] & Disposable;
+            };
+            meta: object;
+        }>;
+        revokeInvite: import("@trpc/server").TRPCMutationProcedure<{
+            input: {
+                inviteId: string;
+            };
+            output: {
+                success: boolean;
+            };
+            meta: object;
+        }>;
+        myInvites: import("@trpc/server").TRPCQueryProcedure<{
+            input: void;
+            output: {
+                invites: {
+                    id: string;
+                    teamId: string;
+                    teamName: string;
+                    role: "owner" | "member";
+                    createdAt: Date;
+                    invitedByName: string;
+                }[] & Disposable;
+            };
+            meta: object;
+        }>;
+        acceptInvite: import("@trpc/server").TRPCMutationProcedure<{
+            input: {
+                inviteId: string;
+            };
+            output: {
+                teamId: string;
+            } & Disposable;
+            meta: object;
+        }>;
+        declineInvite: import("@trpc/server").TRPCMutationProcedure<{
+            input: {
+                inviteId: string;
+            };
+            output: {
+                success: boolean;
+            };
+            meta: object;
+        }>;
+        share: import("@trpc/server").TRPCMutationProcedure<{
+            input: {
+                threadId: string;
+                teamId: string;
+                visibility?: "team" | "restricted" | undefined;
+                accessUserIds?: string[] | undefined;
+            };
+            output: {
+                share: {
+                    id: string;
+                    teamId: string;
+                    threadId: string;
+                    sharerUserId: string;
+                    sharerEmail: string;
+                    providerId: string;
+                    visibility: "team" | "restricted";
+                    subject: string;
+                    preview: string;
+                    participants: {
+                        name?: string;
+                        email: string;
+                    }[];
+                    messageCount: number;
+                    latestReceivedOn: string | null;
+                    status: "open" | "closed";
+                    assigneeUserId: string | null;
+                    lastActivityAt: Date;
+                    createdAt: Date;
+                };
+            };
+            meta: object;
+        }>;
+        unshare: import("@trpc/server").TRPCMutationProcedure<{
+            input: {
+                teamThreadId: string;
+            };
+            output: {
+                success: boolean;
+            };
+            meta: object;
+        }>;
+        listThreads: import("@trpc/server").TRPCQueryProcedure<{
+            input: {
+                teamId: string;
+                status?: "open" | "closed" | undefined;
+                limit?: number | undefined;
+                labelId?: string | undefined;
+                cursor?: {
+                    id: string;
+                    lastActivityAt: string;
+                } | null | undefined;
+                assignee?: "me" | "unassigned" | {
+                    userId: string;
+                } | undefined;
+            };
+            output: {
+                threads: {
+                    id: string;
+                    teamId: string;
+                    threadId: string;
+                    sharerUserId: string;
+                    sharerEmail: string;
+                    providerId: string;
+                    visibility: "team" | "restricted";
+                    subject: string;
+                    preview: string;
+                    participants: {
+                        name?: string | undefined;
+                        email: string;
+                    }[];
+                    messageCount: number;
+                    latestReceivedOn: string | null;
+                    status: "open" | "closed";
+                    assigneeUserId: string | null;
+                    lastActivityAt: Date;
+                    createdAt: Date;
+                    sharerName: string;
+                    commentCount: number;
+                    labels: {
+                        id: string;
+                        name: string;
+                        color: string;
+                    }[];
+                }[];
+                nextCursor: {
+                    lastActivityAt: string;
+                    id: string;
+                } | null;
+            } & Disposable;
+            meta: object;
+        }>;
+        sharesForThread: import("@trpc/server").TRPCQueryProcedure<{
+            input: {
+                threadId: string;
+            };
+            output: {
+                shares: {
+                    id: string;
+                    teamId: string;
+                    teamName: string;
+                    visibility: "team" | "restricted";
+                    status: "open" | "closed";
+                    assigneeUserId: string | null;
+                    sharerUserId: string;
+                    lastActivityAt: Date;
+                    commentCount: number;
+                }[] & Disposable;
+            };
+            meta: object;
+        }>;
+        getShare: import("@trpc/server").TRPCQueryProcedure<{
+            input: {
+                teamThreadId: string;
+            };
+            output: {
+                share: {
+                    id: string;
+                    teamId: string;
+                    threadId: string;
+                    sharerUserId: string;
+                    sharerEmail: string;
+                    providerId: string;
+                    visibility: "team" | "restricted";
+                    subject: string;
+                    preview: string;
+                    participants: {
+                        name?: string;
+                        email: string;
+                    }[];
+                    messageCount: number;
+                    latestReceivedOn: string | null;
+                    status: "open" | "closed";
+                    assigneeUserId: string | null;
+                    lastActivityAt: Date;
+                    createdAt: Date;
+                };
+            };
+            meta: object;
+        }>;
+        readSharedThread: import("@trpc/server").TRPCQueryProcedure<{
+            input: {
+                teamThreadId: string;
+            };
+            output: {
+                share: {
+                    id: string;
+                    teamId: string;
+                    threadId: string;
+                    sharerUserId: string;
+                    sharerEmail: string;
+                    providerId: string;
+                    visibility: "team" | "restricted";
+                    subject: string;
+                    preview: string;
+                    participants: {
+                        name?: string;
+                        email: string;
+                    }[];
+                    messageCount: number;
+                    latestReceivedOn: string | null;
+                    status: "open" | "closed";
+                    assigneeUserId: string | null;
+                    lastActivityAt: Date;
+                    createdAt: Date;
+                };
+                thread: import("@zero/types").IGetThreadResponse;
+            };
+            meta: object;
+        }>;
+        readSharedAttachment: import("@trpc/server").TRPCQueryProcedure<{
+            input: {
+                messageId: string;
+                attachmentId: string;
+                teamThreadId: string;
+            };
+            output: {
+                filename: string;
+                mimeType: string;
+                size: number;
+                body: string;
+            };
+            meta: object;
+        }>;
+        setStatus: import("@trpc/server").TRPCMutationProcedure<{
+            input: {
+                status: "open" | "closed";
+                teamThreadId: string;
+            };
+            output: {
+                success: boolean;
+            };
+            meta: object;
+        }>;
+        assignSharedBatch: import("@trpc/server").TRPCMutationProcedure<{
+            input: {
+                teamId: string;
+                assigneeUserId: string | null;
+                threadIds: string[];
+            };
+            output: {
+                results: {
+                    threadId: string;
+                    outcome: import("../lib/teams/team-store").BatchAssignOutcome;
+                    teamThreadId?: string | undefined;
+                }[];
+                assigned: number;
+                notShared: number;
+                skipped: number;
+            };
+            meta: object;
+        }>;
+        setAssignee: import("@trpc/server").TRPCMutationProcedure<{
+            input: {
+                assigneeUserId: string | null;
+                teamThreadId: string;
+            };
+            output: {
+                success: boolean;
+            };
+            meta: object;
+        }>;
+        listAccess: import("@trpc/server").TRPCQueryProcedure<{
+            input: {
+                teamThreadId: string;
+            };
+            output: {
+                access: {
+                    id: string;
+                    userId: string;
+                    name: string;
+                    email: string;
+                    source: "share" | "mention" | "manual";
+                    grantedBy: string;
+                    createdAt: Date;
+                    revokedAt: Date | null;
+                    revokedBy: string | null;
+                }[] & Disposable;
+            };
+            meta: object;
+        }>;
+        grantAccess: import("@trpc/server").TRPCMutationProcedure<{
+            input: {
+                userId: string;
+                teamThreadId: string;
+            };
+            output: {
+                success: boolean;
+            };
+            meta: object;
+        }>;
+        revokeAccess: import("@trpc/server").TRPCMutationProcedure<{
+            input: {
+                userId: string;
+                teamThreadId: string;
+            };
+            output: {
+                success: boolean;
+            };
+            meta: object;
+        }>;
+        addComment: import("@trpc/server").TRPCMutationProcedure<{
+            input: {
+                body: string;
+                teamThreadId: string;
+                mentions?: string[] | undefined;
+                quoteMessageId?: string | undefined;
+            };
+            output: {
+                comment: {
+                    id: string;
+                    body: string;
+                    quote: {
+                        messageId: string;
+                        authorEmail: string;
+                        authorName?: string | undefined;
+                        receivedOn: string;
+                        text: string;
+                    } | null;
+                    createdAt: Date;
+                    updatedAt: Date;
+                    teamThreadId: string;
+                    authorUserId: string;
+                    mentions: string[];
+                } & Disposable;
+            };
+            meta: object;
+        }>;
+        editComment: import("@trpc/server").TRPCMutationProcedure<{
+            input: {
+                body: string;
+                commentId: string;
+            };
+            output: {
+                success: boolean;
+            };
+            meta: object;
+        }>;
+        deleteComment: import("@trpc/server").TRPCMutationProcedure<{
+            input: {
+                commentId: string;
+            };
+            output: {
+                success: boolean;
+            };
+            meta: object;
+        }>;
+        listComments: import("@trpc/server").TRPCQueryProcedure<{
+            input: {
+                teamThreadId: string;
+            };
+            output: {
+                comments: {
+                    id: string;
+                    body: string;
+                    mentions: string[];
+                    quote: {
+                        messageId: string;
+                        authorEmail: string;
+                        authorName?: string | undefined;
+                        receivedOn: string;
+                        text: string;
+                    } | null;
+                    createdAt: Date;
+                    updatedAt: Date;
+                    authorUserId: string;
+                    authorName: string;
+                    authorEmail: string;
+                    reactions: {
+                        emoji: string;
+                        userId: string;
+                    }[];
+                }[] & Disposable;
+            };
+            meta: object;
+        }>;
+        toggleReaction: import("@trpc/server").TRPCMutationProcedure<{
+            input: {
+                commentId: string;
+                emoji: "👍" | "✅" | "👀" | "❤️" | "🔥" | "😂";
+            };
+            output: {
+                reacted: boolean;
+            };
+            meta: object;
+        }>;
+        createLabel: import("@trpc/server").TRPCMutationProcedure<{
+            input: {
+                name: string;
+                teamId: string;
+                color?: string | undefined;
+            };
+            output: {
+                id: string;
+                name: string;
+                color: string;
+            } & Disposable;
+            meta: object;
+        }>;
+        deleteLabel: import("@trpc/server").TRPCMutationProcedure<{
+            input: {
+                labelId: string;
+            };
+            output: {
+                success: boolean;
+            };
+            meta: object;
+        }>;
+        listLabels: import("@trpc/server").TRPCQueryProcedure<{
+            input: {
+                teamId: string;
+            };
+            output: {
+                labels: {
+                    id: string;
+                    name: string;
+                    color: string;
+                    createdBy: string;
+                }[] & Disposable;
+            };
+            meta: object;
+        }>;
+        setThreadLabels: import("@trpc/server").TRPCMutationProcedure<{
+            input: {
+                teamThreadId: string;
+                labelIds: string[];
+            };
+            output: {
+                success: boolean;
+            };
+            meta: object;
+        }>;
+        listNotifications: import("@trpc/server").TRPCQueryProcedure<{
+            input: {
+                limit?: number | undefined;
+                unreadOnly?: boolean | undefined;
+            };
+            output: {
+                notifications: {
+                    id: string;
+                    teamId: string;
+                    teamName: string;
+                    teamThreadId: string | null;
+                    threadSubject: string | null;
+                    commentId: string | null;
+                    kind: "comment" | "mention" | "assignment" | "access_granted" | "access_revoked" | "status_changed";
+                    actorUserId: string;
+                    actorName: string;
+                    createdAt: Date;
+                    readAt: Date | null;
+                }[] & Disposable;
+            };
+            meta: object;
+        }>;
+        unreadNotificationCount: import("@trpc/server").TRPCQueryProcedure<{
+            input: void;
+            output: {
+                count: number;
+                mentions: number;
+            };
+            meta: object;
+        }>;
+        markNotificationsRead: import("@trpc/server").TRPCMutationProcedure<{
+            input: {
+                ids: string[] | "all";
+            };
+            output: {
+                success: boolean;
+            };
+            meta: object;
+        }>;
+        listAudit: import("@trpc/server").TRPCQueryProcedure<{
+            input: {
+                teamId: string;
+                limit?: number | undefined;
+            };
+            output: {
+                entries: never;
+            };
+            meta: object;
+        }>;
+        heartbeat: import("@trpc/server").TRPCMutationProcedure<{
+            input: {
+                teamThreadId: string;
+                typing?: boolean | undefined;
+            };
+            output: {
+                success: boolean;
+            };
+            meta: object;
+        }>;
+        listPresence: import("@trpc/server").TRPCQueryProcedure<{
+            input: {
+                teamThreadId: string;
+            };
+            output: {
+                presence: {
+                    userId: string;
+                    name: string;
+                    email: string;
+                    lastSeenAt: Date;
+                    typingUntil: Date | null;
+                }[] & Disposable;
+            };
+            meta: object;
+        }>;
+        myCollabThreadSets: import("@trpc/server").TRPCQueryProcedure<{
+            input: void;
+            output: {
+                shared: string[];
+                assigned: string[];
+                commented: string[];
+                mentioned: string[];
+            } & Disposable;
+            meta: object;
+        }>;
+        myAssignedOpenCount: import("@trpc/server").TRPCQueryProcedure<{
+            input: void;
+            output: {
+                count: number;
+            };
+            meta: object;
+        }>;
+    }>>;
     templates: import("@trpc/server").TRPCBuiltRouter<{
         ctx: {
             c: import("hono").Context<{
@@ -1991,6 +2982,23 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
                 Variables: {
                     auth: {
                         api: {
+                            listUserAccounts: (input: {
+                                headers: Headers;
+                            }) => Promise<{
+                                accountId: string;
+                                providerId: string;
+                                scopes?: readonly string[] | null;
+                            }[]>;
+                            getAccessToken: (input: {
+                                body: {
+                                    providerId: string;
+                                    accountId?: string;
+                                };
+                                headers: Headers;
+                            }) => Promise<{
+                                accessToken?: string | null;
+                                scopes?: readonly string[] | null;
+                            }>;
                             signOut: (input: {
                                 headers: Headers;
                             }) => Promise<unknown>;
@@ -2074,6 +3082,23 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
                 Variables: {
                     auth: {
                         api: {
+                            listUserAccounts: (input: {
+                                headers: Headers;
+                            }) => Promise<{
+                                accountId: string;
+                                providerId: string;
+                                scopes?: readonly string[] | null;
+                            }[]>;
+                            getAccessToken: (input: {
+                                body: {
+                                    providerId: string;
+                                    accountId?: string;
+                                };
+                                headers: Headers;
+                            }) => Promise<{
+                                accessToken?: string | null;
+                                scopes?: readonly string[] | null;
+                            }>;
                             signOut: (input: {
                                 headers: Headers;
                             }) => Promise<unknown>;
@@ -2108,6 +3133,30 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
         errorShape: import("@trpc/server").TRPCDefaultErrorShape;
         transformer: true;
     }, import("@trpc/server").TRPCDecorateCreateRouterOptions<{
+        prepareFromThread: import("@trpc/server").TRPCQueryProcedure<{
+            input: {
+                threadId: string;
+            };
+            output: {
+                preview: import("../lib/meetings/prepare-from-thread").MeetingPreview;
+            };
+            meta: object;
+        }>;
+        getAvailability: import("@trpc/server").TRPCQueryProcedure<{
+            input: {
+                timeZone: string;
+                timeMin: string;
+                timeMax: string;
+            };
+            output: {
+                authorizationRequired: false;
+                busy: import("../lib/meetings/freebusy").AvailabilityInterval[];
+            } | {
+                authorizationRequired: true;
+                busy: never[];
+            };
+            meta: object;
+        }>;
         create: import("@trpc/server").TRPCMutationProcedure<{
             input: void;
             output: Response | {
@@ -2134,6 +3183,23 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
                 Variables: {
                     auth: {
                         api: {
+                            listUserAccounts: (input: {
+                                headers: Headers;
+                            }) => Promise<{
+                                accountId: string;
+                                providerId: string;
+                                scopes?: readonly string[] | null;
+                            }[]>;
+                            getAccessToken: (input: {
+                                body: {
+                                    providerId: string;
+                                    accountId?: string;
+                                };
+                                headers: Headers;
+                            }) => Promise<{
+                                accessToken?: string | null;
+                                scopes?: readonly string[] | null;
+                            }>;
                             signOut: (input: {
                                 headers: Headers;
                             }) => Promise<unknown>;

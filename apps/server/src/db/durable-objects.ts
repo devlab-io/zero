@@ -31,6 +31,7 @@ import {
 import { DurableObject, RpcTarget } from 'cloudflare:workers';
 import { eq, and, desc, asc, inArray } from 'drizzle-orm';
 import { consumeSlidingWindow } from '../lib/rate-limit';
+import * as teamStore from '../lib/teams/team-store';
 import { defaultUserSettings } from '../lib/schemas';
 import { createDb, type DB } from './index';
 import { EProviders } from '../types';
@@ -245,6 +246,244 @@ export class DbRpcDO extends RpcTarget {
   ): Promise<boolean> {
     return await this.mainDo.rewrapRetaByokCredential(this.userId, provider, params);
   }
+
+  // --- Team collaboration (email threads only) ------------------------------
+  // Scoping is STRUCTURAL: the façade injects its own userId and the store
+  // checks team membership in SQL on every call — no route can act as another
+  // user, and no teamId is trusted without a membership row. `sessionEmail`
+  // parameters are filled by the tRPC layer from the SESSION, never from
+  // client input.
+
+  async createTeam(name: string) {
+    return await this.mainDo.teamOp((db) => teamStore.createTeam(db, this.userId, name));
+  }
+
+  async listMyTeams() {
+    return await this.mainDo.teamOp((db) => teamStore.listMyTeams(db, this.userId));
+  }
+
+  async renameTeam(teamId: string, name: string) {
+    return await this.mainDo.teamOp((db) => teamStore.renameTeam(db, this.userId, teamId, name));
+  }
+
+  async deleteTeam(teamId: string) {
+    return await this.mainDo.teamOp((db) => teamStore.deleteTeam(db, this.userId, teamId));
+  }
+
+  async leaveTeam(teamId: string) {
+    return await this.mainDo.teamOp((db) => teamStore.leaveTeam(db, this.userId, teamId));
+  }
+
+  async listTeamMembers(teamId: string) {
+    return await this.mainDo.teamOp((db) => teamStore.listTeamMembers(db, this.userId, teamId));
+  }
+
+  async removeTeamMember(teamId: string, targetUserId: string) {
+    return await this.mainDo.teamOp((db) =>
+      teamStore.removeTeamMember(db, this.userId, teamId, targetUserId),
+    );
+  }
+
+  async createTeamInvite(teamId: string, email: string, role: teamStore.TeamRole) {
+    return await this.mainDo.teamOp((db) =>
+      teamStore.createInvite(db, this.userId, teamId, email, role),
+    );
+  }
+
+  async listTeamInvites(teamId: string) {
+    return await this.mainDo.teamOp((db) => teamStore.listTeamInvites(db, this.userId, teamId));
+  }
+
+  async revokeTeamInvite(inviteId: string) {
+    return await this.mainDo.teamOp((db) => teamStore.revokeInvite(db, this.userId, inviteId));
+  }
+
+  async listMyTeamInvites(sessionEmail: string) {
+    return await this.mainDo.teamOp((db) => teamStore.listMyInvites(db, sessionEmail));
+  }
+
+  async acceptTeamInvite(inviteId: string, sessionEmail: string) {
+    return await this.mainDo.teamOp((db) =>
+      teamStore.acceptInvite(db, this.userId, sessionEmail, inviteId),
+    );
+  }
+
+  async declineTeamInvite(inviteId: string, sessionEmail: string) {
+    return await this.mainDo.teamOp((db) => teamStore.declineInvite(db, sessionEmail, inviteId));
+  }
+
+  async shareTeamThread(
+    teamId: string,
+    meta: teamStore.TeamThreadMetadata,
+    options: { visibility: teamStore.TeamThreadVisibility; accessUserIds: string[] },
+  ) {
+    return await this.mainDo.teamOp((db) =>
+      teamStore.shareThread(db, this.userId, teamId, meta, options),
+    );
+  }
+
+  /** THE ACL gate for shared-thread reads — every surface incl. AI uses it. */
+  async resolveTeamThreadAccess(teamThreadId: string) {
+    return await this.mainDo.teamOp((db) => teamStore.resolveAccess(db, this.userId, teamThreadId));
+  }
+
+  async listTeamThreadAccess(teamThreadId: string) {
+    return await this.mainDo.teamOp((db) =>
+      teamStore.listThreadAccess(db, this.userId, teamThreadId),
+    );
+  }
+
+  async grantTeamThreadAccess(teamThreadId: string, targetUserId: string) {
+    return await this.mainDo.teamOp((db) =>
+      teamStore.grantThreadAccess(db, this.userId, teamThreadId, targetUserId, 'manual'),
+    );
+  }
+
+  async revokeTeamThreadAccess(teamThreadId: string, targetUserId: string) {
+    return await this.mainDo.teamOp((db) =>
+      teamStore.revokeThreadAccess(db, this.userId, teamThreadId, targetUserId),
+    );
+  }
+
+  async updateMyTeamPrefs(teamId: string, prefs: Parameters<typeof teamStore.updateMyPrefs>[3]) {
+    return await this.mainDo.teamOp((db) =>
+      teamStore.updateMyPrefs(db, this.userId, teamId, prefs),
+    );
+  }
+
+  async createTeamLabel(teamId: string, name: string, color: string) {
+    return await this.mainDo.teamOp((db) =>
+      teamStore.createLabel(db, this.userId, teamId, name, color),
+    );
+  }
+
+  async deleteTeamLabel(labelId: string) {
+    return await this.mainDo.teamOp((db) => teamStore.deleteLabel(db, this.userId, labelId));
+  }
+
+  async listTeamLabels(teamId: string) {
+    return await this.mainDo.teamOp((db) => teamStore.listLabels(db, this.userId, teamId));
+  }
+
+  async setTeamThreadLabels(teamThreadId: string, labelIds: string[]) {
+    return await this.mainDo.teamOp((db) =>
+      teamStore.setThreadLabels(db, this.userId, teamThreadId, labelIds),
+    );
+  }
+
+  async toggleTeamCommentReaction(commentId: string, emoji: string) {
+    return await this.mainDo.teamOp((db) =>
+      teamStore.toggleReaction(db, this.userId, commentId, emoji),
+    );
+  }
+
+  async listMyTeamNotifications(options: { unreadOnly?: boolean; limit?: number }) {
+    return await this.mainDo.teamOp((db) =>
+      teamStore.listMyNotifications(db, this.userId, options),
+    );
+  }
+
+  async countMyUnreadTeamNotifications() {
+    return await this.mainDo.teamOp((db) => teamStore.countMyUnreadNotifications(db, this.userId));
+  }
+
+  async markTeamNotificationsRead(ids: string[] | 'all') {
+    return await this.mainDo.teamOp((db) => teamStore.markNotificationsRead(db, this.userId, ids));
+  }
+
+  async listTeamAudit(teamId: string, limit?: number) {
+    return await this.mainDo.teamOp((db) =>
+      teamStore.listTeamAudit(db, this.userId, teamId, limit),
+    );
+  }
+
+  async heartbeatTeamThreadPresence(teamThreadId: string, typing: boolean) {
+    return await this.mainDo.teamOp((db) =>
+      teamStore.heartbeatPresence(db, this.userId, teamThreadId, typing),
+    );
+  }
+
+  async listTeamThreadPresence(teamThreadId: string) {
+    return await this.mainDo.teamOp((db) => teamStore.listPresence(db, this.userId, teamThreadId));
+  }
+
+  async unshareTeamThread(teamThreadId: string) {
+    return await this.mainDo.teamOp((db) => teamStore.unshareThread(db, this.userId, teamThreadId));
+  }
+
+  async listTeamThreads(teamId: string, filter: teamStore.TeamThreadListFilter) {
+    return await this.mainDo.teamOp((db) =>
+      teamStore.listTeamThreads(db, this.userId, teamId, filter),
+    );
+  }
+
+  async listTeamSharesForThread(threadId: string, connectionEmail: string) {
+    return await this.mainDo.teamOp((db) =>
+      teamStore.listSharesForThread(db, this.userId, threadId, connectionEmail),
+    );
+  }
+
+  async getTeamThread(teamThreadId: string) {
+    return await this.mainDo.teamOp((db) => teamStore.getTeamThread(db, this.userId, teamThreadId));
+  }
+
+  async setTeamThreadStatus(teamThreadId: string, status: teamStore.TeamThreadStatus) {
+    return await this.mainDo.teamOp((db) =>
+      teamStore.setThreadStatus(db, this.userId, teamThreadId, status),
+    );
+  }
+
+  async setTeamThreadAssignee(teamThreadId: string, assigneeUserId: string | null) {
+    return await this.mainDo.teamOp((db) =>
+      teamStore.setThreadAssignee(db, this.userId, teamThreadId, assigneeUserId),
+    );
+  }
+
+  async addTeamThreadComment(
+    teamThreadId: string,
+    body: string,
+    mentions: string[],
+    quote: teamStore.CommentQuote | null,
+  ) {
+    return await this.mainDo.teamOp((db) =>
+      teamStore.addComment(db, this.userId, teamThreadId, body, mentions, quote),
+    );
+  }
+
+  async editTeamThreadComment(commentId: string, body: string) {
+    return await this.mainDo.teamOp((db) =>
+      teamStore.editComment(db, this.userId, commentId, body),
+    );
+  }
+
+  async deleteTeamThreadComment(commentId: string) {
+    return await this.mainDo.teamOp((db) => teamStore.deleteComment(db, this.userId, commentId));
+  }
+
+  async listTeamThreadComments(teamThreadId: string) {
+    return await this.mainDo.teamOp((db) => teamStore.listComments(db, this.userId, teamThreadId));
+  }
+
+  async assignSharedThreadsBatch(params: {
+    teamId: string;
+    connectionEmail: string;
+    assigneeUserId: string | null;
+    threadIds: string[];
+  }) {
+    return await this.mainDo.teamOp((db) =>
+      teamStore.assignSharedThreadsBatch(db, this.userId, params),
+    );
+  }
+
+  async listMyCollabThreadSets(connectionEmail: string) {
+    return await this.mainDo.teamOp((db) =>
+      teamStore.listMyCollabThreadSets(db, this.userId, connectionEmail),
+    );
+  }
+
+  async countMyAssignedOpenTeamThreads() {
+    return await this.mainDo.teamOp((db) => teamStore.countMyAssignedOpenThreads(db, this.userId));
+  }
 }
 
 export class ZeroDB extends DurableObject<ZeroEnv> {
@@ -287,6 +526,16 @@ export class ZeroDB extends DurableObject<ZeroEnv> {
         reset: result.reset,
       };
     });
+  }
+
+  /**
+   * Team collaboration ops run against the SHARED Postgres through this DO
+   * (same Hyperdrive pool as every other query). The callback comes from the
+   * local DbRpcDO façade only — functions cannot cross the RPC boundary, so
+   * no external caller can reach this with arbitrary code.
+   */
+  async teamOp<T>(fn: (db: DB) => Promise<T>): Promise<T> {
+    return await fn(this.db);
   }
 
   // Ce DO est dédié à un utilisateur (idFromName(userId)) et toutes les écritures

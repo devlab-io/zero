@@ -297,21 +297,42 @@ export const fallbackPlan = (input: AskRetaInput): AskRetaPlan => {
     if (isStrictRecentMetadataQuestion(input.question)) {
       // Tour 10 : la réponse de récence est METADATA et déterministe — le
       // listing seul suffit (zéro corps lu, zéro appel de synthèse, plus vite).
-      actions.push({ type: 'list_recent', folder: 'inbox', limit: askRetaLimits.threadsRead });
+      actions.push({
+        type: 'list_recent',
+        folder: input.context.folder ?? 'inbox',
+        limit: askRetaLimits.threadsRead,
+      });
       return { actions: actions.slice(0, askRetaLimits.planActions) };
     }
     // Tour 11 : demande de CONTENU récent (« résume mes derniers emails ») —
     // le listing fournit les fils, la LECTURE fournit les preuves message,
     // la synthèse tourne normalement.
-    actions.push({ type: 'list_recent', folder: 'inbox', limit: askRetaLimits.threadsRead });
+    actions.push({
+      type: 'list_recent',
+      folder: input.context.folder ?? 'inbox',
+      limit: askRetaLimits.threadsRead,
+    });
     actions.push({ type: 'read_thread', target: 'top_results' });
-    if (terms[0]) actions.push({ type: 'search', query: terms[0] });
+    if (terms[0])
+      actions.push({
+        type: 'search',
+        query: terms[0],
+        ...(input.context.folder ? { folder: input.context.folder } : {}),
+      });
     return { actions: actions.slice(0, askRetaLimits.planActions) };
+  }
+  if (input.context.selectedThreadIds.length) {
+    actions.push({ type: 'read_thread', target: 'selected' });
   }
   if (COUNT_QUESTION.test(input.question)) actions.push({ type: 'overview' });
   // No discriminating token → the search is OMITTED (an empty plan yields the
   // insufficient-evidence answer); the full phrase is never reused as a query.
-  if (terms[0]) actions.push({ type: 'search', query: terms[0] });
+  if (terms[0])
+    actions.push({
+      type: 'search',
+      query: terms[0],
+      ...(input.context.folder ? { folder: input.context.folder } : {}),
+    });
   if (input.context.threadId) actions.push({ type: 'read_thread', target: 'open' });
   if (terms[1]) actions.push({ type: 'search', query: terms[1] });
   return { actions: actions.slice(0, askRetaLimits.planActions) };
@@ -344,6 +365,7 @@ export const normalizePlan = (plan: AskRetaPlan, input: AskRetaInput): AskRetaPl
       });
     } else if (action.type === 'read_thread') {
       if (action.target === 'open' && !input.context.threadId) continue;
+      if (action.target === 'selected' && input.context.selectedThreadIds.length === 0) continue;
       if (action.target === 'top_results' && searches === 0) continue;
       if (actions.some((a) => a.type === 'read_thread' && a.target === action.target)) continue;
       actions.push(action);
@@ -609,7 +631,9 @@ const executePlan = async (
           ? input.context.threadId
             ? [input.context.threadId]
             : []
-          : topResultIds.slice(0, scanCap);
+          : action.target === 'selected'
+            ? input.context.selectedThreadIds.slice(0, scanCap)
+            : topResultIds.slice(0, scanCap);
       const refs: string[] = [];
       let productiveReads = 0;
       let scanned = 0;
@@ -631,7 +655,9 @@ const executePlan = async (
         detail:
           action.target === 'open'
             ? 'read the open thread'
-            : `read top ${Math.min(scanned, scanCap)} results`,
+            : action.target === 'selected'
+              ? `read ${Math.min(scanned, scanCap)} selected threads`
+              : `read top ${Math.min(scanned, scanCap)} results`,
         sourceRefs: refs,
       });
     }
@@ -906,7 +932,13 @@ export async function runAskReta(
   // faisait). Les demandes de CONTENU récentes gardent plan/lecture/synthèse.
   if (isStrictRecentMetadataQuestion(input.question)) {
     const recentPlan: AskRetaPlan = {
-      actions: [{ type: 'list_recent', folder: 'inbox', limit: askRetaLimits.threadsRead }],
+      actions: [
+        {
+          type: 'list_recent',
+          folder: input.context.folder ?? 'inbox',
+          limit: askRetaLimits.threadsRead,
+        },
+      ],
     };
     const listed = await executePlan(deps, budget, input, recentPlan);
     const recent = buildRecentSendersResult(listed);

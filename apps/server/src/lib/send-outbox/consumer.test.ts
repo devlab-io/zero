@@ -80,6 +80,7 @@ function makeKV() {
 
 const stub = {
   sendDraft: vi.fn(async () => {}),
+  sendStoredDraft: vi.fn(async () => {}),
   create: vi.fn(async () => {}),
 };
 const getAgent = vi.fn(async () => ({ stub }));
@@ -140,6 +141,44 @@ describe('send-outbox consumer — chemin send_job', () => {
     expect(stub.sendDraft).toHaveBeenCalledWith('dr-1', expect.any(Object));
     expect(stub.create).not.toHaveBeenCalled();
     expect(jobs.get('j2')?.status).toBe('sent');
+  });
+
+  it('payload draftId + sendAsStored → sendStoredDraft SEUL (brouillon envoyé tel que stocké)', async () => {
+    jobs.set(
+      'j2b',
+      makeJob({
+        id: 'j2b',
+        payload: { draftId: 'dr-2', sendAsStored: true, to: [], subject: 'S', message: '' },
+      }),
+    );
+
+    await processSendEmailBatch(
+      [msg({ jobId: 'j2b', messageId: 'j2b', connectionId: 'conn-1' })],
+      deps(),
+    );
+
+    expect(stub.sendStoredDraft).toHaveBeenCalledWith('dr-2');
+    expect(stub.sendDraft).not.toHaveBeenCalled();
+    expect(stub.create).not.toHaveBeenCalled();
+    expect(jobs.get('j2b')?.status).toBe('sent');
+  });
+
+  it('sendAsStored SANS draftId : ignoré — création normale', async () => {
+    jobs.set(
+      'j2c',
+      makeJob({
+        id: 'j2c',
+        payload: { sendAsStored: true, to: [], subject: 'S', message: 'M' },
+      }),
+    );
+
+    await processSendEmailBatch(
+      [msg({ jobId: 'j2c', messageId: 'j2c', connectionId: 'conn-1' })],
+      deps(),
+    );
+
+    expect(stub.sendStoredDraft).not.toHaveBeenCalled();
+    expect(stub.create).toHaveBeenCalledTimes(1);
   });
 
   it('échec fournisseur → failed, payload CONSERVÉ, retry() appelé, pas ack', async () => {

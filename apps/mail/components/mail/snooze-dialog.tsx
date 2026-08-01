@@ -9,6 +9,13 @@ import {
   CommandShortcut,
 } from '@/components/ui/command';
 import {
+  buildSnoozePresets,
+  formatSnoozePreview,
+  isValidTimeZone,
+  resolveSnoozeExpression,
+  type SnoozePresetId,
+} from '@/lib/snooze-date';
+import {
   CalendarClock,
   CalendarDays,
   CalendarRange,
@@ -18,10 +25,11 @@ import {
   SunMedium,
   TimerReset,
 } from 'lucide-react';
-import { buildSnoozePresets, parseSnoozeExpression, type SnoozePresetId } from '@/lib/snooze-date';
 import { useEffect, useMemo, useState } from 'react';
+import { useSettings } from '@/hooks/use-settings';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { toZonedTime } from 'date-fns-tz';
 import { toast } from 'sonner';
 
 type SnoozeDialogProps = {
@@ -34,15 +42,6 @@ const pad = (value: number) => value.toString().padStart(2, '0');
 
 const toDateInputValue = (date: Date) =>
   `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
-
-const formatWakeAt = (date: Date) =>
-  new Intl.DateTimeFormat(undefined, {
-    weekday: 'short',
-    month: 'short',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-  }).format(date);
 
 const PresetIcon = ({ id }: { id: SnoozePresetId }) => {
   const Icon = {
@@ -64,30 +63,53 @@ export function SnoozeDialog({ onConfirm, open = false, onOpenChange }: SnoozeDi
   const [date, setDate] = useState('');
   const [time, setTime] = useState('08:00');
 
+  // Fuseau IANA du réglage utilisateur (UTC inclus et validé) ; repli sur le
+  // fuseau du navigateur seulement si aucun réglage exploitable n'existe.
+  const { data: settingsData } = useSettings();
+  const effectiveZone = useMemo(() => {
+    const zone = settingsData?.settings?.timezone;
+    return zone && isValidTimeZone(zone) ? zone : undefined;
+  }, [settingsData?.settings?.timezone]);
+
   useEffect(() => {
     if (!open) return;
     const now = new Date();
-    const tomorrow = new Date(now);
-    tomorrow.setDate(tomorrow.getDate() + 1);
+    const tomorrowMorning = buildSnoozePresets(now, effectiveZone).find(
+      (preset) => preset.id === 'tomorrow-morning',
+    )?.wakeAt;
+    const tomorrowWall =
+      tomorrowMorning && effectiveZone
+        ? toZonedTime(tomorrowMorning, effectiveZone)
+        : tomorrowMorning;
     setReferenceNow(now);
     setQuery('');
     setShowCustom(false);
-    setDate(toDateInputValue(tomorrow));
+    setDate(toDateInputValue(tomorrowWall ?? now));
     setTime('08:00');
-  }, [open]);
+  }, [effectiveZone, open]);
 
-  const presets = useMemo(() => buildSnoozePresets(referenceNow), [referenceNow]);
-  const parsedDate = useMemo(
-    () => (query.trim() ? parseSnoozeExpression(query, referenceNow) : null),
-    [query, referenceNow],
+  const presets = useMemo(
+    () => buildSnoozePresets(referenceNow, effectiveZone),
+    [referenceNow, effectiveZone],
+  );
+  const parsedResolution = useMemo(
+    () => (query.trim() ? resolveSnoozeExpression(query, referenceNow, effectiveZone) : null),
+    [query, referenceNow, effectiveZone],
+  );
+  const parsedDate = parsedResolution?.wakeAt ?? null;
+  const customResolution = useMemo(
+    () =>
+      date && time ? resolveSnoozeExpression(`${date} ${time}`, referenceNow, effectiveZone) : null,
+    [date, effectiveZone, referenceNow, time],
   );
   const timeZoneLabel = useMemo(() => {
+    if (effectiveZone) return effectiveZone;
     try {
       return Intl.DateTimeFormat().resolvedOptions().timeZone;
     } catch {
       return 'Local time';
     }
-  }, []);
+  }, [effectiveZone]);
 
   const confirm = (wakeAt: Date) => {
     if (wakeAt.getTime() <= Date.now()) {
@@ -99,12 +121,13 @@ export function SnoozeDialog({ onConfirm, open = false, onOpenChange }: SnoozeDi
   };
 
   const confirmCustom = () => {
-    const wakeAt = new Date(`${date}T${time || '08:00'}`);
-    if (!date || Number.isNaN(wakeAt.getTime())) {
+    // Passe par le même parseur que la saisie naturelle : zone, DST, date
+    // future et ajustement d'heure inexistante suivent un contrat unique.
+    if (!customResolution) {
       toast.error('Choose a valid date and time.');
       return;
     }
-    confirm(wakeAt);
+    confirm(customResolution.wakeAt);
   };
 
   const handleShortcut = (event: React.KeyboardEvent) => {
@@ -154,8 +177,15 @@ export function SnoozeDialog({ onConfirm, open = false, onOpenChange }: SnoozeDi
                 >
                   <CalendarClock className="text-primary" />
                   <div className="min-w-0 flex-1">
-                    <p className="font-medium">Snooze until {formatWakeAt(parsedDate)}</p>
-                    <p className="text-muted-foreground truncate text-xs">{query}</p>
+                    <p className="font-medium">
+                      Snooze until {formatSnoozePreview(parsedDate, effectiveZone)}
+                    </p>
+                    <p className="text-muted-foreground truncate text-xs">
+                      {query}
+                      {parsedResolution?.adjusted
+                        ? ' — requested time does not exist in this time zone (DST); adjusted as shown'
+                        : ''}
+                    </p>
                   </div>
                   <CommandShortcut>↵</CommandShortcut>
                 </CommandItem>
@@ -182,7 +212,7 @@ export function SnoozeDialog({ onConfirm, open = false, onOpenChange }: SnoozeDi
                     <div className="min-w-0 flex-1">
                       <p className="font-medium">{preset.label}</p>
                       <p className="text-muted-foreground text-xs">
-                        {preset.hint} · {formatWakeAt(preset.wakeAt)}
+                        {preset.hint} · {formatSnoozePreview(preset.wakeAt, effectiveZone)}
                       </p>
                     </div>
                     <CommandShortcut>{preset.shortcut}</CommandShortcut>
@@ -241,7 +271,10 @@ export function SnoozeDialog({ onConfirm, open = false, onOpenChange }: SnoozeDi
               </label>
             </div>
             <Button className="mt-3 w-full" onClick={confirmCustom}>
-              Snooze until {date ? formatWakeAt(new Date(`${date}T${time}`)) : 'later'}
+              Snooze until{' '}
+              {customResolution
+                ? formatSnoozePreview(customResolution.wakeAt, effectiveZone)
+                : 'later'}
             </Button>
           </div>
         )}

@@ -4,6 +4,10 @@ import { getContext } from 'hono/context-storage';
 import type { HonoContext } from '../ctx';
 import { logger } from './logger';
 
+// tRPC middleware generics are intentionally erased at this adapter boundary;
+// payloads are immediately redacted/serialized before they leave the process.
+/* eslint-disable @typescript-eslint/no-explicit-any */
+
 // Utility function to hash IP addresses for PII protection
 function hashIpAddress(ip: string | undefined): string | undefined {
   if (!ip) return undefined;

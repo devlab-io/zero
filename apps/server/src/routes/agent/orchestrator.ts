@@ -1,6 +1,6 @@
-import { logger } from '../../lib/logger';
 import { streamText, tool, type DataStreamWriter, type ToolSet } from 'ai';
 import { perplexity } from '@ai-sdk/perplexity';
+import { logger } from '../../lib/logger';
 
 import { getZeroAgent } from '../../lib/server-utils';
 import { Tools } from '../../types';
@@ -32,6 +32,7 @@ export class ToolOrchestrator {
    */
   // originalTool is a passthrough AI SDK tool; typing it as ToolSet[string] over-narrows
   // the wrapper's return union, so keep it loose at this boundary.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   createStreamingAgent(toolName: string, originalTool: any) {
     if (!this.isStreamingTool(toolName)) {
       return originalTool;

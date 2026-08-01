@@ -19,6 +19,7 @@ export type SendEmailQueueMessage = {
 type SendAgentStub = {
   stub: {
     sendDraft: (draftId: string, mail: IOutgoingMessage) => Promise<unknown>;
+    sendStoredDraft: (draftId: string) => Promise<unknown>;
     create: (mail: IOutgoingMessage) => Promise<unknown>;
   };
 };
@@ -47,6 +48,7 @@ export const LEGACY_FAILED_MARKER_TTL_SECONDS = 60 * 60 * 24;
 type StoredSendPayload = Omit<IOutgoingMessage, 'attachments'> & {
   attachments?: (SerializedAttachment | AttachmentFile)[];
   draftId?: string;
+  sendAsStored?: boolean;
   connectionId?: string;
   threadId?: string;
 };
@@ -68,7 +70,14 @@ const deliver = async (
   payload: StoredSendPayload,
 ) => {
   const agent = await deps.getAgent(connectionId);
-  const { draftId, connectionId: _scope, threadId, ...mail } = payload;
+  const { draftId, sendAsStored, connectionId: _scope, threadId, ...mail } = payload;
+  // Envoi direct depuis la vue Drafts : le brouillon part TEL QUE STOCKÉ chez
+  // le fournisseur (PJ/destinataires/threading/signature préservés), aucune
+  // reconstruction du corps depuis le payload.
+  if (draftId && sendAsStored) {
+    await agent.stub.sendStoredDraft(draftId);
+    return;
+  }
   const outgoing = materializeAttachments({ ...mail, threadId } as StoredSendPayload);
   if (draftId) {
     await agent.stub.sendDraft(draftId, outgoing);
@@ -113,7 +122,8 @@ const processJobMessage = async (deps: SendOutboxConsumerDeps, jobId: string): P
     await ops.markSendJobSent(deps.db, jobId);
     if (claimed.threadId && deps.resyncThread) {
       const resync = deps.resyncThread(claimed.connectionId, claimed.threadId);
-      deps.waitUntil ? deps.waitUntil(resync) : await resync.catch(() => {});
+      if (deps.waitUntil) deps.waitUntil(resync);
+      else await resync.catch(() => {});
     }
     logger.info(`Send job ${jobId} sent successfully`);
   } catch (error) {

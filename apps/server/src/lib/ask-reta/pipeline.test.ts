@@ -25,8 +25,12 @@ import type { RetaModel } from './model';
 import { readFileSync } from 'node:fs';
 import { logger } from '../logger';
 import { join } from 'node:path';
+import type { z } from 'zod';
 
-const input = (overrides: Partial<ReturnType<typeof askRetaInputSchema.parse>> = {}) =>
+// Typé sur l'ENTRÉE du schéma (pré-parse) : selectedThreadIds a un .default([])
+// — requis en sortie, optionnel en entrée. Les overrides des tests sont des
+// entrées ; le .parse applique les défauts.
+const input = (overrides: Partial<z.input<typeof askRetaInputSchema>> = {}) =>
   askRetaInputSchema.parse({ question: 'Que dit la dernière facture Balguerie ?', ...overrides });
 
 const scriptedModel = (responses: string[]): RetaModel & { calls: number } => {
@@ -129,6 +133,19 @@ describe('fallback search terms — single literal LIKE means single terms', () 
     for (const search of searches) {
       expect(search.type === 'search' && search.query.includes(' ')).toBe(false);
     }
+  });
+
+  it('binds fallback retrieval to the current folder and selected threads', () => {
+    const plan = fallbackPlan(
+      input({
+        context: {
+          folder: 'sent',
+          selectedThreadIds: ['selected-1', 'selected-2'],
+        },
+      }),
+    );
+    expect(plan.actions).toContainEqual({ type: 'read_thread', target: 'selected' });
+    expect(plan.actions).toContainEqual({ type: 'search', query: 'balguerie', folder: 'sent' });
   });
 
   it('NO discriminating token → the search is omitted, the phrase is never reused', async () => {
@@ -338,7 +355,7 @@ describe('runAskReta — strict citations: message-kind + verified quote ONLY', 
   it('uses the deterministic single-term fallback plan when the planner returns garbage', async () => {
     const model = scriptedModel(['not json at all', synthesisJson]);
     const deps = makeDeps(model);
-    await runAskReta(deps, input({ context: { threadId: 'open-thread' } }));
+    await runAskReta(deps, input({ context: { threadId: 'open-thread', selectedThreadIds: [] } }));
 
     expect(deps.searchThreads).toHaveBeenCalledWith(
       expect.objectContaining({ query: 'balguerie' }),
@@ -361,7 +378,7 @@ describe('runAskReta — reply proposals require a VALIDATED open-thread read', 
     const model = scriptedModel([readOpenPlan, replyProposal]);
     const result = await runAskReta(
       makeDeps(model),
-      input({ context: { threadId: 'open-thread' } }),
+      input({ context: { threadId: 'open-thread', selectedThreadIds: [] } }),
     );
     expect(result.proposal?.kind).toBe('reply');
     expect(result.proposal?.threadId).toBe('open-thread');
@@ -371,7 +388,7 @@ describe('runAskReta — reply proposals require a VALIDATED open-thread read', 
     const model = scriptedModel([planJson, replyProposal]); // plan never reads the open thread
     const result = await runAskReta(
       makeDeps(model),
-      input({ context: { threadId: 'open-thread' } }),
+      input({ context: { threadId: 'open-thread', selectedThreadIds: [] } }),
     );
     expect(result.proposal?.kind).toBe('new');
     expect(result.proposal?.threadId).toBeUndefined();
@@ -382,7 +399,10 @@ describe('runAskReta — reply proposals require a VALIDATED open-thread read', 
     const deps = makeDeps(model, {
       readThread: vi.fn(async () => ({ messages: [] }) as unknown as IGetThreadResponse),
     });
-    const result = await runAskReta(deps, input({ context: { threadId: 'forged-id' } }));
+    const result = await runAskReta(
+      deps,
+      input({ context: { threadId: 'forged-id', selectedThreadIds: [] } }),
+    );
     expect(result.proposal?.kind).toBe('new');
     expect(result.proposal?.threadId).toBeUndefined();
   });
@@ -404,6 +424,25 @@ describe('runAskReta — reply proposals require a VALIDATED open-thread read', 
     expect(result.proposal?.threadId).toBeUndefined();
     expect(result.proposal?.bodyHtml).toContain('<p>Ia ora na,</p>');
     expect(result.proposal?.bodyHtml).not.toContain('script');
+  });
+});
+
+describe('runAskReta — P8 selected threads are bounded and connection-scoped by deps', () => {
+  it('reads the selected ids directly, never turns them into a mailbox search', async () => {
+    const model = scriptedModel([
+      JSON.stringify({ actions: [{ type: 'read_thread', target: 'selected' }] }),
+      synthesisJson,
+    ]);
+    const deps = makeDeps(model);
+
+    await runAskReta(
+      deps,
+      input({ context: { folder: 'archive', selectedThreadIds: ['sel-1', 'sel-2'] } }),
+    );
+
+    expect(deps.readThread).toHaveBeenCalledWith('sel-1');
+    expect(deps.readThread).toHaveBeenCalledWith('sel-2');
+    expect(deps.searchThreads).not.toHaveBeenCalled();
   });
 });
 

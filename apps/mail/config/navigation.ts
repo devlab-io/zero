@@ -101,6 +101,12 @@ export const navigationConfig: Record<string, NavConfig> = {
             url: '/mail/bin',
             icon: Bin,
           },
+          {
+            id: 'team',
+            title: m['navigation.sidebar.team'](),
+            url: '/team',
+            icon: Users,
+          },
         ],
       },
       // {
@@ -156,6 +162,11 @@ export const navigationConfig: Record<string, NavConfig> = {
           {
             title: m['navigation.settings.connections'](),
             url: '/settings/connections',
+            icon: Users,
+          },
+          {
+            title: m['navigation.settings.teams'](),
+            url: '/settings/teams',
             icon: Users,
           },
           {

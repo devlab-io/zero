@@ -1,5 +1,9 @@
+import {
+  GOOGLE_CALENDAR_FREEBUSY_SCOPE,
+  GOOGLE_OAUTH_SCOPES,
+  GOOGLE_OAUTH_SCOPE_STRING,
+} from './google-scopes';
 import { describe, expect, it } from 'vitest';
-import { GOOGLE_OAUTH_SCOPES, GOOGLE_OAUTH_SCOPE_STRING } from './google-scopes';
 
 // Config auth (A?/V5.2 §config auth) : la portée OAuth interactive est l'union MINIMALE.
 // Le scope illimité mail.google.com — et toute portée restreinte plus large — est exclu.
@@ -37,5 +41,25 @@ describe('GOOGLE_OAUTH_SCOPE_STRING', () => {
     expect(GOOGLE_OAUTH_SCOPE_STRING).toBe(GOOGLE_OAUTH_SCOPES.join(' '));
     expect(GOOGLE_OAUTH_SCOPE_STRING.split(' ')).toHaveLength(GOOGLE_OAUTH_SCOPES.length);
     expect(GOOGLE_OAUTH_SCOPE_STRING).not.toContain('mail.google.com');
+  });
+});
+
+describe('P11 — scope calendrier INCRÉMENTAL, jamais par défaut', () => {
+  it('GOOGLE_OAUTH_SCOPES ne contient AUCUN scope calendrier (le login par défaut ne s’élargit jamais)', () => {
+    for (const scope of GOOGLE_OAUTH_SCOPES) {
+      expect(scope).not.toContain('calendar');
+    }
+    expect(GOOGLE_OAUTH_SCOPE_STRING).not.toContain('calendar');
+  });
+
+  it('le scope incrémental est freebusy STRICT — ni écriture, ni lecture des événements', () => {
+    expect(GOOGLE_CALENDAR_FREEBUSY_SCOPE).toBe(
+      'https://www.googleapis.com/auth/calendar.freebusy',
+    );
+    // calendar.readonly permettrait de VOIR les événements — interdit ici.
+    expect(GOOGLE_CALENDAR_FREEBUSY_SCOPE).not.toContain('readonly');
+    expect(
+      (GOOGLE_OAUTH_SCOPES as readonly string[]).includes(GOOGLE_CALENDAR_FREEBUSY_SCOPE),
+    ).toBe(false);
   });
 });

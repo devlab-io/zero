@@ -3,7 +3,6 @@ import { Github, Mail, ArrowLeft } from 'lucide-react';
 import { Navigation } from '@/components/navigation';
 import { Button } from '@/components/ui/button';
 import Footer from '@/components/home/footer';
-import React from 'react';
 
 export default function AboutPage() {
   return (

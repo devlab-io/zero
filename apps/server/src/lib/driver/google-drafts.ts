@@ -21,6 +21,26 @@ export class GmailDrafts {
     private readonly messages: GmailMessages,
   ) {}
 
+  /**
+   * Envoi direct du brouillon STOCKÉ : drafts.send avec {id} SEUL — Gmail
+   * envoie le brouillon tel quel (PJ, destinataires, threading, signature),
+   * aucune reconstruction de raw qui pourrait perdre les pièces jointes.
+   */
+  public sendStoredDraft(draftId: string) {
+    return this.t.withErrorHandler(
+      'sendStoredDraft',
+      async () => {
+        await this.t.execute((gmail) =>
+          gmail.users.drafts.send({
+            userId: 'me',
+            requestBody: { id: draftId },
+          }),
+        );
+      },
+      { draftId },
+    );
+  }
+
   public sendDraft(draftId: string, data: IOutgoingMessage) {
     return this.t.withErrorHandler(
       'sendDraft',

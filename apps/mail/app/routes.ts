@@ -24,6 +24,7 @@ export default [
   layout('(routes)/layout.tsx', [
     route('/developer', '(routes)/developer/page.tsx'),
     route('/queue', '(routes)/queue/page.tsx'),
+    route('/team', '(routes)/team/page.tsx'),
     layout(
       '(routes)/mail/layout.tsx',
       prefix('/mail', [
@@ -48,6 +49,7 @@ export default [
         route('/privacy', '(routes)/settings/privacy/page.tsx'),
         route('/security', '(routes)/settings/security/page.tsx'),
         route('/shortcuts', '(routes)/settings/shortcuts/page.tsx'),
+        route('/teams', '(routes)/settings/teams/page.tsx'),
         route('/*', '(routes)/settings/[...settings]/page.tsx'),
       ]),
     ),

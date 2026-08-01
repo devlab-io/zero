@@ -5,8 +5,11 @@ import { Hono } from 'hono';
 
 // Passthrough sanitizer for the autumn customer body; the shape is the provider's
 // AttachParams/CancelParams, so keep it loose and let the caller's types apply.
+// autumn-js request types differ per route; the sanitizer preserves the incoming
+// provider shape while removing identity fields controlled by the authenticated session.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const sanitizeCustomerBody = (body: any) => {
-  let bodyCopy = { ...body };
+  const bodyCopy = { ...body };
   delete bodyCopy.id;
   delete bodyCopy.name;
   delete bodyCopy.email;

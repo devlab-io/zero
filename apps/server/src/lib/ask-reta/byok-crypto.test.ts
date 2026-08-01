@@ -16,7 +16,7 @@ import { describe, expect, it } from 'vitest';
 const kekA = new Uint8Array(32).fill(7);
 const kekB = new Uint8Array(32).fill(9);
 const aad = { userId: 'user-1', provider: 'openai', credentialId: 'row-1' };
-const API_KEY = 'sk-live-EXTREMEMENT-SECRETE-123456';
+const API_KEY = 'reta-byok-test-value-not-a-real-credential';
 
 const seal = () => encryptApiKey({ apiKey: API_KEY, kek: kekA, kekVersion: 'v1', aad });
 const openText = async (envelope: Awaited<ReturnType<typeof seal>>, kek = kekA, useAad = aad) => {

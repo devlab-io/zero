@@ -92,3 +92,57 @@ describe('AskRetaButton — the sanctioned sidebar entry', () => {
     expect(document.body.textContent).toContain('common.askReta.subtitle');
   });
 });
+
+describe('AskRetaButton — P8 : panneau latéral non-modal persistant', () => {
+  const openPanel = async () => {
+    act(() => {
+      root.render(<AskRetaButton />);
+    });
+    const trigger = [...container.querySelectorAll('button')].find((b) =>
+      b.textContent?.includes('common.askReta.open'),
+    )!;
+    await act(async () => {
+      trigger.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    });
+    return trigger;
+  };
+
+  it('rend un <aside role=complementary> — PAS un dialog modal', async () => {
+    await openPanel();
+    const aside = document.querySelector('aside[role="complementary"]');
+    expect(aside).toBeTruthy();
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    // La surface vit DANS le panneau, montée en portal.
+    expect(aside!.querySelector('[data-testid="ask-reta-surface"]')).toBeTruthy();
+  });
+
+  it('le bouton de fermeture remet le param à null et démonte le panneau', async () => {
+    await openPanel();
+    const close = [...document.querySelectorAll('aside button')].find((b) =>
+      b.getAttribute('aria-label')?.includes('common.actions.close'),
+    )!;
+    await act(async () => {
+      close.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    });
+    expect(queryStore.isAskRetaOpen).toBeNull();
+    expect(document.querySelector('aside[role="complementary"]')).toBeNull();
+  });
+
+  it('Escape DANS le panneau ferme ; le trigger re-clique = toggle', async () => {
+    const trigger = await openPanel();
+    const aside = document.querySelector('aside[role="complementary"]')!;
+    await act(async () => {
+      aside.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    });
+    expect(queryStore.isAskRetaOpen).toBeNull();
+
+    await act(async () => {
+      trigger.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    });
+    expect(queryStore.isAskRetaOpen).toBe('true');
+    await act(async () => {
+      trigger.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    });
+    expect(queryStore.isAskRetaOpen).toBeNull();
+  });
+});

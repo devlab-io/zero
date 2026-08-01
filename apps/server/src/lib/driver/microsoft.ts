@@ -147,7 +147,7 @@ export class OutlookMailManager implements MailManager {
           .select('id,displayName,userPrincipalName,mail')
           .get();
 
-        let photoUrl = '';
+        const photoUrl = '';
         try {
           // Requires separate fetching logic
         } catch (error: unknown) {
@@ -568,6 +568,17 @@ export class OutlookMailManager implements MailManager {
         await (await this.graphClient).api(`/me/messages/${draftId}/send`).post({});
       },
       { draftId, data },
+    );
+  }
+
+  // Graph envoie déjà le message stocké — même endpoint, sans payload.
+  public sendStoredDraft(draftId: string) {
+    return this.withErrorHandler(
+      'sendStoredDraft',
+      async () => {
+        await (await this.graphClient).api(`/me/messages/${draftId}/send`).post({});
+      },
+      { draftId },
     );
   }
   public getDraft(draftId: string) {

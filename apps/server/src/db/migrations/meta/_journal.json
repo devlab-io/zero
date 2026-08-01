@@ -288,6 +288,13 @@
       "when": 1785558851166,
       "tag": "0040_fixed_wallop",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1785589186877,
+      "tag": "0041_purple_mandroid",
+      "breakpoints": true
     }
   ]
 }

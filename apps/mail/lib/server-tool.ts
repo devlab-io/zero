@@ -18,7 +18,7 @@ export async function callServerTool(action: string, payload: unknown, caller: s
     throw new Error(`Server error (${res.status}): ${txt}`);
   }
 
-  const data = await res.json<{ success: boolean; result?: unknown; error?: string }>(); // { success, result?, error? }
+  const data = (await res.json()) as { success: boolean; result?: unknown; error?: string };
   if (!data.success) throw new Error(data.error ?? 'Unknown error');
 
   return data.result; // ⇦ what ElevenLabs expects

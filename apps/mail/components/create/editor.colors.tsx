@@ -1,6 +1,6 @@
-import { log } from '@/lib/log';
 import { EditorBubbleItem, useEditor } from 'novel';
 import { Check, ChevronDown } from 'lucide-react';
+import { log } from '@/lib/log';
 
 import { PopoverTrigger, Popover, PopoverContent } from '@/components/ui/popover';
 import { Button } from '@/components/ui/button';
@@ -133,12 +133,13 @@ export const ColorSelector = ({ open, onOpenChange }: ColorSelectorProps) => {
               key={name}
               onSelect={() => {
                 // editor.commands.unsetColor();
-                name !== 'Default' &&
+                if (name !== 'Default') {
                   editor
                     .chain()
                     .focus()
                     .setColor(color || '')
                     .run();
+                }
               }}
               className="hover:bg-accent flex cursor-pointer items-center justify-between px-2 py-1 text-sm"
             >
@@ -158,7 +159,7 @@ export const ColorSelector = ({ open, onOpenChange }: ColorSelectorProps) => {
               key={name}
               onSelect={() => {
                 editor.commands.unsetHighlight();
-                name !== 'Default' && editor.commands.setHighlight({ color });
+                if (name !== 'Default') editor.commands.setHighlight({ color });
               }}
               className="hover:bg-accent flex cursor-pointer items-center justify-between px-2 py-1 text-sm"
             >

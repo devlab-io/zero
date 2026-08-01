@@ -1,9 +1,13 @@
+import { loadGoogleAvailability, selectGoogleFreeBusyAccount } from '../../lib/meetings/freebusy';
 import { activeDriverProcedure, createRateLimiterMiddleware, router } from '../trpc';
+import { buildMeetingPreview } from '../../lib/meetings/prepare-from-thread';
+import { getThread, getZeroDB } from '../../lib/server-utils';
 import { isProCustomer } from '../../lib/utils';
 import { Ratelimit } from '@upstash/ratelimit';
 import { logger } from '../../lib/logger';
 import { TRPCError } from '@trpc/server';
 import { env } from '../../env';
+import { z } from 'zod';
 
 type MeetResponse = {
   success: boolean;
@@ -21,6 +25,69 @@ type MeetResponse = {
 };
 
 export const meetRouter = router({
+  /**
+   * P11 — preview ÉDITABLE d'un RDV construit depuis un fil : participants
+   * dédupliqués (no-reply/listes écartés et LISTÉS), sujet nettoyé, contexte
+   * borné, fuseau du réglage utilisateur. AUCUNE création d'événement, aucune
+   * invitation, aucun nouveau scope OAuth — la création réelle restera une
+   * action humaine distincte (calendar.freebusy incrémental pour les
+   * disponibilités, scope de création séparé).
+   */
+  prepareFromThread: activeDriverProcedure
+    .input(z.object({ threadId: z.string().min(1).max(256) }))
+    .query(async ({ ctx, input }) => {
+      const { result } = await getThread(ctx.activeConnection.id, input.threadId);
+      const db = await getZeroDB(ctx.sessionUser.id);
+      const settings = await db.findUserSettings();
+      const timeZone = settings?.settings?.timezone ?? null;
+      return {
+        preview: buildMeetingPreview(result, {
+          selfEmail: ctx.activeConnection.email,
+          timeZone: timeZone && timeZone !== 'UTC' ? timeZone : null,
+        }),
+      };
+    }),
+  /**
+   * Read-only availability for the proposed slot. The route can only query the
+   * authenticated user's primary Google calendar and returns no event content.
+   * Missing incremental consent is an explicit product state, not an error.
+   */
+  getAvailability: activeDriverProcedure
+    .input(
+      z.object({
+        timeMin: z.string().datetime(),
+        timeMax: z.string().datetime(),
+        timeZone: z.string().min(1).max(100),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      if (ctx.activeConnection.providerId !== 'google') {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'Availability is currently supported for Google Calendar only',
+        });
+      }
+      try {
+        const accounts = await ctx.c.var.auth.api.listUserAccounts({
+          headers: ctx.c.req.raw.headers,
+        });
+        const calendarAccount = selectGoogleFreeBusyAccount(accounts);
+        if (!calendarAccount) return { authorizationRequired: true as const, busy: [] };
+        return await loadGoogleAvailability(input, {
+          getAccessToken: () =>
+            ctx.c.var.auth.api.getAccessToken({
+              body: { providerId: 'google', accountId: calendarAccount.accountId },
+              headers: ctx.c.req.raw.headers,
+            }),
+        });
+      } catch {
+        logger.warn('[meet] Google FreeBusy lookup failed');
+        throw new TRPCError({
+          code: 'SERVICE_UNAVAILABLE',
+          message: 'Calendar availability is temporarily unavailable',
+        });
+      }
+    }),
   create: activeDriverProcedure
     .use(
       createRateLimiterMiddleware({

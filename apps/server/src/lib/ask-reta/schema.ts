@@ -30,10 +30,23 @@ export const askRetaLimits = {
   searchesPerAsk: 2,
   searchResults: 10,
   threadsRead: 3,
+  selectedThreads: 10,
   messagesPerThread: 12,
   excerptChars: 1_200,
   citations: 12,
 } as const;
+
+/** Canonical folders accepted from the current route and planner. */
+export const askRetaFolderSchema = z.enum([
+  'inbox',
+  'sent',
+  'archive',
+  'spam',
+  'trash',
+  'bin',
+  'draft',
+  'snoozed',
+]);
 
 export const askRetaInputSchema = z.object({
   question: z.string().trim().min(1).max(askRetaLimits.questionChars),
@@ -50,6 +63,13 @@ export const askRetaInputSchema = z.object({
     .object({
       /** Thread currently open in the reader; ownership enforced server-side. */
       threadId: z.string().trim().max(200).optional(),
+      /** Current visible folder; custom label ids are deliberately excluded. */
+      folder: askRetaFolderSchema.optional(),
+      /** Bulk selection; every id is re-read through the active connection. */
+      selectedThreadIds: z
+        .array(z.string().trim().min(1).max(200))
+        .max(askRetaLimits.selectedThreads)
+        .default([]),
       /** Current unsent draft, as the composer sees it. */
       draft: z
         .object({
@@ -63,22 +83,6 @@ export const askRetaInputSchema = z.object({
 });
 
 export type AskRetaInput = z.infer<typeof askRetaInputSchema>;
-
-/**
- * Canonical folder vocabulary (slice-2 review): the only folder values the
- * planner or the replay may use — free strings never reach the search layer
- * (and never the logs).
- */
-export const askRetaFolderSchema = z.enum([
-  'inbox',
-  'sent',
-  'archive',
-  'spam',
-  'trash',
-  'bin',
-  'draft',
-  'snoozed',
-]);
 
 /** Model output 1 — the retrieval plan. Read-only actions ONLY, by construction. */
 export const askRetaPlanSchema = z.object({
@@ -101,7 +105,7 @@ export const askRetaPlanSchema = z.object({
         }),
         z.object({
           type: z.literal('read_thread'),
-          target: z.enum(['open', 'top_results']),
+          target: z.enum(['open', 'selected', 'top_results']),
         }),
       ]),
     )
@@ -137,7 +141,7 @@ export const askRetaPlanJsonSchema: Record<string, unknown> = {
           query: { type: 'string' },
           folder: { type: 'string' },
           limit: { type: 'integer', minimum: 1, maximum: 10 },
-          target: { type: 'string', enum: ['open', 'top_results'] },
+          target: { type: 'string', enum: ['open', 'selected', 'top_results'] },
         },
         required: ['type'],
       },

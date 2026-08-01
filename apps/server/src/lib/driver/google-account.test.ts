@@ -11,9 +11,12 @@ const loggerSpy = { info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn()
 vi.mock('../logger', () => ({ logger: loggerSpy }));
 
 const { GmailAccount } = await import('./google-account');
-const { makeFakeTransport, makeFakeGmail, data, gmailError } = await import(
-  './__fixtures__/google-http-fake'
-);
+const {
+  makeFakeTransport,
+  makeFakeGmail,
+  data,
+  gmailError: _gmailError,
+} = await import('./__fixtures__/google-http-fake');
 
 const asT = (t: unknown) => t as unknown as GmailTransport;
 
@@ -25,7 +28,9 @@ beforeEach(() => {
 describe('GmailAccount.getTokens', () => {
   it('échange le code contre des tokens via auth.getToken', async () => {
     const t = makeFakeTransport({
-      auth: { getToken: vi.fn(async (code: string) => ({ tokens: { access_token: `at-${code}` } })) },
+      auth: {
+        getToken: vi.fn(async (code: string) => ({ tokens: { access_token: `at-${code}` } })),
+      },
     });
     const out = await new GmailAccount(asT(t)).getTokens('auth-code');
     expect(out).toEqual({ tokens: { access_token: 'at-auth-code' } });
@@ -43,7 +48,11 @@ describe('GmailAccount.getUserInfo', () => {
       },
     });
     const out = await new GmailAccount(asT(makeFakeTransport({ auth: {} }))).getUserInfo();
-    expect(out).toEqual({ address: 'me@devlab.io', name: 'Thomas V', photo: 'https://photo/1.png' });
+    expect(out).toEqual({
+      address: 'me@devlab.io',
+      name: 'Thomas V',
+      photo: 'https://photo/1.png',
+    });
   });
 
   it('champs absents → chaînes vides', async () => {
@@ -102,7 +111,9 @@ describe('GmailAccount.revokeToken', () => {
   });
 
   it('révocation en échec → false + log d’erreur', async () => {
-    const revokeToken = vi.fn(async () => { throw new Error('revoke failed'); });
+    const revokeToken = vi.fn(async () => {
+      throw new Error('revoke failed');
+    });
     const t = makeFakeTransport({ auth: { revokeToken } });
     await expect(new GmailAccount(asT(t)).revokeToken('tok')).resolves.toBe(false);
     expect(loggerSpy.error).toHaveBeenCalled();

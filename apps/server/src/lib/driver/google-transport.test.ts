@@ -1,6 +1,3 @@
-import { describe, expect, it, vi, beforeEach } from 'vitest';
-import type { BatchHttp } from './gmail-batch';
-import type { ManagerConfig } from './types';
 import {
   buildMixedResponse,
   countSubRequests,
@@ -8,6 +5,9 @@ import {
   makeCapturingBatchHttp,
   statusByPath,
 } from './__fixtures__/batch-http-fake';
+import { describe, expect, it, vi, beforeEach } from 'vitest';
+import type { BatchHttp } from './gmail-batch';
+import type { ManagerConfig } from './types';
 
 // --- Couture d'injection : le transport importe `../../env` (→ cloudflare:workers) et
 // `./utils` (→ server-utils → dormroom → cloudflare:workers). On neutralise les DEUX ;
@@ -78,7 +78,9 @@ describe('GmailTransport — configuration auth', () => {
 
   it('getQuotaUser() = undefined sans email d’auth', () => {
     expect(make({} as ManagerConfig).getQuotaUser()).toBeUndefined();
-    expect(make({ auth: { refreshToken: 'r' } } as unknown as ManagerConfig).getQuotaUser()).toBeUndefined();
+    expect(
+      make({ auth: { refreshToken: 'r' } } as unknown as ManagerConfig).getQuotaUser(),
+    ).toBeUndefined();
   });
 });
 
@@ -100,7 +102,9 @@ describe('GmailTransport.execute — dispatch unique + compteur (couture #31)', 
 
   it('sans retry : une erreur remonte immédiatement, 1 seul appel compté', async () => {
     const t = make(authedConfig);
-    await expect(t.execute(async () => Promise.reject({ code: 429 }))).rejects.toEqual({ code: 429 });
+    await expect(t.execute(async () => Promise.reject({ code: 429 }))).rejects.toEqual({
+      code: 429,
+    });
     expect(t.getGmailCallCount()).toBe(1);
   });
 
@@ -214,7 +218,7 @@ describe('GmailTransport.batchThreadsGet — coalescing + complétude', () => {
 describe('GmailTransport.batchAttachmentsGet — données base64url ordonnées', () => {
   const attHttp: BatchHttp = async (req) => {
     const n = countSubRequests(req.body);
-    const statuses = new Array(n).fill(200);
+    const statuses = Array.from({ length: n }, () => 200);
     return {
       status: 200,
       contentType: 'multipart/mixed; boundary=r',
@@ -240,7 +244,7 @@ describe('GmailTransport.batchAttachmentsGet — données base64url ordonnées',
   });
 
   it('data absente → chaîne vide (jamais undefined)', async () => {
-    const http: BatchHttp = async (req) => ({
+    const http: BatchHttp = async (_req) => ({
       status: 200,
       contentType: 'multipart/mixed; boundary=r',
       text: buildMixedResponse([200], 'r', () => ({})),

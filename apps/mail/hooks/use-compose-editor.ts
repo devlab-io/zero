@@ -1,17 +1,19 @@
-import { log } from '@/lib/log';
 import { useEditor, type KeyboardShortcutCommand, Extension, generateJSON } from '@tiptap/react';
 import { AutoComplete } from '@/components/create/editor-autocomplete';
 import { defaultExtensions } from '@/components/create/extensions';
-import Emoji from '@tiptap/extension-emoji';
-import { getGitHubEmojis } from '@/lib/emoji-data';
 import { FileHandler } from '@tiptap/extension-file-handler';
 import Placeholder from '@tiptap/extension-placeholder';
 import { Plugin, PluginKey } from '@tiptap/pm/state';
+import { useSettings } from '@/hooks/use-settings';
+import { getGitHubEmojis } from '@/lib/emoji-data';
 import { TextSelection } from 'prosemirror-state';
 import { Image } from '@tiptap/extension-image';
+import { getLocale } from '@/paraglide/runtime';
+import Emoji from '@tiptap/extension-emoji';
 import { Markdown } from 'tiptap-markdown';
 import { isObjectType } from 'remeda';
 import { cn } from '@/lib/utils';
+import { log } from '@/lib/log';
 
 const CustomModEnter = (onModEnter: KeyboardShortcutCommand) => {
   return Extension.create({
@@ -74,6 +76,7 @@ const MouseDownSelection = Extension.create({
 const AutoCompleteExtension = ({
   sender,
   myInfo,
+  enabled,
 }: {
   sender?: {
     name?: string;
@@ -83,8 +86,10 @@ const AutoCompleteExtension = ({
     name?: string;
     email?: string;
   };
+  enabled?: boolean;
 } = {}) => {
   return AutoComplete.configure({
+    enabled,
     suggestions: {
       openers: [
         'Hi there,',
@@ -104,6 +109,8 @@ const AutoCompleteExtension = ({
     },
     sender,
     myInfo,
+    // Banque déterministe localisée (P7) — la langue de l'UI pilote la banque.
+    locale: getLocale() === 'fr' ? 'fr' : 'en',
   });
 };
 
@@ -148,6 +155,7 @@ const useComposeEditor = ({
   };
   autofocus?: boolean;
 }) => {
+  const settings = useSettings();
   const extensions = [
     ...defaultExtensions,
     Markdown,
@@ -201,6 +209,7 @@ const useComposeEditor = ({
     AutoCompleteExtension({
       myInfo,
       sender,
+      enabled: settings.data?.settings.predictiveWritingEnabled ?? true,
     }),
     ...(onModEnter
       ? [

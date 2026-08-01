@@ -1,15 +1,15 @@
-import { log } from '@/lib/log';
-import React, { useCallback, useMemo, useRef, useState, useEffect } from 'react';
+import { useCallback, useMemo, useRef, useState, useEffect } from 'react';
 import { useSearchValue } from '@/hooks/use-search-value';
 import { trpcClient } from '@/providers/query-provider';
 import { useMail } from '@/components/mail/use-mail';
 import { Checkbox } from '@/components/ui/checkbox';
 import { useThreads } from '@/hooks/use-threads';
+import { m } from '@/paraglide/messages';
 import { useParams } from 'react-router';
 import { Check } from '../icons/icons';
 import { cn } from '@/lib/utils';
+import { log } from '@/lib/log';
 import { toast } from 'sonner';
-import { m } from '@/paraglide/messages';
 
 export default function SelectAllCheckbox({ className }: { className?: string }) {
   const [mail, setMail] = useMail();
@@ -72,30 +72,27 @@ export default function SelectAllCheckbox({ className }: { className?: string })
 
     setMail((prev) => ({ ...prev, bulkSelected: loadedIds }));
 
-    toast(
-      m['common.mail.conversationsSelected']({ count: loadedIds.length }),
-      {
-        action: {
-          label: m['common.mail.selectAllConversations'](),
-          onClick: async () => {
-            try {
-              if (!allIdsCache.current) {
-                setIsFetchingIds(true);
-                allIdsCache.current = await fetchAllMatchingThreadIds();
-                setIsFetchingIds(false);
-              }
-              const allIds = allIdsCache.current ?? [];
-              setMail((prev) => ({ ...prev, bulkSelected: allIds }));
-            } catch (err) {
-              log.error(err);
+    toast(m['common.mail.conversationsSelected']({ count: loadedIds.length }), {
+      action: {
+        label: m['common.mail.selectAllConversations'](),
+        onClick: async () => {
+          try {
+            if (!allIdsCache.current) {
+              setIsFetchingIds(true);
+              allIdsCache.current = await fetchAllMatchingThreadIds();
               setIsFetchingIds(false);
-              toast.error(m['common.mail.failedToSelectAllConversations']());
             }
-          },
+            const allIds = allIdsCache.current ?? [];
+            setMail((prev) => ({ ...prev, bulkSelected: allIds }));
+          } catch (err) {
+            log.error(err);
+            setIsFetchingIds(false);
+            toast.error(m['common.mail.failedToSelectAllConversations']());
+          }
         },
-        className: 'w-auto! whitespace-nowrap',
       },
-    );
+      className: 'w-auto! whitespace-nowrap',
+    });
   }, [isFetchingIds, mail.bulkSelected.length, loadedIds, fetchAllMatchingThreadIds, setMail]);
 
   useEffect(() => {

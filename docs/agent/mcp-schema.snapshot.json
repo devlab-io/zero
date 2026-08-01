@@ -3,19 +3,24 @@
     "name": "zero-mcp",
     "version": "1.1.0"
   },
-  "draftOnly": true,
-  "canSendMail": false,
+  "draftFirst": true,
+  "sendException": {
+    "tool": "sendConfirmedDraft",
+    "humanConfirmation": "elicitation",
+    "transport": "durable-outbox"
+  },
+  "canSendMailWithoutHumanConfirmation": false,
   "canPermanentlyDeleteMail": false,
   "canReportSpam": false,
   "canChangeAccountSettings": false,
-  "statement": "This MCP server is draft-only. No tool can send mail, permanently delete mail, report spam, or change account settings. Agent output stops at a Gmail draft or a reviewable outbox item; a human in Zero performs any send.",
+  "statement": "This MCP server is draft-first. No tool can permanently delete mail, report spam, or change account settings, and no tool can send mail EXCEPT sendConfirmedDraft — which sends an EXISTING draft only after an explicit in-tool human confirmation (MCP elicitation) at call time. Declined, cancelled or unavailable confirmation means nothing is sent. A confirmed send goes through the idempotent durable outbox (send_job + Queue + sendStoredDraft), never a direct provider call.",
   "tools": [
     {
       "name": "getServerCapabilities",
       "category": "read",
       "mutates": false,
       "idempotent": true,
-      "description": "Report this MCP server health and capabilities as JSON: name/version, that it is draft-only, the registered tools, and the hard guarantees that no tool can send mail, permanently delete mail, report spam, or change account settings. Read-only; stores nothing.",
+      "description": "Report this MCP server health and capabilities as JSON: name/version, that it is draft-first, the registered tools, and the hard guarantees that only sendConfirmedDraft can send after MCP elicitation; no tool can permanently delete mail, report spam, or change account settings. Read-only; stores nothing.",
       "inputSchema": {
         "type": "object",
         "properties": {},
@@ -60,9 +65,7 @@
             "description": "Email address of an already-connected account to select"
           }
         },
-        "required": [
-          "email"
-        ],
+        "required": ["email"],
         "additionalProperties": false
       }
     },
@@ -128,9 +131,7 @@
             "description": "Search text; matched against stored thread metadata"
           }
         },
-        "required": [
-          "query"
-        ],
+        "required": ["query"],
         "additionalProperties": false
       }
     },
@@ -148,9 +149,7 @@
             "description": "Thread id to fetch on demand"
           }
         },
-        "required": [
-          "threadId"
-        ],
+        "required": ["threadId"],
         "additionalProperties": false
       }
     },
@@ -168,9 +167,7 @@
             "description": "Thread id to summarize"
           }
         },
-        "required": [
-          "id"
-        ],
+        "required": ["id"],
         "additionalProperties": false
       }
     },
@@ -200,9 +197,7 @@
             "description": "Label id to fetch"
           }
         },
-        "required": [
-          "id"
-        ],
+        "required": ["id"],
         "additionalProperties": false
       }
     },
@@ -267,12 +262,7 @@
                   }
                 }
               },
-              "required": [
-                "body",
-                "from",
-                "subject",
-                "to"
-              ],
+              "required": ["body", "from", "subject", "to"],
               "additionalProperties": false
             },
             "description": "Prior thread messages for context"
@@ -284,9 +274,7 @@
             }
           }
         },
-        "required": [
-          "prompt"
-        ],
+        "required": ["prompt"],
         "additionalProperties": false
       }
     },
@@ -331,9 +319,7 @@
             "description": "Outbox item id owned by the authenticated user"
           }
         },
-        "required": [
-          "id"
-        ],
+        "required": ["id"],
         "additionalProperties": false
       }
     },
@@ -358,9 +344,7 @@
                   "type": "string"
                 }
               },
-              "required": [
-                "email"
-              ],
+              "required": ["email"],
               "additionalProperties": false
             }
           },
@@ -376,9 +360,7 @@
                   "type": "string"
                 }
               },
-              "required": [
-                "email"
-              ],
+              "required": ["email"],
               "additionalProperties": false
             }
           },
@@ -408,18 +390,151 @@
                   "type": "string"
                 }
               },
-              "required": [
-                "email"
-              ],
+              "required": ["email"],
               "additionalProperties": false
             }
           }
         },
-        "required": [
-          "message",
-          "subject",
-          "to"
-        ],
+        "required": ["message", "subject", "to"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "previewDraft",
+      "category": "read",
+      "mutates": false,
+      "idempotent": true,
+      "description": "Preview one Gmail draft the user owns: recipients, subject and the SANITIZED text of its body (bounded). Read-only; stores nothing; never sends. Missing or other-user drafts return an identical not-found result without revealing which.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "draftId": {
+            "type": "string",
+            "description": "Gmail draft id to preview before any human review or edit"
+          }
+        },
+        "required": ["draftId"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "updateDraft",
+      "category": "write",
+      "mutates": true,
+      "idempotent": true,
+      "description": "Update an EXISTING Gmail draft in place (recipients, subject, body). The result is still an UNSENT draft in the user Gmail Drafts folder — this NEVER sends the email; sending remains a human action in Zero. Omitted fields keep their current value. Idempotent: repeating the same update leaves the same stored draft. Pass threadId to keep a reply attached to its thread.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "bcc": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "email": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                }
+              },
+              "required": ["email"],
+              "additionalProperties": false
+            }
+          },
+          "cc": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "email": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                }
+              },
+              "required": ["email"],
+              "additionalProperties": false
+            }
+          },
+          "draftId": {
+            "type": "string",
+            "description": "Existing Gmail draft id to update in place"
+          },
+          "message": {
+            "type": "string",
+            "description": "Replacement body (omitted = keep current)"
+          },
+          "subject": {
+            "type": "string",
+            "description": "Replacement subject (omitted = keep current)"
+          },
+          "threadId": {
+            "type": "string",
+            "description": "Thread to stay attached to — omit ONLY for a standalone (non-reply) draft"
+          },
+          "to": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "email": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                }
+              },
+              "required": ["email"],
+              "additionalProperties": false
+            },
+            "description": "Replacement To recipients"
+          }
+        },
+        "required": ["draftId"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "sendConfirmedDraft",
+      "category": "write",
+      "mutates": true,
+      "idempotent": true,
+      "sendCapable": true,
+      "humanConfirmation": "elicitation",
+      "description": "THE ONLY send-capable tool. Sends an EXISTING Gmail draft — but ONLY after an explicit in-tool human confirmation: the tool raises an MCP elicitation showing the exact recipients and subject, and proceeds ONLY if the human accepts AND checks confirm=true. Decline, cancel, an unchecked box, or a client without elicitation support = NOTHING is sent (fail closed). A confirmed send is enqueued in the idempotent durable outbox (send_job + Queue) and delivered via sendStoredDraft — the draft goes out exactly as stored (attachments, threading, signature preserved), never a direct provider call. Repeat calls for the same draft reuse the same stable submission key (no double send).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "draftId": {
+            "type": "string",
+            "description": "EXISTING Gmail draft id to send — only after the human explicitly confirms in the elicitation prompt this tool raises"
+          }
+        },
+        "required": ["draftId"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "getThreadCitations",
+      "category": "read",
+      "mutates": false,
+      "idempotent": true,
+      "description": "Extract STRUCTURED citations from one thread: for each cited message, its exact messageId, threadId, sender, date, subject and a bounded sanitized quote taken VERBATIM from the message body — never model-generated text. Read-only; stores nothing.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "maxCitations": {
+            "type": "number",
+            "description": "How many messages to cite, newest first (max 6)"
+          },
+          "threadId": {
+            "type": "string",
+            "description": "Thread id to extract structured citations from"
+          }
+        },
+        "required": ["threadId"],
         "additionalProperties": false
       }
     },
@@ -463,9 +578,7 @@
             "description": "Outbox item id to cancel (idempotent)"
           }
         },
-        "required": [
-          "id"
-        ],
+        "required": ["id"],
         "additionalProperties": false
       }
     },
@@ -483,9 +596,7 @@
             "description": "Failed outbox item id to re-queue (idempotent)"
           }
         },
-        "required": [
-          "id"
-        ],
+        "required": ["id"],
         "additionalProperties": false
       }
     }

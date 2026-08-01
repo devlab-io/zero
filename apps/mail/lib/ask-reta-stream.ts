@@ -17,7 +17,12 @@ import type { AskRetaAssistantPayload, AskRetaStepView } from '@/components/copi
 export type AskRetaStreamInput = {
   question: string;
   history: { role: 'user' | 'assistant'; content: string }[];
-  context: { threadId?: string; draft?: { subject?: string; to?: string; body?: string } };
+  context: {
+    threadId?: string;
+    folder?: 'inbox' | 'sent' | 'archive' | 'spam' | 'trash' | 'bin' | 'draft' | 'snoozed';
+    selectedThreadIds?: string[];
+    draft?: { subject?: string; to?: string; body?: string };
+  };
 };
 
 export type AskRetaStreamResult = Omit<AskRetaAssistantPayload, 'steps'> & {

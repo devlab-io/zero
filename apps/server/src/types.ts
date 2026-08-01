@@ -181,7 +181,11 @@ export interface DeleteAllSpamResponse {
   error?: string;
 }
 
-export type AppContext = Context<{ Bindings: Env }>;
+// Keep this shared compatibility type independent from the generated Worker
+// `Env`: apps/mail imports server types without loading worker-configuration.d.ts.
+export type AppContext<TBindings extends object = Record<string, unknown>> = Context<{
+  Bindings: TBindings;
+}>;
 
 export interface IEmailSendBatch {
   messageId: string;

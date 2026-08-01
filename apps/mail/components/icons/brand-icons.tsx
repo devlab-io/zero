@@ -205,8 +205,8 @@ export const Figma = ({ className }: { className?: string }) => (
     <g clipPath="url(#clip0_2827_15426)">
       <mask
         id="mask0_2827_15426"
-        mask-type="luminance"
         maskUnits="userSpaceOnUse"
+        style={{ maskType: 'luminance' }}
         x="0"
         y="0"
         width="9"

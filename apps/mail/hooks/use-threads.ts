@@ -23,6 +23,7 @@ import {
 } from '@tanstack/react-query';
 import { backgroundQueueAtom, isThreadInBackgroundQueueAtom } from '@/store/backgroundQueue';
 import { emailContentQueryKey, resolveEmailContentTheme } from '@/lib/email-content-query';
+import { extractCollabFilters, filterThreadsByCollabSets } from '@/lib/collab-search';
 import { requestImmediateDetailPersist } from '@/lib/detail-persist-flush';
 import { canReuseMailListPlaceholder } from '@/lib/mail-list-placeholder';
 import { useTRPC, useTRPCClient } from '@/providers/query-provider';
@@ -33,6 +34,7 @@ import { isSimpleLiteralSearch } from '@/lib/search-intent';
 import { mailListMaxResults } from '@/lib/mail-pagination';
 import { useSearchValue } from '@/hooks/use-search-value';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
+import { useCollabThreadSets } from '@/hooks/use-teams';
 import { useCallback, useEffect, useMemo } from 'react';
 import type { IGetThreadResponse } from '@zero/types';
 import useSearchLabels from './use-labels-search';
@@ -142,10 +144,20 @@ export const useThreads = () => {
   // servie par cookie avant confirmation de l'utilisateur).
   const { data: session } = useSession();
 
+  // Opérateurs collaboratifs (is:shared / is:assigned / has:comment /
+  // has:mention) : extraits AVANT le fournisseur (Gmail les ignorerait en
+  // rendant zéro résultat), appliqués en aval contre les ensembles ACL de
+  // teams.myCollabThreadSets. Le reste de la requête part inchangé.
+  const collabSearch = useMemo(() => extractCollabFilters(searchValue.value), [searchValue.value]);
+  const providerSearchValue = collabSearch.hasFilters
+    ? collabSearch.providerQuery
+    : searchValue.value;
+  const collabSets = useCollabThreadSets(collabSearch.hasFilters);
+
   const isSearchingList = searchValue.value.trim().length > 0;
   const listThreadsQueryOptions = trpc.mail.listThreads.infiniteQueryOptions(
     {
-      q: searchValue.value,
+      q: providerSearchValue,
       folder,
       labelIds: labels,
       // Pages de 50 sur le chemin projection (perf r6 : le scroll profond
@@ -182,7 +194,7 @@ export const useThreads = () => {
   const isSearching = searchValue.value.trim().length > 0;
   const previewQuery = useQuery(
     trpc.mail.listThreads.queryOptions(
-      { q: searchValue.value, folder, labelIds: labels, cursor: '', localPreview: true },
+      { q: providerSearchValue, folder, labelIds: labels, cursor: '', localPreview: true },
       { enabled: isSearching && Boolean(session?.user?.id), staleTime: 60 * 1000 },
     ),
   );
@@ -247,20 +259,20 @@ export const useThreads = () => {
   }, [previewQuery.data, isInQueue, backgroundQueue]);
 
   const literalPreviewThreads = useMemo(() => {
-    if (!isSearching || !isSimpleLiteralSearch(searchValue.value)) return previewThreads;
+    if (!isSearching || !isSimpleLiteralSearch(providerSearchValue)) return previewThreads;
     if (previewThreads?.length) return previewThreads;
     // During placeholderData, `freshThreads` is the rich page from the same
     // folder before q changed. Filter it synchronously so a known DHL-style
     // match paints in the first frame instead of waiting on a DO round-trip.
     if (threadsQuery.isPlaceholderData) {
-      return filterLiteralSearchPreviewItems(freshThreads, searchValue.value);
+      return filterLiteralSearchPreviewItems(freshThreads, providerSearchValue);
     }
     return previewThreads;
   }, [
     freshThreads,
     isSearching,
     previewThreads,
-    searchValue.value,
+    providerSearchValue,
     threadsQuery.isPlaceholderData,
   ]);
 
@@ -282,7 +294,7 @@ export const useThreads = () => {
         fallbackItems: held,
         // Littéral (« DHL ») : seuls les matches locaux s'affichent pendant le
         // vol Gmail — jamais la vue précédente (voir search-preview-selector).
-        literalSearch: isSimpleLiteralSearch(searchValue.value),
+        literalSearch: isSimpleLiteralSearch(providerSearchValue),
       });
     }
     // Réponse Gmail atterrie. Littéral : fusion locale-d'abord — les matches
@@ -292,7 +304,7 @@ export const useThreads = () => {
     // threadId (CUA 2026-07-31 : Kura/Restaurant vides, LIQUID STUDIO faux
     // positif). Non-littéral (opérateurs/IA) : composition Gmail inchangée,
     // la préview n'y est qu'un sentinel d'enrichissement.
-    if (isSimpleLiteralSearch(searchValue.value)) {
+    if (isSimpleLiteralSearch(providerSearchValue)) {
       return mergeAuthoritativeWithLocalMatches(held, previewThreads);
     }
     return enrichThinItemsWithPreview(held, previewThreads);
@@ -307,7 +319,15 @@ export const useThreads = () => {
     literalPreviewThreads,
   ]);
 
-  const isEmpty = useMemo(() => threads.length === 0, [threads]);
+  // Application des opérateurs collaboratifs : intersection avec les sets
+  // ACL-filtrés. Sets en vol → liste vide plutôt qu'un flash non filtré.
+  const visibleThreads = useMemo(() => {
+    if (!collabSearch.hasFilters) return threads;
+    if (!collabSets.data) return [];
+    return filterThreadsByCollabSets(threads, collabSearch.filters, collabSets.data);
+  }, [threads, collabSearch, collabSets.data]);
+
+  const isEmpty = useMemo(() => visibleThreads.length === 0, [visibleThreads]);
   const isReachingEnd =
     isEmpty ||
     (threadsQuery.data &&
@@ -322,7 +342,7 @@ export const useThreads = () => {
   // presentation layer (mail-list.tsx, via useMailListData) uses this to show the
   // "resync in progress" banner, independently of whether a snapshot is currently
   // substituted (it may not be, on a view with nothing cached yet).
-  return [threadsQuery, threads, isReachingEnd, loadMore, forceSyncHold.active] as const;
+  return [threadsQuery, visibleThreads, isReachingEnd, loadMore, forceSyncHold.active] as const;
 };
 
 export const useThread = (threadId: string | null, options?: { enabled?: boolean }) => {

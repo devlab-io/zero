@@ -137,6 +137,15 @@ export class ZeroDriver extends DurableObject<ZeroEnv> {
     return result;
   }
 
+  async sendStoredDraft(id: string) {
+    if (!this.driver) {
+      throw new Error('No driver available');
+    }
+    const result = await this.driver.sendStoredDraft(id);
+    this.invalidateRecipientCache();
+    return result;
+  }
+
   async create(data: IOutgoingMessage) {
     if (!this.driver) {
       throw new Error('No driver available');

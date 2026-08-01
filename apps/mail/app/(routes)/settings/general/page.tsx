@@ -1,4 +1,3 @@
-import { log } from '@/lib/log';
 import {
   Form,
   FormControl,
@@ -26,9 +25,10 @@ import { useState, useEffect, useMemo, memo } from 'react';
 import { userSettingsSchema } from '@zero/server/schemas';
 import { locales } from '@/project.inlang/settings.json';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { zodResolver } from '@/lib/zod-resolver';
 import { useTRPC } from '@/providers/query-provider';
 import { getBrowserTimezone } from '@/lib/timezones';
+import { zodResolver } from '@/lib/zod-resolver';
+import { log } from '@/lib/log';
 
 import { useSettings } from '@/hooks/use-settings';
 import { locales as localesData } from '@/locales';
@@ -36,10 +36,10 @@ import { Switch } from '@/components/ui/switch';
 import { Button } from '@/components/ui/button';
 // import { useRevalidator } from 'react-router';
 import { m } from '@/paraglide/messages';
+import { useCallback } from 'react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import * as z from 'zod';
-import { useCallback } from 'react';
 
 const TimezoneSelect = memo(
   ({ field }: { field: ControllerRenderProps<z.infer<typeof userSettingsSchema>, 'timezone'> }) => {
@@ -63,7 +63,7 @@ const TimezoneSelect = memo(
               variant="outline"
               role="combobox"
               aria-expanded={open}
-              className="flex h-9! w-full items-center justify-start rounded-md hover:bg-transparent"
+              className="h-9! flex w-full items-center justify-start rounded-md hover:bg-transparent"
             >
               <Clock className="mr-2 h-4 w-4 shrink-0" />
               <span className="truncate">{field.value}</span>
@@ -137,6 +137,8 @@ export default function GeneralPage() {
       zeroSignature: true,
       defaultEmailAlias: '',
       animations: false,
+      confirmDirectDraftSend: true,
+      predictiveWritingEnabled: true,
     },
   });
 
@@ -182,7 +184,11 @@ export default function GeneralPage() {
   }
 
   const renderAnimationsField = useCallback(
-    ({ field }: { field: ControllerRenderProps<z.infer<typeof userSettingsSchema>, 'animations'> }) => (
+    ({
+      field,
+    }: {
+      field: ControllerRenderProps<z.infer<typeof userSettingsSchema>, 'animations'>;
+    }) => (
       <FormItem className="flex max-w-xl flex-row items-center justify-between rounded-lg border p-3 shadow-sm">
         <div className="space-y-0.5">
           <FormLabel>{m['pages.settings.general.animations']()}</FormLabel>
@@ -197,7 +203,11 @@ export default function GeneralPage() {
   );
 
   const renderLanguageField = useCallback(
-    ({ field }: { field: ControllerRenderProps<z.infer<typeof userSettingsSchema>, 'language'> }) => (
+    ({
+      field,
+    }: {
+      field: ControllerRenderProps<z.infer<typeof userSettingsSchema>, 'language'>;
+    }) => (
       <FormItem className="w-full md:w-[200px]">
         <FormLabel className="text-sm font-medium">
           {m['pages.settings.general.language']()}
@@ -223,8 +233,12 @@ export default function GeneralPage() {
   );
 
   const renderTimezoneField = useCallback(
-    ({ field }: { field: ControllerRenderProps<z.infer<typeof userSettingsSchema>, 'timezone'> }) => (
-      <FormItem className="w-full md:w-[200px] self-start">
+    ({
+      field,
+    }: {
+      field: ControllerRenderProps<z.infer<typeof userSettingsSchema>, 'timezone'>;
+    }) => (
+      <FormItem className="w-full self-start md:w-[200px]">
         <FormLabel className="text-sm font-medium">
           {m['pages.settings.general.timezone']()}
         </FormLabel>
@@ -278,11 +292,17 @@ export default function GeneralPage() {
   );
 
   const renderZeroSignatureField = useCallback(
-    ({ field }: { field: ControllerRenderProps<z.infer<typeof userSettingsSchema>, 'zeroSignature'> }) => (
+    ({
+      field,
+    }: {
+      field: ControllerRenderProps<z.infer<typeof userSettingsSchema>, 'zeroSignature'>;
+    }) => (
       <FormItem className="flex max-w-xl flex-row items-center justify-between rounded-lg border px-4 py-2">
         <div className="space-y-0.5">
           <FormLabel>{m['pages.settings.general.zeroSignature']()}</FormLabel>
-          <FormDescription>{m['pages.settings.general.zeroSignatureDescription']()}</FormDescription>
+          <FormDescription>
+            {m['pages.settings.general.zeroSignatureDescription']()}
+          </FormDescription>
         </div>
         <FormControl>
           <Switch checked={field.value} onCheckedChange={field.onChange} />
@@ -293,7 +313,11 @@ export default function GeneralPage() {
   );
 
   const renderAutoReadField = useCallback(
-    ({ field }: { field: ControllerRenderProps<z.infer<typeof userSettingsSchema>, 'autoRead'> }) => (
+    ({
+      field,
+    }: {
+      field: ControllerRenderProps<z.infer<typeof userSettingsSchema>, 'autoRead'>;
+    }) => (
       <FormItem className="flex max-w-xl flex-row items-center justify-between rounded-lg border p-3 shadow-sm">
         <div className="space-y-0.5">
           <FormLabel>{m['pages.settings.general.autoRead']()}</FormLabel>
@@ -328,6 +352,48 @@ export default function GeneralPage() {
     [],
   );
 
+  const renderConfirmDirectDraftSendField = useCallback(
+    ({
+      field,
+    }: {
+      field: ControllerRenderProps<z.infer<typeof userSettingsSchema>, 'confirmDirectDraftSend'>;
+    }) => (
+      <FormItem className="flex max-w-xl flex-row items-center justify-between rounded-lg border p-3 shadow-sm">
+        <div className="space-y-0.5">
+          <FormLabel>{m['pages.settings.general.confirmDirectDraftSend']()}</FormLabel>
+          <FormDescription>
+            {m['pages.settings.general.confirmDirectDraftSendDescription']()}
+          </FormDescription>
+        </div>
+        <FormControl>
+          <Switch checked={field.value} onCheckedChange={field.onChange} />
+        </FormControl>
+      </FormItem>
+    ),
+    [],
+  );
+
+  const renderPredictiveWritingEnabledField = useCallback(
+    ({
+      field,
+    }: {
+      field: ControllerRenderProps<z.infer<typeof userSettingsSchema>, 'predictiveWritingEnabled'>;
+    }) => (
+      <FormItem className="flex max-w-xl flex-row items-center justify-between rounded-lg border p-3 shadow-sm">
+        <div className="space-y-0.5">
+          <FormLabel>{m['pages.settings.general.predictiveWritingEnabled']()}</FormLabel>
+          <FormDescription>
+            {m['pages.settings.general.predictiveWritingEnabledDescription']()}
+          </FormDescription>
+        </div>
+        <FormControl>
+          <Switch checked={field.value} onCheckedChange={field.onChange} />
+        </FormControl>
+      </FormItem>
+    ),
+    [],
+  );
+
   return (
     <div className="grid gap-6">
       <SettingsCard
@@ -342,16 +408,8 @@ export default function GeneralPage() {
         <Form {...form}>
           <form id="general-form" onSubmit={form.handleSubmit(onSubmit)} className="space-y-8">
             <div className="flex w-full flex-col items-start gap-4 md:flex-row md:items-center">
-              <FormField
-                control={form.control}
-                name="language"
-                render={renderLanguageField}
-              />
-              <FormField
-                control={form.control}
-                name="timezone"
-                render={renderTimezoneField}
-              />
+              <FormField control={form.control} name="language" render={renderLanguageField} />
+              <FormField control={form.control} name="timezone" render={renderTimezoneField} />
               {aliases && aliases.length > 0 && (
                 <FormField
                   control={form.control}
@@ -366,15 +424,21 @@ export default function GeneralPage() {
               name="zeroSignature"
               render={renderZeroSignatureField}
             />
-            <FormField
-              control={form.control}
-              name="autoRead"
-              render={renderAutoReadField}
-            />
+            <FormField control={form.control} name="autoRead" render={renderAutoReadField} />
             <FormField
               control={form.control}
               name="undoSendEnabled"
               render={renderUndoSendEnabledField}
+            />
+            <FormField
+              control={form.control}
+              name="confirmDirectDraftSend"
+              render={renderConfirmDirectDraftSendField}
+            />
+            <FormField
+              control={form.control}
+              name="predictiveWritingEnabled"
+              render={renderPredictiveWritingEnabledField}
             />
             <FormField control={form.control} name="animations" render={renderAnimationsField} />
           </form>

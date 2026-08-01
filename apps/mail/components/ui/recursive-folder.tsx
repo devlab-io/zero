@@ -7,7 +7,6 @@ import { Folder } from '../magicui/file-tree';
 import { useNavigate } from 'react-router';
 
 import { useCallback } from 'react';
-import * as React from 'react';
 
 export const RecursiveFolder = ({
   label,

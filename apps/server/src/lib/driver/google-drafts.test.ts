@@ -41,6 +41,23 @@ const outgoing: IOutgoingMessage = {
 };
 
 describe('GmailDrafts.sendDraft / deleteDraft', () => {
+  it('sendStoredDraft envoie uniquement l’id fournisseur, sans reconstruire le contenu stocké', async () => {
+    let sendParams: Record<string, unknown> | undefined;
+    const t = makeFakeTransport({
+      gmail: makeFakeGmail({
+        'users.drafts.send': (p) => {
+          sendParams = p;
+          return data({ id: 'sent' });
+        },
+      }),
+    });
+
+    await new GmailDrafts(asT(t), noMessages()).sendStoredDraft('d-stored');
+
+    expect(sendParams).toMatchObject({ userId: 'me', requestBody: { id: 'd-stored' } });
+    expect(sendParams?.requestBody).toEqual({ id: 'd-stored' });
+  });
+
   it('sendDraft sérialise et envoie le brouillon avec son id', async () => {
     let sendParams: Record<string, unknown> | undefined;
     const t = makeFakeTransport({

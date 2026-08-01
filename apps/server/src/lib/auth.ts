@@ -31,6 +31,9 @@ const scheduleCampaign = (userInfo: { address: string; name: string }) =>
             from: '0.email <onboarding@0.email>',
             to: userInfo.address,
             subject,
+            // Resend's generated overload narrows this property to its bundled
+            // React version; the dynamically imported template is equivalent at runtime.
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
             react: react as any,
             ...(scheduledAt && { scheduledAt }),
           })

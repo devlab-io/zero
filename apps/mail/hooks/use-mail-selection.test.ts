@@ -30,4 +30,13 @@ describe('resolveMailSelectMode', () => {
     expect(resolveMailSelectMode(undefined, (key) => key === 'Control')).toBe('mass');
     expect(resolveMailSelectMode(undefined, (key) => key === 'Shift')).toBe('range');
   });
+
+  it('keeps Alt+Shift select-below reachable before the generic Shift range', () => {
+    expect(
+      resolveMailSelectMode(
+        { ...plainClick, altKey: true, shiftKey: true },
+        (key) => key === 'Alt' || key === 'Shift',
+      ),
+    ).toBe('selectAllBelow');
+  });
 });

@@ -27,10 +27,12 @@ import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { useReplyStatePurge } from '@/hooks/use-reply-state-purge';
 import { useActiveConnection } from '@/hooks/use-connections';
 import { useTRPC } from '@/providers/query-provider';
+import { useMail } from '@/components/mail/use-mail';
 import { Button } from '@/components/ui/button';
 import { useSession } from '@/lib/auth-client';
 import { Input } from '@/components/ui/input';
 import { m } from '@/paraglide/messages';
+import { useParams } from 'react-router';
 import { useQueryState } from 'nuqs';
 import { log } from '@/lib/log';
 import { useAtom } from 'jotai';
@@ -108,6 +110,8 @@ export function AskRetaSurface() {
   const [conversation, setConversation] = useAtom(askRetaConversationAtom);
   const [question, setQuestion] = useState('');
   const [threadId] = useQueryState('threadId');
+  const { folder: routeFolder } = useParams<{ folder: string }>();
+  const [mail] = useMail();
   const [draftId] = useQueryState('draftId');
   const [activeReplyId] = useQueryState('activeReplyId');
   const [, setAskRetaOpen] = useQueryState('isAskRetaOpen');
@@ -118,6 +122,10 @@ export function AskRetaSurface() {
   // ET le contexte serveur ; sans capture (bouton/palette), l'URL fait foi.
   const [threadCapture, setThreadCapture] = useAtom(askRetaThreadCaptureAtom);
   const effectiveThreadId = threadCapture ? threadCapture.threadId : threadId;
+  const canonicalFolder = (
+    ['inbox', 'sent', 'archive', 'spam', 'trash', 'bin', 'draft', 'snoozed'] as const
+  ).find((folder) => folder === routeFolder);
+  const selectedThreadIds = mail.bulkSelected.slice(0, 10);
   // Éphémère : mort à la fermeture du panneau (unmount) et à la fermeture du
   // fil sous-jacent ; le changement de compte/connexion purge plus bas.
   useEffect(() => () => setThreadCapture(null), [setThreadCapture]);
@@ -333,6 +341,8 @@ export function AskRetaSurface() {
             // Capture du raccourci prioritaire (tour 06) ; le serveur reste
             // l'autorité d'ownership et rejette tout fil étranger.
             ...(effectiveThreadId ? { threadId: effectiveThreadId } : {}),
+            ...(canonicalFolder ? { folder: canonicalFolder } : {}),
+            ...(selectedThreadIds.length ? { selectedThreadIds } : {}),
             ...(draftContext ? { draft: draftContext } : {}),
           },
         },
@@ -847,6 +857,20 @@ export function AskRetaSurface() {
               {threadChipSubject ? ` — ${threadChipSubject}` : ''}
             </span>
           </span>
+        </div>
+      )}
+      {(selectedThreadIds.length > 0 || canonicalFolder) && (
+        <div className="flex flex-wrap gap-1.5 border-t px-3 pt-2">
+          {selectedThreadIds.length > 0 && (
+            <span className="bg-muted text-muted-foreground rounded-full px-2.5 py-1 text-xs font-medium">
+              {m['common.askReta.selectedThreadsIncluded']({ count: selectedThreadIds.length })}
+            </span>
+          )}
+          {canonicalFolder && (
+            <span className="bg-muted text-muted-foreground rounded-full px-2.5 py-1 text-xs font-medium">
+              {m['common.askReta.folderIncluded']({ folder: canonicalFolder })}
+            </span>
+          )}
         </div>
       )}
       {/* Small render-time hint: the live composer's current draft will ride

@@ -139,6 +139,7 @@ export const MailList = memo(
 
         const messageThreadId = message.threadId ?? message.id;
         const clickedIndex = itemsRef.current.findIndex((item) => item.id === messageThreadId);
+        if (clickedIndex !== -1) setAnchorIndex(clickedIndex);
         // r15a : le fil CLIQUÉ passe devant toute spéculation. La file des
         // lignes visibles est invalidée synchronement (génération + timer)
         // avant le moindre départ réseau, l'openThread courant part SEUL

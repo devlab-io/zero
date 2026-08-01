@@ -14,8 +14,6 @@
  * Reuse or distribution of this file requires a license from Zero Email Inc.
  */
 
-import { logger } from '../../lib/logger';
-import { invariant } from '../../lib/invariant';
 import {
   appendResponseMessages,
   createDataStreamResponse,
@@ -30,16 +28,18 @@ import {
   type OutgoingMessage,
 } from './types';
 import { DurableObjectOAuthClientProvider } from 'agents/mcp/do-oauth-client-provider';
-import { AiChatPrompt } from '../../lib/prompts';
 import { reSyncThread } from '../../lib/server-utils';
 import { getPrompt } from '../../pipelines.effect';
 import { AIChatAgent } from 'agents/ai-chat-agent';
 import { ToolOrchestrator } from './orchestrator';
+import { AiChatPrompt } from '../../lib/prompts';
+import { invariant } from '../../lib/invariant';
 import { getPromptName } from '../../pipelines';
 import { anthropic } from '@ai-sdk/anthropic';
 import type { WSMessage } from 'partyserver';
 import { tools as authTools } from './tools';
 import { processToolCalls } from './utils';
+import { logger } from '../../lib/logger';
 import { type ZeroEnv } from '../../env';
 import { type Connection } from 'agents';
 import { EPrompts } from '../../types';
@@ -92,7 +92,10 @@ export class ZeroAgent extends AIChatAgent<ZeroEnv> {
   }
 
   private getDataStreamResponse(
-    onFinish: StreamTextOnFinishCallback<{}>,
+    // The concrete tool union is assembled below; the callback is passed through
+    // unchanged to the AI SDK, whose generic cannot be named at this boundary.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    onFinish: StreamTextOnFinishCallback<any>,
     currentThreadId: string,
     currentFolder: string,
     currentFilter: string,
@@ -352,7 +355,12 @@ export class ZeroAgent extends AIChatAgent<ZeroEnv> {
       const cached = await this.ctx.storage.get('do_state_cache');
       if (!cached) return null;
 
-      const data = cached as { storageSize: number; counts: { label: string; count: number }[]; shards: number; timestamp: number };
+      const data = cached as {
+        storageSize: number;
+        counts: { label: string; count: number }[];
+        shards: number;
+        timestamp: number;
+      };
       const now = Date.now();
       const CACHE_TTL = 5 * 60 * 1000;
 
@@ -395,7 +403,8 @@ export class ZeroAgent extends AIChatAgent<ZeroEnv> {
   }
 
   async onChatMessageWithContext(
-    onFinish: StreamTextOnFinishCallback<{}>,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    onFinish: StreamTextOnFinishCallback<any>,
     currentThreadId: string,
     currentFolder: string,
     currentFilter: string,

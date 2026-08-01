@@ -78,6 +78,114 @@ export const matchesDraftSearch = (row: DraftListRow, search: string): boolean =
   return `${row.recipient}\n${row.subject}\n${row.preview}`.toLocaleLowerCase().includes(needle);
 };
 
+/**
+ * Envoi direct (Mod+Enter) : autorisé UNIQUEMENT depuis le brouillon COMPLET
+ * (drafts.get) — jamais depuis une DraftListRow partielle. Le draft chargé
+ * doit correspondre à la ligne sélectionnée et porter au moins un
+ * destinataire ; le serveur enverra le brouillon TEL QUE STOCKÉ.
+ */
+export type DirectSendCheck =
+  | { ok: true; to: string[]; cc: string[]; bcc: string[]; subject: string }
+  | { ok: false; reason: 'not-loaded' | 'mismatch' | 'no-recipient' };
+
+export type DirectSendCandidate = {
+  draftId: string;
+  to: string[];
+  cc: string[];
+  bcc: string[];
+  subject: string;
+};
+
+export type ConfirmedDirectSend = {
+  draftId: string;
+  sendAsStored: true;
+  to: { email: string; name: string }[];
+  cc: { email: string; name: string }[];
+  bcc: { email: string; name: string }[];
+  subject: string;
+  message: '';
+  clientSendId: string;
+};
+
+/**
+ * Stable for the lifetime of a provider draft, including page reloads. The
+ * server scopes this key by connection, so the same provider id in another
+ * mailbox cannot collide. Keeping the key deterministic closes the window
+ * where a double shortcut could enqueue a second job before the provider has
+ * removed the sent draft from the list.
+ */
+export const directSendClientId = (draftId: string): string => {
+  let hash = 0xcbf29ce484222325n;
+  for (let index = 0; index < draftId.length; index += 1) {
+    hash ^= BigInt(draftId.charCodeAt(index));
+    hash = BigInt.asUintN(64, hash * 0x100000001b3n);
+  }
+  return `draft-direct-${hash.toString(36)}`;
+};
+
+export const canDirectSend = (
+  rowId: string | null,
+  draft:
+    | { id?: unknown; to?: unknown; cc?: unknown; bcc?: unknown; subject?: unknown }
+    | null
+    | undefined,
+): DirectSendCheck => {
+  if (!rowId || !draft || typeof draft.id !== 'string') {
+    return { ok: false, reason: 'not-loaded' };
+  }
+  if (draft.id !== rowId) return { ok: false, reason: 'mismatch' };
+  const addresses = (value: unknown) =>
+    Array.isArray(value)
+      ? value.filter((entry): entry is string => typeof entry === 'string' && entry.includes('@'))
+      : [];
+  const to = addresses(draft.to);
+  const cc = addresses(draft.cc);
+  const bcc = addresses(draft.bcc);
+  if (to.length + cc.length + bcc.length === 0) return { ok: false, reason: 'no-recipient' };
+  return {
+    ok: true,
+    to,
+    cc,
+    bcc,
+    subject: typeof draft.subject === 'string' ? draft.subject : '',
+  };
+};
+
+/**
+ * The mutation payload only exists after an explicit confirmation candidate
+ * has been created. Revalidate the complete draft at confirmation time and
+ * reject a stale dialog if recipients or subject changed underneath it.
+ */
+export const buildConfirmedDirectSend = (
+  candidate: DirectSendCandidate | null,
+  draft:
+    | { id?: unknown; to?: unknown; cc?: unknown; bcc?: unknown; subject?: unknown }
+    | null
+    | undefined,
+): ConfirmedDirectSend | null => {
+  if (!candidate) return null;
+  const check = canDirectSend(candidate.draftId, draft);
+  if (!check.ok) return null;
+  if (
+    check.subject !== candidate.subject ||
+    check.to.join('\n') !== candidate.to.join('\n') ||
+    check.cc.join('\n') !== candidate.cc.join('\n') ||
+    check.bcc.join('\n') !== candidate.bcc.join('\n')
+  ) {
+    return null;
+  }
+  return {
+    draftId: candidate.draftId,
+    sendAsStored: true,
+    to: check.to.map((email) => ({ email, name: email.split('@')[0] || email })),
+    cc: check.cc.map((email) => ({ email, name: email.split('@')[0] || email })),
+    bcc: check.bcc.map((email) => ({ email, name: email.split('@')[0] || email })),
+    subject: check.subject,
+    message: '',
+    clientSendId: directSendClientId(candidate.draftId),
+  };
+};
+
 export const moveDraftSelection = (
   ids: readonly string[],
   currentId: string | null,

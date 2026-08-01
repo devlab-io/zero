@@ -392,6 +392,330 @@ export const draftOutbox = createTable(
   ],
 );
 
+/**
+ * Collaboration d'équipe — EXCLUSIVEMENT centrée sur les fils email.
+ * Une équipe regroupe des utilisateurs (pas des connexions) ; l'appartenance
+ * est par userId pour survivre à l'ajout/retrait de connexions. Toute lecture
+ * ou écriture collaborative passe par une vérification d'appartenance en SQL
+ * (couche DO) — jamais par confiance dans un teamId fourni par le client.
+ */
+export const team = createTable(
+  'team',
+  {
+    id: text('id').primaryKey(),
+    name: text('name').notNull(),
+    createdBy: text('created_by')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (t) => [index('team_created_by_idx').on(t.createdBy)],
+);
+
+export type TeamNotificationPrefs = {
+  onComment: boolean;
+  onMention: boolean;
+  onAssignment: boolean;
+};
+
+export const defaultTeamNotificationPrefs: TeamNotificationPrefs = {
+  onComment: true,
+  onMention: true,
+  onAssignment: true,
+};
+
+export const teamMember = createTable(
+  'team_member',
+  {
+    teamId: text('team_id')
+      .notNull()
+      .references(() => team.id, { onDelete: 'cascade' }),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    role: text('role').$type<'owner' | 'member'>().notNull().default('member'),
+    prefs: jsonb('prefs')
+      .$type<TeamNotificationPrefs>()
+      .notNull()
+      .default(defaultTeamNotificationPrefs),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.teamId, t.userId] }),
+    index('team_member_user_id_idx').on(t.userId),
+  ],
+);
+
+// L'invitation est liée à une ADRESSE email (normalisée lowercase) — elle est
+// résolue vers un userId uniquement à l'acceptation, contre l'email de session.
+export const teamInvite = createTable(
+  'team_invite',
+  {
+    id: text('id').primaryKey(),
+    teamId: text('team_id')
+      .notNull()
+      .references(() => team.id, { onDelete: 'cascade' }),
+    email: text('email').notNull(),
+    role: text('role').$type<'owner' | 'member'>().notNull().default('member'),
+    invitedBy: text('invited_by')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    status: text('status')
+      .$type<'pending' | 'accepted' | 'declined' | 'revoked'>()
+      .notNull()
+      .default('pending'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    respondedAt: timestamp('responded_at'),
+  },
+  (t) => [
+    index('team_invite_team_id_idx').on(t.teamId),
+    index('team_invite_email_status_idx').on(t.email, t.status),
+  ],
+);
+
+/**
+ * Un fil partagé à l'équipe. Les métadonnées (sujet, participants, aperçu)
+ * sont capturées CÔTÉ SERVEUR depuis la boîte du partageur au moment du
+ * partage — jamais fournies par le client — et servent aux LISTES. La lecture
+ * complète (messages, PJ) passe par le proxy borné readSharedThread /
+ * readSharedAttachment : le serveur n'utilise sharerConnectionId qu'APRÈS
+ * resolveAccess(teamThreadId, sessionUserId), sans jamais exposer de
+ * credentials ni ouvrir le reste de la boîte du partageur. `visibility`
+ * 'team' = toute l'équipe ; 'restricted' = lignes team_thread_access actives
+ * uniquement (+ partageur et owners).
+ */
+export const teamThread = createTable(
+  'team_thread',
+  {
+    id: text('id').primaryKey(),
+    teamId: text('team_id')
+      .notNull()
+      .references(() => team.id, { onDelete: 'cascade' }),
+    threadId: text('thread_id').notNull(),
+    sharerUserId: text('sharer_user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    sharerConnectionId: text('sharer_connection_id').notNull(),
+    sharerEmail: text('sharer_email').notNull(),
+    providerId: text('provider_id').notNull(),
+    visibility: text('visibility').$type<'team' | 'restricted'>().notNull().default('team'),
+    subject: text('subject').notNull(),
+    preview: text('preview').notNull().default(''),
+    participants: jsonb('participants')
+      .$type<{ name?: string; email: string }[]>()
+      .notNull()
+      .default([]),
+    messageCount: integer('message_count').notNull().default(0),
+    latestReceivedOn: text('latest_received_on'),
+    status: text('status').$type<'open' | 'closed'>().notNull().default('open'),
+    assigneeUserId: text('assignee_user_id').references(() => user.id, { onDelete: 'set null' }),
+    lastActivityAt: timestamp('last_activity_at').notNull().defaultNow(),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (t) => [
+    unique('team_thread_team_conn_thread_unique').on(t.teamId, t.sharerConnectionId, t.threadId),
+    index('team_thread_team_activity_idx').on(t.teamId, t.lastActivityAt),
+    index('team_thread_team_status_idx').on(t.teamId, t.status),
+    index('team_thread_assignee_idx').on(t.assigneeUserId),
+    index('team_thread_thread_id_idx').on(t.threadId),
+  ],
+);
+
+/**
+ * ACL granulaire et RÉVOCABLE d'un fil partagé en visibilité 'restricted'.
+ * La révocation est explicite et auditable : la ligne est conservée avec
+ * revokedAt/revokedBy (jamais supprimée), et l'élargissement d'accès par
+ * mention est VISIBLE (source='mention' + notification + audit).
+ */
+export const teamThreadAccess = createTable(
+  'team_thread_access',
+  {
+    id: text('id').primaryKey(),
+    teamThreadId: text('team_thread_id')
+      .notNull()
+      .references(() => teamThread.id, { onDelete: 'cascade' }),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    source: text('source').$type<'share' | 'mention' | 'manual'>().notNull(),
+    grantedBy: text('granted_by')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    revokedAt: timestamp('revoked_at'),
+    revokedBy: text('revoked_by'),
+  },
+  (t) => [
+    unique('team_thread_access_thread_user_unique').on(t.teamThreadId, t.userId),
+    index('team_thread_access_user_idx').on(t.userId),
+  ],
+);
+
+// Commentaire interne d'équipe sur un fil partagé : texte BRUT borné (jamais
+// de HTML — rendu en texte, zéro surface XSS), mentions = userIds validés
+// membres au moment de l'écriture. `quote` est une citation STRUCTURÉE d'un
+// message du fil, capturée côté serveur depuis la boîte du partageur (même
+// autorisation que readSharedThread) — jamais du texte client libre.
+export const teamThreadComment = createTable(
+  'team_thread_comment',
+  {
+    id: text('id').primaryKey(),
+    teamThreadId: text('team_thread_id')
+      .notNull()
+      .references(() => teamThread.id, { onDelete: 'cascade' }),
+    authorUserId: text('author_user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    body: text('body').notNull(),
+    mentions: jsonb('mentions').$type<string[]>().notNull().default([]),
+    quote: jsonb('quote').$type<{
+      messageId: string;
+      authorEmail: string;
+      authorName?: string;
+      receivedOn: string;
+      text: string;
+    } | null>(),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (t) => [
+    index('team_thread_comment_thread_created_idx').on(t.teamThreadId, t.createdAt),
+    index('team_thread_comment_author_idx').on(t.authorUserId),
+  ],
+);
+
+// Réaction emoji sur un commentaire — une ligne par (commentaire, membre,
+// emoji), l'emoji est contraint à une allowlist côté route.
+export const teamCommentReaction = createTable(
+  'team_comment_reaction',
+  {
+    commentId: text('comment_id')
+      .notNull()
+      .references(() => teamThreadComment.id, { onDelete: 'cascade' }),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    emoji: text('emoji').notNull(),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.commentId, t.userId, t.emoji] })],
+);
+
+// Labels d'équipe (équipe/projet), appliqués aux fils partagés uniquement.
+export const teamLabel = createTable(
+  'team_label',
+  {
+    id: text('id').primaryKey(),
+    teamId: text('team_id')
+      .notNull()
+      .references(() => team.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    color: text('color').notNull().default('default'),
+    createdBy: text('created_by')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (t) => [
+    unique('team_label_team_name_unique').on(t.teamId, t.name),
+    index('team_label_team_idx').on(t.teamId),
+  ],
+);
+
+export const teamThreadLabel = createTable(
+  'team_thread_label',
+  {
+    teamThreadId: text('team_thread_id')
+      .notNull()
+      .references(() => teamThread.id, { onDelete: 'cascade' }),
+    labelId: text('label_id')
+      .notNull()
+      .references(() => teamLabel.id, { onDelete: 'cascade' }),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.teamThreadId, t.labelId] }),
+    index('team_thread_label_label_idx').on(t.labelId),
+  ],
+);
+
+// Notification collaborative lu/non-lu, filtrée à l'écriture par les
+// préférences du membre (team_member.prefs). readAt = null tant que non lue.
+export const teamNotification = createTable(
+  'team_notification',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    teamId: text('team_id')
+      .notNull()
+      .references(() => team.id, { onDelete: 'cascade' }),
+    teamThreadId: text('team_thread_id').references(() => teamThread.id, { onDelete: 'cascade' }),
+    commentId: text('comment_id').references(() => teamThreadComment.id, { onDelete: 'cascade' }),
+    kind: text('kind')
+      .$type<
+        | 'mention'
+        | 'comment'
+        | 'assignment'
+        | 'access_granted'
+        | 'access_revoked'
+        | 'status_changed'
+      >()
+      .notNull(),
+    actorUserId: text('actor_user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    readAt: timestamp('read_at'),
+  },
+  (t) => [
+    index('team_notification_user_read_idx').on(t.userId, t.readAt),
+    index('team_notification_user_created_idx').on(t.userId, t.createdAt),
+  ],
+);
+
+// Journal d'audit append-only des actions collaboratives (partage, ACL,
+// membres, labels, statut, suppression de commentaire par un owner…).
+export const teamAuditLog = createTable(
+  'team_audit_log',
+  {
+    id: text('id').primaryKey(),
+    teamId: text('team_id')
+      .notNull()
+      .references(() => team.id, { onDelete: 'cascade' }),
+    actorUserId: text('actor_user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    action: text('action').notNull(),
+    subjectType: text('subject_type').notNull(),
+    subjectId: text('subject_id').notNull(),
+    metadata: jsonb('metadata').$type<Record<string, unknown>>().notNull().default({}),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (t) => [index('team_audit_team_created_idx').on(t.teamId, t.createdAt)],
+);
+
+// Présence/typing par polling : heartbeat upsert, lecture filtrée sur
+// lastSeenAt récent. Aucun canal détaché des fils email — la présence est
+// TOUJOURS rattachée à un fil partagé.
+export const teamThreadPresence = createTable(
+  'team_thread_presence',
+  {
+    teamThreadId: text('team_thread_id')
+      .notNull()
+      .references(() => teamThread.id, { onDelete: 'cascade' }),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    lastSeenAt: timestamp('last_seen_at').notNull().defaultNow(),
+    typingUntil: timestamp('typing_until'),
+  },
+  (t) => [primaryKey({ columns: [t.teamThreadId, t.userId] })],
+);
+
 // Outbox d'envoi autoritatif : chaque mail.send devient une ligne send_job avant
 // tout contact Gmail. La contrainte unique (connection_id, client_submission_key)
 // est la barrière d'idempotence des doubles clics/retries client ; `payload` est

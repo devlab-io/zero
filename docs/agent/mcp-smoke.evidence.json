@@ -1,7 +1,15 @@
 {
-  "note": "Local, sandbox smoke with injected driver fakes (no network, no OAuth-console, no prod). A fully live authenticated /mcp session against local/staging requires an interactive better-auth OIDC login unavailable here (blocker documented in docs/agent/mcp-smoke.md, precedent #28/#40). This exercises the read-only and draft-only handlers end-to-end and proves no send path exists.",
+  "confirmedSend": {
+    "declined": "Send NOT confirmed by the human — nothing was sent",
+    "cancelled": "Send NOT confirmed by the human — nothing was sent",
+    "acceptedUnchecked": "Send NOT confirmed by the human — nothing was sent",
+    "enqueuesWithoutConfirmation": 0,
+    "accepted": "Draft dr-1 CONFIRMED by the human and queued in the durable outbox — it will be sent exactly as stored (sendStoredDraft). Preview: {\"id\":\"dr-1\",\"to\":[\"a@b.pf\"],\"cc\":[],\"bcc\":[],\"subject\":\"S\",\"bodyText\":\"C\",\"unsent\":true}",
+    "enqueuesAfterConfirmation": 1
+  },
+  "note": "Local, sandbox smoke with injected driver fakes (no network, no OAuth-console, no prod). A fully live authenticated /mcp session against local/staging requires an interactive better-auth OIDC login unavailable here (blocker documented in docs/agent/mcp-smoke.md, precedent #28/#40). This exercises read/draft handlers plus the confirmed-send gate and proves that unconfirmed paths enqueue nothing while an accepted elicitation enqueues once.",
   "readonly": {
-    "capabilitiesSendable": false,
+    "capabilitiesSendableWithoutConfirmation": false,
     "listThreadsSample": [
       "ID: thread-1 | Subject: Proposition commerciale Devlab | From: Hinatea <hinatea@client.pf> | Date: 2026-07-13T08:00:00.000Z | Unread: yes | Labels: Inbox, Unread",
       "ID: thread-2 | Subject: Suivi hebdo | From: Unknown sender | Date: 2026-07-12T08:00:00.000Z | Unread: no | Labels: —"
@@ -18,7 +26,7 @@
       "updatedAt": "2026-07-13T00:00:00.000Z"
     }
   },
-  "draftOnly": {
+  "draftFirst": {
     "createDraftFirst": {
       "id": "gmail-draft-1",
       "deduped": false
@@ -28,11 +36,12 @@
       "deduped": true
     },
     "distinctGmailDraftsCreated": 1,
-    "sendCallsObserved": 0
+    "providerSendCallsObserved": 0
   },
   "assertions": {
     "oneLogicalDraftPerKey": true,
-    "zeroSends": true,
-    "draftOnlyGuaranteed": true
+    "zeroUnconfirmedSends": true,
+    "confirmedSendEnqueuedExactlyOnce": true,
+    "draftFirstGuaranteed": true
   }
 }

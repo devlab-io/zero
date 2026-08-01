@@ -79,29 +79,57 @@ try {
 } catch {
   schemaSnapshot = null;
 }
-assert(schemaSnapshot, 'MCP schema snapshot docs/agent/mcp-schema.snapshot.json is missing/invalid');
+assert(
+  schemaSnapshot,
+  'MCP schema snapshot docs/agent/mcp-schema.snapshot.json is missing/invalid',
+);
 
 if (schemaSnapshot) {
+  // P9 élargi : plus AUCUN envoi sans confirmation humaine, et l'unique
+  // exception (sendConfirmedDraft) porte un contrat d'elicitation NON
+  // contournable, asserté tool par tool ci-dessous.
   for (const guarantee of [
-    'canSendMail',
+    'canSendMailWithoutHumanConfirmation',
     'canPermanentlyDeleteMail',
     'canReportSpam',
     'canChangeAccountSettings',
   ]) {
-    assert(schemaSnapshot[guarantee] === false, `MCP snapshot must guarantee ${guarantee} === false`);
+    assert(
+      schemaSnapshot[guarantee] === false,
+      `MCP snapshot must guarantee ${guarantee} === false`,
+    );
   }
-  assert(schemaSnapshot.draftOnly === true, 'MCP snapshot must declare draftOnly === true');
+  assert(schemaSnapshot.draftFirst === true, 'MCP snapshot must declare draftFirst === true');
+  assert(
+    schemaSnapshot.sendException?.tool === 'sendConfirmedDraft' &&
+      schemaSnapshot.sendException?.humanConfirmation === 'elicitation' &&
+      schemaSnapshot.sendException?.transport === 'durable-outbox',
+    'MCP snapshot must declare sendConfirmedDraft as the ONLY send exception, gated by elicitation over the durable outbox',
+  );
+  assert(
+    /EXCEPT sendConfirmedDraft/.test(schemaSnapshot.statement ?? '') &&
+      /elicitation/i.test(schemaSnapshot.statement ?? ''),
+    'MCP snapshot statement must state the single elicitation-gated send exception',
+  );
 
   const tools = Array.isArray(schemaSnapshot.tools) ? schemaSnapshot.tools : [];
   const toolNames = new Set(tools.map((t) => t.name));
 
-  // WRITE tools are limited to create draft + reviewable outbox create/inspect/cancel/retry.
+  // WRITE tools are limited to create/update draft + reviewable outbox
+  // create/inspect/cancel/retry + the SINGLE elicitation-gated send exception.
   const writeWhitelist = new Set([
     'createDraft',
+    'updateDraft',
+    'sendConfirmedDraft',
     'enqueueDraftJob',
     'cancelOutboxItem',
     'retryOutboxItem',
   ]);
+  const sendCapableTools = tools.filter((t) => t.sendCapable === true);
+  assert(
+    sendCapableTools.length === 1 && sendCapableTools[0].name === 'sendConfirmedDraft',
+    'exactly ONE tool may be sendCapable, and it must be sendConfirmedDraft',
+  );
   for (const tool of tools) {
     if (tool.category === 'write') {
       assert(
@@ -109,9 +137,29 @@ if (schemaSnapshot) {
         `MCP snapshot write tool "${tool.name}" is outside the draft/outbox whitelist`,
       );
     }
+    if (tool.name === 'sendConfirmedDraft') {
+      assert(
+        tool.sendCapable === true && tool.humanConfirmation === 'elicitation',
+        'sendConfirmedDraft must declare sendCapable + humanConfirmation=elicitation',
+      );
+      assert(
+        /elicitation/i.test(tool.description) &&
+          /fail closed/i.test(tool.description) &&
+          /sendStoredDraft/.test(tool.description),
+        'sendConfirmedDraft description must state the elicitation gate, fail-closed behaviour and stored-draft delivery',
+      );
+    } else {
+      assert(
+        tool.sendCapable !== true,
+        `tool "${tool.name}" must NOT be sendCapable — sendConfirmedDraft is the only exception`,
+      );
+    }
     // Every mutation tool must be idempotent (spec §"Mutation tools must be idempotent").
     if (tool.mutates) {
-      assert(tool.idempotent === true, `MCP snapshot mutation tool "${tool.name}" is not idempotent`);
+      assert(
+        tool.idempotent === true,
+        `MCP snapshot mutation tool "${tool.name}" is not idempotent`,
+      );
     }
   }
 
@@ -125,7 +173,10 @@ if (schemaSnapshot) {
     'getUserLabels',
     'getLabel',
   ]) {
-    assert(toolNames.has(requiredRead), `MCP snapshot is missing required read tool ${requiredRead}`);
+    assert(
+      toolNames.has(requiredRead),
+      `MCP snapshot is missing required read tool ${requiredRead}`,
+    );
   }
 }
 
@@ -143,4 +194,6 @@ if (failures.length) {
   process.exit(1);
 }
 
-console.log('Security surface check passed: least scopes, bounded session cache, draft-only MCP.');
+console.log(
+  'Security surface check passed: least scopes, bounded session cache, draft-first MCP with one elicitation-gated send.',
+);

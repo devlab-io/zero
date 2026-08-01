@@ -1,10 +1,10 @@
-import { logger } from '../../lib/logger';
 import { getCurrentDateContext, GmailSearchAssistantSystemPrompt } from '../../lib/prompts';
 import { getThread, getZeroAgent } from '../../lib/server-utils';
 import type { IGetThreadResponse } from '../../lib/driver/types';
 import { composeEmail } from '../../trpc/routes/ai/compose';
 import { perplexity } from '@ai-sdk/perplexity';
 import { colors } from '../../lib/prompts';
+import { logger } from '../../lib/logger';
 import { openai } from '@ai-sdk/openai';
 import { generateText, tool } from 'ai';
 import { Tools } from '../../types';
@@ -13,6 +13,8 @@ import { z } from 'zod';
 
 type ModelTypes = 'summarize' | 'general' | 'chat' | 'vectorize';
 
+// Cloudflare AI's model-name overload is broader than the local generated union.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const models: Record<ModelTypes, any> = {
   summarize: '@cf/facebook/bart-large-cnn',
   general: 'llama-3.3-70b-instruct-fp8-fast',

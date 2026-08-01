@@ -4,10 +4,9 @@ import {
   DropdownMenuContent,
   DropdownMenuTrigger,
 } from '../ui/dropdown-menu';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { ThreadReaderSurface, PricingDialogSurface } from '@/components/mail/mail-lazy-surfaces';
-import { Bell, Lightning, Mail, ScanEye, Tag, User, X, Search } from '../icons/icons';
 import { useCategorySettings, useDefaultCategoryId } from '@/hooks/use-categories';
+import { Bell, Lightning, Mail, ScanEye, Tag, User, Search } from '../icons/icons';
 import { ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable';
 import { useCommandPalette } from '../context/command-palette-context';
 import { useWarmCoreMailFolders } from '@/hooks/use-folder-prefetch';
@@ -16,13 +15,16 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useActiveConnection } from '@/hooks/use-connections';
 import { Check, ChevronDown, RefreshCcw } from 'lucide-react';
 import { useMediaQuery } from '../../hooks/use-media-query';
+import { TooltipProvider } from '@/components/ui/tooltip';
 import useSearchLabels from '@/hooks/use-labels-search';
 import { MailList } from '@/components/mail/mail-list';
+import { LabelMovePicker } from './label-move-picker';
 import { useNavigate, useParams } from 'react-router';
 import { useMail } from '@/components/mail/use-mail';
 import { SidebarToggle } from '../ui/sidebar-toggle';
 import { clearBulkSelectionAtom } from './use-mail';
 import { markStageOnce } from '@/lib/perf-stages';
+import { BulkActionBar } from './bulk-action-bar';
 import { log } from '@/lib/log';
 
 import { useThreads } from '@/hooks/use-threads';
@@ -494,27 +496,11 @@ export function MailLayout() {
                       )}
                     </>
                   ) : (
-                    <div className="flex flex-1 items-center justify-between">
-                      <div className="text-foreground text-sm font-medium">
-                        {mail.bulkSelected.length} selected
-                      </div>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Button
-                            variant="secondary"
-                            size="sm"
-                            onClick={handleExitBulkSelection}
-                            className="h-8 gap-2 rounded-lg"
-                          >
-                            <X className="h-3 w-3" />
-                            <span className="text-xs">ESC</span>
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent>
-                          {m['common.actions.exitSelectionModeEsc']()}
-                        </TooltipContent>
-                      </Tooltip>
-                    </div>
+                    <BulkActionBar
+                      selectedIds={mail.bulkSelected}
+                      folder={folder ?? 'inbox'}
+                      onExit={handleExitBulkSelection}
+                    />
                   )}
 
                   <Button
@@ -573,6 +559,10 @@ export function MailLayout() {
             </div>
           )}
         </ResizablePanelGroup>
+        {/* P5 : picker label/move UNIQUE, monté hors du gate « fil ouvert » —
+            il sert le fil ouvert (raccourcis l/v) ET la sélection multiple de
+            la BulkActionBar (bulkSelected prime dans le picker). */}
+        <LabelMovePicker />
       </div>
     </TooltipProvider>
   );

@@ -1,6 +1,5 @@
 import { Button } from '@/components/ui/button';
 import { X } from 'lucide-react';
-import React from 'react';
 
 const getLogo = (mimetype: string): string => {
   if (mimetype.includes('pdf')) {

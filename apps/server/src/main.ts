@@ -315,4 +315,5 @@ export {
   SyncThreadsCoordinatorWorkflow,
   ShardRegistry,
 };
+export { TeamThreadRealtime } from './routes/team-realtime';
 export { DbRpcDO, ZeroDB } from './db/durable-objects';

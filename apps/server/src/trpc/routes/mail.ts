@@ -531,6 +531,9 @@ export const mailRouter = router({
         threadId: z.string().optional(),
         fromEmail: z.string().optional(),
         draftId: z.string().optional(),
+        // Envoi direct depuis la vue Drafts : le brouillon part TEL QUE
+        // STOCKÉ (drafts.send {id}) — exige draftId, sinon ignoré.
+        sendAsStored: z.boolean().optional(),
         isForward: z.boolean().optional(),
         originalMessage: z.string().optional(),
         scheduleAt: z.string().optional(),
@@ -907,6 +910,26 @@ export const mailRouter = router({
     const executionCtx = getContext<HonoContext>().executionCtx;
     const { stub: agent } = await getZeroAgent(activeConnection.id, executionCtx);
     return agent.getEmailAliases();
+  }),
+  /**
+   * P6 — snoozes À VENIR du dashboard : projection DO du dossier snoozed
+   * (première page, plancher exposé via `truncated`) croisée avec les wakeAt
+   * KV de LA connexion active. Sourcé, zéro IA — logique pure testée dans
+   * lib/snooze-upcoming.ts.
+   */
+  getUpcomingSnoozes: activeDriverProcedure.query(async ({ ctx }) => {
+    const { activeConnection } = ctx;
+    const { selectUpcomingSnoozes } = await import('../../lib/snooze-upcoming');
+    const page = await getThreadsFromDB(activeConnection.id, {
+      folder: FOLDERS.SNOOZED,
+      maxResults: 100,
+    });
+    return await selectUpcomingSnoozes(
+      page.threads.map((thread) => thread.id),
+      (threadId) => env.snoozed_emails.get(`${threadId}__${activeConnection.id}`),
+      Date.now(),
+      Boolean(page.nextPageToken),
+    );
   }),
   snoozeThreads: activeDriverProcedure
     .input(

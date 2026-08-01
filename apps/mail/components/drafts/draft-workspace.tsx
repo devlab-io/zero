@@ -1,4 +1,6 @@
 import {
+  buildConfirmedDirectSend,
+  canDirectSend,
   draftListRow,
   matchesDraftSearch,
   moveDraftSelection,
@@ -27,11 +29,15 @@ import {
 } from '@/components/ui/dialog';
 import { preloadComposeSurface } from '@/components/create/compose-surface';
 import { useOptimisticActions } from '@/hooks/use-optimistic-actions';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useHotkeys, useHotkeysContext } from 'react-hotkeys-hook';
 import { useMailboxOverview } from '@/hooks/use-mailbox-overview';
 import { QueueReview } from '@/components/queue/queue-review';
+import { interpretSendOutcome } from '@/lib/send-outcome';
+import { useTRPC } from '@/providers/query-provider';
 import { useEffect, useMemo, useState } from 'react';
 import { Skeleton } from '@/components/ui/skeleton';
+import { useSettings } from '@/hooks/use-settings';
 import { useThreads } from '@/hooks/use-threads';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -40,6 +46,7 @@ import { useDraft } from '@/hooks/use-drafts';
 import { m } from '@/paraglide/messages';
 import { useQueryState } from 'nuqs';
 import { cn } from '@/lib/utils';
+import { toast } from 'sonner';
 
 type DraftView = 'drafts' | 'agent';
 
@@ -131,6 +138,88 @@ export function DraftWorkspace() {
     if (selectedRow) setDeleteCandidate(selectedRow);
   };
 
+  // --- Envoi direct (Mod+Enter) : brouillon COMPLET chargé, confirmation
+  // explicite, clé d'idempotence stable par brouillon, envoi TEL QUE STOCKÉ
+  // côté serveur (PJ/destinataires/threading/signature préservés).
+  const trpc = useTRPC();
+  const queryClient = useQueryClient();
+  const { mutateAsync: sendEmail, isPending: isSendingDraft } = useMutation(
+    trpc.mail.send.mutationOptions(),
+  );
+  const settings = useSettings();
+  const [sendCandidate, setSendCandidate] = useState<{
+    draftId: string;
+    to: string[];
+    cc: string[];
+    bcc: string[];
+    subject: string;
+  } | null>(null);
+
+  const submitDirectSend = async (candidate: {
+    draftId: string;
+    to: string[];
+    cc: string[];
+    bcc: string[];
+    subject: string;
+  }) => {
+    if (isSendingDraft) return;
+    const submission = buildConfirmedDirectSend(candidate, selectedDraft.data);
+    if (!submission) {
+      setSendCandidate(null);
+      toast.info(m['draftWorkspace.sendNotLoaded']());
+      return;
+    }
+    const { draftId } = submission;
+    const sendingToast = toast.loading(m['states.sending']());
+    try {
+      const result = await sendEmail(submission);
+      const outcome = interpretSendOutcome(result);
+      if (!outcome.ok) {
+        throw new Error(typeof outcome.error === 'string' ? outcome.error : 'Send failed');
+      }
+      setSendCandidate(null);
+      toast.success(m['draftWorkspace.sendQueued']());
+      void queryClient.invalidateQueries({ queryKey: trpc.mail.listThreads.queryKey() });
+      void queryClient.invalidateQueries({ queryKey: trpc.drafts.get.queryKey({ id: draftId }) });
+    } catch (error) {
+      // La clé est déterministe par draft : retry, double frappe et reload
+      // convergent vers le même send_job côté serveur.
+      toast.error(error instanceof Error ? error.message : m['draftWorkspace.sendFailed']());
+    } finally {
+      toast.dismiss(sendingToast);
+    }
+  };
+
+  const requestDirectSend = () => {
+    if (view !== 'drafts' || !selectedRow) return;
+    const check = canDirectSend(selectedRow.id, selectedDraft.data);
+    if (!check.ok) {
+      toast.info(
+        check.reason === 'no-recipient'
+          ? m['draftWorkspace.sendNoRecipient']()
+          : m['draftWorkspace.sendNotLoaded'](),
+      );
+      return;
+    }
+    const candidate = {
+      draftId: selectedRow.id,
+      to: check.to,
+      cc: check.cc,
+      bcc: check.bcc,
+      subject: check.subject,
+    };
+    if (settings.data?.settings.confirmDirectDraftSend ?? true) {
+      setSendCandidate(candidate);
+      return;
+    }
+    void submitDirectSend(candidate);
+  };
+
+  const confirmDirectSend = async () => {
+    if (!sendCandidate || isSendingDraft) return;
+    await submitDirectSend(sendCandidate);
+  };
+
   const confirmDelete = () => {
     if (!deleteCandidate) return;
     const ids = filteredRows.map((row) => row.id).filter((id) => id !== deleteCandidate.id);
@@ -156,6 +245,11 @@ export function DraftWorkspace() {
     enableOnFormTags: false,
   });
   useHotkeys(['shift+3', 'delete', 'meta+backspace', 'ctrl+backspace'], requestDelete, {
+    scopes: ['draft-workspace'],
+    preventDefault: true,
+    enableOnFormTags: false,
+  });
+  useHotkeys(['meta+enter', 'ctrl+enter'], requestDirectSend, {
     scopes: ['draft-workspace'],
     preventDefault: true,
     enableOnFormTags: false,
@@ -280,6 +374,40 @@ export function DraftWorkspace() {
           />
         </div>
       )}
+
+      <Dialog
+        open={Boolean(sendCandidate)}
+        onOpenChange={(open) => !open && setSendCandidate(null)}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{m['draftWorkspace.sendTitle']()}</DialogTitle>
+            <DialogDescription>
+              {m['draftWorkspace.sendDescription']({
+                recipients: [
+                  ...(sendCandidate?.to ?? []),
+                  ...(sendCandidate?.cc ?? []),
+                  ...(sendCandidate?.bcc ?? []),
+                ].join(', '),
+                subject: sendCandidate?.subject || m['draftWorkspace.untitled'](),
+              })}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setSendCandidate(null)}>
+              {m['draftWorkspace.cancel']()}
+            </Button>
+            <Button
+              type="button"
+              disabled={isSendingDraft}
+              onClick={() => void confirmDirectSend()}
+            >
+              <Send className="mr-1.5 h-3.5 w-3.5" />
+              {m['draftWorkspace.sendConfirm']()}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog
         open={Boolean(deleteCandidate)}

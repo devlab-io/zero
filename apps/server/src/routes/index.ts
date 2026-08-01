@@ -9,6 +9,7 @@ import { oAuthDiscoveryMetadata } from 'better-auth/plugins';
 import { getZeroDB, verifyToken } from '../lib/server-utils';
 import { ThinkingMCP } from '../lib/sequential-thinking';
 import { contextStorage } from 'hono/context-storage';
+import { teamRealtimeRouter } from './team-realtime';
 import { createLocalJWKSet, jwtVerify } from 'jose';
 import { askRetaStreamRouter } from './ask-reta';
 import { trpcServer } from '@hono/trpc-server';
@@ -195,7 +196,7 @@ export const api = new Hono<HonoContext>()
     // Note: Trace will be completed by TRPC middleware after logging
 
     c.set('sessionUser', undefined);
-    c.set('auth', undefined as any);
+    c.set('auth', undefined as never);
   })
   .route('/ai', aiRouter)
   .route('/autumn', autumnApi)
@@ -203,6 +204,9 @@ export const api = new Hono<HonoContext>()
   // Ask Reta NDJSON stream (slice 2) — behind the session middleware above;
   // active connection resolved server-side inside the handler.
   .route('/ask-reta', askRetaStreamRouter)
+  // Team realtime (P2) — upgrade WebSocket par fil partagé, ACL résolue
+  // AVANT tout contact avec le DO (voir routes/team-realtime.ts).
+  .route('/team-rt', teamRealtimeRouter)
   .on(['GET', 'POST', 'OPTIONS'], '/auth/*', (c) => {
     return c.var.auth.handler(c.req.raw);
   })

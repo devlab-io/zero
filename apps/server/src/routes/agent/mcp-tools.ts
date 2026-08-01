@@ -15,7 +15,7 @@
  */
 
 /**
- * MCP tool surface — single source of truth for the draft-only "Claude and Codex API"
+ * MCP tool surface — single source of truth for the draft-first "Claude and Codex API"
  * (spec niveau8-mailos §"Claude and Codex API contract"; issue #36).
  *
  * This module is intentionally free of `cloudflare:workers` / `env` imports and of any
@@ -47,27 +47,39 @@ export const MCP_SERVER_INFO = {
 } as const;
 
 /**
- * The four operations this surface can NEVER perform. These are asserted by
- * `scripts/security/check-agent-surface.mjs` and surfaced verbatim to agents by the
- * `getServerCapabilities` tool so a client can verify the draft-only contract at runtime.
+ * Hard guarantees, asserted by `scripts/security/check-agent-surface.mjs` and surfaced
+ * verbatim to agents by `getServerCapabilities`. P9 élargi : la SEULE exception
+ * d'envoi est `sendConfirmedDraft`, et son contrat d'elicitation (confirmation
+ * humaine DANS l'outil, au moment de l'appel) est NON contournable — un client
+ * sans elicitation, un decline, un cancel ou un confirm≠true = zéro envoi.
  */
 export const MCP_SEND_GUARANTEES = {
-  canSendMail: false,
+  canSendMailWithoutHumanConfirmation: false,
   canPermanentlyDeleteMail: false,
   canReportSpam: false,
   canChangeAccountSettings: false,
 } as const;
 
+export const MCP_SEND_EXCEPTION = {
+  tool: 'sendConfirmedDraft',
+  humanConfirmation: 'elicitation',
+  transport: 'durable-outbox',
+} as const;
+
 export const MCP_DRAFT_ONLY_STATEMENT =
-  'This MCP server is draft-only. No tool can send mail, permanently delete mail, report ' +
-  'spam, or change account settings. Agent output stops at a Gmail draft or a reviewable ' +
-  'outbox item; a human in Zero performs any send.';
+  'This MCP server is draft-first. No tool can permanently delete mail, report spam, or ' +
+  'change account settings, and no tool can send mail EXCEPT sendConfirmedDraft — which ' +
+  'sends an EXISTING draft only after an explicit in-tool human confirmation (MCP ' +
+  'elicitation) at call time. Declined, cancelled or unavailable confirmation means ' +
+  'nothing is sent. A confirmed send goes through the idempotent durable outbox ' +
+  '(send_job + Queue + sendStoredDraft), never a direct provider call.';
 
 export interface McpCapabilities {
   server: typeof MCP_SERVER_INFO;
-  draftOnly: true;
+  draftFirst: true;
   humanReviewIsTheSendBoundary: true;
-  canSendMail: false;
+  sendException: typeof MCP_SEND_EXCEPTION;
+  canSendMailWithoutHumanConfirmation: false;
   canPermanentlyDeleteMail: false;
   canReportSpam: false;
   canChangeAccountSettings: false;
@@ -81,8 +93,9 @@ export function buildCapabilities(
 ): McpCapabilities {
   return {
     server: MCP_SERVER_INFO,
-    draftOnly: true,
+    draftFirst: true,
     humanReviewIsTheSendBoundary: true,
+    sendException: MCP_SEND_EXCEPTION,
     ...MCP_SEND_GUARANTEES,
     statement: MCP_DRAFT_ONLY_STATEMENT,
     toolCount: tools.length,
@@ -275,6 +288,429 @@ export async function handleRetryOutboxItem(deps: OutboxRetryDeps, id: string): 
 }
 
 // ---------------------------------------------------------------------------
+// Draft preview / update / citations (P9 API-first) — pure, DI'd handlers
+// ---------------------------------------------------------------------------
+
+const MAX_PREVIEW_BODY_CHARS = 2000;
+const MAX_CITATION_QUOTE_CHARS = 280;
+
+/** Minimal HTML→text for previews/citations — no DOM, deterministic. */
+export function stripMailHtml(value: string): string {
+  return value
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+export type PreviewableDraft = {
+  id: string;
+  to?: string[];
+  cc?: string[];
+  bcc?: string[];
+  subject?: string;
+  content?: string;
+};
+
+/** Uniform not-found: missing and other-user drafts are indistinguishable. */
+export const DRAFT_NOT_FOUND_MESSAGE = 'Draft not found';
+
+export function formatDraftPreview(draft: PreviewableDraft | null): string {
+  if (!draft) return DRAFT_NOT_FOUND_MESSAGE;
+  return JSON.stringify({
+    id: draft.id,
+    to: draft.to ?? [],
+    cc: draft.cc ?? [],
+    bcc: draft.bcc ?? [],
+    subject: draft.subject ?? '',
+    bodyText: stripMailHtml(draft.content ?? '').slice(0, MAX_PREVIEW_BODY_CHARS),
+    unsent: true,
+  });
+}
+
+export interface UpdateDraftDeps {
+  /** Draft du COMPTE ACTIF uniquement (le stub agent est déjà scopé connexion). */
+  getDraft: (draftId: string) => Promise<PreviewableDraft | null>;
+  saveDraft: (data: {
+    to: string;
+    cc?: string;
+    bcc?: string;
+    subject: string;
+    message: string;
+    id: string;
+    threadId: string | null;
+  }) => Promise<{ id?: string | null }>;
+}
+
+export type UpdateDraftInput = {
+  draftId: string;
+  to?: DraftRecipient[];
+  cc?: DraftRecipient[];
+  bcc?: DraftRecipient[];
+  subject?: string;
+  message?: string;
+  threadId?: string;
+};
+
+const joinRecipients = (recipients: DraftRecipient[]) =>
+  recipients.map((recipient) => recipient.email).join(', ');
+
+/**
+ * Update in place: the existing draft is LOADED first (uniform not-found),
+ * omitted fields keep their stored value, and the result stays an UNSENT
+ * draft. Naturally idempotent — replaying the same update rewrites the same
+ * stored content.
+ */
+export async function handleUpdateDraft(
+  deps: UpdateDraftDeps,
+  input: UpdateDraftInput,
+): Promise<string> {
+  const existing = await deps.getDraft(input.draftId).catch(() => null);
+  if (!existing) return DRAFT_NOT_FOUND_MESSAGE;
+  await deps.saveDraft({
+    to: input.to ? joinRecipients(input.to) : (existing.to ?? []).join(', '),
+    cc: input.cc ? joinRecipients(input.cc) : (existing.cc ?? []).join(', ') || undefined,
+    bcc: input.bcc ? joinRecipients(input.bcc) : (existing.bcc ?? []).join(', ') || undefined,
+    subject: input.subject ?? existing.subject ?? '',
+    message: input.message ?? existing.content ?? '',
+    id: input.draftId,
+    threadId: input.threadId ?? null,
+  });
+  return `Draft ${input.draftId} updated — still an UNSENT draft; sending remains a human action in Zero`;
+}
+
+export type CitableMessage = {
+  id: string;
+  sender: { name?: string; email: string };
+  receivedOn: string;
+  subject: string;
+  decodedBody?: string;
+  body?: string;
+};
+
+export type ThreadCitation = {
+  kind: 'message';
+  messageId: string;
+  threadId: string;
+  senderEmail: string;
+  senderName?: string;
+  receivedOn: string;
+  subject: string;
+  /** Extrait VERBATIM (détaggé, borné) du corps — jamais du texte de modèle. */
+  quote: string;
+};
+
+/** Citations structurées, plus récentes d'abord, quote verbatim bornée. */
+export function buildThreadCitations(
+  threadId: string,
+  messages: CitableMessage[],
+  maxCitations: number,
+): ThreadCitation[] {
+  const max = Math.min(Math.max(maxCitations, 1), 6);
+  return [...messages]
+    .reverse()
+    .slice(0, max)
+    .map((message) => ({
+      kind: 'message' as const,
+      messageId: message.id,
+      threadId,
+      senderEmail: message.sender.email,
+      senderName: message.sender.name,
+      receivedOn: message.receivedOn,
+      subject: message.subject,
+      quote: stripMailHtml(message.decodedBody || message.body || '').slice(
+        0,
+        MAX_CITATION_QUOTE_CHARS,
+      ),
+    }))
+    .filter((citation) => citation.quote.length > 0);
+}
+
+// ---------------------------------------------------------------------------
+// sendConfirmedDraft (P9 élargi) — l'UNIQUE exception d'envoi, gardée par une
+// confirmation humaine DANS l'outil (MCP elicitation), fail-closed partout.
+// ---------------------------------------------------------------------------
+
+export const SEND_NOT_CONFIRMED_MESSAGE = 'Send NOT confirmed by the human — nothing was sent';
+export const SEND_CONFIRMATION_UNAVAILABLE_MESSAGE =
+  'Human confirmation unavailable (client does not support MCP elicitation) — nothing was sent';
+export const SEND_NO_RECIPIENT_MESSAGE = 'Draft has no recipients — nothing was sent';
+
+/**
+ * Clé de soumission STABLE par brouillon : double appel, retry réseau et
+ * relivraison convergent vers LE MÊME send_job (contrainte unique
+ * connection_id + client_submission_key — le scope connexion vient de la DB).
+ */
+export const confirmedSendSubmissionKey = (draftId: string): string => {
+  let hash = 0xcbf29ce484222325n;
+  for (let index = 0; index < draftId.length; index += 1) {
+    hash ^= BigInt(draftId.charCodeAt(index));
+    hash = BigInt.asUintN(64, hash * 0x100000001b3n);
+  }
+  return `mcp-confirmed-send-${hash.toString(36)}`;
+};
+
+/** Schéma d'elicitation EXACT : un unique booléen `confirm`, requis. */
+export const CONFIRM_SEND_REQUESTED_SCHEMA: {
+  type: 'object';
+  properties: {
+    confirm: { type: 'boolean'; title: string; description: string };
+  };
+  required: string[];
+} = {
+  type: 'object',
+  properties: {
+    confirm: {
+      type: 'boolean',
+      title: 'Send this draft now',
+      description: 'Check to confirm sending this exact draft. Leave unchecked to abort.',
+    },
+  },
+  required: ['confirm'],
+};
+
+/** Message d'elicitation : destinataires + sujet EXACTS, rien d'autre à deviner. */
+export function buildConfirmSendMessage(draft: PreviewableDraft): string {
+  const lines = [
+    'Confirm sending this EXISTING draft now (attachments, threading and signature are',
+    'preserved — it is sent exactly as stored).',
+    `To: ${(draft.to ?? []).join(', ') || '(none)'}`,
+  ];
+  if (draft.cc?.length) lines.push(`Cc: ${draft.cc.join(', ')}`);
+  if (draft.bcc?.length) lines.push(`Bcc: ${draft.bcc.join(', ')}`);
+  lines.push(`Subject: ${draft.subject ?? '(no subject)'}`);
+  return lines.join('\n');
+}
+
+export type SendElicitOutcome = {
+  action: 'accept' | 'decline' | 'cancel';
+  content?: Record<string, unknown>;
+};
+
+export type ConfirmedSendAuditEvent = {
+  draftId: string;
+  outcome:
+    | 'not_found'
+    | 'no_recipient'
+    | 'confirmation_unavailable'
+    | 'declined'
+    | 'cancelled'
+    | 'not_confirmed'
+    | 'enqueue_failed'
+    | 'accepted'
+    | 'accepted_duplicate';
+};
+
+export interface SendConfirmedDraftDeps {
+  /** Draft du COMPTE ACTIF uniquement (stub agent scopé connexion). */
+  getDraft: (draftId: string) => Promise<PreviewableDraft | null>;
+  /**
+   * MCP elicitation vers le client — DOIT lever si le client ne déclare pas
+   * la capability (le SDK l'assure) : toute erreur = fail closed, zéro envoi.
+   */
+  elicit: (params: {
+    mode: 'form';
+    message: string;
+    requestedSchema: typeof CONFIRM_SEND_REQUESTED_SCHEMA;
+  }) => Promise<SendElicitOutcome>;
+  /**
+   * Enqueue outbox durable (send_job + Queue) — JAMAIS d'appel fournisseur
+   * direct ici ; le consumer enverra via sendStoredDraft (draft tel que
+   * stocké : PJ/threading/signature préservés par le fournisseur).
+   */
+  enqueueSend: (input: {
+    draftId: string;
+    clientSubmissionKey: string;
+    subject: string;
+  }) => Promise<{ queued: boolean; duplicate?: boolean; error?: string }>;
+  /** Trace d'audit structurée (en plus de la ligne send_job durable). */
+  audit: (event: ConfirmedSendAuditEvent) => void;
+}
+
+/**
+ * L'ORDRE est le contrat : (1) charger le brouillon RÉEL (not-found uniforme,
+ * cross-account structurellement impossible via le stub scopé) ; (2) preview
+ * exacte ; (3) elicitation humaine ; (4) n'enqueuer QUE sur action==='accept'
+ * ET content.confirm===true ; tout autre chemin — decline, cancel, confirm
+ * absent/faux, elicitation indisponible, erreur — est fail-closed : ZÉRO envoi.
+ */
+export async function handleSendConfirmedDraft(
+  deps: SendConfirmedDraftDeps,
+  input: { draftId: string },
+): Promise<string> {
+  const draft = await deps.getDraft(input.draftId).catch(() => null);
+  if (!draft) {
+    deps.audit({ draftId: input.draftId, outcome: 'not_found' });
+    return DRAFT_NOT_FOUND_MESSAGE;
+  }
+  if ((draft.to ?? []).length + (draft.cc ?? []).length + (draft.bcc ?? []).length === 0) {
+    deps.audit({ draftId: input.draftId, outcome: 'no_recipient' });
+    return SEND_NO_RECIPIENT_MESSAGE;
+  }
+
+  const preview = formatDraftPreview(draft);
+  let outcome: SendElicitOutcome;
+  try {
+    outcome = await deps.elicit({
+      mode: 'form',
+      message: buildConfirmSendMessage(draft),
+      requestedSchema: CONFIRM_SEND_REQUESTED_SCHEMA,
+    });
+  } catch {
+    deps.audit({ draftId: input.draftId, outcome: 'confirmation_unavailable' });
+    return SEND_CONFIRMATION_UNAVAILABLE_MESSAGE;
+  }
+
+  if (outcome.action !== 'accept' || outcome.content?.['confirm'] !== true) {
+    deps.audit({
+      draftId: input.draftId,
+      outcome:
+        outcome.action === 'decline'
+          ? 'declined'
+          : outcome.action === 'cancel'
+            ? 'cancelled'
+            : 'not_confirmed',
+    });
+    return SEND_NOT_CONFIRMED_MESSAGE;
+  }
+
+  const enqueue = await deps
+    .enqueueSend({
+      draftId: input.draftId,
+      clientSubmissionKey: confirmedSendSubmissionKey(input.draftId),
+      subject: draft.subject ?? '',
+    })
+    .catch((error: unknown) => ({
+      queued: false as const,
+      error: error instanceof Error ? error.message : 'enqueue failed',
+    }));
+  if (!enqueue.queued) {
+    deps.audit({ draftId: input.draftId, outcome: 'enqueue_failed' });
+    return `Send failed to enqueue — nothing was sent (${enqueue.error ?? 'unknown error'})`;
+  }
+
+  deps.audit({
+    draftId: input.draftId,
+    outcome: enqueue.duplicate ? 'accepted_duplicate' : 'accepted',
+  });
+  const suffix = enqueue.duplicate ? ' (idempotent: this confirmed send was already queued)' : '';
+  return (
+    `Draft ${input.draftId} CONFIRMED by the human and queued in the durable outbox — it will be ` +
+    `sent exactly as stored (sendStoredDraft)${suffix}. Preview: ${preview}`
+  );
+}
+
+export type ConfirmedSendJobState = {
+  id: string;
+  status: 'queued' | 'sending' | 'sent' | 'cancelled' | 'failed';
+  enqueuedAt: Date | null;
+  error?: string | null;
+};
+
+/**
+ * Durable enqueue contract shared by the MCP handler and its tests. A DB row
+ * created before a Queue outage remains retriable: a deduped `queued` row
+ * without `enqueuedAt` MUST be published again, never reported as delivered.
+ */
+export async function enqueueConfirmedStoredDraft(deps: {
+  createJob: () => Promise<{ job: ConfirmedSendJobState; deduped: boolean }>;
+  publish: (jobId: string) => Promise<void>;
+  markEnqueued: (jobId: string) => Promise<void>;
+}): Promise<{ queued: boolean; duplicate?: boolean; error?: string }> {
+  const { job, deduped } = await deps.createJob();
+
+  if (deduped) {
+    if (job.status === 'cancelled') return { queued: false, error: 'existing job is cancelled' };
+    if (job.status === 'failed') {
+      return { queued: false, error: job.error ?? 'existing job is failed' };
+    }
+    if (job.status === 'sending' || job.status === 'sent' || job.enqueuedAt) {
+      return { queued: true, duplicate: true };
+    }
+  }
+
+  try {
+    await deps.publish(job.id);
+  } catch {
+    return { queued: false, error: 'queue publication failed' };
+  }
+  await deps.markEnqueued(job.id).catch(() => {});
+  return { queued: true, ...(deduped ? { duplicate: true } : {}) };
+}
+
+// ---------------------------------------------------------------------------
+// Structured output + embedded citation resources (SDK 1.29)
+// ---------------------------------------------------------------------------
+
+export function buildDraftPreviewObject(draft: PreviewableDraft) {
+  return {
+    id: draft.id,
+    to: draft.to ?? [],
+    cc: draft.cc ?? [],
+    bcc: draft.bcc ?? [],
+    subject: draft.subject ?? '',
+    bodyText: stripMailHtml(draft.content ?? '').slice(0, MAX_PREVIEW_BODY_CHARS),
+    unsent: true as const,
+  };
+}
+
+/** URI stable d'une citation — résolue DANS la connexion active (ACL au read). */
+export const citationResourceUri = (citation: ThreadCitation): string =>
+  `mail://thread/${encodeURIComponent(citation.threadId)}/message/${encodeURIComponent(citation.messageId)}#quote`;
+
+/**
+ * Ressources EMBARQUÉES (embedded resources MCP) : un aperçu texte exact par
+ * message cité. Produites uniquement à l'intérieur du handler scopé à la
+ * connexion active — l'ACL s'applique donc AU READ, jamais après coup.
+ */
+export function buildCitationResources(citations: ThreadCitation[]) {
+  return citations.map((citation) => ({
+    type: 'resource' as const,
+    resource: {
+      uri: citationResourceUri(citation),
+      mimeType: 'text/plain' as const,
+      text:
+        `From: ${citation.senderName ? `${citation.senderName} <${citation.senderEmail}>` : citation.senderEmail}\n` +
+        `Date: ${citation.receivedOn}\nSubject: ${citation.subject}\n\n${citation.quote}`,
+    },
+  }));
+}
+
+export const draftPreviewOutputSchema = {
+  id: z.string(),
+  to: z.array(z.string()),
+  cc: z.array(z.string()),
+  bcc: z.array(z.string()),
+  subject: z.string(),
+  bodyText: z.string(),
+  unsent: z.literal(true),
+};
+
+export const threadCitationsOutputSchema = {
+  threadId: z.string(),
+  citations: z.array(
+    z.object({
+      kind: z.literal('message'),
+      messageId: z.string(),
+      threadId: z.string(),
+      senderEmail: z.string(),
+      senderName: z.string().optional(),
+      receivedOn: z.string(),
+      subject: z.string(),
+      quote: z.string(),
+      resourceUri: z.string(),
+    }),
+  ),
+};
+
+// ---------------------------------------------------------------------------
 // zod input schemas — single source shared by mcp.ts and the schema snapshot
 // ---------------------------------------------------------------------------
 
@@ -350,6 +786,40 @@ export const mcpToolSchemas = {
       .optional()
       .describe('Stable key: repeat calls return the same draft instead of duplicating it'),
   },
+  previewDraft: {
+    draftId: z.string().describe('Gmail draft id to preview before any human review or edit'),
+  },
+  updateDraft: {
+    draftId: z.string().describe('Existing Gmail draft id to update in place'),
+    to: z.array(draftRecipientSchema).optional().describe('Replacement To recipients'),
+    cc: z.array(draftRecipientSchema).optional(),
+    bcc: z.array(draftRecipientSchema).optional(),
+    subject: z.string().optional().describe('Replacement subject (omitted = keep current)'),
+    message: z.string().optional().describe('Replacement body (omitted = keep current)'),
+    threadId: z
+      .string()
+      .optional()
+      .describe('Thread to stay attached to — omit ONLY for a standalone (non-reply) draft'),
+  },
+  sendConfirmedDraft: {
+    draftId: z
+      .string()
+      .describe(
+        'EXISTING Gmail draft id to send — only after the human explicitly confirms in the ' +
+          'elicitation prompt this tool raises',
+      ),
+  },
+  getThreadCitations: {
+    threadId: z.string().describe('Thread id to extract structured citations from'),
+    maxCitations: z
+      .number()
+      .int()
+      .min(1)
+      .max(6)
+      .optional()
+      .default(3)
+      .describe('How many messages to cite, newest first (max 6)'),
+  },
   enqueueDraftJob: {
     threadId: z.string().optional(),
     mission: z.string().optional().describe('What the reviewable draft should accomplish'),
@@ -373,14 +843,15 @@ export const mcpToolSchemas = {
 export type McpToolName = keyof typeof mcpToolSchemas;
 
 // ---------------------------------------------------------------------------
-// Descriptions — MUST state exactly what is stored and that sending is impossible
+// Descriptions — MUST state exactly what is stored and the single send exception
 // ---------------------------------------------------------------------------
 
 export const mcpToolDescriptions: Record<McpToolName, string> = {
   getServerCapabilities:
     'Report this MCP server health and capabilities as JSON: name/version, that it is ' +
-    'draft-only, the registered tools, and the hard guarantees that no tool can send mail, ' +
-    'permanently delete mail, report spam, or change account settings. Read-only; stores nothing.',
+    'draft-first, the registered tools, and the hard guarantees that only sendConfirmedDraft ' +
+    'can send after MCP elicitation; no tool can permanently delete mail, report spam, or change ' +
+    'account settings. Read-only; stores nothing.',
   getConnections:
     'List the email accounts (connections) linked to the authenticated user — email address ' +
     'and provider only. Read-only.',
@@ -412,6 +883,28 @@ export const mcpToolDescriptions: Record<McpToolName, string> = {
     'the given recipients, subject and body as an UNSENT draft. This NEVER sends the email — ' +
     'sending is a separate human action in Zero. Pass a stable idempotencyKey so retries return ' +
     'the same draft instead of creating duplicates.',
+  previewDraft:
+    'Preview one Gmail draft the user owns: recipients, subject and the SANITIZED text of its ' +
+    'body (bounded). Read-only; stores nothing; never sends. Missing or other-user drafts return ' +
+    'an identical not-found result without revealing which.',
+  updateDraft:
+    'Update an EXISTING Gmail draft in place (recipients, subject, body). The result is still an ' +
+    'UNSENT draft in the user Gmail Drafts folder — this NEVER sends the email; sending remains ' +
+    'a human action in Zero. Omitted fields keep their current value. Idempotent: repeating the ' +
+    'same update leaves the same stored draft. Pass threadId to keep a reply attached to its thread.',
+  sendConfirmedDraft:
+    'THE ONLY send-capable tool. Sends an EXISTING Gmail draft — but ONLY after an explicit ' +
+    'in-tool human confirmation: the tool raises an MCP elicitation showing the exact ' +
+    'recipients and subject, and proceeds ONLY if the human accepts AND checks confirm=true. ' +
+    'Decline, cancel, an unchecked box, or a client without elicitation support = NOTHING is ' +
+    'sent (fail closed). A confirmed send is enqueued in the idempotent durable outbox ' +
+    '(send_job + Queue) and delivered via sendStoredDraft — the draft goes out exactly as ' +
+    'stored (attachments, threading, signature preserved), never a direct provider call. ' +
+    'Repeat calls for the same draft reuse the same stable submission key (no double send).',
+  getThreadCitations:
+    'Extract STRUCTURED citations from one thread: for each cited message, its exact messageId, ' +
+    'threadId, sender, date, subject and a bounded sanitized quote taken VERBATIM from the ' +
+    'message body — never model-generated text. Read-only; stores nothing.',
   enqueueDraftJob:
     'Store a reviewable draft job in the outbox with status "queued". The job holds the given ' +
     'mission/subject/body; a background step later turns it into a Gmail draft that a human must ' +
@@ -442,6 +935,9 @@ export interface McpToolDefinition {
   category: 'read' | 'write';
   mutates: boolean;
   idempotent: boolean;
+  /** SEUL sendConfirmedDraft peut le porter — asserté par le check sécurité. */
+  sendCapable?: true;
+  humanConfirmation?: 'elicitation';
   description: string;
 }
 
@@ -558,6 +1054,36 @@ export const MCP_TOOL_DEFINITIONS: McpToolDefinition[] = [
     description: mcpToolDescriptions.createDraft,
   },
   {
+    name: 'previewDraft',
+    category: 'read',
+    mutates: false,
+    idempotent: true,
+    description: mcpToolDescriptions.previewDraft,
+  },
+  {
+    name: 'updateDraft',
+    category: 'write',
+    mutates: true,
+    idempotent: true,
+    description: mcpToolDescriptions.updateDraft,
+  },
+  {
+    name: 'sendConfirmedDraft',
+    category: 'write',
+    mutates: true,
+    idempotent: true,
+    sendCapable: true,
+    humanConfirmation: 'elicitation',
+    description: mcpToolDescriptions.sendConfirmedDraft,
+  },
+  {
+    name: 'getThreadCitations',
+    category: 'read',
+    mutates: false,
+    idempotent: true,
+    description: mcpToolDescriptions.getThreadCitations,
+  },
+  {
     name: 'enqueueDraftJob',
     category: 'write',
     mutates: true,
@@ -634,7 +1160,8 @@ export function jsonSchemaForShape(shape: z.ZodRawShape): JsonSchemaNode {
 export function buildMcpSchemaSnapshot() {
   return {
     server: MCP_SERVER_INFO,
-    draftOnly: true,
+    draftFirst: true,
+    sendException: MCP_SEND_EXCEPTION,
     ...MCP_SEND_GUARANTEES,
     statement: MCP_DRAFT_ONLY_STATEMENT,
     tools: MCP_TOOL_DEFINITIONS.map((def) => ({
@@ -642,6 +1169,7 @@ export function buildMcpSchemaSnapshot() {
       category: def.category,
       mutates: def.mutates,
       idempotent: def.idempotent,
+      ...(def.sendCapable ? { sendCapable: true, humanConfirmation: def.humanConfirmation } : {}),
       description: def.description,
       inputSchema: jsonSchemaForShape(mcpToolSchemas[def.name]),
     })),

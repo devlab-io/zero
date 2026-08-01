@@ -30,6 +30,17 @@ import superjson from 'superjson';
 type BoundarySessionUser = { id: string; name: string; email: string };
 type BoundaryAuthApi = {
   api: {
+    listUserAccounts: (input: { headers: Headers }) => Promise<
+      {
+        accountId: string;
+        providerId: string;
+        scopes?: readonly string[] | null;
+      }[]
+    >;
+    getAccessToken: (input: {
+      body: { providerId: string; accountId?: string };
+      headers: Headers;
+    }) => Promise<{ accessToken?: string | null; scopes?: readonly string[] | null }>;
     signOut: (input: { headers: Headers }) => Promise<unknown>;
     deleteUser: (input: {
       body: { callbackURL: string };
@@ -216,7 +227,6 @@ export const activeDriverProcedure = activeConnectionProcedure.use(async ({ ctx,
 
 export const createRateLimiterMiddleware = (config: {
   limiter: RatelimitConfig['limiter'];
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   generatePrefix: (ctx: TrpcContext, input: unknown) => string;
   /**
    * 'ip' (historical default) or 'userId' — strict: a missing session user is

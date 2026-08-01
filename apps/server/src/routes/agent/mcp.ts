@@ -16,18 +16,30 @@
 
 import {
   buildCapabilities,
+  buildCitationResources,
+  buildDraftPreviewObject,
+  buildThreadCitations,
+  citationResourceUri,
+  draftPreviewOutputSchema,
   formatCompactThreadList,
   formatOutboxItem,
   formatSender,
   handleCancelOutboxItem,
+  enqueueConfirmedStoredDraft,
   handleRetryOutboxItem,
+  handleSendConfirmedDraft,
+  handleUpdateDraft,
   mcpToolDescriptions as descriptions,
   mcpToolSchemas as schemas,
+  threadCitationsOutputSchema,
+  DRAFT_NOT_FOUND_MESSAGE,
   MCP_SERVER_INFO,
   MCP_TOOL_DEFINITIONS,
   resolveIdempotentDraft,
   type CreateDraftResult,
   type DraftIdempotencyStore,
+  type PreviewableDraft,
+  type SendElicitOutcome,
 } from './mcp-tools';
 import {
   cancelDraftOutboxJob,
@@ -36,6 +48,7 @@ import {
   listDraftOutboxItems,
   retryDraftOutboxJob,
 } from '../../lib/draft-outbox';
+import { createSendJob, markSendJobEnqueued } from '../../lib/send-outbox';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { getThread, getZeroAgent } from '../../lib/server-utils';
 import { sanitizeMailContent } from '../../lib/mail-sanitize';
@@ -51,9 +64,7 @@ import { McpAgent } from 'agents/mcp';
 import { createDb } from '../../db';
 import z from 'zod';
 
-const draftRecipientSchema = schemas.createDraft.to.element;
-
-type DraftRecipient = z.infer<typeof draftRecipientSchema>;
+type DraftRecipient = z.infer<typeof schemas.createDraft.to.element>;
 
 const formatDraftRecipient = (recipient: DraftRecipient) => {
   if (!recipient.name) return recipient.email;
@@ -70,7 +81,8 @@ export class ZeroMCP extends McpAgent<typeof env, Record<string, unknown>, { use
   server = new McpServer({
     name: MCP_SERVER_INFO.name,
     version: MCP_SERVER_INFO.version,
-    description: 'Zero draft-only mail MCP (no send / delete / spam / account-settings surface)',
+    description:
+      'Zero draft-first mail MCP (one elicitation-gated stored-draft send; no delete, spam or account-settings surface)',
   });
 
   activeConnectionId: string | undefined;
@@ -392,6 +404,192 @@ export class ZeroMCP extends McpAgent<typeof env, Record<string, unknown>, { use
       },
     );
 
+    // --- read: draft preview (P9 API-first, structured output) ---------------
+    this.server.registerTool(
+      'previewDraft',
+      {
+        description: descriptions.previewDraft,
+        inputSchema: schemas.previewDraft,
+        outputSchema: draftPreviewOutputSchema,
+      },
+      async (s) => {
+        const connectionId = this.activeConnectionId;
+        if (!connectionId) {
+          throw new Error('No active connection');
+        }
+        // Le stub agent est scopé à LA connexion active de CET utilisateur :
+        // un draftId d'un autre compte échoue côté fournisseur → not-found
+        // uniforme, l'existence n'est jamais révélée.
+        const draft = await (await this.agentFor(connectionId))
+          .getDraft(s.draftId)
+          .catch(() => null);
+        if (!draft) {
+          return {
+            content: [{ type: 'text' as const, text: DRAFT_NOT_FOUND_MESSAGE }],
+            isError: true,
+          };
+        }
+        const structured = buildDraftPreviewObject(draft as PreviewableDraft);
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify(structured) }],
+          structuredContent: structured,
+        };
+      },
+    );
+
+    // --- write: THE ONLY send-capable tool (P9 élargi, elicitation) ----------
+    this.server.registerTool(
+      'sendConfirmedDraft',
+      { description: descriptions.sendConfirmedDraft, inputSchema: schemas.sendConfirmedDraft },
+      async (s) => {
+        // Capturé UNE fois : preview, elicitation et enqueue frappent la même
+        // connexion même si setActiveConnection court pendant le handler.
+        const connectionId = this.activeConnectionId;
+        if (!connectionId) {
+          return text('No active connection');
+        }
+        const agent = await this.agentFor(connectionId);
+        const message = await handleSendConfirmedDraft(
+          {
+            getDraft: async (draftId) =>
+              ((await agent.getDraft(draftId).catch(() => null)) as PreviewableDraft | null) ??
+              null,
+            // Le SDK lève si le client ne déclare pas la capability
+            // elicitation — handleSendConfirmedDraft traduit en fail-closed.
+            elicit: async (params) =>
+              (await this.server.server.elicitInput(params)) as SendElicitOutcome,
+            enqueueSend: async (input) => {
+              // Outbox durable UNIQUEMENT — jamais d'appel fournisseur direct.
+              // Le consumer délivrera via sendStoredDraft (brouillon tel que
+              // stocké : PJ/threading/signature préservés).
+              return enqueueConfirmedStoredDraft({
+                createJob: () =>
+                  createSendJob(db, {
+                    connectionId,
+                    clientSubmissionKey: input.clientSubmissionKey,
+                    payload: {
+                      draftId: input.draftId,
+                      sendAsStored: true,
+                      to: [],
+                      subject: input.subject,
+                      message: '',
+                    },
+                    threadId: null,
+                    scheduledSendAt: null,
+                  }),
+                publish: (jobId) =>
+                  env.send_email_queue.send(
+                    { messageId: jobId, jobId, connectionId },
+                    { delaySeconds: 0 },
+                  ),
+                markEnqueued: (jobId) => markSendJobEnqueued(db, jobId),
+              });
+            },
+            audit: (event) =>
+              logger.info('[mcp] sendConfirmedDraft audit', {
+                userId: this.props.userId,
+                connectionId,
+                draftId: event.draftId,
+                outcome: event.outcome,
+              }),
+          },
+          { draftId: s.draftId },
+        );
+        return text(message);
+      },
+    );
+
+    // --- write: draft update in place (P9, idempotent) -----------------------
+    this.server.registerTool(
+      'updateDraft',
+      { description: descriptions.updateDraft, inputSchema: schemas.updateDraft },
+      async (s) => {
+        // Capturé UNE fois : lecture et écriture frappent la même connexion
+        // même si setActiveConnection court pendant le handler.
+        const connectionId = this.activeConnectionId;
+        if (!connectionId) {
+          return text('No active connection');
+        }
+        const agent = await this.agentFor(connectionId);
+        const message = await handleUpdateDraft(
+          {
+            getDraft: async (draftId) =>
+              ((await agent.getDraft(draftId).catch(() => null)) as PreviewableDraft | null) ??
+              null,
+            saveDraft: async (data) =>
+              (await agent.createDraft({
+                to: data.to,
+                cc: data.cc,
+                bcc: data.bcc,
+                subject: data.subject,
+                message: data.message,
+                attachments: [],
+                id: data.id,
+                threadId: data.threadId,
+                fromEmail: null,
+              })) as { id?: string | null },
+          },
+          {
+            draftId: s.draftId,
+            to: s.to,
+            cc: s.cc,
+            bcc: s.bcc,
+            subject: s.subject,
+            message: s.message,
+            threadId: s.threadId,
+          },
+        );
+        return text(message);
+      },
+    );
+
+    // --- read: structured citations + embedded resources (P9, SDK 1.29) ------
+    this.server.registerTool(
+      'getThreadCitations',
+      {
+        description: descriptions.getThreadCitations,
+        inputSchema: schemas.getThreadCitations,
+        outputSchema: threadCitationsOutputSchema,
+      },
+      async (s) => {
+        // L'ACL s'applique AU READ : getThread ne lit que la connexion active
+        // de CET utilisateur — les ressources embarquées en héritent.
+        const connectionId = this.activeConnectionId;
+        if (!connectionId) {
+          throw new Error('No active connection');
+        }
+        const { result: thread } = await getThread(connectionId, s.threadId);
+        const citations = buildThreadCitations(
+          s.threadId,
+          thread.messages.map((message) => ({
+            id: message.id,
+            sender: message.sender,
+            receivedOn: message.receivedOn,
+            subject: message.subject,
+            decodedBody: message.decodedBody,
+            body: message.body,
+          })),
+          s.maxCitations ?? 3,
+        );
+        const structured = {
+          threadId: s.threadId,
+          citations: citations.map((citation) => ({
+            ...citation,
+            resourceUri: citationResourceUri(citation),
+          })),
+        };
+        return {
+          content: [
+            { type: 'text' as const, text: JSON.stringify(structured) },
+            // Aperçus EMBARQUÉS : une ressource text/plain exacte par message
+            // cité (uri mail://thread/…/message/…#quote).
+            ...buildCitationResources(citations),
+          ],
+          structuredContent: structured,
+        };
+      },
+    );
+
     // --- write: reviewable outbox (idempotent) -------------------------------
     this.server.registerTool(
       'enqueueDraftJob',
@@ -441,7 +639,7 @@ export class ZeroMCP extends McpAgent<typeof env, Record<string, unknown>, { use
       },
     );
 
-    logger.info('[ZeroMCP] draft-only surface registered', {
+    logger.info('[ZeroMCP] draft-first, elicitation-gated surface registered', {
       userId: this.props.userId,
       toolCount: MCP_TOOL_DEFINITIONS.length,
     });

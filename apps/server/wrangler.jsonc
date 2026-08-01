@@ -71,6 +71,10 @@
             "name": "SHARD_REGISTRY",
             "class_name": "ShardRegistry",
           },
+          {
+            "name": "TEAM_THREAD_RT",
+            "class_name": "TeamThreadRealtime",
+          },
         ],
       },
       "workflows": [
@@ -148,6 +152,10 @@
         {
           "tag": "v9",
           "new_sqlite_classes": ["ShardRegistry"],
+        },
+        {
+          "tag": "v10",
+          "new_classes": ["TeamThreadRealtime"],
         },
       ],
 
@@ -299,6 +307,10 @@
             "name": "SHARD_REGISTRY",
             "class_name": "ShardRegistry",
           },
+          {
+            "name": "TEAM_THREAD_RT",
+            "class_name": "TeamThreadRealtime",
+          },
         ],
       },
       "workflows": [
@@ -359,6 +371,10 @@
             "ThreadSyncWorker",
             "ShardRegistry",
           ],
+        },
+        {
+          "tag": "v2",
+          "new_classes": ["TeamThreadRealtime"],
         },
       ],
       "observability": {
@@ -519,6 +535,10 @@
             "name": "SHARD_REGISTRY",
             "class_name": "ShardRegistry",
           },
+          {
+            "name": "TEAM_THREAD_RT",
+            "class_name": "TeamThreadRealtime",
+          },
         ],
       },
       "workflows": [
@@ -573,6 +593,10 @@
             "ThreadSyncWorker",
             "ShardRegistry",
           ],
+        },
+        {
+          "tag": "v2",
+          "new_classes": ["TeamThreadRealtime"],
         },
       ],
       "vars": {

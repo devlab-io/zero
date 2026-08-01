@@ -135,9 +135,6 @@ export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {
       error.status === 404
         ? m['pages.error.boundary.notFoundDetails']()
         : error.statusText || details;
-    if (error.status === 404) {
-      return <NotFound />;
-    }
   } else if (import.meta.env.DEV && error && error instanceof Error) {
     details = error.message;
     stack = error.stack;
@@ -176,6 +173,10 @@ export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {
       });
     }
   }, [error, message, details, stack]);
+
+  if (isRouteErrorResponse(error) && error.status === 404) {
+    return <NotFound />;
+  }
 
   return (
     <div className="dark:bg-background flex w-full items-center justify-center bg-white text-center">

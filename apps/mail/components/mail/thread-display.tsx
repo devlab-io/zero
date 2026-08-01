@@ -40,18 +40,19 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { useIsOffline } from '@/hooks/use-online-status';
 import { useAnimations } from '@/hooks/use-animations';
 // #32 label/move picker — self-contained, driven by the `picker` query-state (l/v shortcuts).
-import { LabelMovePicker } from './label-move-picker';
 import { MailDisplaySkeleton } from './mail-skeleton';
 import { useTRPC } from '@/providers/query-provider';
 import { useMutation } from '@tanstack/react-query';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { Inbox, RefreshCcw } from 'lucide-react';
+import { MeetingPanel } from './meeting-panel';
 import { markStage } from '@/lib/perf-stages';
 import { NotesPanel } from './note-panel';
 import { cn, FOLDERS } from '@/lib/utils';
 import type { Attachment } from '@/types';
 import { m } from '@/paraglide/messages';
 import { useParams } from 'react-router';
+import { TeamPanel } from './team-panel';
 import { useQueryState } from 'nuqs';
 import { useAtom } from 'jotai';
 import { toast } from 'sonner';
@@ -555,6 +556,8 @@ export function ThreadDisplay() {
                   </div>
                 </button>
                 <NotesPanel threadId={id} />
+                <TeamPanel threadId={id} />
+                <MeetingPanel threadId={id} />
                 <TooltipProvider delayDuration={0}>
                   <Tooltip>
                     <TooltipTrigger asChild>
@@ -744,7 +747,6 @@ export function ThreadDisplay() {
                     </Suspense>
                   </div>
                 )}
-              <LabelMovePicker />
             </div>
           </>
         ) : null}

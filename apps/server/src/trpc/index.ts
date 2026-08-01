@@ -10,6 +10,7 @@ import { copilotRouter } from './routes/copilot';
 import { outboxRouter } from './routes/outbox';
 import { draftsRouter } from './routes/drafts';
 import { labelsRouter } from './routes/label';
+import { teamsRouter } from './routes/teams';
 import { notesRouter } from './routes/notes';
 import { brainRouter } from './routes/brain';
 import { userRouter } from './routes/user';
@@ -35,6 +36,7 @@ export const appRouter = router({
   shortcut: shortcutRouter,
   settings: settingsRouter,
   user: userRouter,
+  teams: teamsRouter,
   templates: templatesRouter,
   meet: meetRouter,
   logging: loggingRouter,

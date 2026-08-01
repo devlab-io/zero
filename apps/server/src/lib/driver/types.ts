@@ -46,6 +46,12 @@ export interface MailManager {
   get(id: string): Promise<IGetThreadResponse>;
   create(data: IOutgoingMessage): Promise<{ id?: string | null }>;
   sendDraft(id: string, data: IOutgoingMessage): Promise<void>;
+  /**
+   * Envoi du brouillon TEL QUE STOCKÉ chez le fournisseur (aucune
+   * reconstruction du corps) : PJ, destinataires, threading et signature du
+   * brouillon sont préservés par le fournisseur lui-même.
+   */
+  sendStoredDraft(id: string): Promise<void>;
   createDraft(
     data: CreateDraftData,
   ): Promise<{ id?: string | null; success?: boolean; error?: string }>;

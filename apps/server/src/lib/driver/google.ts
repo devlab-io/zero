@@ -141,6 +141,10 @@ export class GoogleMailManager implements MailManager {
   public sendDraft(draftId: string, data: IOutgoingMessage) {
     return this.drafts.sendDraft(draftId, data);
   }
+
+  public sendStoredDraft(draftId: string) {
+    return this.drafts.sendStoredDraft(draftId);
+  }
   public deleteDraft(draftId: string) {
     return this.drafts.deleteDraft(draftId);
   }

@@ -64,6 +64,8 @@ const harness = vi.hoisted(() => ({
   userId: 'user-1' as string | undefined,
   connectionId: 'conn-a' as string | undefined,
   queryStore: {} as Record<string, string | null>,
+  folder: 'inbox' as string | undefined,
+  bulkSelected: [] as string[],
 }));
 
 vi.mock('nuqs', () => ({
@@ -73,6 +75,14 @@ vi.mock('nuqs', () => ({
       harness.queryStore[key] = value;
     },
   ],
+}));
+
+vi.mock('react-router', () => ({
+  useParams: () => ({ folder: harness.folder }),
+}));
+
+vi.mock('@/components/mail/use-mail', () => ({
+  useMail: () => [{ bulkSelected: harness.bulkSelected }, vi.fn()],
 }));
 
 vi.mock('@/lib/ask-reta-stream', async (importOriginal) => {
@@ -199,6 +209,8 @@ beforeEach(() => {
   getDefaultStore().set(askRetaThreadCaptureAtom, null);
   harness.userId = 'user-1';
   harness.connectionId = 'conn-a';
+  harness.folder = 'inbox';
+  harness.bulkSelected = [];
   harness.queryStore.threadId = null;
   harness.queryStore.draftId = null;
   harness.queryStore.activeReplyId = null;
@@ -1141,6 +1153,36 @@ describe('AskRetaSurface — chip « fil actuel inclus » (prod CUA fix)', () =>
     await act(async () => {});
     expect(chip()).not.toBeNull();
     expect(chip()!.textContent).toContain('Sujet du fil 2');
+  });
+});
+
+describe('AskRetaSurface — P8 folder and bulk-selection context', () => {
+  it('shows and sends the canonical folder plus bounded selected thread ids', async () => {
+    harness.folder = 'archive';
+    harness.bulkSelected = ['sel-1', 'sel-2'];
+    render();
+
+    expect(container.textContent).toContain('common.askReta.selectedThreadsIncluded');
+    expect(container.textContent).toContain('common.askReta.folderIncluded');
+
+    await askQuestion('Résume cette sélection');
+    const sent = harness.streamAskReta.mock.calls[0]![0] as {
+      input: { context: { folder?: string; selectedThreadIds?: string[] } };
+    };
+    expect(sent.input.context).toMatchObject({
+      folder: 'archive',
+      selectedThreadIds: ['sel-1', 'sel-2'],
+    });
+  });
+
+  it('does not send a custom label id as a folder token', async () => {
+    harness.folder = 'Label_42';
+    render();
+    await askQuestion('Question');
+    const sent = harness.streamAskReta.mock.calls[0]![0] as {
+      input: { context: { folder?: string } };
+    };
+    expect(sent.input.context.folder).toBeUndefined();
   });
 });
 

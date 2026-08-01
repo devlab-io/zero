@@ -9,6 +9,7 @@ import {
 import { disarmOpeningKeyGuard, shouldSuppressOpeningKey } from '@/lib/hotkeys/opening-key-guard';
 import { availableMoveDestinations, isLabelOnThread } from './label-move-picker.logic';
 import { useOptimisticActions } from '@/hooks/use-optimistic-actions';
+import { useMail } from '@/components/mail/use-mail';
 import useMoveTo from '@/hooks/driver/use-move-to';
 import { useThread } from '@/hooks/use-threads';
 import { useLabels } from '@/hooks/use-labels';
@@ -30,8 +31,18 @@ export function LabelMovePicker() {
   const params = useParams<{ folder: string }>();
   const folder = params?.folder ?? 'inbox';
 
+  // P5 : la sélection MULTIPLE prime sur le fil ouvert — le même picker sert
+  // la BulkActionBar (bulkSelected) et les raccourcis l/v du fil unique.
+  const [mail] = useMail();
+  const bulkIds = mail.bulkSelected;
+  const targetIds = useMemo(
+    () => (bulkIds.length > 0 ? bulkIds : threadId ? [threadId] : []),
+    [bulkIds, threadId],
+  );
+  const isBulk = bulkIds.length > 0;
+
   const { userLabels } = useLabels();
-  const { data: thread } = useThread(picker === 'labels' ? (threadId ?? null) : null);
+  const { data: thread } = useThread(picker === 'labels' && !isBulk ? (threadId ?? null) : null);
   const { optimisticToggleLabel } = useOptimisticActions();
   const { mutate: moveTo } = useMoveTo();
 
@@ -40,7 +51,7 @@ export function LabelMovePicker() {
     [thread?.latest?.tags],
   );
 
-  const isOpen = (picker === 'labels' || picker === 'move') && !!threadId;
+  const isOpen = (picker === 'labels' || picker === 'move') && targetIds.length > 0;
   const close = () => setPicker(null);
 
   // CUA round 3 : défense en profondeur contre l'écho de la touche d'ouverture
@@ -54,7 +65,7 @@ export function LabelMovePicker() {
     },
   };
 
-  if (!isOpen || !threadId) return null;
+  if (!isOpen || targetIds.length === 0) return null;
 
   if (picker === 'move') {
     return (
@@ -70,7 +81,7 @@ export function LabelMovePicker() {
                   value={destination.label}
                   onSelect={() => {
                     moveTo({
-                      threadIds: [threadId],
+                      threadIds: targetIds,
                       currentFolder: folder,
                       destination: destination.id,
                     });
@@ -95,12 +106,14 @@ export function LabelMovePicker() {
           <CommandEmpty>No labels.</CommandEmpty>
           <CommandGroup heading="Labels">
             {userLabels.map((label) => {
-              const isOn = isLabelOnThread(threadLabelIds, label.id);
+              // Bulk : pas d'état « déjà posé » agrégé fiable — le toggle est
+              // ADDITIF (pose le label sur toute la sélection), coche masquée.
+              const isOn = !isBulk && isLabelOnThread(threadLabelIds, label.id);
               return (
                 <CommandItem
                   key={label.id}
                   value={label.name}
-                  onSelect={() => optimisticToggleLabel([threadId], label.id, !isOn)}
+                  onSelect={() => optimisticToggleLabel(targetIds, label.id, !isOn)}
                 >
                   <Check className={`mr-2 h-4 w-4 ${isOn ? 'opacity-100' : 'opacity-0'}`} />
                   {label.name}

@@ -530,6 +530,34 @@ describe('mail router — send (enqueue durable, jamais Gmail dans la requête)'
     expect(sendJobs.size).toBe(1);
   });
 
+  it('direct-send : double frappe avec la même clé crée un seul job stocké et un seul enqueue', async () => {
+    const direct = {
+      ...base,
+      draftId: 'dr-stored-1',
+      sendAsStored: true,
+      clientSendId: 'draft-direct-abc12345',
+    };
+    const first = await call('send', direct);
+    const second = await call('send', direct);
+
+    expect(first).toMatchObject({ success: true, queued: true, messageId: 'job-1' });
+    expect(second).toMatchObject({
+      success: true,
+      queued: true,
+      messageId: 'job-1',
+      duplicate: true,
+    });
+    expect(sendJobs.size).toBe(1);
+    expect(send_email_queue.send).toHaveBeenCalledTimes(1);
+    expect(sendOutbox.createSendJob).toHaveBeenLastCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        clientSubmissionKey: 'draft-direct-abc12345',
+        payload: expect.objectContaining({ draftId: 'dr-stored-1', sendAsStored: true }),
+      }),
+    );
+  });
+
   it('dedupe sent/sending → duplicate success sans republication', async () => {
     await call('send', { ...base, clientSendId: 'submit-aaaaaaaa' });
     send_email_queue.send.mockClear();

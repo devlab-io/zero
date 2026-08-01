@@ -148,7 +148,7 @@ function ContributorsPage() {
                 size="sm"
                 className="gap-2 border-neutral-200 bg-white/50 text-neutral-700 hover:bg-neutral-100 hover:text-neutral-900 dark:border-neutral-700 dark:bg-neutral-900/50 dark:text-neutral-200 dark:hover:bg-neutral-800 dark:hover:text-white"
               >
-                <a href={`https://github.com/${REPOSITORY}`} target="_blank">
+                <a href={`https://github.com/${REPOSITORY}`} target="_blank" rel="noreferrer">
                   <Github className="h-4 w-4" />
                   View on GitHub
                 </a>
@@ -440,6 +440,7 @@ function ContributorsPage() {
                     <a
                       href={`https://github.com/${member.login}`}
                       target="_blank"
+                      rel="noreferrer"
                       className="rounded-md p-1 text-neutral-600 transition-colors hover:bg-neutral-100 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-white"
                     >
                       <Github className="h-4 w-4" />
@@ -448,6 +449,7 @@ function ContributorsPage() {
                       <a
                         href={`https://x.com/${specialRoles[member.login.toLowerCase()]?.x}`}
                         target="_blank"
+                        rel="noreferrer"
                         className="rounded-md p-1 text-neutral-600 transition-colors hover:bg-neutral-100 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-white"
                       >
                         <Twitter className="dark:fill-muted-foreground h-4 w-4" />
@@ -457,6 +459,7 @@ function ContributorsPage() {
                       <a
                         href={specialRoles[member.login.toLowerCase()]?.website || '#'}
                         target="_blank"
+                        rel="noreferrer"
                         className="rounded-md p-1 text-neutral-600 transition-colors hover:bg-neutral-100 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-white"
                       >
                         <svg
@@ -521,6 +524,7 @@ function ContributorsPage() {
                       key={contributor.login}
                       href={contributor.html_url}
                       target="_blank"
+                      rel="noreferrer"
                       className="group relative flex flex-col items-center rounded-xl border bg-white/50 p-4 hover:-translate-y-1 hover:bg-white hover:shadow-lg dark:border-neutral-800 dark:bg-neutral-900/50 dark:hover:bg-neutral-900 dark:hover:shadow-neutral-900/50"
                       style={{
                         animationDelay: `${index * 50}ms`,
@@ -671,6 +675,7 @@ function ContributorsPage() {
                       <a
                         href={`https://github.com/${REPOSITORY}/blob/main/.github/CONTRIBUTING.md`}
                         target="_blank"
+                        rel="noreferrer"
                       >
                         <span className="relative z-10 flex items-center">
                           <GitGraph className="mr-2 h-4 w-4" />
@@ -683,7 +688,11 @@ function ContributorsPage() {
                       variant="outline"
                       className="gap-2 border-neutral-200 bg-white/80 text-neutral-700 hover:bg-neutral-100 hover:text-neutral-900 dark:border-neutral-700 dark:bg-neutral-900/50 dark:text-neutral-200 dark:hover:bg-neutral-800 dark:hover:text-white"
                     >
-                      <a href={`https://github.com/${REPOSITORY}/issues`} target="_blank">
+                      <a
+                        href={`https://github.com/${REPOSITORY}/issues`}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
                         <MessageCircle className="h-4 w-4" />
                         Open Issues
                       </a>
