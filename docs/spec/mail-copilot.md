@@ -164,12 +164,51 @@ types). **Jamais** le transport websocket legacy.
 
 - v1 : catalogue Workers AI — `llama-4-scout` (défaut), `llama-3.3-70b` —
   réglage `askRetaModel` dans `userSettingsSchema` (sélecteur dans le panneau).
-- BYOK (tranche ≥ 3, **flag désactivé d'ici là**) : prérequis non négociables —
-  chiffrement enveloppe des clés (pas le précédent OAuth-en-clair), allowlist
-  fixe d'hôtes provider (**aucune baseURL arbitraire**), rotation + suppression,
-  tests no-secret-log. Clé jamais renvoyée au client après saisie (lecture
-  masquée). Anthropic « where legally configured » : clé API Console uniquement,
-  jamais de détournement d'abonnement consommateur.
+- BYOK backend **livré en tranche 3A** (aucune UI — le panneau reste sur les
+  clés legacy Workers jusqu'à la 3B) :
+  - **Catalogue deployment-owned** (`lib/ask-reta/catalogue.ts`) : ids internes
+    `provider:model`, mapping upstream server-only, capabilities server-owned
+    (les modèles qui refusent `temperature` ne le reçoivent JAMAIS : GPT-5.x
+    Responses, Claude 5, Gemini 3.6 Flash ; Moonshot utilise
+    `max_completion_tokens`). Id hors catalogue → échec/défaut déterministe,
+    jamais transmis à un provider. Alias legacy `llama-*` → entrées Workers.
+  - **Coffre** `mail0_reta_byok_credential` (unique user+provider, FK cascade)
+    : chiffrement enveloppe AES-GCM (`lib/ask-reta/byok-crypto.ts`) — payload
+    de TAILLE FIXE 8192 octets (uint32 longueur + clé + padding aléatoire :
+    le ciphertext ne révèle rien de la longueur de la clé ; borne en OCTETS),
+    DEK 32 o aléatoire, KEK secret Worker `RETA_BYOK_KEK_V1` (base64url,
+    32 octets exactement, OPTIONNEL — Workers fonctionne sans), IV 96 bits
+    distincts. AAD scindé : payload (formatVersion+user+provider+row id,
+    indépendant du KEK) / wrap (+kekVersion). Rotation = VRAI rewrap (unwrap
+    DEK, re-wrap sous le nouveau KEK, ciphertext+iv préservés, la clé n'est
+    jamais déchiffrée). Remplacement/suppression atomiques ; suppression =
+    delete + reset du modèle sélectionné vers Workers dans UNE transaction.
+    Colonnes strictes : id, userId, provider, ciphertext, iv, wrappedDek,
+    wrapIv, kekVersion, consentVersion, timestamps — **aucun hint/suffixe/
+    longueur/préfixe de clé en DB ni en API**, jamais dans user_settings.
+  - **Adapters fetch natifs** (`lib/ask-reta/providers.ts`, abortMode
+    `native`) : endpoints CONSTANTS (OpenAI /v1/responses, Anthropic
+    /v1/messages, Gemini generativelanguage avec clé en HEADER x-goog-api-key
+    et chemin modèle issu du catalogue, Moonshot api.moonshot.ai, Z.AI
+    api.z.ai) — POST only, redirect:'error', cache:'no-store', signal natif
+    honoré pendant fetch ET la lecture du corps, réponse bornée 1 MiB avant
+    parse, zéro retry (jamais après abort), auth jamais en query, erreurs
+    provider FIXES sans body/url/status/clé. L'adapter résout le catalogue
+    lui-même depuis l'id interne — aucune entrée injectable.
+  - **Routes tRPC privées** sous copilot (rate-limit userId fail-closed sur
+    les écritures) : `modelCatalog` (métadonnées non sensibles + booléen
+    configured), `setCredential` (consentement egress EXPLICITE — littéraux
+    `acceptsMailboxEgress: true` + `consentVersion` figée — clé jamais
+    échoée), `deleteCredential` (delete+reset atomique, reset set server-
+    owned), `selectModel` (catalogue ET provider configuré ; Workers
+    toujours). Aucune route n'accepte userId/connectionId.
+  - **Résolution à l'usage** (`createAskRetaDeps`) : sélection BYOK avec
+    coffre indisponible (KEK absent, credential manquante, enveloppe
+    indéchiffrable, version KEK retirée) → erreur FIXE
+    `RetaVaultUnavailableError`, JAMAIS de repli silencieux vers un autre
+    modèle. Déchiffrement en scope minimal, buffers zéroïsés en finally
+    (best-effort). Anthropic « where legally configured » : clé API Console
+    uniquement, jamais de détournement d'abonnement consommateur.
 
 ### Sécurité (contrôles v1 obligatoires, tous testés)
 
@@ -198,7 +237,13 @@ threadId)`) — jamais le stub du shard actif seul.
 - Ids forgés (connexion, fil, citation) → rejet/jet silencieux testés.
 - Rédaction logs : ni question, ni corps de mail, ni brouillon dans console /
   Datadog / Sentry (préfixe `copilot.` déjà couvert par la rédaction commitée).
-- Pas d'egress web pendant qu'un contexte mail est en mémoire de pipeline.
+- Egress (amendé en 3A) : la boîte ENTIÈRE reste accessible uniquement via la
+  récupération bornée locale ; seuls les extraits récupérés (caps ci-dessus),
+  la question et le brouillon courant partent vers le SEUL endpoint fixe du
+  modèle choisi par l'utilisateur, et seulement après consentement egress
+  explicite (setCredential). Sans sélection BYOK : aucune sortie réseau hors
+  Workers AI. Jamais d'outils web/browsing, jamais d'egress web générique
+  pendant qu'un contexte mail est en mémoire de pipeline.
 
 ## Tranches
 

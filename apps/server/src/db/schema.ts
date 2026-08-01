@@ -204,6 +204,37 @@ export const userSettings = createTable(
   (t) => [index('user_settings_settings_idx').on(t.settings)],
 );
 
+/**
+ * Ask Reta BYOK vault (slice 3A, spec docs/spec/mail-copilot.md).
+ * NO plaintext anywhere — and NO key hint of ANY kind: no suffix, no prefix,
+ * no length (contract: nothing derivable about the key in DB or API). The
+ * API key is envelope-encrypted (AES-GCM DEK, wrapped by the Worker-secret
+ * KEK) — only ciphertext/iv/wrappedDek/wrapIv/kekVersion are stored.
+ * One credential per (user, provider); cascades away with the user.
+ */
+export const retaByokCredential = createTable(
+  'reta_byok_credential',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    provider: text('provider').notNull(),
+    ciphertext: text('ciphertext').notNull(),
+    iv: text('iv').notNull(),
+    wrappedDek: text('wrapped_dek').notNull(),
+    wrapIv: text('wrap_iv').notNull(),
+    kekVersion: text('kek_version').notNull(),
+    consentVersion: text('consent_version').notNull(),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (t) => [
+    unique('reta_byok_credential_user_provider_unique').on(t.userId, t.provider),
+    index('reta_byok_credential_user_id_idx').on(t.userId),
+  ],
+);
+
 export const writingStyleMatrix = createTable(
   'writing_style_matrix',
   {

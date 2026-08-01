@@ -1,4 +1,4 @@
-import { askRetaModelKeys, DEFAULT_ASK_RETA_MODEL } from './ask-reta/schema';
+import { DEFAULT_ASK_RETA_MODEL } from './ask-reta/schema';
 import { z } from 'zod';
 
 export const serializedFileSchema = z.object({
@@ -114,7 +114,12 @@ export const userSettingsSchema = z.object({
   imageCompression: z.enum(['low', 'medium', 'original']).default('medium'),
   autoRead: z.boolean().default(true),
   animations: z.boolean().default(false),
-  askRetaModel: z.enum(askRetaModelKeys).default(DEFAULT_ASK_RETA_MODEL),
+  // Bounded string, NOT an enum (slice 3A): the value is a catalogue id
+  // (`provider:model`) or a legacy short key. `settings.get` resets ALL
+  // settings on a failed parse, so an unknown/stale id must still PARSE here —
+  // resolveSelectedEntry maps anything off-catalogue to the default
+  // deterministically before it can reach a provider.
+  askRetaModel: z.string().max(60).default(DEFAULT_ASK_RETA_MODEL),
 });
 
 export type UserSettings = z.infer<typeof userSettingsSchema>;

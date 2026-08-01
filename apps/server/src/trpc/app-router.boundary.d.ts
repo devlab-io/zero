@@ -215,6 +215,52 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
             };
             meta: object;
         }>;
+        modelCatalog: import("@trpc/server").TRPCQueryProcedure<{
+            input: void;
+            output: {
+                selectedModelId: string;
+                vaultAvailable: boolean;
+                consentVersion: string;
+                models: {
+                    id: string;
+                    provider: import("../lib/ask-reta/catalogue").RetaProviderId;
+                    label: string;
+                    requiresCredential: boolean;
+                    configured: boolean;
+                }[];
+            };
+            meta: object;
+        }>;
+        setCredential: import("@trpc/server").TRPCMutationProcedure<{
+            input: {
+                provider: "anthropic" | "openai" | "gemini" | "moonshot" | "zai";
+                consentVersion: "2026-08-01";
+                apiKey: string;
+                acceptsMailboxEgress: true;
+            };
+            output: {
+                ok: true;
+            };
+            meta: object;
+        }>;
+        deleteCredential: import("@trpc/server").TRPCMutationProcedure<{
+            input: {
+                provider: "anthropic" | "openai" | "gemini" | "moonshot" | "zai";
+            };
+            output: {
+                ok: true;
+            };
+            meta: object;
+        }>;
+        selectModel: import("@trpc/server").TRPCMutationProcedure<{
+            input: {
+                modelId: string;
+            };
+            output: {
+                selectedModelId: string;
+            };
+            meta: object;
+        }>;
     }>>;
     bimi: import("@trpc/server").TRPCBuiltRouter<{
         ctx: {
@@ -1834,7 +1880,7 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
                     imageCompression: "low" | "medium" | "original";
                     autoRead: boolean;
                     animations: boolean;
-                    askRetaModel: "llama-4-scout" | "llama-3.3-70b";
+                    askRetaModel: string;
                     dynamicContent?: boolean | undefined;
                     isOnboarded?: boolean | undefined;
                     trustedSenders?: string[] | undefined;
@@ -1875,7 +1921,7 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
                 imageCompression?: "low" | "medium" | "original" | undefined;
                 autoRead?: boolean | undefined;
                 animations?: boolean | undefined;
-                askRetaModel?: "llama-4-scout" | "llama-3.3-70b" | undefined;
+                askRetaModel?: string | undefined;
             };
             output: {
                 success: boolean;

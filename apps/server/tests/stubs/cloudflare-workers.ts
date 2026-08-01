@@ -10,4 +10,6 @@ export class DurableObject<Env = unknown> {
   ) {}
 }
 
+export class RpcTarget {}
+
 export const env = {} as never;

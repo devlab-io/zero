@@ -1,10 +1,9 @@
-import { ASK_RETA_MODELS, type AskRetaModelKey } from './schema';
 import { AskRetaAbortedError } from './errors';
 
 /**
- * Injectable model seam. Slice 1 ships Workers AI only (no external
- * credentials); BYOK providers (spec, slice ≥ 3) implement the same interface
- * behind the envelope-encryption + host-allowlist prerequisites.
+ * Injectable model seam. Workers AI needs no credential; BYOK providers
+ * (slice 3A, lib/ask-reta/providers.ts) implement the same interface behind
+ * the envelope-encryption vault + fixed-endpoint catalogue.
  *
  * Cancellation capability (review 02-cancel-contract) is EXPLICIT:
  * - 'cooperative': the provider API is NOT abortable (env.AI.run ignores the
@@ -15,7 +14,8 @@ import { AskRetaAbortedError } from './errors';
  *   passes it to fetch, aborting the HTTP request for real).
  */
 export interface RetaModel {
-  readonly key: AskRetaModelKey;
+  /** Catalogue id (`provider:model`) — the only model identifier clients see. */
+  readonly key: string;
   readonly abortMode: 'native' | 'cooperative';
   complete(params: {
     system: string;
@@ -37,15 +37,18 @@ export type WorkersAiBinding = {
   ) => Promise<unknown>;
 };
 
-export const workersAiModel = (ai: WorkersAiBinding, key: AskRetaModelKey): RetaModel => ({
-  key,
+export const workersAiModel = (
+  ai: WorkersAiBinding,
+  entry: { key: string; upstreamModel: string },
+): RetaModel => ({
+  key: entry.key,
   // env.AI.run ignores AbortSignal: cancellation here is COOPERATIVE only —
   // refuse to dispatch after abort, discard a late result after abort. The
   // dispatched inference itself may run to completion on Cloudflare's side.
   abortMode: 'cooperative',
   async complete({ system, user, maxTokens, temperature, signal }) {
     if (signal?.aborted) throw new AskRetaAbortedError('aborted');
-    const response = await ai.run(ASK_RETA_MODELS[key], {
+    const response = await ai.run(entry.upstreamModel, {
       messages: [
         { role: 'system', content: system },
         { role: 'user', content: user },

@@ -4,15 +4,10 @@
 // are unchanged; main.ts re-exports them so the wrangler `ZERO_DB` binding and
 // exported-class surface are identical. No routing logic lives here.
 import {
-  createUpdatedMatrixFromNewEmail,
-  initializeStyleMatrixFromEmail,
-  type EmailMatrix,
-  type WritingStyleMatrix,
-} from '../services/writing-style-service';
-import {
   account,
   connection,
   note,
+  retaByokCredential,
   session,
   user,
   userHotkeys,
@@ -20,6 +15,12 @@ import {
   writingStyleMatrix,
   emailTemplate,
 } from './schema';
+import {
+  createUpdatedMatrixFromNewEmail,
+  initializeStyleMatrixFromEmail,
+  type EmailMatrix,
+  type WritingStyleMatrix,
+} from '../services/writing-style-service';
 import { DurableObject, RpcTarget } from 'cloudflare:workers';
 import { eq, and, desc, asc, inArray } from 'drizzle-orm';
 import { defaultUserSettings } from '../lib/schemas';
@@ -171,6 +172,44 @@ export class DbRpcDO extends RpcTarget {
 
   async updateEmailTemplate(templateId: string, data: Partial<typeof emailTemplate.$inferInsert>) {
     return await this.mainDo.updateEmailTemplate(this.userId, templateId, data);
+  }
+
+  // --- Ask Reta BYOK vault (slice 3A) --------------------------------------
+  // Scoping is STRUCTURAL: this façade injects its own userId — no route can
+  // name a user, so user A cannot find/list/replace/delete user B's rows.
+
+  async findRetaByokCredential(provider: string) {
+    return await this.mainDo.findRetaByokCredential(this.userId, provider);
+  }
+
+  async listRetaByokCredentialStatus() {
+    return await this.mainDo.listRetaByokCredentialStatus(this.userId);
+  }
+
+  async replaceRetaByokCredential(data: {
+    id: string;
+    provider: string;
+    ciphertext: string;
+    iv: string;
+    wrappedDek: string;
+    wrapIv: string;
+    kekVersion: string;
+    consentVersion: string;
+  }) {
+    return await this.mainDo.replaceRetaByokCredential(this.userId, data);
+  }
+
+  async deleteRetaByokCredentialAndResetModel(
+    provider: string,
+    resetModelIds: string[],
+    fallbackModelId: string,
+  ) {
+    return await this.mainDo.deleteRetaByokCredentialAndResetModel(
+      this.userId,
+      provider,
+      resetModelIds,
+      fallbackModelId,
+    );
   }
 }
 
@@ -428,6 +467,107 @@ export class ZeroDB extends DurableObject<ZeroEnv> {
           updatedAt: new Date(),
         },
       });
+  }
+
+  // --- Ask Reta BYOK vault (slice 3A) --------------------------------------
+  // The envelope is OPAQUE at this layer: no crypto, no plaintext, and every
+  // query is bound to the caller-scoped userId (DbRpcDO). Envelope fields
+  // never leave the tRPC layer — listRetaByokCredentialStatus is the only
+  // read the routes expose and it carries provider + timestamps only.
+
+  async findRetaByokCredential(
+    userId: string,
+    provider: string,
+  ): Promise<typeof retaByokCredential.$inferSelect | undefined> {
+    return await this.db.query.retaByokCredential.findFirst({
+      where: and(eq(retaByokCredential.userId, userId), eq(retaByokCredential.provider, provider)),
+    });
+  }
+
+  /** Status only — NEVER envelope fields (no ciphertext/iv/wrappedDek/...). */
+  async listRetaByokCredentialStatus(
+    userId: string,
+  ): Promise<{ provider: string; updatedAt: Date }[]> {
+    return await this.db.query.retaByokCredential.findMany({
+      where: eq(retaByokCredential.userId, userId),
+      columns: { provider: true, updatedAt: true },
+    });
+  }
+
+  /**
+   * Set/rotate in ONE transaction: the whole envelope is REPLACED (old row
+   * deleted, new row inserted with its fresh id — the AAD is bound to that
+   * id, so a half-written mix of old and new envelope cannot exist).
+   */
+  async replaceRetaByokCredential(
+    userId: string,
+    data: {
+      id: string;
+      provider: string;
+      ciphertext: string;
+      iv: string;
+      wrappedDek: string;
+      wrapIv: string;
+      kekVersion: string;
+      consentVersion: string;
+    },
+  ) {
+    await this.db.transaction(async (tx) => {
+      await tx
+        .delete(retaByokCredential)
+        .where(
+          and(
+            eq(retaByokCredential.userId, userId),
+            eq(retaByokCredential.provider, data.provider),
+          ),
+        );
+      await tx.insert(retaByokCredential).values({
+        ...data,
+        userId,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+    });
+  }
+
+  /**
+   * Delete + model reset in ONE transaction: if the stored selection points
+   * at the removed provider (resetModelIds = that provider's catalogue ids,
+   * server-owned), it falls back to the Workers default — a selection whose
+   * credential vanished can never survive the deletion.
+   */
+  async deleteRetaByokCredentialAndResetModel(
+    userId: string,
+    provider: string,
+    resetModelIds: string[],
+    fallbackModelId: string,
+  ) {
+    await this.db.transaction(async (tx) => {
+      await tx
+        .delete(retaByokCredential)
+        .where(
+          and(eq(retaByokCredential.userId, userId), eq(retaByokCredential.provider, provider)),
+        );
+      const row = await tx.query.userSettings.findFirst({
+        where: eq(userSettings.userId, userId),
+      });
+      const current = row?.settings as
+        | (typeof defaultUserSettings & { askRetaModel?: unknown })
+        | undefined;
+      if (
+        current &&
+        typeof current.askRetaModel === 'string' &&
+        resetModelIds.includes(current.askRetaModel)
+      ) {
+        await tx
+          .update(userSettings)
+          .set({
+            settings: { ...current, askRetaModel: fallbackModelId },
+            updatedAt: new Date(),
+          })
+          .where(eq(userSettings.userId, userId));
+      }
+    });
   }
 
   async createConnection(

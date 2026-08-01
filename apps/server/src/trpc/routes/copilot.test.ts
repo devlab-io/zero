@@ -159,7 +159,7 @@ describe('copilot.ask — multi-shard reads, connection-scoped, strict citations
     });
     expect(result.citations[0]).not.toHaveProperty('excerpt');
     expect(JSON.stringify(result.citations)).not.toContain('en attente de paiement.</p>');
-    expect(result.model).toBe('llama-4-scout');
+    expect(result.model).toBe('workers-ai:llama-4-scout');
   });
 
   it('metadata-only retrieval yields ZERO citations even when the model cites it', async () => {
@@ -221,7 +221,7 @@ describe('copilot.ask — multi-shard reads, connection-scoped, strict citations
     } as never);
     script(searchOnlyPlan, JSON.stringify({ answer: 'ok', cites: [] }));
     const result = await ask({ question: 'test modèle' });
-    expect(result.model).toBe('llama-3.3-70b');
+    expect(result.model).toBe('workers-ai:llama-3.3-70b');
     expect(harness.aiRun).toHaveBeenCalledWith(
       '@cf/meta/llama-3.3-70b-instruct-fp8-fast',
       expect.anything(),

@@ -224,5 +224,6 @@ export type AskRetaResult = {
   citations: AskRetaCitation[];
   proposal?: AskRetaProposal;
   steps: AskRetaStep[];
-  model: AskRetaModelKey;
+  /** Catalogue id (`provider:model`, slice 3A) — never an upstream model name. */
+  model: string;
 };

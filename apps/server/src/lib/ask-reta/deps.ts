@@ -1,28 +1,85 @@
-import {
-  askRetaModelKeys,
-  DEFAULT_ASK_RETA_MODEL,
-  type AskRetaModelKey,
-  type AskRetaStep,
-} from './schema';
+import { decodeKek, decryptApiKey, RETA_BYOK_KEK_VERSION, zeroize } from './byok-crypto';
 import { getThread, getThreadsFromDB, getZeroAgent, getZeroDB } from '../server-utils';
+import { workersAiModel, type RetaModel, type WorkersAiBinding } from './model';
 import { buildMailboxOverview, getMailboxActivity } from '../mailbox-overview';
-import { workersAiModel, type WorkersAiBinding } from './model';
+import { createProviderModel, RetaVaultUnavailableError } from './providers';
+import { resolveSelectedEntry, type RetaCatalogueEntry } from './catalogue';
 import type { AskRetaDeps } from './pipeline';
+import type { AskRetaStep } from './schema';
 import { guardWithSignal } from './errors';
-import { env } from 'cloudflare:workers';
 import { createDb } from '../../db';
+import { env } from '../../env';
 
 /**
  * Shared dependency wiring for BOTH Ask Reta transports (tRPC copilot.ask and
  * the slice-2 NDJSON stream). Connection ownership is the caller's contract:
  * `connectionId` must come from the server-resolved active connection, never
  * from the client. The surface stays read-only by construction.
+ *
+ * Model resolution (slice 3A): the STORED selection resolves through the
+ * deployment-owned catalogue (legacy short keys aliased, anything stale →
+ * Workers default — never forwarded to a provider). A BYOK selection decrypts
+ * the vault credential in MINIMAL scope; if the vault is unusable the ask
+ * fails with a FIXED error — never a silent fallback to another model.
  */
 
-export const resolveAskRetaModelKey = (value: unknown): AskRetaModelKey =>
-  askRetaModelKeys.includes(value as AskRetaModelKey)
-    ? (value as AskRetaModelKey)
-    : DEFAULT_ASK_RETA_MODEL;
+type VaultReader = {
+  findRetaByokCredential(provider: string): Promise<
+    | {
+        id: string;
+        ciphertext: string;
+        iv: string;
+        wrappedDek: string;
+        wrapIv: string;
+        kekVersion: string;
+      }
+    | undefined
+  >;
+};
+
+export async function buildByokModel(params: {
+  vault: VaultReader;
+  userId: string;
+  entry: RetaCatalogueEntry;
+  kekSecret: string | undefined;
+  fetchImpl?: typeof fetch;
+}): Promise<RetaModel> {
+  const { vault, userId, entry, kekSecret } = params;
+  if (!kekSecret) throw new RetaVaultUnavailableError();
+  const row = await vault.findRetaByokCredential(entry.provider);
+  if (!row) throw new RetaVaultUnavailableError();
+  // Version pinning: an envelope wrapped under a retired KEK fails closed
+  // until a rewrap migration re-wraps it — never a guessing loop over KEKs.
+  if (row.kekVersion !== RETA_BYOK_KEK_VERSION) throw new RetaVaultUnavailableError();
+
+  let kek: Uint8Array;
+  try {
+    kek = decodeKek(kekSecret);
+  } catch {
+    throw new RetaVaultUnavailableError();
+  }
+  let keyBytes: Uint8Array | null = null;
+  try {
+    keyBytes = await decryptApiKey({
+      envelope: row,
+      kek,
+      aad: { userId, provider: entry.provider, credentialId: row.id },
+    });
+    // The decoded string lives only in the adapter closure for this request;
+    // the buffers are zeroized below (best-effort — JS strings cannot be).
+    const apiKey = new TextDecoder().decode(keyBytes);
+    // The adapter resolves the catalogue ITSELF from the internal id — no
+    // entry object crosses this boundary (nothing injectable).
+    return createProviderModel({ modelId: entry.id, apiKey, fetchImpl: params.fetchImpl });
+  } catch (error) {
+    if (error instanceof RetaVaultUnavailableError) throw error;
+    // Tampered/misbound envelope: fail closed, no crypto detail leaves here.
+    throw new RetaVaultUnavailableError();
+  } finally {
+    if (keyBytes) zeroize(keyBytes);
+    zeroize(kek);
+  }
+}
 
 export async function createAskRetaDeps(params: {
   userId: string;
@@ -30,23 +87,30 @@ export async function createAskRetaDeps(params: {
   executionCtx: ExecutionContext;
   signal?: AbortSignal;
   onStep?: (step: AskRetaStep) => void;
-}): Promise<{ deps: AskRetaDeps; modelKey: AskRetaModelKey }> {
+}): Promise<{ deps: AskRetaDeps; modelKey: string }> {
   const { userId, connectionId, executionCtx, signal, onStep } = params;
   const { stub: agent } = await getZeroAgent(connectionId, executionCtx);
 
   const db = await getZeroDB(userId);
   const stored = await db.findUserSettings();
-  const modelKey = resolveAskRetaModelKey(
+  const entry = resolveSelectedEntry(
     (stored?.settings as { askRetaModel?: unknown } | undefined)?.askRetaModel,
   );
+
+  const model =
+    entry.provider === 'workers-ai'
+      ? // Workers AI path works WITHOUT any KEK/vault — no credential involved.
+        workersAiModel(env.AI as unknown as WorkersAiBinding, {
+          key: entry.id,
+          upstreamModel: entry.upstreamModel,
+        })
+      : await buildByokModel({ vault: db, userId, entry, kekSecret: env.RETA_BYOK_KEK_V1 });
 
   // DO RPC calls have NO abort contract: a dispatched RPC may complete on its
   // shard regardless. Cooperative discipline only — never dispatch after
   // abort, discard a late result after abort (review 02-cancel-contract).
   const deps: AskRetaDeps = {
-    // Structural narrowing: the generated Ai<AiModels> run() overloads reject a
-    // string-typed model id; the catalogue only holds valid @cf/meta ids.
-    model: workersAiModel(env.AI as unknown as WorkersAiBinding, modelKey),
+    model,
     overview: () =>
       guardWithSignal(signal, async () => {
         const now = Date.now();
@@ -77,5 +141,5 @@ export async function createAskRetaDeps(params: {
     onStep,
   };
 
-  return { deps, modelKey };
+  return { deps, modelKey: model.key };
 }
