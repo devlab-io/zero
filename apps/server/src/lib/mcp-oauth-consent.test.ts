@@ -6,6 +6,7 @@ import { createHash } from 'node:crypto';
 import {
   handleConsentGatedMcpToken,
   isPendingMcpConsent,
+  isSameOriginMcpConsentSubmission,
   renderMcpConsentPage,
   requireExplicitMcpConsent,
 } from './mcp-oauth-consent';
@@ -14,6 +15,52 @@ const BASE_URL = 'http://localhost:3047';
 const CALLBACK_URL = 'http://127.0.0.1:51234/callback/reta-codex-test';
 
 describe('MCP OAuth explicit consent boundary', () => {
+  it('accepts a strict same-origin form POST, including Dia Origin redaction', () => {
+    const submission = (headers: HeadersInit) =>
+      new Request(`${BASE_URL}/api/oauth/mcp/consent`, { method: 'POST', headers });
+
+    expect(
+      isSameOriginMcpConsentSubmission(
+        submission({ Origin: BASE_URL, 'Sec-Fetch-Site': 'same-origin' }),
+        BASE_URL,
+      ),
+    ).toBe(true);
+    expect(
+      isSameOriginMcpConsentSubmission(submission({ 'Sec-Fetch-Site': 'same-origin' }), BASE_URL),
+    ).toBe(true);
+    expect(
+      isSameOriginMcpConsentSubmission(
+        submission({ Origin: 'null', 'Sec-Fetch-Site': 'same-origin' }),
+        BASE_URL,
+      ),
+    ).toBe(true);
+  });
+
+  it('rejects cross-site, wrong-origin and signal-less consent submissions', () => {
+    const submission = (headers: HeadersInit, url = `${BASE_URL}/api/oauth/mcp/consent`) =>
+      new Request(url, { method: 'POST', headers });
+
+    expect(
+      isSameOriginMcpConsentSubmission(
+        submission({ Origin: 'https://evil.example', 'Sec-Fetch-Site': 'cross-site' }),
+        BASE_URL,
+      ),
+    ).toBe(false);
+    expect(
+      isSameOriginMcpConsentSubmission(
+        submission({ Origin: 'https://evil.example', 'Sec-Fetch-Site': 'same-origin' }),
+        BASE_URL,
+      ),
+    ).toBe(false);
+    expect(isSameOriginMcpConsentSubmission(submission({}), BASE_URL)).toBe(false);
+    expect(
+      isSameOriginMcpConsentSubmission(
+        submission({ 'Sec-Fetch-Site': 'same-origin' }, 'https://evil.example/consent'),
+        BASE_URL,
+      ),
+    ).toBe(false);
+  });
+
   it('forces prompt=consent without changing the client callback or PKCE request', () => {
     const source = new Request(
       `${BASE_URL}/api/auth/mcp/authorize?response_type=code&client_id=dynamic-client&redirect_uri=${encodeURIComponent(CALLBACK_URL)}&scope=openid+profile+email+offline_access&state=state-1&code_challenge=challenge&code_challenge_method=S256`,

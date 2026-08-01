@@ -3,6 +3,7 @@ import { Hono } from 'hono';
 import {
   findMcpVerification,
   handleConsentGatedMcpToken,
+  isSameOriginMcpConsentSubmission,
   loadMcpConsentContext,
   McpConsentError,
   renderMcpConsentPage,
@@ -54,13 +55,6 @@ function consentError(error: unknown) {
   return new McpConsentError('Unable to load this authorization request.', 400);
 }
 
-function isSameOriginSubmission(request: Request) {
-  const expectedOrigin = new URL(env.VITE_PUBLIC_BACKEND_URL).origin;
-  const origin = request.headers.get('origin');
-  const fetchSite = request.headers.get('sec-fetch-site');
-  return origin === expectedOrigin && (!fetchSite || fetchSite === 'same-origin');
-}
-
 export const mcpOAuthConsentRouter = new Hono<HonoContext>()
   .get('/consent', async (c) => {
     if (!c.var.sessionUser) return c.text('Authentication required.', 401, consentHeaders());
@@ -88,7 +82,7 @@ export const mcpOAuthConsentRouter = new Hono<HonoContext>()
   })
   .post('/consent', async (c) => {
     if (!c.var.sessionUser) return c.text('Authentication required.', 401, consentHeaders());
-    if (!isSameOriginSubmission(c.req.raw)) {
+    if (!isSameOriginMcpConsentSubmission(c.req.raw, env.VITE_PUBLIC_BACKEND_URL)) {
       return c.text('Invalid consent origin.', 403, consentHeaders());
     }
 

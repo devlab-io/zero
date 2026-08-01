@@ -55,6 +55,34 @@ export class McpConsentError extends Error {
   }
 }
 
+/**
+ * CSRF boundary for the browser consent form.
+ *
+ * Some privacy-focused browsers omit (or redact to `null`) Origin on a
+ * same-origin top-level form POST. In that case Fetch Metadata remains the
+ * browser-authenticated signal: accept only `Sec-Fetch-Site: same-origin` and
+ * only when the effective request URL itself is the configured backend
+ * origin. Non-browser clients with neither signal remain rejected.
+ */
+export function isSameOriginMcpConsentSubmission(request: Request, backendUrl: string): boolean {
+  const expectedOrigin = new URL(backendUrl).origin;
+  if (new URL(request.url).origin !== expectedOrigin) return false;
+
+  const fetchSite = request.headers.get('sec-fetch-site');
+  if (fetchSite && fetchSite !== 'same-origin') return false;
+
+  const origin = request.headers.get('origin');
+  if (origin && origin !== 'null') {
+    try {
+      return new URL(origin).origin === expectedOrigin;
+    } catch {
+      return false;
+    }
+  }
+
+  return fetchSite === 'same-origin';
+}
+
 function parseVerificationPayload(value: string): ConsentVerificationPayload | null {
   try {
     const parsed = JSON.parse(value) as Partial<ConsentVerificationPayload>;
