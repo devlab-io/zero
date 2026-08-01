@@ -2,6 +2,7 @@ import { getActiveConnection, getZeroDB } from '../lib/server-utils';
 import { Ratelimit, type RatelimitConfig } from '@upstash/ratelimit';
 import { createLoggingMiddleware } from '../lib/trpc-logging';
 import { getConnInfo } from 'hono/cloudflare-workers';
+import { evaluateRateLimit } from '../lib/rate-limit';
 import { initTRPC, TRPCError } from '@trpc/server';
 import { env } from 'cloudflare:workers';
 import { logger } from '../lib/logger';
@@ -217,27 +218,58 @@ export const createRateLimiterMiddleware = (config: {
   limiter: RatelimitConfig['limiter'];
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   generatePrefix: (ctx: TrpcContext, input: unknown) => string;
+  /**
+   * 'ip' (historical default) or 'userId' — strict: a missing session user is
+   * UNAUTHORIZED, never a shared bucket.
+   */
+  key?: 'ip' | 'userId';
+  /**
+   * Expensive surfaces (copilot.ask): in production WITHOUT remote Redis the
+   * call is denied (PRECONDITION_FAILED) instead of silently unlimited.
+   */
+  failClosed?: boolean;
 }) =>
   t.middleware(async ({ next, ctx, input }) => {
-    // Devlab self-host: sans Redis distant réel, pas de rate limiting (no-op).
-    // hasRemoteRedis rejette les URLs locales (incident staging 2026-07-30).
+    // Devlab self-host: hasRemoteRedis rejette les URLs locales (incident
+    // staging 2026-07-30). La décision complète vit dans lib/rate-limit.ts.
     const zenv = env as unknown as ZeroEnv;
-    if (!hasRemoteRedis(zenv)) return next();
-    const ratelimiter = new Ratelimit({
-      redis: redis(),
-      limiter: config.limiter,
-      analytics: true,
-      prefix: config.generatePrefix(ctx, input),
+    const identifier =
+      (config.key ?? 'ip') === 'userId'
+        ? (ctx.sessionUser?.id ?? null)
+        : (getConnInfo(ctx.c).remote.address ?? 'no-ip');
+
+    const decision = await evaluateRateLimit({
+      hasRemoteRedis: hasRemoteRedis(zenv),
+      isProduction: zenv.NODE_ENV === 'production',
+      failClosed: config.failClosed ?? false,
+      identifier,
+      limit: (id) =>
+        new Ratelimit({
+          redis: redis(),
+          limiter: config.limiter,
+          analytics: true,
+          prefix: config.generatePrefix(ctx, input),
+        }).limit(id),
     });
-    const finalIp = getConnInfo(ctx.c).remote.address ?? 'no-ip';
-    const { success, limit, reset, remaining } = await ratelimiter.limit(finalIp);
 
-    ctx.c.res.headers.append('X-RateLimit-Limit', limit.toString());
-    ctx.c.res.headers.append('X-RateLimit-Remaining', remaining.toString());
-    ctx.c.res.headers.append('X-RateLimit-Reset', reset.toString());
+    if (decision.outcome === 'missing-identity') {
+      throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Session required.' });
+    }
+    if (decision.outcome === 'unavailable') {
+      logger.error('[rate-limit] fail-closed: remote Redis unavailable in production');
+      throw new TRPCError({
+        code: 'PRECONDITION_FAILED',
+        message: 'Rate limiting unavailable. Please try again later.',
+      });
+    }
+    if (decision.outcome === 'skip') return next();
 
-    if (!success) {
-      logger.info(`Rate limit exceeded for IP ${finalIp}.`);
+    ctx.c.res.headers.append('X-RateLimit-Limit', decision.headers.limit.toString());
+    ctx.c.res.headers.append('X-RateLimit-Remaining', decision.headers.remaining.toString());
+    ctx.c.res.headers.append('X-RateLimit-Reset', decision.headers.reset.toString());
+
+    if (decision.outcome === 'limited') {
+      logger.info('Rate limit exceeded.', { key: config.key ?? 'ip' });
       throw new TRPCError({
         code: 'TOO_MANY_REQUESTS',
         message: 'Too many requests. Please try again later.',

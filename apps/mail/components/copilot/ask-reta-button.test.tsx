@@ -86,5 +86,9 @@ describe('AskRetaButton — the sanctioned sidebar entry', () => {
     expect(queryStore.isAskRetaOpen).toBe('true');
     expect(h.surfaceFactory).toBeGreaterThanOrEqual(factoryBefore);
     expect(document.querySelector('[data-testid="ask-reta-surface"]')).toBeTruthy();
+
+    // A11y: the dialog carries a NON-EMPTY title and description (sr-only).
+    expect(document.body.textContent).toContain('common.askReta.title');
+    expect(document.body.textContent).toContain('common.askReta.subtitle');
   });
 });

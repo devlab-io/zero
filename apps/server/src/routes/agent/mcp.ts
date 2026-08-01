@@ -26,6 +26,7 @@ import {
   MCP_SERVER_INFO,
   MCP_TOOL_DEFINITIONS,
   resolveIdempotentDraft,
+  type CreateDraftResult,
   type DraftIdempotencyStore,
 } from './mcp-tools';
 import {
@@ -75,15 +76,20 @@ export class ZeroMCP extends McpAgent<typeof env, Record<string, unknown>, { use
   activeConnectionId: string | undefined;
 
   /**
-   * Every mailbox handler must resolve its agent HERE, at call time. A stub captured
-   * at init() stays bound to the first connection even after setActiveConnection —
-   * reads and draft writes would then hit the wrong account.
+   * Every mailbox handler must CAPTURE `this.activeConnectionId` once at entry
+   * and resolve its agent from that captured id. A stub captured at init()
+   * stays bound to the first connection after setActiveConnection; and reading
+   * `this.activeConnectionId` twice inside one handler can straddle a
+   * concurrent switch — id and agent would then disagree mid-operation.
    */
-  private async activeAgent() {
-    invariant(this.activeConnectionId, 'No active connection');
-    const { stub } = await getZeroAgent(this.activeConnectionId);
+  private async agentFor(connectionId: string | undefined) {
+    invariant(connectionId, 'No active connection');
+    const { stub } = await getZeroAgent(connectionId);
     return stub;
   }
+
+  /** In-flight createDraft tasks per idempotency storage key (atomic dedupe). */
+  private draftCreationsInFlight = new Map<string, Promise<CreateDraftResult>>();
 
   async init(): Promise<void> {
     if (!this.props.userId) return;
@@ -181,7 +187,7 @@ export class ZeroMCP extends McpAgent<typeof env, Record<string, unknown>, { use
       { description: descriptions.listThreads, inputSchema: schemas.listThreads },
       async (s) => {
         // Single projection query (#22/#30) — compact metadata, NO per-row body/N+1.
-        const agent = await this.activeAgent();
+        const agent = await this.agentFor(this.activeConnectionId);
         const response = (await agent.getThreadsFromDB({
           folder: s.folder,
           q: s.query,
@@ -197,7 +203,7 @@ export class ZeroMCP extends McpAgent<typeof env, Record<string, unknown>, { use
       'searchThreads',
       { description: descriptions.searchThreads, inputSchema: schemas.searchThreads },
       async (s) => {
-        const agent = await this.activeAgent();
+        const agent = await this.agentFor(this.activeConnectionId);
         const response = (await agent.getThreadsFromDB({
           folder: s.folder,
           q: s.query,
@@ -273,7 +279,7 @@ export class ZeroMCP extends McpAgent<typeof env, Record<string, unknown>, { use
       'getUserLabels',
       { description: descriptions.getUserLabels, inputSchema: schemas.getUserLabels },
       async () => {
-        const agent = await this.activeAgent();
+        const agent = await this.agentFor(this.activeConnectionId);
         const labels = await agent.getUserLabels();
         return text(
           labels
@@ -287,7 +293,7 @@ export class ZeroMCP extends McpAgent<typeof env, Record<string, unknown>, { use
       'getLabel',
       { description: descriptions.getLabel, inputSchema: schemas.getLabel },
       async (s) => {
-        const agent = await this.activeAgent();
+        const agent = await this.agentFor(this.activeConnectionId);
         const label = await agent.getLabel(s.id);
         return {
           content: [
@@ -354,15 +360,18 @@ export class ZeroMCP extends McpAgent<typeof env, Record<string, unknown>, { use
       'createDraft',
       { description: descriptions.createDraft, inputSchema: schemas.createDraft },
       async (data) => {
-        if (!this.activeConnectionId) {
+        // Captured ONCE: the idempotency scope and the draft target must be the
+        // same connection even if setActiveConnection runs mid-flight.
+        const connectionId = this.activeConnectionId;
+        if (!connectionId) {
           throw new Error('No active connection');
         }
         const result = await resolveIdempotentDraft(
-          this.activeConnectionId,
+          connectionId,
           data.idempotencyKey,
           draftIdempotencyStore,
           async () =>
-            (await this.activeAgent()).createDraft({
+            (await this.agentFor(connectionId)).createDraft({
               to: formatDraftRecipients(data.to),
               cc: data.cc?.length ? formatDraftRecipients(data.cc) : undefined,
               bcc: data.bcc?.length ? formatDraftRecipients(data.bcc) : undefined,
@@ -373,6 +382,7 @@ export class ZeroMCP extends McpAgent<typeof env, Record<string, unknown>, { use
               threadId: data.threadId ?? null,
               fromEmail: null,
             }),
+          this.draftCreationsInFlight,
         );
         const suffix = result.deduped ? ' (idempotent: existing draft)' : '';
         return text(result.id ? `Draft created: ${result.id}${suffix}` : `Draft created${suffix}`);

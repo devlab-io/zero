@@ -8,11 +8,15 @@ import { atom } from 'jotai';
 
 export type AskRetaCitationView = {
   ref: string;
+  /** v1 contract: citations are always message-kind with a verified quote. */
+  kind: 'message';
   threadId: string;
+  messageId?: string;
   subject: string;
   sender: string;
   date: string;
   excerptHash: string;
+  quote: string;
 };
 
 export type AskRetaProposalView = {

@@ -202,6 +202,15 @@ export function EmailComposer({
       if (payload.subject && !getValues('subject')) {
         setValue('subject', payload.subject, { shouldDirty: true });
       }
+      // Recipient applied EXPLICITLY (never silently dropped): only fills an
+      // empty To — an addressed draft keeps its recipients.
+      if (payload.to && (getValues('to') ?? []).length === 0) {
+        const recipients = payload.to
+          .split(/[,;]/)
+          .map((email) => email.trim())
+          .filter(Boolean);
+        if (recipients.length) setValue('to', recipients, { shouldDirty: true });
+      }
       setHasUnsavedChanges(true);
       editor.commands.focus('end');
       return 'inserted';

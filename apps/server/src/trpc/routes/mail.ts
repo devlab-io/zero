@@ -134,7 +134,13 @@ export const mailRouter = router({
       const executionCtx = getContext<HonoContext>().executionCtx;
       const { stub: agent } = await getZeroAgent(activeConnection.id, executionCtx);
 
-      logger.debug('[listThreads] input:', { folder, maxResults, cursor, q, labelIds });
+      logger.debug('[listThreads] input:', {
+        folder,
+        maxResults,
+        cursor,
+        qLength: q?.length,
+        labelIds,
+      });
 
       if (folder === FOLDERS.DRAFT) {
         logger.debug('[listThreads] Listing drafts');

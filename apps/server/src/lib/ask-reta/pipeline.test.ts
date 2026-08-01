@@ -2,6 +2,7 @@ import {
   AskRetaAbortedError,
   fallbackPlan,
   fallbackSearchQuery,
+  fallbackSearchTerms,
   normalizePlan,
   runAskReta,
   type AskRetaDeps,
@@ -74,22 +75,42 @@ const makeDeps = (
 
 const planJson = JSON.stringify({
   actions: [
-    { type: 'search', query: 'facture balguerie' },
+    { type: 'search', query: 'balguerie' },
     { type: 'read_thread', target: 'top_results' },
   ],
 });
 
+// Search yields s1..s10 (metadata). Reading the top 3 threads then yields
+// message sources: thread-1 non-draft messages 3..14 → s11..s22, thread-2 →
+// s23.., etc. s11 = thread-1 message 3.
 const synthesisJson = JSON.stringify({
   answer: 'La dernière facture Balguerie réclame 120 000 XPF.',
-  cites: ['s1', 's99'],
+  cites: [{ ref: 's11', quote: 'Montant dû message 3' }, { ref: 's99', quote: 'forged' }, 's1'],
 });
 
-describe('fallbackSearchQuery', () => {
-  it('keeps discriminating words, drops fr/en stopwords', () => {
-    expect(fallbackSearchQuery('Que dit la dernière facture de Balguerie ?')).toBe(
-      'dit facture balguerie',
+describe('fallback search terms — single literal LIKE means single terms', () => {
+  it('picks ONE most-discriminant token (emails/numbers first, then longest)', () => {
+    expect(fallbackSearchQuery('Que dit la dernière facture de Balguerie ?')).toBe('balguerie');
+    expect(fallbackSearchQuery('How many unread emails from Github ?')).toBe('unread');
+    expect(fallbackSearchQuery('relance de compta@socredo.pf pour le devis 2026-113')).toBe(
+      'compta@socredo.pf',
     );
-    expect(fallbackSearchQuery('How many unread emails from Github ?')).toContain('github');
+  });
+
+  it('exposes ranked distinct terms for the fallback plan', () => {
+    expect(fallbackSearchTerms('Que dit la dernière facture de Balguerie ?', 2)).toEqual([
+      'balguerie',
+      'facture',
+    ]);
+  });
+
+  it('fallbackPlan issues single-term searches (never a joined sentence)', () => {
+    const plan = fallbackPlan(input());
+    const searches = plan.actions.filter((a) => a.type === 'search');
+    expect(searches.length).toBeGreaterThanOrEqual(1);
+    for (const search of searches) {
+      expect(search.type === 'search' && search.query.includes(' ')).toBe(false);
+    }
   });
 });
 
@@ -119,24 +140,57 @@ describe('normalizePlan — every cap enforced, degradation never throws', () =>
   });
 });
 
-describe('runAskReta — grounded, capped, read-only', () => {
-  it('answers with server-resolved citations; forged refs are dropped', async () => {
+describe('runAskReta — strict citations: message-kind + verified quote ONLY', () => {
+  it('keeps only message-source cites whose quote matches; metadata/forged/string cites vanish', async () => {
     const model = scriptedModel([planJson, synthesisJson]);
     const deps = makeDeps(model);
     const result = await runAskReta(deps, input());
 
     expect(result.answer).toContain('120 000 XPF');
-    // s99 was never retrieved: containment drops it.
     expect(result.citations).toHaveLength(1);
-    expect(result.citations[0]).toMatchObject({ ref: 's1', threadId: 'thread-1' });
+    expect(result.citations[0]).toMatchObject({
+      ref: 's11',
+      kind: 'message',
+      threadId: 'thread-1',
+      quote: 'Montant dû message 3',
+    });
+    expect(result.citations[0]?.messageId).toBe('thread-1-m3');
     expect(result.citations[0]?.excerptHash).toMatch(/^[0-9a-f]{64}$/);
-    // No raw excerpt leaves the server in a citation.
     expect(result.citations[0]).not.toHaveProperty('excerpt');
-    // The retrieval trace is visible.
     expect(result.steps.map((s) => s.kind)).toEqual(['search', 'read_thread']);
   });
 
-  it('hard-caps retrieval: 10 search results, 3 threads, 12 messages, bounded excerpts', async () => {
+  it('a claim citing a METADATA ref yields zero citations', async () => {
+    const claim = JSON.stringify({
+      answer: 'La facture réclame 120 000 XPF.',
+      cites: [{ ref: 's1', quote: 'Facture 1' }],
+    });
+    const model = scriptedModel([planJson, claim]);
+    const result = await runAskReta(makeDeps(model), input());
+    expect(result.citations).toEqual([]);
+  });
+
+  it('a claim without quotes (legacy string cites) yields zero citations', async () => {
+    const claim = JSON.stringify({
+      answer: 'La facture réclame 120 000 XPF.',
+      cites: ['s11', { ref: 's12' }],
+    });
+    const model = scriptedModel([planJson, claim]);
+    const result = await runAskReta(makeDeps(model), input());
+    expect(result.citations).toEqual([]);
+  });
+
+  it('an altered quote on a real message source yields zero citations', async () => {
+    const claim = JSON.stringify({
+      answer: 'La facture réclame 999 999 XPF.',
+      cites: [{ ref: 's11', quote: 'Montant dû 999 999 XPF' }],
+    });
+    const model = scriptedModel([planJson, claim]);
+    const result = await runAskReta(makeDeps(model), input());
+    expect(result.citations).toEqual([]);
+  });
+
+  it('hard-caps retrieval: 10 search results, 3 threads read', async () => {
     const model = scriptedModel([planJson, synthesisJson]);
     const deps = makeDeps(model);
     await runAskReta(deps, input());
@@ -144,21 +198,59 @@ describe('runAskReta — grounded, capped, read-only', () => {
     expect(deps.searchThreads).toHaveBeenCalledWith(
       expect.objectContaining({ maxResults: askRetaLimits.searchResults }),
     );
-    const readThread = deps.readThread as ReturnType<typeof vi.fn>;
-    expect(readThread).toHaveBeenCalledTimes(askRetaLimits.threadsRead);
+    expect(deps.readThread).toHaveBeenCalledTimes(askRetaLimits.threadsRead);
   });
 
-  it('uses the deterministic fallback plan when the planner returns garbage', async () => {
+  it('uses the deterministic single-term fallback plan when the planner returns garbage', async () => {
     const model = scriptedModel(['not json at all', synthesisJson]);
     const deps = makeDeps(model);
-    const result = await runAskReta(deps, input({ context: { threadId: 'open-thread' } }));
+    await runAskReta(deps, input({ context: { threadId: 'open-thread' } }));
 
-    // Fallback = search(question words) + read the open thread.
     expect(deps.searchThreads).toHaveBeenCalledWith(
-      expect.objectContaining({ query: 'dit facture balguerie' }),
+      expect.objectContaining({ query: 'balguerie' }),
     );
     expect(deps.readThread).toHaveBeenCalledWith('open-thread');
-    expect(result.answer).toBeTruthy();
+  });
+});
+
+describe('runAskReta — reply proposals require a VALIDATED open-thread read', () => {
+  const readOpenPlan = JSON.stringify({
+    actions: [{ type: 'read_thread', target: 'open' }],
+  });
+  const replyProposal = JSON.stringify({
+    answer: 'Réponse préparée.',
+    cites: [],
+    proposal: { kind: 'reply', body: 'Bien reçu, merci.' },
+  });
+
+  it('keeps reply + threadId after a successful scoped read of the open thread', async () => {
+    const model = scriptedModel([readOpenPlan, replyProposal]);
+    const result = await runAskReta(
+      makeDeps(model),
+      input({ context: { threadId: 'open-thread' } }),
+    );
+    expect(result.proposal?.kind).toBe('reply');
+    expect(result.proposal?.threadId).toBe('open-thread');
+  });
+
+  it('downgrades to new when the open thread was never read during the ask', async () => {
+    const model = scriptedModel([planJson, replyProposal]); // plan never reads the open thread
+    const result = await runAskReta(
+      makeDeps(model),
+      input({ context: { threadId: 'open-thread' } }),
+    );
+    expect(result.proposal?.kind).toBe('new');
+    expect(result.proposal?.threadId).toBeUndefined();
+  });
+
+  it('downgrades to new when the open-thread read finds nothing (forged id)', async () => {
+    const model = scriptedModel([readOpenPlan, replyProposal]);
+    const deps = makeDeps(model, {
+      readThread: vi.fn(async () => ({ messages: [] }) as unknown as IGetThreadResponse),
+    });
+    const result = await runAskReta(deps, input({ context: { threadId: 'forged-id' } }));
+    expect(result.proposal?.kind).toBe('new');
+    expect(result.proposal?.threadId).toBeUndefined();
   });
 
   it('sanitizes proposals and downgrades reply→new without an open thread', async () => {
@@ -179,22 +271,9 @@ describe('runAskReta — grounded, capped, read-only', () => {
     expect(result.proposal?.bodyHtml).toContain('<p>Ia ora na,</p>');
     expect(result.proposal?.bodyHtml).not.toContain('script');
   });
+});
 
-  it('keeps reply proposals attached to the open thread', async () => {
-    const withProposal = JSON.stringify({
-      answer: 'Réponse préparée.',
-      cites: [],
-      proposal: { kind: 'reply', body: 'Bien reçu, merci.' },
-    });
-    const model = scriptedModel([planJson, withProposal]);
-    const result = await runAskReta(
-      makeDeps(model),
-      input({ context: { threadId: 'open-thread' } }),
-    );
-    expect(result.proposal?.kind).toBe('reply');
-    expect(result.proposal?.threadId).toBe('open-thread');
-  });
-
+describe('runAskReta — abort & deadline', () => {
   it('aborts between steps when the signal fires', async () => {
     const controller = new AbortController();
     controller.abort();
@@ -202,6 +281,13 @@ describe('runAskReta — grounded, capped, read-only', () => {
     await expect(
       runAskReta(makeDeps(model, { signal: controller.signal }), input()),
     ).rejects.toBeInstanceOf(AskRetaAbortedError);
+  });
+
+  it('stops with a deadline error once the wall-clock budget is spent', async () => {
+    const model = scriptedModel([planJson, synthesisJson]);
+    await expect(runAskReta(makeDeps(model, { deadlineMs: -1 }), input())).rejects.toThrow(
+      'deadline exceeded',
+    );
   });
 
   it('retries synthesis once, then fails without leaking content', async () => {

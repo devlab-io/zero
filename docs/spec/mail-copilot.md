@@ -109,10 +109,14 @@ Reta vise mieux sur quatre axes mesurables :
 - **pipeline** : orchestration serveur bornée plan → récupération → synthèse
   (2 appels modèle max, outils de lecture uniquement).
 - **source** : élément récupéré par le pipeline ; porte un `ref` opaque
-  (`s1`…), le threadId réel (propriété de la connexion active), un extrait
-  borné et son `excerptHash` (sha-256).
-- **citation** : `ref` cité par le modèle, résolu par le serveur vers la
-  source ; tout `ref` hors du jeu récupéré est jeté.
+  (`s1`…), un `kind` (`metadata` = ligne sujet/expéditeur, `message` = corps
+  réel avec `messageId`), le threadId réel (propriété de la connexion active),
+  un extrait borné et son `excerptHash` (sha-256).
+- **citation** (contrat strict v1, revue Codex 01/08) : exclusivement
+  `kind=message` avec `quote` non vide vérifiée sous-chaîne de l'extrait côté
+  serveur. Refs inconnus, refs metadata, quotes absentes/altérées, cites
+  string legacy → zéro citation. Les sources metadata servent à localiser les
+  fils (sources/steps), jamais de preuve de contenu.
 - **proposition** : brouillon suggéré (réponse ou nouveau mail), texte
   sanitisé par `normalizeEmailRewriteHtml`, jamais envoyé — inséré ou créé en
   brouillon Gmail sur clic explicite.
@@ -161,7 +165,17 @@ types). **Jamais** le transport websocket legacy.
 ### Sécurité (contrôles v1 obligatoires, tous testés)
 
 - Connexion résolue serveur (`ctx.activeConnection`) ; aucun connectionId
-  accepté du client.
+  accepté du client. Lectures via les **helpers multi-shards** de
+  server-utils (`getThreadsFromDB(connectionId, …)`, `getThread(connectionId,
+threadId)`) — jamais le stub du shard actif seul.
+- Rate limit `copilot.ask` : clé **userId stricte** (session absente =
+  UNAUTHORIZED) et **fail-closed en production sans Redis distant**
+  (PRECONDITION_FAILED) — testé sur le vrai middleware.
+- Deadline murale 45 s + AbortSignal revérifiés après chaque await ;
+  proposition `reply` uniquement si le fil ouvert a été **lu avec succès dans
+  la connexion pendant la requête** (`validatedOpenThreadId`), sinon
+  rétrogradée `new`.
+- `q` (termes de recherche) jamais en clair dans les logs (longueur seule).
 - Outils v1 = lecture seule. Les outils legacy à mutation
   (markRead/labels/archive) et `webSearch` sont **exclus**.
 - Ids forgés (connexion, fil, citation) → rejet/jet silencieux testés.

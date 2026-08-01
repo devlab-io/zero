@@ -86,10 +86,34 @@ export const askRetaPlanSchema = z.object({
 
 export type AskRetaPlan = z.infer<typeof askRetaPlanSchema>;
 
-/** Model output 2 — the grounded answer. `cites` may only reference provided refs. */
+/**
+ * Model output 2 — the grounded answer. Citation contract (v1, strict): every
+ * cite MUST be `{ref, quote}` with a non-empty quote — the server then verifies
+ * the quote is a substring of a MESSAGE source excerpt. Legacy string cites,
+ * quote-less cites and malformed entries are DISCARDED at parse (the answer
+ * survives with zero citations); metadata sources can never become evidence.
+ */
+const askRetaCiteShape = z.object({
+  ref: z.string().trim().min(1).max(16),
+  quote: z.string().trim().min(1).max(300),
+});
+
+export type AskRetaCite = z.infer<typeof askRetaCiteShape>;
+
 export const askRetaSynthesisSchema = z.object({
   answer: z.string().trim().min(1).max(8_000),
-  cites: z.array(z.string().trim().max(16)).max(askRetaLimits.citations).default([]),
+  cites: z
+    .array(z.unknown())
+    .max(32)
+    .default([])
+    .transform((entries) =>
+      entries
+        .flatMap((entry) => {
+          const parsed = askRetaCiteShape.safeParse(entry);
+          return parsed.success ? [parsed.data] : [];
+        })
+        .slice(0, askRetaLimits.citations),
+    ),
   proposal: z
     .object({
       kind: z.enum(['reply', 'new']),
@@ -105,7 +129,11 @@ export type AskRetaSynthesis = z.infer<typeof askRetaSynthesisSchema>;
 /** A retrieved element; `ref` is the only handle the model ever sees. */
 export type AskRetaSource = {
   ref: string;
+  /** 'metadata' = list row (subject/sender only); 'message' = real body text. */
+  kind: 'metadata' | 'message';
   threadId: string;
+  /** Present on message-kind sources only. */
+  messageId?: string;
   subject: string;
   sender: string;
   date: string;
@@ -114,7 +142,13 @@ export type AskRetaSource = {
   excerptHash: string;
 };
 
-export type AskRetaCitation = Omit<AskRetaSource, 'excerpt'>;
+/** v1: a citation is ALWAYS message-kind with a server-verified quote. */
+export type AskRetaCitation = Omit<AskRetaSource, 'excerpt' | 'kind' | 'messageId'> & {
+  kind: 'message';
+  messageId?: string;
+  /** Non-empty, verified as a substring of the source excerpt. */
+  quote: string;
+};
 
 export type AskRetaStep = {
   kind: 'overview' | 'search' | 'read_thread';

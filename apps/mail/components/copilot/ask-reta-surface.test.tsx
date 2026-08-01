@@ -18,6 +18,7 @@ const harness = vi.hoisted(() => ({
   toastSuccess: vi.fn(),
   toastError: vi.fn(),
   toastPlain: vi.fn(),
+  purge: vi.fn(),
   queryStore: {} as Record<string, string | null>,
 }));
 
@@ -57,6 +58,10 @@ vi.mock('@tanstack/react-query', () => ({
 
 vi.mock('@/hooks/use-settings', () => ({
   useSettings: () => ({ data: { settings: { askRetaModel: 'llama-4-scout' } } }),
+}));
+
+vi.mock('@/hooks/use-reply-state-purge', () => ({
+  useReplyStatePurge: () => harness.purge,
 }));
 
 vi.mock('@/paraglide/messages', () => ({
@@ -122,9 +127,12 @@ beforeEach(() => {
     model: 'llama-4-scout',
   });
   harness.draftsMutateAsync.mockReset();
+  harness.settingsMutateAsync.mockReset();
+  harness.settingsMutateAsync.mockResolvedValue({ success: true });
   harness.toastSuccess.mockClear();
   harness.toastError.mockClear();
   harness.toastPlain.mockClear();
+  harness.purge.mockClear();
 });
 
 afterEach(() => {
@@ -179,20 +187,23 @@ describe('AskRetaSurface — context capture', () => {
 });
 
 describe('AskRetaSurface — citations', () => {
-  it('renders server citations and opens the cited thread on click', async () => {
+  it('renders server citations and opens the cited thread through the reply-state PURGE', async () => {
     harness.askMutateAsync.mockResolvedValue({
       answer: 'Voir la relance.',
       citations: [
         {
-          ref: 's1',
+          ref: 's2',
+          kind: 'message',
           threadId: 'thread-42',
+          messageId: 'msg-7',
           subject: 'Relance facture',
           sender: 'Compta <c@x.test>',
           date: '2026-07-30',
           excerptHash: 'a'.repeat(64),
+          quote: 'merci de régler la facture',
         },
       ],
-      steps: [{ kind: 'search', detail: '"facture" → 1 threads', sourceRefs: ['s1'] }],
+      steps: [{ kind: 'search', detail: '"facture" → 1 threads', sourceRefs: ['s2'] }],
       model: 'llama-4-scout',
     });
 
@@ -206,7 +217,9 @@ describe('AskRetaSurface — citations', () => {
     act(() => {
       chip!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
-    expect(harness.queryStore.threadId).toBe('thread-42');
+    // Navigation goes through useReplyStatePurge: activeReplyId/draftId/mode/
+    // picker are cleared atomically with the thread switch.
+    expect(harness.purge).toHaveBeenCalledWith({ threadId: 'thread-42' });
     expect(harness.queryStore.isAskRetaOpen).toBeNull();
   });
 });
@@ -219,6 +232,7 @@ describe('AskRetaSurface — proposal insertion, never silently overwriting', ()
     model: 'llama-4-scout',
     proposal: {
       kind,
+      to: 'client@x.test',
       subject: 'Objet proposé',
       bodyHtml: '<p>Corps proposé</p>',
       ...(threadId ? { threadId } : {}),
@@ -245,10 +259,42 @@ describe('AskRetaSurface — proposal insertion, never silently overwriting', ()
     clickInsert();
 
     expect(handler).toHaveBeenCalledWith(
-      expect.objectContaining({ message: '<p>Corps proposé</p>' }),
+      expect.objectContaining({ message: '<p>Corps proposé</p>', to: 'client@x.test' }),
       { force: false },
     );
     expect(harness.toastSuccess).toHaveBeenCalled();
+    unregister();
+  });
+
+  it('a NEW proposal never injects into a live reply: purged compose scope, recipient kept', async () => {
+    // A reply composer is open on thread-9…
+    harness.queryStore.threadId = 'thread-9';
+    harness.queryStore.activeReplyId = 'msg-3';
+    harness.askMutateAsync.mockResolvedValue(proposalResponse('new'));
+    const replyHandler = vi.fn(() => 'inserted' as const);
+    const unregister = registerComposerInsertHandler(
+      draftStorageKey({ threadId: 'thread-9', replyId: 'msg-3' }),
+      replyHandler,
+    );
+
+    render();
+    await askQuestion('Prépare un mail');
+    clickInsert();
+
+    // …and the NEW proposal never touches it.
+    expect(replyHandler).not.toHaveBeenCalled();
+    // Snapshot under the BARE compose key (no threadId: the composer autosave
+    // would otherwise attach the new draft to the old thread), recipient kept.
+    const snapshot = JSON.parse(localStorage.getItem(draftStorageKey({}))!) as {
+      to: string[];
+      subject: string;
+    };
+    expect(snapshot.to).toEqual(['client@x.test']);
+    expect(snapshot.subject).toBe('Objet proposé');
+    expect(localStorage.getItem(draftStorageKey({ threadId: 'thread-9' }))).toBeNull();
+    // Reply state AND threadId purged, compose dialog opened.
+    expect(harness.purge).toHaveBeenCalledWith({ threadId: null });
+    expect(harness.queryStore.isComposeOpen).toBe('true');
     unregister();
   });
 
@@ -291,6 +337,39 @@ describe('AskRetaSurface — proposal insertion, never silently overwriting', ()
     expect(
       [...container.querySelectorAll('button')].some((b) => b.textContent?.includes('createDraft')),
     ).toBe(true);
+  });
+
+  it('a clipboard failure surfaces a toast error instead of a silent rejection', async () => {
+    harness.askMutateAsync.mockResolvedValue(proposalResponse('new'));
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: vi.fn(async () => Promise.reject(new Error('denied'))) },
+    });
+
+    render();
+    await askQuestion('Prépare un mail');
+    const copyButton = [...container.querySelectorAll('button')].find((b) =>
+      b.textContent?.includes('askReta.copy'),
+    );
+    await act(async () => {
+      copyButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    expect(harness.toastError).toHaveBeenCalledWith('common.actions.errorTryAgainLater');
+  });
+
+  it('a model-save failure surfaces a toast error', async () => {
+    harness.settingsMutateAsync.mockRejectedValueOnce(new Error('offline'));
+    render();
+    await askQuestion('Question');
+    const select = container.querySelector('select')!;
+    const setValue = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')!.set!;
+    await act(async () => {
+      setValue.call(select, 'llama-3.3-70b');
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    expect(harness.settingsMutateAsync).toHaveBeenCalledWith({ askRetaModel: 'llama-3.3-70b' });
+    expect(harness.toastError).toHaveBeenCalledWith('common.actions.errorTryAgainLater');
   });
 
   it('saves a reply proposal as a Gmail draft attached to its thread', async () => {

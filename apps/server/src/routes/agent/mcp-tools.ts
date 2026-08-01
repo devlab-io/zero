@@ -166,28 +166,55 @@ export interface CreateDraftResult {
  * Idempotent Gmail draft creation. With an idempotencyKey, a previously-created draft id
  * is returned instead of creating a second Gmail draft — so duplicate calls with one key
  * produce one logical result. Without a key (or store) behaviour is unchanged.
+ *
+ * Concurrency (revue Codex 2026-08-01): the plain get→create→put sequence lets two
+ * CONCURRENT calls with the same key both miss the stored id and create two drafts.
+ * With `inflight`, the first call registers its promise SYNCHRONOUSLY (the DO event
+ * loop is single-threaded, so check-and-set cannot interleave) and every concurrent
+ * same-key call awaits that same creation — exactly one Gmail draft. A failed
+ * creation clears the slot so a retry is possible; failures are never cached.
  */
 export async function resolveIdempotentDraft(
   connectionId: string,
   idempotencyKey: string | undefined,
   store: DraftIdempotencyStore | undefined,
   create: () => Promise<{ id?: string | null; error?: string | null }>,
+  inflight?: Map<string, Promise<CreateDraftResult>>,
 ): Promise<CreateDraftResult> {
-  const key = idempotencyKey?.trim();
-  if (!key || !store) {
+  const runCreate = async (): Promise<CreateDraftResult> => {
     const created = await create();
     if (created?.error) throw new Error(`Failed to create draft: ${created.error}`);
     return { id: created?.id ?? null, deduped: false };
-  }
+  };
+
+  const key = idempotencyKey?.trim();
+  if (!key || !store) return runCreate();
 
   const storageKey = draftIdempotencyStorageKey(connectionId, key);
-  const existing = await store.get(storageKey);
-  if (existing) return { id: existing, deduped: true };
 
-  const created = await create();
-  if (created?.error) throw new Error(`Failed to create draft: ${created.error}`);
-  if (created?.id) await store.put(storageKey, created.id);
-  return { id: created?.id ?? null, deduped: false };
+  const pending = inflight?.get(storageKey);
+  if (pending) {
+    const result = await pending;
+    return { ...result, deduped: true };
+  }
+
+  const task = (async (): Promise<CreateDraftResult> => {
+    const existing = await store.get(storageKey);
+    if (existing) return { id: existing, deduped: true };
+    const created = await runCreate();
+    if (created.id) await store.put(storageKey, created.id);
+    return created;
+  })();
+
+  if (inflight) {
+    inflight.set(storageKey, task);
+    try {
+      return await task;
+    } finally {
+      inflight.delete(storageKey);
+    }
+  }
+  return task;
 }
 
 // ---------------------------------------------------------------------------
@@ -425,24 +452,132 @@ export interface McpToolDefinition {
  * marks the mutation tools the spec requires to be idempotent.
  */
 export const MCP_TOOL_DEFINITIONS: McpToolDefinition[] = [
-  { name: 'getServerCapabilities', category: 'read', mutates: false, idempotent: true, description: mcpToolDescriptions.getServerCapabilities },
-  { name: 'getConnections', category: 'read', mutates: false, idempotent: true, description: mcpToolDescriptions.getConnections },
-  { name: 'getActiveConnection', category: 'read', mutates: false, idempotent: true, description: mcpToolDescriptions.getActiveConnection },
-  { name: 'setActiveConnection', category: 'read', mutates: false, idempotent: true, description: mcpToolDescriptions.setActiveConnection },
-  { name: 'listThreads', category: 'read', mutates: false, idempotent: true, description: mcpToolDescriptions.listThreads },
-  { name: 'searchThreads', category: 'read', mutates: false, idempotent: true, description: mcpToolDescriptions.searchThreads },
-  { name: 'getThread', category: 'read', mutates: false, idempotent: true, description: mcpToolDescriptions.getThread },
-  { name: 'getThreadSummary', category: 'read', mutates: false, idempotent: true, description: mcpToolDescriptions.getThreadSummary },
-  { name: 'getUserLabels', category: 'read', mutates: false, idempotent: true, description: mcpToolDescriptions.getUserLabels },
-  { name: 'getLabel', category: 'read', mutates: false, idempotent: true, description: mcpToolDescriptions.getLabel },
-  { name: 'getCurrentDate', category: 'read', mutates: false, idempotent: true, description: mcpToolDescriptions.getCurrentDate },
-  { name: 'composeEmail', category: 'read', mutates: false, idempotent: true, description: mcpToolDescriptions.composeEmail },
-  { name: 'listOutbox', category: 'read', mutates: false, idempotent: true, description: mcpToolDescriptions.listOutbox },
-  { name: 'getOutboxItem', category: 'read', mutates: false, idempotent: true, description: mcpToolDescriptions.getOutboxItem },
-  { name: 'createDraft', category: 'write', mutates: true, idempotent: true, description: mcpToolDescriptions.createDraft },
-  { name: 'enqueueDraftJob', category: 'write', mutates: true, idempotent: true, description: mcpToolDescriptions.enqueueDraftJob },
-  { name: 'cancelOutboxItem', category: 'write', mutates: true, idempotent: true, description: mcpToolDescriptions.cancelOutboxItem },
-  { name: 'retryOutboxItem', category: 'write', mutates: true, idempotent: true, description: mcpToolDescriptions.retryOutboxItem },
+  {
+    name: 'getServerCapabilities',
+    category: 'read',
+    mutates: false,
+    idempotent: true,
+    description: mcpToolDescriptions.getServerCapabilities,
+  },
+  {
+    name: 'getConnections',
+    category: 'read',
+    mutates: false,
+    idempotent: true,
+    description: mcpToolDescriptions.getConnections,
+  },
+  {
+    name: 'getActiveConnection',
+    category: 'read',
+    mutates: false,
+    idempotent: true,
+    description: mcpToolDescriptions.getActiveConnection,
+  },
+  {
+    name: 'setActiveConnection',
+    category: 'read',
+    mutates: false,
+    idempotent: true,
+    description: mcpToolDescriptions.setActiveConnection,
+  },
+  {
+    name: 'listThreads',
+    category: 'read',
+    mutates: false,
+    idempotent: true,
+    description: mcpToolDescriptions.listThreads,
+  },
+  {
+    name: 'searchThreads',
+    category: 'read',
+    mutates: false,
+    idempotent: true,
+    description: mcpToolDescriptions.searchThreads,
+  },
+  {
+    name: 'getThread',
+    category: 'read',
+    mutates: false,
+    idempotent: true,
+    description: mcpToolDescriptions.getThread,
+  },
+  {
+    name: 'getThreadSummary',
+    category: 'read',
+    mutates: false,
+    idempotent: true,
+    description: mcpToolDescriptions.getThreadSummary,
+  },
+  {
+    name: 'getUserLabels',
+    category: 'read',
+    mutates: false,
+    idempotent: true,
+    description: mcpToolDescriptions.getUserLabels,
+  },
+  {
+    name: 'getLabel',
+    category: 'read',
+    mutates: false,
+    idempotent: true,
+    description: mcpToolDescriptions.getLabel,
+  },
+  {
+    name: 'getCurrentDate',
+    category: 'read',
+    mutates: false,
+    idempotent: true,
+    description: mcpToolDescriptions.getCurrentDate,
+  },
+  {
+    name: 'composeEmail',
+    category: 'read',
+    mutates: false,
+    idempotent: true,
+    description: mcpToolDescriptions.composeEmail,
+  },
+  {
+    name: 'listOutbox',
+    category: 'read',
+    mutates: false,
+    idempotent: true,
+    description: mcpToolDescriptions.listOutbox,
+  },
+  {
+    name: 'getOutboxItem',
+    category: 'read',
+    mutates: false,
+    idempotent: true,
+    description: mcpToolDescriptions.getOutboxItem,
+  },
+  {
+    name: 'createDraft',
+    category: 'write',
+    mutates: true,
+    idempotent: true,
+    description: mcpToolDescriptions.createDraft,
+  },
+  {
+    name: 'enqueueDraftJob',
+    category: 'write',
+    mutates: true,
+    idempotent: true,
+    description: mcpToolDescriptions.enqueueDraftJob,
+  },
+  {
+    name: 'cancelOutboxItem',
+    category: 'write',
+    mutates: true,
+    idempotent: true,
+    description: mcpToolDescriptions.cancelOutboxItem,
+  },
+  {
+    name: 'retryOutboxItem',
+    category: 'write',
+    mutates: true,
+    idempotent: true,
+    description: mcpToolDescriptions.retryOutboxItem,
+  },
 ];
 
 // ---------------------------------------------------------------------------

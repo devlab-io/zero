@@ -8,6 +8,7 @@ import {
 import { askRetaConversationAtom, type AskRetaAssistantPayload } from './ask-reta-state';
 import { insertIntoComposer, type ComposerInsertPayload } from '@/lib/composer-insert';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useReplyStatePurge } from '@/hooks/use-reply-state-purge';
 import { LoaderCircle, Sparkles, Trash2 } from 'lucide-react';
 import { useTRPC } from '@/providers/query-provider';
 import { useSettings } from '@/hooks/use-settings';
@@ -26,9 +27,9 @@ import { toast } from 'sonner';
  * consequential action (open composer, save Gmail draft) is an explicit click.
  */
 
-const ASK_RETA_MODELS: { key: string; label: string }[] = [
-  { key: 'llama-4-scout', label: 'Llama 4 Scout · fast' },
-  { key: 'llama-3.3-70b', label: 'Llama 3.3 70B · deep' },
+const ASK_RETA_MODELS: { key: string; label: () => string }[] = [
+  { key: 'llama-4-scout', label: () => m['common.askReta.modelFast']() },
+  { key: 'llama-3.3-70b', label: () => m['common.askReta.modelDeep']() },
 ];
 
 const HISTORY_TURNS = 6;
@@ -56,13 +57,18 @@ export function AskRetaSurface() {
   const queryClient = useQueryClient();
   const [conversation, setConversation] = useAtom(askRetaConversationAtom);
   const [question, setQuestion] = useState('');
-  const [threadId, setThreadId] = useQueryState('threadId');
+  const [threadId] = useQueryState('threadId');
   const [draftId] = useQueryState('draftId');
   const [activeReplyId] = useQueryState('activeReplyId');
   const [, setAskRetaOpen] = useQueryState('isAskRetaOpen');
   const [, setComposeOpen] = useQueryState('isComposeOpen');
+  const purgeReplyState = useReplyStatePurge();
   // The EXACT persistence scope of whatever composer is (or would be) mounted.
   const composerScope: ComposerDraftScope = { threadId, draftId, replyId: activeReplyId };
+  // The BARE compose scope for 'new' proposals. NO threadId: the composer's
+  // autosave sends the URL threadId, so keeping the open thread would attach
+  // the brand-new draft to that old thread. threadId is purged with the rest.
+  const composeScope: ComposerDraftScope = {};
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const { data: settingsData } = useSettings();
@@ -128,21 +134,26 @@ export function AskRetaSurface() {
   };
 
   const openCitation = (citedThreadId: string) => {
-    setThreadId(citedThreadId);
+    // Full purge (mode/activeReplyId/draftId/picker) while switching thread —
+    // stale reply state must never leak onto the cited thread.
+    purgeReplyState({ threadId: citedThreadId });
     setAskRetaOpen(null);
   };
 
   /**
-   * Insert a proposal into the composer. Order of attempts:
-   * 1. live insert into the mounted composer for the current scope key;
-   * 2. 'occupied' → the user confirms replacement via the toast action;
-   * 3. no live composer → persisted snapshot (same key) + open the composer —
-   *    but never over an existing snapshot without the same confirmation.
+   * Insert a proposal into a composer. Targeting rule (revue UI 2026-08-01):
+   * - 'reply' → the CURRENT scope key, live reply composer only.
+   * - 'new'   → the BLANK compose scope: it must never inject into a live
+   *   reply; the reply state is purged and the compose dialog opened instead.
+   * In every path an occupied composer / non-empty snapshot requires an
+   * explicit user confirmation — nothing is overwritten silently — and the
+   * recipient travels with the payload (applied explicitly by the composer).
    */
   const openProposalInComposer = (payload: AskRetaAssistantPayload) => {
     const proposal = payload.proposal;
     if (!proposal) return;
-    const scopeKey = draftStorageKey(composerScope);
+    const isReply = proposal.kind === 'reply';
+    const scopeKey = draftStorageKey(isReply ? composerScope : composeScope);
     const insertPayload: ComposerInsertPayload = {
       subject: proposal.subject,
       to: proposal.to,
@@ -163,6 +174,10 @@ export function AskRetaSurface() {
         savedAt: Date.now(),
       });
       setAskRetaOpen(null);
+      // Bare compose scope by construction: reply/draft params AND threadId
+      // are purged, so the mounting composer derives exactly `{}` and its
+      // autosave cannot attach the new draft to the previously open thread.
+      purgeReplyState({ threadId: null });
       setComposeOpen('true');
     };
 
@@ -185,7 +200,7 @@ export function AskRetaSurface() {
     // No live composer. A reply proposal needs its reply composer open — the
     // button is hidden otherwise (canInsertProposal), so reaching here with a
     // reply means the composer just closed: bail without touching anything.
-    if (proposal.kind === 'reply') {
+    if (isReply) {
       toast.error(m['common.askReta.error']());
       return;
     }
@@ -237,8 +252,13 @@ export function AskRetaSurface() {
   const copyProposal = async (payload: AskRetaAssistantPayload) => {
     const proposal = payload.proposal;
     if (!proposal) return;
-    await navigator.clipboard.writeText(proposalText(proposal.bodyHtml));
-    toast.success(m['common.askReta.copied']());
+    try {
+      await navigator.clipboard.writeText(proposalText(proposal.bodyHtml));
+      toast.success(m['common.askReta.copied']());
+    } catch (error) {
+      log.error('Ask Reta clipboard copy failed', error);
+      toast.error(m['common.actions.errorTryAgainLater']());
+    }
   };
 
   return (
@@ -264,13 +284,17 @@ export function AskRetaSurface() {
                 .mutateAsync({ askRetaModel: event.target.value as never })
                 .then(() =>
                   queryClient.invalidateQueries({ queryKey: trpc.settings.get.queryKey() }),
-                );
+                )
+                .catch((error) => {
+                  log.error('Ask Reta model save failed', error);
+                  toast.error(m['common.actions.errorTryAgainLater']());
+                });
             }}
             className="bg-background h-7 rounded border px-1 text-xs"
           >
             {ASK_RETA_MODELS.map((model) => (
               <option key={model.key} value={model.key}>
-                {model.label}
+                {model.label()}
               </option>
             ))}
           </select>
@@ -323,7 +347,7 @@ export function AskRetaSurface() {
                         key={citation.ref}
                         type="button"
                         onClick={() => openCitation(citation.threadId)}
-                        title={`${citation.sender} — ${citation.date}`}
+                        title={`${citation.sender} — ${citation.date}${citation.quote ? ` — « ${citation.quote} »` : ''}`}
                         className="bg-background hover:bg-accent max-w-[240px] truncate rounded-full border px-2 py-0.5 text-[11px] transition-colors"
                       >
                         {citation.subject}

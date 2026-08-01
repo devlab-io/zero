@@ -84,6 +84,8 @@
       "copy": "Copier",
       "copied": "Copié dans le presse-papier",
       "model": "Modèle",
+      "modelFast": "Llama 4 Scout · rapide",
+      "modelDeep": "Llama 3.3 70B · approfondi",
       "error": "Reta n'a pas pu répondre. Réessayez.",
       "draftCreated": "Brouillon enregistré dans Gmail",
       "empty": "Posez n'importe quelle question sur votre boîte — Reta répond avec des sources."

@@ -84,6 +84,8 @@
       "copy": "Copy",
       "copied": "Copied to clipboard",
       "model": "Model",
+      "modelFast": "Llama 4 Scout · fast",
+      "modelDeep": "Llama 3.3 70B · deep",
       "error": "Reta could not answer. Try again.",
       "draftCreated": "Draft saved to Gmail",
       "empty": "Ask anything about your mailbox — Reta answers with sources."

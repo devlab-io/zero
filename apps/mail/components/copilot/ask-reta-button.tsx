@@ -52,9 +52,6 @@ export function AskRetaButton() {
 
   return (
     <Dialog open={!!dialogOpen} onOpenChange={(open) => setDialogOpen(open ? 'true' : null)}>
-      <DialogTitle></DialogTitle>
-      <DialogDescription></DialogDescription>
-
       <DialogTrigger asChild>
         <button
           type="button"
@@ -74,6 +71,9 @@ export function AskRetaButton() {
       </DialogTrigger>
 
       <DialogContent className="flex h-[80vh] w-full max-w-2xl flex-col overflow-hidden border p-0 shadow-lg">
+        {/* Non-empty a11y title/description, visually hidden (the panel renders its own header). */}
+        <DialogTitle className="sr-only">{m['common.askReta.title']()}</DialogTitle>
+        <DialogDescription className="sr-only">{m['common.askReta.subtitle']()}</DialogDescription>
         <Suspense fallback={<AskRetaLoadingFallback />}>
           <AskRetaSurfaceLazy />
         </Suspense>

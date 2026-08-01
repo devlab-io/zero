@@ -5,11 +5,11 @@ import {
   type AskRetaModelKey,
   type AskRetaResult,
 } from '../../lib/ask-reta/schema';
+import { getThread, getThreadsFromDB, getZeroAgent, getZeroDB } from '../../lib/server-utils';
 import { buildMailboxOverview, getMailboxActivity } from '../../lib/mailbox-overview';
 import { activeDriverProcedure, createRateLimiterMiddleware, router } from '../trpc';
 import { workersAiModel, type WorkersAiBinding } from '../../lib/ask-reta/model';
 import { runAskReta, type AskRetaDeps } from '../../lib/ask-reta/pipeline';
-import { getZeroAgent, getZeroDB } from '../../lib/server-utils';
 import { getContext } from 'hono/context-storage';
 import { Ratelimit } from '@upstash/ratelimit';
 import { type HonoContext } from '../../ctx';
@@ -34,7 +34,11 @@ export const copilotRouter = router({
     .use(
       createRateLimiterMiddleware({
         limiter: Ratelimit.slidingWindow(20, '5m'),
-        generatePrefix: ({ sessionUser }) => `ratelimit:copilot-ask-${sessionUser?.id}`,
+        generatePrefix: () => 'ratelimit:copilot-ask',
+        // Strict per-user key + fail-closed: in production without remote
+        // Redis this expensive surface DENIES instead of running unlimited.
+        key: 'userId',
+        failClosed: true,
       }),
     )
     .input(askRetaInputSchema)
@@ -73,11 +77,12 @@ export const copilotRouter = router({
             executionCtx.waitUntil(conn.end());
           }
         },
-        // No folder default: the contract is the WHOLE active mailbox. `folder`
-        // narrows the search only when the planner explicitly asked for it.
+        // Multi-shard helpers (revue Codex 2026-08-01): the ZeroDriver stub is
+        // ONE shard — searching through it silently misses every other shard.
+        // No folder default either: the contract is the WHOLE active mailbox.
         searchThreads: async ({ query, folder, maxResults }) =>
-          await agent.getThreadsFromDB({ q: query, folder, maxResults }),
-        readThread: async (threadId) => await agent.getThreadFromDB(threadId),
+          await getThreadsFromDB(activeConnection.id, { q: query, folder, maxResults }),
+        readThread: async (threadId) => (await getThread(activeConnection.id, threadId)).result,
         signal: ctx.c.req.raw.signal,
       };
 

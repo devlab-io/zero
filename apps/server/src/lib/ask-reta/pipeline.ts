@@ -33,26 +33,34 @@ export interface AskRetaDeps {
   model: RetaModel;
   /** Exact folder counts + send activity (never model-estimated). */
   overview(): Promise<unknown>;
-  /** Literal metadata search over the connection's own DO SQLite. */
+  /** Literal metadata search over ALL the connection's shards (multi-shard helper). */
   searchThreads(params: {
     query: string;
     folder?: string;
     maxResults: number;
   }): Promise<ThreadsResponse>;
-  /** Full thread (bodies) from the connection's own DO + R2. */
+  /** Full thread (bodies), resolved across shards; throws when not owned/found. */
   readThread(threadId: string): Promise<IGetThreadResponse>;
   signal?: AbortSignal;
+  /** Wall-clock budget for the whole ask; expired → AskRetaAbortedError. */
+  deadlineMs?: number;
 }
 
 export class AskRetaAbortedError extends Error {
-  constructor() {
-    super('Ask Reta request aborted');
+  constructor(reason: 'aborted' | 'deadline' = 'aborted') {
+    super(reason === 'deadline' ? 'Ask Reta deadline exceeded' : 'Ask Reta request aborted');
     this.name = 'AskRetaAbortedError';
   }
 }
 
-const throwIfAborted = (signal?: AbortSignal) => {
-  if (signal?.aborted) throw new AskRetaAbortedError();
+const DEFAULT_DEADLINE_MS = 45_000;
+
+/** Re-checked after EVERY await (model, overview, search, thread read). */
+type Budget = { signal?: AbortSignal; deadline: number };
+
+const checkBudget = (budget: Budget) => {
+  if (budget.signal?.aborted) throw new AskRetaAbortedError('aborted');
+  if (Date.now() > budget.deadline) throw new AskRetaAbortedError('deadline');
 };
 
 const STOPWORDS = new Set([
@@ -111,27 +119,55 @@ const STOPWORDS = new Set([
   'quelles',
   'dernier',
   'derniere',
+  // Mailbox-generic noise: never discriminating inside a mail client.
+  'from',
+  'many',
+  'email',
+  'emails',
+  'mail',
+  'mails',
+  'courriel',
+  'courriels',
+  'message',
+  'messages',
 ]);
 
 const stripDiacritics = (word: string) => word.normalize('NFD').replace(/[̀-ͯ]/g, '');
 
-/** Deterministic fallback query: the discriminating words of the question. */
-export const fallbackSearchQuery = (question: string): string => {
-  const words = question
+/**
+ * The DO search is ONE literal (folded) LIKE over subject/sender — a joined
+ * multi-word phrase matches nothing. The fallback therefore picks single
+ * discriminating TERMS: emails/numbers first, then longest, stable order.
+ */
+export const fallbackSearchTerms = (question: string, count: number): string[] => {
+  const tokens = question
     .toLowerCase()
     .replace(/[^\p{L}\p{N}@.\-\s]/gu, ' ')
     .split(/\s+/)
     .filter((word) => word.length > 2 && !STOPWORDS.has(stripDiacritics(word)));
-  return words.slice(0, 6).join(' ') || question.slice(0, 60);
+  const unique = [...new Set(tokens)];
+  const score = (word: string) =>
+    (word.includes('@') ? 1_000 : 0) + (/\d/.test(word) ? 500 : 0) + word.length;
+  return unique
+    .map((word, index) => ({ word, index, score: score(word) }))
+    .sort((a, b) => b.score - a.score || a.index - b.index)
+    .slice(0, count)
+    .map((entry) => entry.word);
 };
+
+/** Deterministic fallback query: the single most discriminating term. */
+export const fallbackSearchQuery = (question: string): string =>
+  fallbackSearchTerms(question, 1)[0] ?? question.trim().slice(0, 60);
 
 const COUNT_QUESTION = /\bcombien\b|\bhow many\b|\bcount\b|\bnombre\b|\bunread\b|\bnon lus?\b/i;
 
 export const fallbackPlan = (input: AskRetaInput): AskRetaPlan => {
+  const terms = fallbackSearchTerms(input.question, askRetaLimits.searchesPerAsk);
   const actions: AskRetaPlan['actions'] = [];
   if (COUNT_QUESTION.test(input.question)) actions.push({ type: 'overview' });
-  actions.push({ type: 'search', query: fallbackSearchQuery(input.question) });
+  actions.push({ type: 'search', query: terms[0] ?? input.question.trim().slice(0, 60) });
   if (input.context.threadId) actions.push({ type: 'read_thread', target: 'open' });
+  if (terms[1]) actions.push({ type: 'search', query: terms[1] });
   return { actions: actions.slice(0, askRetaLimits.planActions) };
 };
 
@@ -176,6 +212,8 @@ type Gathered = {
   sources: AskRetaSource[];
   steps: AskRetaStep[];
   overviewJson: string | null;
+  /** Set ONLY after the open thread was read successfully within this connection. */
+  validatedOpenThreadId: string | null;
 };
 
 const addSource = async (
@@ -195,16 +233,18 @@ const addSource = async (
 
 const readOneThread = async (
   deps: AskRetaDeps,
+  budget: Budget,
   gathered: Gathered,
   threadId: string,
-): Promise<string[]> => {
+): Promise<{ refs: string[]; found: boolean }> => {
   let thread: IGetThreadResponse;
   try {
     thread = await deps.readThread(threadId);
   } catch {
     logger.warn('[ask-reta] readThread failed', { threadId });
-    return [];
+    return { refs: [], found: false };
   }
+  checkBudget(budget);
   const refs: string[] = [];
   const messages = (thread.messages ?? [])
     .filter((message) => !message.isDraft)
@@ -213,30 +253,40 @@ const readOneThread = async (
     const text = sanitizeMailContent(message.decodedBody ?? message.body ?? '').text;
     if (!text.trim()) continue;
     const source = await addSource(gathered, {
+      kind: 'message',
       threadId,
+      messageId: message.id,
       subject: message.subject ?? '(no subject)',
       sender: formatSender(message.sender),
       date: message.receivedOn ?? 'unknown',
       excerpt: text,
     });
+    checkBudget(budget);
     refs.push(source.ref);
   }
-  return refs;
+  return { refs, found: messages.length > 0 };
 };
 
 const executePlan = async (
   deps: AskRetaDeps,
+  budget: Budget,
   input: AskRetaInput,
   plan: AskRetaPlan,
 ): Promise<Gathered> => {
-  const gathered: Gathered = { sources: [], steps: [], overviewJson: null };
+  const gathered: Gathered = {
+    sources: [],
+    steps: [],
+    overviewJson: null,
+    validatedOpenThreadId: null,
+  };
   let topResultIds: string[] = [];
 
   for (const action of plan.actions) {
-    throwIfAborted(deps.signal);
+    checkBudget(budget);
 
     if (action.type === 'overview') {
       const overview = await deps.overview();
+      checkBudget(budget);
       gathered.overviewJson = JSON.stringify(overview);
       gathered.steps.push({ kind: 'overview', detail: 'exact mailbox counts', sourceRefs: [] });
     } else if (action.type === 'search') {
@@ -245,17 +295,20 @@ const executePlan = async (
         folder: action.folder,
         maxResults: askRetaLimits.searchResults,
       });
+      checkBudget(budget);
       const rows = response.threads.slice(0, askRetaLimits.searchResults);
       if (topResultIds.length === 0) topResultIds = rows.map((row) => row.id);
       const refs: string[] = [];
       for (const row of rows) {
         const source = await addSource(gathered, {
+          kind: 'metadata',
           threadId: row.id,
           subject: row.subject ?? '(no subject)',
           sender: formatSender(row.sender),
           date: row.receivedOn ?? 'unknown',
           excerpt: `${row.subject ?? '(no subject)'} — ${formatSender(row.sender)}`,
         });
+        checkBudget(budget);
         refs.push(source.ref);
       }
       gathered.steps.push({
@@ -272,8 +325,14 @@ const executePlan = async (
           : topResultIds.slice(0, askRetaLimits.threadsRead);
       const refs: string[] = [];
       for (const threadId of targets.slice(0, askRetaLimits.threadsRead)) {
-        throwIfAborted(deps.signal);
-        refs.push(...(await readOneThread(deps, gathered, threadId)));
+        checkBudget(budget);
+        const read = await readOneThread(deps, budget, gathered, threadId);
+        refs.push(...read.refs);
+        // Reply proposals may only target an open thread PROVEN readable
+        // within this connection — a forged id never validates.
+        if (action.target === 'open' && read.found && threadId === input.context.threadId) {
+          gathered.validatedOpenThreadId = threadId;
+        }
       }
       gathered.steps.push({
         kind: 'read_thread',
@@ -289,7 +348,11 @@ const executePlan = async (
   return gathered;
 };
 
-const getPlan = async (deps: AskRetaDeps, input: AskRetaInput): Promise<AskRetaPlan> => {
+const getPlan = async (
+  deps: AskRetaDeps,
+  budget: Budget,
+  input: AskRetaInput,
+): Promise<AskRetaPlan> => {
   let raw: string;
   try {
     raw = await deps.model.complete({
@@ -299,10 +362,13 @@ const getPlan = async (deps: AskRetaDeps, input: AskRetaInput): Promise<AskRetaP
       temperature: 0.1,
       signal: deps.signal,
     });
-  } catch {
+  } catch (error) {
+    if (error instanceof AskRetaAbortedError) throw error;
     logger.warn('[ask-reta] plan call failed, using fallback plan');
+    checkBudget(budget);
     return fallbackPlan(input);
   }
+  checkBudget(budget);
   const parsed = askRetaPlanSchema.safeParse(extractJsonObject(raw));
   if (!parsed.success) return fallbackPlan(input);
   return normalizePlan(parsed.data, input);
@@ -323,10 +389,16 @@ export const proposalBodyToHtml = (body: string): string => {
   return normalizeEmailRewriteHtml(html);
 };
 
-const getSynthesis = async (deps: AskRetaDeps, input: AskRetaInput, gathered: Gathered) => {
+const getSynthesis = async (
+  deps: AskRetaDeps,
+  budget: Budget,
+  input: AskRetaInput,
+  gathered: Gathered,
+) => {
   const sourcesJson = JSON.stringify(
-    gathered.sources.map(({ ref, subject, sender, date, excerpt }) => ({
+    gathered.sources.map(({ ref, kind, subject, sender, date, excerpt }) => ({
       ref,
+      kind,
       subject,
       sender,
       date,
@@ -340,7 +412,7 @@ const getSynthesis = async (deps: AskRetaDeps, input: AskRetaInput, gathered: Ga
   });
 
   for (const attempt of [0, 1]) {
-    throwIfAborted(deps.signal);
+    checkBudget(budget);
     const raw = await deps.model.complete({
       system: askRetaSynthesisSystemPrompt(),
       user:
@@ -351,45 +423,63 @@ const getSynthesis = async (deps: AskRetaDeps, input: AskRetaInput, gathered: Ga
       temperature: 0.2,
       signal: deps.signal,
     });
+    checkBudget(budget);
     const parsed = askRetaSynthesisSchema.safeParse(extractJsonObject(raw));
     if (parsed.success) return parsed.data;
   }
   throw new Error('Ask Reta could not produce a grounded answer');
 };
 
+const normalizeForQuoteMatch = (value: string) => value.replace(/\s+/g, ' ').trim().toLowerCase();
+
 export async function runAskReta(
   deps: AskRetaDeps,
   input: AskRetaInput,
 ): Promise<Omit<AskRetaResult, 'model'>> {
-  throwIfAborted(deps.signal);
-  const plan = normalizePlan(await getPlan(deps, input), input);
-  const gathered = await executePlan(deps, input, plan);
-  const synthesis = await getSynthesis(deps, input, gathered);
+  const budget: Budget = {
+    signal: deps.signal,
+    deadline: Date.now() + (deps.deadlineMs ?? DEFAULT_DEADLINE_MS),
+  };
+  checkBudget(budget);
+  const plan = normalizePlan(await getPlan(deps, budget, input), input);
+  const gathered = await executePlan(deps, budget, input, plan);
+  const synthesis = await getSynthesis(deps, budget, input, gathered);
 
   const byRef = new Map(gathered.sources.map((source) => [source.ref, source]));
-  // Server-side containment: a cite outside the retrieved set is DROPPED —
-  // the model cannot point the user at a thread the pipeline never touched.
+  // Server-side containment, strict v1 contract: a citation exists ONLY when
+  // the cite resolves to a MESSAGE source retrieved this run AND its non-empty
+  // quote is a substring of that source's excerpt. Everything else — unknown
+  // refs, metadata refs, missing/altered quotes — yields ZERO citations.
+  // Metadata sources still power sources/steps (thread discovery), never proof.
   const citations: AskRetaCitation[] = [];
-  for (const ref of synthesis.cites) {
-    const source = byRef.get(ref);
+  for (const cite of synthesis.cites) {
+    const source = byRef.get(cite.ref);
     if (!source) continue;
-    if (citations.some((c) => c.ref === ref)) continue;
-    const { excerpt: _excerpt, ...citation } = source;
-    citations.push(citation);
+    if (source.kind !== 'message') continue;
+    if (citations.some((c) => c.ref === cite.ref)) continue;
+    if (!normalizeForQuoteMatch(source.excerpt).includes(normalizeForQuoteMatch(cite.quote))) {
+      continue;
+    }
+    const { excerpt: _excerpt, kind: _kind, ...citation } = source;
+    citations.push({ ...citation, kind: 'message', quote: cite.quote });
   }
+
+  // Reply proposals require the open thread to have been read successfully
+  // within this connection during THIS ask — never a client-asserted id alone.
+  const replyThreadId =
+    synthesis.proposal?.kind === 'reply' &&
+    gathered.validatedOpenThreadId &&
+    gathered.validatedOpenThreadId === input.context.threadId
+      ? gathered.validatedOpenThreadId
+      : null;
 
   const proposal = synthesis.proposal
     ? {
-        kind:
-          synthesis.proposal.kind === 'reply' && !input.context.threadId
-            ? ('new' as const)
-            : synthesis.proposal.kind,
+        kind: replyThreadId ? ('reply' as const) : ('new' as const),
         to: synthesis.proposal.to,
         subject: synthesis.proposal.subject,
         bodyHtml: proposalBodyToHtml(synthesis.proposal.body),
-        ...(synthesis.proposal.kind === 'reply' && input.context.threadId
-          ? { threadId: input.context.threadId }
-          : {}),
+        ...(replyThreadId ? { threadId: replyThreadId } : {}),
       }
     : undefined;
 

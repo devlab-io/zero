@@ -137,8 +137,9 @@ export async function inboxRag(self: ZeroDriverInternal, query: string) {
   }
 
   try {
+    // Search terms are user/mailbox content — log their size, never their value.
     logger.info(`[inboxRag] Executing AI search with parameters:`, {
-      query,
+      queryLength: query.length,
       max_num_results: 3,
       score_threshold: 0.3,
       folder_filter: `${self.name}/`,
@@ -161,7 +162,7 @@ export async function inboxRag(self: ZeroDriverInternal, query: string) {
 
     return { result: answer.response, data: answer.data };
   } catch (error) {
-    logger.error(`[inboxRag] Search failed for query: "${query}"`, {
+    logger.error(`[inboxRag] Search failed (query ${query.length} chars)`, {
       error: error instanceof Error ? error.message : 'Unknown error',
       stack: error instanceof Error ? error.stack : undefined,
       user: self.name,
@@ -264,7 +265,14 @@ function queryThreads(
     async (): Promise<{ rows: ThreadRow[]; nextPageToken: string | null }> => {
       const { labelIds = [], folder, q, pageToken, maxResults } = params;
 
-      logger.info('[queryThreads] params:', { labelIds, folder, q, pageToken, maxResults });
+      // `q` is mailbox/user content: size only, never the literal needle.
+      logger.info('[queryThreads] params:', {
+        labelIds,
+        folder,
+        qLength: q?.length,
+        pageToken,
+        maxResults,
+      });
 
       // Slice/heuristic paths derive the cursor from the page; the folder path overrides it
       // with the exact SQL LIMIT+1 token (see heuristicToken doc).
@@ -323,7 +331,7 @@ function queryThreads(
 
       // Case 4: Text search only
       if (q && !folder && labelIds.length === 0) {
-        logger.info('[queryThreads] Case: text search only', { q });
+        logger.info('[queryThreads] Case: text search only', { qLength: q.length });
         const threads = await findThreadsWithTextSearch(self.db, q);
         return page(threads.slice(0, maxResults).map(projectRow));
       }
@@ -332,7 +340,7 @@ function queryThreads(
       logger.info('[queryThreads] Case: complex filtering', {
         folder,
         labelIds,
-        q,
+        qLength: q?.length,
         pageToken,
       });
 

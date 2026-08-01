@@ -183,6 +183,76 @@ describe('ZeroMCP — mailbox tools follow the ACTIVE connection (A → B → A)
     expect(agentOf(CONN_B).createDraft).toHaveBeenCalledTimes(1);
   });
 
+  it('concurrent same-key createDraft calls produce EXACTLY ONE Gmail draft', async () => {
+    await bootMcp();
+    let release!: (value: { id: string }) => void;
+    agentOf(CONN_A).createDraft.mockImplementation(
+      () => new Promise<{ id: string }>((resolve) => (release = resolve)),
+    );
+
+    const payload = {
+      to: [{ email: 'client@example.test' }],
+      subject: 'Re: facture',
+      message: 'Ia ora na,',
+      idempotencyKey: 'race-key',
+    };
+    const first = call('createDraft', payload) as Promise<{ content: { text: string }[] }>;
+    const second = call('createDraft', payload) as Promise<{ content: { text: string }[] }>;
+    // Let both calls pass the storage lookup and reach the (single) creation.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    release({ id: 'gdraft-1' });
+    const [r1, r2] = await Promise.all([first, second]);
+
+    expect(agentOf(CONN_A).createDraft).toHaveBeenCalledTimes(1);
+    expect(r1.content[0]?.text).toContain('gdraft-1');
+    expect(r2.content[0]?.text).toContain('gdraft-1');
+    expect(r2.content[0]?.text).toContain('idempotent');
+  });
+
+  it('captures the connection at handler entry: a mid-flight switch cannot retarget the draft', async () => {
+    await bootMcp();
+    let release!: (value: { id: string }) => void;
+    agentOf(CONN_A).createDraft.mockImplementation(
+      () => new Promise<{ id: string }>((resolve) => (release = resolve)),
+    );
+
+    const payload = {
+      to: [{ email: 'client@example.test' }],
+      subject: 'Re: facture',
+      message: 'Ia ora na,',
+      idempotencyKey: 'switch-key',
+    };
+    const pending = call('createDraft', payload) as Promise<unknown>;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    // The user switches account while the draft creation is still in flight.
+    harness.findFirst.mockResolvedValueOnce(CONN_B);
+    await call('setActiveConnection', { email: CONN_B.email });
+    release({ id: 'gdraft-a' });
+    await pending;
+
+    expect(agentOf(CONN_A).createDraft).toHaveBeenCalledTimes(1);
+    expect(agentOf(CONN_B).createDraft).not.toHaveBeenCalled();
+
+    // Same key on the NEW connection: a fresh draft — idempotency is per-connection.
+    await call('createDraft', payload);
+    expect(agentOf(CONN_B).createDraft).toHaveBeenCalledTimes(1);
+  });
+
+  it('a failed creation is never cached: the same key can retry', async () => {
+    await bootMcp();
+    agentOf(CONN_A).createDraft.mockRejectedValueOnce(new Error('gmail 500'));
+    const payload = {
+      to: [{ email: 'client@example.test' }],
+      subject: 'Re: facture',
+      message: 'Ia ora na,',
+      idempotencyKey: 'retry-key',
+    };
+    await expect(call('createDraft', payload)).rejects.toThrow('gmail 500');
+    const result = (await call('createDraft', payload)) as { content: { text: string }[] };
+    expect(agentOf(CONN_A).createDraft).toHaveBeenCalledTimes(2);
+    expect(result.content[0]?.text).toContain('draft-of-conn-a');
+  });
+
   it('setActiveConnection never reveals other-user connections', async () => {
     await bootMcp();
     harness.findFirst.mockResolvedValueOnce(undefined); // ownership scoped: not found
