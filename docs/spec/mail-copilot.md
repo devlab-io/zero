@@ -116,10 +116,12 @@ Reta vise mieux sur quatre axes mesurables :
   `kind=message` avec `quote` **substantielle** (≥ 24 caractères ET ≥ 3 mots)
   vérifiée sous-chaîne de l'extrait côté serveur. Refs inconnus, refs
   metadata, quotes courtes/absentes/altérées, cites string legacy → zéro
-  citation ; et toute réponse mailbox hors overview sans au moins une preuve
-  valide est **remplacée par la réponse « preuve insuffisante »** — jamais un
-  ton fondé sans preuve. Les sources metadata servent à localiser les fils
-  (sources/steps), jamais de preuve de contenu.
+  citation ; les **marqueurs techniques du sanitizer** sont retirés du texte
+  citable et toute quote en contenant un est rejetée (re-review 3). Sans
+  citation valide, **aucun texte libre du modèle ne sort** : réponse overview
+  **formatée côté serveur** depuis les seuls champs numériques whitelist,
+  sinon réponse « preuve insuffisante ». Les sources metadata servent à
+  localiser les fils (sources/steps), jamais de preuve de contenu.
 - **proposition** : brouillon suggéré (réponse ou nouveau mail), texte
   sanitisé par `normalizeEmailRewriteHtml`, jamais envoyé — inséré ou créé en
   brouillon Gmail sur clic explicite.
@@ -177,8 +179,12 @@ threadId)`) — jamais le stub du shard actif seul.
 - `getThread` multi-shard : lecture **no-sync** `getThreadIfPresent` (absent →
   null, jamais un objet vide truthy ni de syncThread parasite) + résolveur
   premier-NON-null — un miss rapide ne bat jamais le shard propriétaire lent.
-- Deadline murale 45 s **préemptive** (Promise.race avec timer sur chaque
-  appel modèle/dépendance) + AbortSignal revérifiés après chaque await ;
+  Miss ≠ erreur : null seulement si TOUS les shards ont répondu null ; sinon
+  sans découverte et avec ≥ 1 erreur, AggregateError (indisponible) — jamais
+  un faux « not found ».
+- Deadline murale 45 s **préemptive** ET abort préemptif (Promise.race avec
+  timer + listener `abort` once, cleanup systématique, sur chaque appel
+  modèle/dépendance) + AbortSignal revérifiés après chaque await ;
   proposition `reply` uniquement si le fil ouvert a été **lu avec succès dans
   la connexion pendant la requête** (`validatedOpenThreadId`), sinon
   rétrogradée `new`.

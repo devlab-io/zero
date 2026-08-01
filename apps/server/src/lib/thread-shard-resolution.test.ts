@@ -21,7 +21,7 @@ describe('resolveThreadAcrossShards — the owner wins, never a fast miss', () =
     expect(resolved).toBeNull();
   });
 
-  it('a shard error counts as a miss and is reported, not a winner', async () => {
+  it('a shard error never blocks a real owner from winning', async () => {
     const onError = vi.fn();
     const resolved = await resolveThreadAcrossShards(
       [
@@ -34,12 +34,25 @@ describe('resolveThreadAcrossShards — the owner wins, never a fast miss', () =
     expect(onError).toHaveBeenCalledWith('broken', expect.any(Error));
   });
 
-  it('all shards erroring resolves null', async () => {
-    const resolved = await resolveThreadAcrossShards([
+  it('miss + error WITHOUT a find is UNAVAILABLE (AggregateError), never a silent not-found', async () => {
+    // The thread may live on the broken shard: null would be a lie.
+    await expect(
+      resolveThreadAcrossShards([
+        { shardId: 'healthy-miss', read: () => delayed(null, 1) },
+        { shardId: 'broken', read: () => Promise.reject(new Error('rpc down')) },
+      ]),
+    ).rejects.toBeInstanceOf(AggregateError);
+  });
+
+  it('ALL shards erroring propagates an AggregateError carrying every failure', async () => {
+    const rejection = resolveThreadAcrossShards([
       { shardId: 's1', read: () => Promise.reject(new Error('a')) },
       { shardId: 's2', read: () => Promise.reject(new Error('b')) },
     ]);
-    expect(resolved).toBeNull();
+    await expect(rejection).rejects.toBeInstanceOf(AggregateError);
+    await rejection.catch((error: AggregateError) => {
+      expect(error.errors).toHaveLength(2);
+    });
   });
 
   it('the FIRST owner to answer wins when several shards return data', async () => {

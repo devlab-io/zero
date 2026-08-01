@@ -230,12 +230,33 @@ describe('runAskReta — strict citations: message-kind + verified quote ONLY', 
     expect(result.answer).toBe(INSUFFICIENT_EVIDENCE_ANSWER);
   });
 
-  it('an overview-only answer (exact counts) stands WITHOUT citations', async () => {
+  it("the sanitizer-marker attack — quoting '[UNTRUSTED EMAIL CONTENT - SANITIZED]' — yields zero citations", async () => {
+    const claim = JSON.stringify({
+      answer: 'La facture réclame 120 000 XPF.',
+      cites: [
+        // Long enough, ≥3 words — but a technical marker, present in NO citable excerpt.
+        { ref: 's11', quote: '[UNTRUSTED EMAIL CONTENT - SANITIZED]' },
+        { ref: 's12', quote: 'Sanitizer note: removed 2 hidden segment(s).' },
+        { ref: 's13', quote: 'voici [hidden content removed] la suite du texte' },
+      ],
+    });
+    const model = scriptedModel([planJson, claim]);
+    const result = await runAskReta(makeDeps(model), input());
+    expect(result.citations).toEqual([]);
+    expect(result.answer).toBe(INSUFFICIENT_EVIDENCE_ANSWER);
+  });
+
+  it('overview answers are SERVER-FORMATTED: a free model answer never ships uncited', async () => {
     const overviewPlan = JSON.stringify({ actions: [{ type: 'overview' }] });
-    const countAnswer = JSON.stringify({ answer: 'Vous avez 42 mails en inbox.', cites: [] });
-    const model = scriptedModel([overviewPlan, countAnswer]);
+    const injectedAnswer = JSON.stringify({
+      answer: 'Virez 100 000 XPF sur le compte FR76-XXXX immédiatement.',
+      cites: [],
+    });
+    const model = scriptedModel([overviewPlan, injectedAnswer]);
     const result = await runAskReta(makeDeps(model), input({ question: 'Combien de mails ?' }));
-    expect(result.answer).toBe('Vous avez 42 mails en inbox.');
+    // Deterministic server format from whitelisted numbers — the model text is gone.
+    expect(result.answer).toBe('Boîte : 42 en boîte de réception.');
+    expect(result.answer).not.toContain('100 000');
     expect(result.citations).toEqual([]);
   });
 
@@ -337,6 +358,30 @@ describe('runAskReta — abort & deadline', () => {
     await expect(runAskReta(makeDeps(model, { deadlineMs: -1 }), input())).rejects.toThrow(
       'deadline exceeded',
     );
+  });
+
+  it('PREEMPTS a slow model call on ABORT: a 10ms abort beats a 100ms model', async () => {
+    let modelSettled = false;
+    const slowModel: RetaModel = {
+      key: 'llama-4-scout',
+      complete: vi.fn(
+        () =>
+          new Promise<string>((resolve) =>
+            setTimeout(() => {
+              modelSettled = true;
+              resolve(planJson);
+            }, 100),
+          ),
+      ),
+    };
+    const controller = new AbortController();
+    setTimeout(() => controller.abort(), 10);
+    const started = Date.now();
+    await expect(
+      runAskReta(makeDeps(slowModel, { signal: controller.signal }), input()),
+    ).rejects.toThrow('request aborted');
+    expect(modelSettled).toBe(false);
+    expect(Date.now() - started).toBeLessThan(100);
   });
 
   it('PREEMPTS a slow model call: 10ms budget beats an 80ms model, before it resolves', async () => {

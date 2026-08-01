@@ -14,6 +14,35 @@ export type SanitizedMailContent = {
 
 const SPOTLIGHT_HEADER = '[UNTRUSTED EMAIL CONTENT - SANITIZED]';
 const HIDDEN_CONTENT_MARKER = '[hidden content removed]';
+const EMPTY_CONTENT_PLACEHOLDER = '(empty sanitized content)';
+const SANITIZER_NOTE_RE = /sanitizer note: removed \d+ hidden segment\(s\)\./gi;
+
+/**
+ * Technical markers this sanitizer injects into `.text`. They are NOT mailbox
+ * content: citable excerpts must strip them, and a citation quote containing
+ * one is a forgery attempt (re-review 3 Codex 2026-08-01 — the spotlight
+ * header alone passed the 24-char evidence floor for EVERY message).
+ */
+export const SANITIZER_TEXT_MARKERS = [
+  SPOTLIGHT_HEADER,
+  HIDDEN_CONTENT_MARKER,
+  EMPTY_CONTENT_PLACEHOLDER,
+] as const;
+
+export const stripSanitizerMarkers = (text: string): string => {
+  let out = text;
+  for (const marker of SANITIZER_TEXT_MARKERS) {
+    out = out.split(marker).join(' ');
+  }
+  return out.replace(SANITIZER_NOTE_RE, ' ');
+};
+
+export const containsSanitizerMarker = (text: string): boolean => {
+  const lowered = text.toLowerCase();
+  if (SANITIZER_TEXT_MARKERS.some((marker) => lowered.includes(marker.toLowerCase()))) return true;
+  SANITIZER_NOTE_RE.lastIndex = 0;
+  return SANITIZER_NOTE_RE.test(text);
+};
 
 type InlineStyle = Record<string, string>;
 

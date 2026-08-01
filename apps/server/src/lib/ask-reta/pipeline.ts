@@ -15,12 +15,17 @@ import {
   askRetaSynthesisSystemPrompt,
   askRetaSynthesisUserPrompt,
 } from './prompts';
+import {
+  containsSanitizerMarker,
+  sanitizeMailContent,
+  stripSanitizerMarkers,
+} from '../mail-sanitize';
 import type { IGetThreadResponse, ThreadsResponse } from '@zero/types';
 import { normalizeEmailRewriteHtml } from '../rewrite-email';
 import { extractJsonObject, type RetaModel } from './model';
-import { sanitizeMailContent } from '../mail-sanitize';
 import sanitizeHtml from 'sanitize-html';
 import { logger } from '../logger';
+import { z } from 'zod';
 
 /**
  * Ask Reta pipeline — bounded plan → retrieve → synthesize (spec
@@ -72,15 +77,27 @@ const withBudget = async <T>(budget: Budget, run: () => Promise<T>): Promise<T> 
   checkBudget(budget);
   const remaining = Math.max(0, budget.deadline - Date.now());
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let removeAbortListener: (() => void) | undefined;
   const expiry = new Promise<never>((_, reject) => {
     timer = setTimeout(() => reject(new AskRetaAbortedError('deadline')), remaining);
   });
+  // Abort preempts too (re-review 3, P2): the signal joins the race via a
+  // once-listener, so a cancelled request interrupts a slow model call
+  // immediately instead of waiting it out.
+  const aborted = new Promise<never>((_, reject) => {
+    const signal = budget.signal;
+    if (!signal) return; // never settles — the race ignores it
+    const onAbort = () => reject(new AskRetaAbortedError('aborted'));
+    signal.addEventListener('abort', onAbort, { once: true });
+    removeAbortListener = () => signal.removeEventListener('abort', onAbort);
+  });
   try {
-    const result = await Promise.race([run(), expiry]);
+    const result = await Promise.race([run(), expiry, aborted]);
     if (budget.signal?.aborted) throw new AskRetaAbortedError('aborted');
     return result;
   } finally {
     if (timer !== undefined) clearTimeout(timer);
+    removeAbortListener?.();
   }
 };
 
@@ -278,7 +295,11 @@ const readOneThread = async (
     .filter((message) => !message.isDraft)
     .slice(-askRetaLimits.messagesPerThread);
   for (const message of messages) {
-    const text = sanitizeMailContent(message.decodedBody ?? message.body ?? '').text;
+    // Sanitizer markers are NOT mailbox content: stripped from citable text so
+    // they can never satisfy the evidence floor (re-review 3, P1).
+    const text = stripSanitizerMarkers(
+      sanitizeMailContent(message.decodedBody ?? message.body ?? '').text,
+    );
     if (!text.trim()) continue;
     const source = await addSource(gathered, {
       kind: 'message',
@@ -473,6 +494,53 @@ const normalizeForQuoteMatch = (value: string) => value.replace(/\s+/g, ' ').tri
 export const INSUFFICIENT_EVIDENCE_ANSWER =
   "Preuve insuffisante dans la boîte pour fonder cette réponse — précisez l'expéditeur, le sujet ou la période. (Insufficient mailbox evidence to ground this answer.)";
 
+// Whitelisted numeric overview fields — the ONLY values a citation-free answer
+// may display, formatted server-side (re-review 3, P1: a free model answer must
+// never pass uncited, overview questions included).
+const overviewAnswerWhitelist = z.object({
+  folders: z
+    .object({
+      inbox: z.number().int().nonnegative(),
+      drafts: z.number().int().nonnegative(),
+      sent: z.number().int().nonnegative(),
+      queue: z.number().int().nonnegative(),
+    })
+    .partial()
+    .optional(),
+  activity: z
+    .object({
+      processedToday: z.number().int().nonnegative(),
+      processedWeek: z.number().int().nonnegative(),
+    })
+    .partial()
+    .optional(),
+});
+
+/** Deterministic overview answer — every displayed number comes from the whitelist. */
+export const formatOverviewAnswer = (overview: unknown): string | null => {
+  const parsed = overviewAnswerWhitelist.safeParse(overview);
+  if (!parsed.success) return null;
+  const parts: string[] = [];
+  const folders = parsed.data.folders;
+  if (folders) {
+    const bits: string[] = [];
+    if (folders.inbox !== undefined) bits.push(`${folders.inbox} en boîte de réception`);
+    if (folders.drafts !== undefined) bits.push(`${folders.drafts} brouillons`);
+    if (folders.sent !== undefined) bits.push(`${folders.sent} envoyés`);
+    if (folders.queue !== undefined) bits.push(`${folders.queue} en file d'envoi`);
+    if (bits.length) parts.push(`Boîte : ${bits.join(', ')}.`);
+  }
+  const activity = parsed.data.activity;
+  if (activity) {
+    const bits: string[] = [];
+    if (activity.processedToday !== undefined)
+      bits.push(`${activity.processedToday} envoyés aujourd'hui`);
+    if (activity.processedWeek !== undefined) bits.push(`${activity.processedWeek} sur 7 jours`);
+    if (bits.length) parts.push(`Activité : ${bits.join(', ')}.`);
+  }
+  return parts.length ? parts.join(' ') : null;
+};
+
 export async function runAskReta(
   deps: AskRetaDeps,
   input: AskRetaInput,
@@ -498,6 +566,8 @@ export async function runAskReta(
     if (!source) continue;
     if (source.kind !== 'message') continue;
     if (citations.some((c) => c.ref === cite.ref)) continue;
+    // A quote carrying a sanitizer marker is a forgery attempt, never evidence.
+    if (containsSanitizerMarker(cite.quote)) continue;
     if (!normalizeForQuoteMatch(source.excerpt).includes(normalizeForQuoteMatch(cite.quote))) {
       continue;
     }
@@ -505,13 +575,18 @@ export async function runAskReta(
     citations.push({ ...citation, kind: 'message', quote: cite.quote });
   }
 
-  // Evidence gate: a mailbox answer that goes beyond pure overview counts and
-  // carries ZERO valid citations must not sound grounded — replace it with the
-  // explicit insufficient-evidence answer. Proposals/steps survive: a draft is
-  // reviewable content, not a factual claim.
-  const overviewOnly = gathered.sources.length === 0 && gathered.overviewJson !== null;
-  const answer =
-    citations.length > 0 || overviewOnly ? synthesis.answer : INSUFFICIENT_EVIDENCE_ANSWER;
+  // Evidence gate (re-review 3): a FREE model answer NEVER ships without at
+  // least one valid citation. Zero citations → either the server-formatted
+  // overview (whitelisted numbers only, model controls no displayed text) or
+  // the explicit insufficient-evidence answer. Proposals/steps survive: a
+  // draft is reviewable content, not a factual claim.
+  let answer = synthesis.answer;
+  if (citations.length === 0) {
+    const overviewAnswer = gathered.overviewJson
+      ? formatOverviewAnswer(JSON.parse(gathered.overviewJson))
+      : null;
+    answer = overviewAnswer ?? INSUFFICIENT_EVIDENCE_ANSWER;
+  }
 
   // Reply proposals require the open thread to have been read successfully
   // within this connection during THIS ask — never a client-asserted id alone.
