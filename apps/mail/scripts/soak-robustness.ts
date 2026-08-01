@@ -3,21 +3,21 @@ import { dirname, resolve } from 'node:path';
 import { expect, test } from 'vitest';
 
 import {
+  clearLocalDraft,
+  loadLocalDraft,
+  ownedDraftStorageKey,
+  saveLocalDraft,
+  type StoredComposerDraft,
+} from '@/lib/draft-storage';
+import {
   READ_RETRY_MAX,
   readRetryDelay,
   readRetryDelayCeiling,
   shouldRetryRead,
 } from '@/lib/query-retry';
 import { registerComposerFlush, type FlushTarget, type VisibilityDoc } from '@/lib/composer-flush';
-import {
-  clearLocalDraft,
-  draftStorageKey,
-  loadLocalDraft,
-  saveLocalDraft,
-  type StoredComposerDraft,
-} from '@/lib/draft-storage';
-import { selectMailListState } from '@/lib/mail-list-state';
 import { selectThreadViewState } from '@/lib/thread-view-state';
+import { selectMailListState } from '@/lib/mail-list-state';
 
 /**
  * 30-minute local robustness soak (issue #34, check point 8).
@@ -112,6 +112,11 @@ function executionsPerTriggerUnderChurn(): number {
   return executions;
 }
 
+// v2 owned keys only (owner-transition fix): the soak exercises the SAME key
+// shape the app uses — legacy v1 keys are never read/written outside the
+// dedicated compatibility tests.
+const SOAK_OWNER = { userId: 'soak-user', connectionId: 'soak-conn' };
+
 const draft: StoredComposerDraft = {
   to: ['soak@zero.test'],
   cc: [],
@@ -154,7 +159,7 @@ test('30-minute robustness soak — no rejections, leaks, dup shortcuts, or grow
       expect(attempts).toBeLessThanOrEqual(1 + READ_RETRY_MAX);
 
       // (3a) listener-leak invariant — every register is balanced by cleanup.
-      const key = draftStorageKey({ threadId: `t${iterations % 8}` });
+      const key = ownedDraftStorageKey(SOAK_OWNER, { threadId: `t${iterations % 8}` });
       const flush = () => saveLocalDraft(key, { ...draft, savedAt: Date.now() });
       const cleanup = registerComposerFlush(win, doc, flush);
       // exercise the durability path (also (1): a throwing flush must never leak)
@@ -169,9 +174,9 @@ test('30-minute robustness soak — no rejections, leaks, dup shortcuts, or grow
       expect(executionsPerTriggerUnderChurn()).toBe(1);
 
       // exercise the honest-state selectors so a regression there trips the soak too.
-      expect(selectMailListState({ itemCount: 0, isLoading: false, isError: true, isOffline: false })).toBe(
-        'error',
-      );
+      expect(
+        selectMailListState({ itemCount: 0, isLoading: false, isError: true, isOffline: false }),
+      ).toBe('error');
       expect(
         selectThreadViewState({
           hasSelection: true,
@@ -218,7 +223,9 @@ test('30-minute robustness soak — no rejections, leaks, dup shortcuts, or grow
         `maxAttempts=${maxRequestAttempts} listenerBalance(win=${win.added - win.removed},doc=${doc.added - doc.removed})`,
     );
   } catch (error) {
-    log(`SOAK FAIL iter=${iterations} error=${error instanceof Error ? error.message : String(error)}`);
+    log(
+      `SOAK FAIL iter=${iterations} error=${error instanceof Error ? error.message : String(error)}`,
+    );
     throw error;
   } finally {
     process.off('unhandledRejection', onRejection);

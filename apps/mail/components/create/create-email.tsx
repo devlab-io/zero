@@ -3,6 +3,7 @@ import { cleanEmailAddresses, isSendResult } from '@/lib/email-utils';
 import { useActiveConnection } from '@/hooks/use-connections';
 import { Dialog, DialogClose } from '@/components/ui/dialog';
 import { useEmailAliases } from '@/hooks/use-email-aliases';
+import { ComposerOwnerGate } from './composer-owner-gate';
 import { interpretSendOutcome } from '@/lib/send-outcome';
 import { loadGitHubEmojis } from '@/lib/emoji-data';
 import { markStage } from '@/lib/perf-stages';
@@ -292,38 +293,46 @@ export function CreateEmail({
                 </div>
               }
             >
-              <EmailComposer
-                key={typedDraft?.id || undoEmailData?.to?.join(',') || 'composer'}
-                className="mb-12 rounded-2xl border"
-                onSendEmail={handleSendEmail}
-                initialMessage={undoEmailData?.message || typedDraft?.content || initialBody}
-                initialTo={
-                  undoEmailData?.to ||
-                  typedDraft?.to?.map((e: string) => e.replace(/[<>]/g, '')) ||
-                  processInitialEmails(initialTo)
-                }
-                initialCc={
-                  undoEmailData?.cc ||
-                  typedDraft?.cc?.map((e: string) => e.replace(/[<>]/g, '')) ||
-                  processInitialEmails(initialCc)
-                }
-                initialBcc={
-                  undoEmailData?.bcc ||
-                  typedDraft?.bcc?.map((e: string) => e.replace(/[<>]/g, '')) ||
-                  processInitialEmails(initialBcc)
-                }
-                onClose={() => {
-                  setThreadId(null);
-                  setActiveReplyId(null);
-                  setIsComposeOpen(null);
-                  setDraftId(null);
-                  clearUndoData();
-                }}
-                initialAttachments={undoEmailData?.attachments || files}
-                initialSubject={undoEmailData?.subject || typedDraft?.subject || initialSubject}
-                autofocus={false}
-                settingsLoading={settingsLoading}
-              />
+              {/* Owner-transition fix : le gate résout {userId, connectionId},
+                  ne peint RIEN tant qu'ils manquent, et force un remount
+                  atomique du composeur quand le compte/la connexion change. */}
+              <ComposerOwnerGate>
+                {(draftOwner) => (
+                  <EmailComposer
+                    key={typedDraft?.id || undoEmailData?.to?.join(',') || 'composer'}
+                    draftOwner={draftOwner}
+                    className="mb-12 rounded-2xl border"
+                    onSendEmail={handleSendEmail}
+                    initialMessage={undoEmailData?.message || typedDraft?.content || initialBody}
+                    initialTo={
+                      undoEmailData?.to ||
+                      typedDraft?.to?.map((e: string) => e.replace(/[<>]/g, '')) ||
+                      processInitialEmails(initialTo)
+                    }
+                    initialCc={
+                      undoEmailData?.cc ||
+                      typedDraft?.cc?.map((e: string) => e.replace(/[<>]/g, '')) ||
+                      processInitialEmails(initialCc)
+                    }
+                    initialBcc={
+                      undoEmailData?.bcc ||
+                      typedDraft?.bcc?.map((e: string) => e.replace(/[<>]/g, '')) ||
+                      processInitialEmails(initialBcc)
+                    }
+                    onClose={() => {
+                      setThreadId(null);
+                      setActiveReplyId(null);
+                      setIsComposeOpen(null);
+                      setDraftId(null);
+                      clearUndoData();
+                    }}
+                    initialAttachments={undoEmailData?.attachments || files}
+                    initialSubject={undoEmailData?.subject || typedDraft?.subject || initialSubject}
+                    autofocus={false}
+                    settingsLoading={settingsLoading}
+                  />
+                )}
+              </ComposerOwnerGate>
             </Suspense>
           )}
         </div>

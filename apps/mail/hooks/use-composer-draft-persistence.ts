@@ -32,6 +32,14 @@ export interface ComposerDraftPersistence {
  * bare `compose` key collided). While the owner is NOT resolved the hook is
  * FAIL-CLOSED: nothing is read, written or cleared — never a legacy unscoped
  * fallback (v1 keys stay untouched for manual recovery).
+ *
+ * OWNER-TRANSITION SAFE (owner-transition fix 2026-08-01): the pending
+ * snapshot is TAGGED with the key it was recorded under. A flush registered
+ * for key B refuses a snapshot recorded under key A, and a stale callback
+ * captured under A can only ever write under A — content of one account is
+ * structurally unable to land under another account's key, even if the owner
+ * changes on the SAME mount (the parent remount via ComposerOwnerGate is the
+ * first barrier; this guard holds without it).
  */
 export function useComposerDraftPersistence(
   owner: DraftOwner | null,
@@ -54,12 +62,12 @@ export function useComposerDraftPersistence(
     return draft;
   }, [key]);
 
-  const latestRef = useRef<StoredComposerDraft | null>(null);
+  const latestRef = useRef<{ key: string; snapshot: StoredComposerDraft } | null>(null);
 
   const update = useCallback(
     (snapshot: StoredComposerDraft) => {
       if (!key) return; // fail-closed
-      latestRef.current = snapshot;
+      latestRef.current = { key, snapshot };
       if (draftHasContent(snapshot)) saveLocalDraft(key, snapshot);
     },
     [key],
@@ -73,13 +81,18 @@ export function useComposerDraftPersistence(
   useEffect(() => {
     if (!key) return;
     const flush = () => {
-      const snapshot = latestRef.current;
-      if (snapshot && draftHasContent(snapshot)) saveLocalDraft(key, snapshot);
+      const latest = latestRef.current;
+      // Generation guard: a snapshot recorded under ANOTHER key is stale here
+      // (owner/scope changed since) — writing it would leak one account's
+      // content into another's slot. The old key's own cleanup flush already
+      // persisted it where it belongs.
+      if (!latest || latest.key !== key) return;
+      if (draftHasContent(latest.snapshot)) saveLocalDraft(key, latest.snapshot);
     };
     const unregister = registerComposerFlush(window, document, flush);
     return () => {
       unregister();
-      flush(); // durability on unmount (teardown / route change)
+      flush(); // durability on unmount (teardown / route change / owner remount)
     };
   }, [key]);
 

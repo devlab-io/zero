@@ -1,4 +1,5 @@
 import type { ThreadQuoteRequest } from '@/lib/thread-quote';
+import type { DraftOwner } from '@/lib/draft-storage';
 import type { ParsedMessage } from '@/types';
 import { z } from 'zod';
 
@@ -14,6 +15,13 @@ export type ThreadContent = {
 }[];
 
 export interface EmailComposerProps {
+  /**
+   * Partition de compte {userId, connectionId} — OBLIGATOIRE, résolue par le
+   * parent via ComposerOwnerGate : le composeur ne monte jamais sans owner et
+   * est remonté (key React) quand l'owner change, donc l'état formulaire /
+   * TipTap d'un compte ne peut être ni peint ni persisté sous un autre.
+   */
+  draftOwner: DraftOwner;
   initialTo?: string[];
   initialCc?: string[];
   initialBcc?: string[];

@@ -1,18 +1,16 @@
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip';
-import { ownedDraftStorageKey, type DraftOwner } from '@/lib/draft-storage';
 import { createDraftSaveLifecycle } from '@/lib/draft-save-lifecycle';
 import { registerComposerInsertHandler } from '@/lib/composer-insert';
 import { resolveComposerChord } from '@/lib/hotkeys/composer-chords';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { registerLiveDraft } from '@/lib/live-draft-registry';
-import { useActiveConnection } from '@/hooks/use-connections';
 import { resolveComposerEscape } from '@/lib/composer-escape';
 import { useEmailAliases } from '@/hooks/use-email-aliases';
 import { ScheduleSendPicker } from './schedule-send-picker';
+import { ownedDraftStorageKey } from '@/lib/draft-storage';
 import useComposeEditor from '@/hooks/use-compose-editor';
 import { Command, Plus, Type } from 'lucide-react';
 import { zodResolver } from '@/lib/zod-resolver';
-import { useSession } from '@/lib/auth-client';
 import { CurvedArrow } from '../icons/icons';
 import { isMac } from '@/lib/platform';
 import { log } from '@/lib/log';
@@ -61,6 +59,7 @@ export function EmailComposer({
   initialSubject = '',
   initialMessage = '',
   initialAttachments = [],
+  draftOwner,
   onSendEmail,
   onClose,
   onAbandonEmpty,
@@ -109,17 +108,11 @@ export function EmailComposer({
   // Durable local draft persistence (issue #34, check point 5): survives unmount,
   // pagehide/reload and a failed server autosave; restored on mount. The callbacks
   // are key-stable, so the persist effect only fires on real content changes.
-  // Draft OWNER (scope-fix 2026-08-01): every composer seam — durable
-  // autosave/restore, live registry, insert handler — is partitioned by
-  // {userId, connectionId}. Until both are resolved the seams stay closed:
-  // no read/write on any shared or legacy key.
-  const { data: composerSession } = useSession();
-  const { data: composerConnection } = useActiveConnection();
-  const draftOwner: DraftOwner | null =
-    composerSession?.user?.id && composerConnection?.id
-      ? { userId: composerSession.user.id, connectionId: composerConnection.id }
-      : null;
-
+  // Draft OWNER (owner-transition fix 2026-08-01): resolved by the PARENT via
+  // ComposerOwnerGate and passed as a MANDATORY prop — this instance never
+  // exists without its {userId, connectionId} and is remounted (React key)
+  // when the owner changes, so every seam below sees ONE owner for its whole
+  // lifetime.
   const {
     restored: restoredDraft,
     update: persistDraftSnapshot,
@@ -209,7 +202,6 @@ export function EmailComposer({
   // newer instance of the same scope. Autosave/restore are untouched.
   const liveDraftRef = useRef<ReturnType<typeof registerLiveDraft> | null>(null);
   useEffect(() => {
-    if (!draftOwner) return; // owner unresolved: never a shared live slot
     const scopeKey = ownedDraftStorageKey(draftOwner, {
       threadId,
       draftId,
@@ -221,7 +213,7 @@ export function EmailComposer({
       if (liveDraftRef.current === handle) liveDraftRef.current = null;
       handle.unregister();
     };
-  }, [draftOwner?.userId, draftOwner?.connectionId, threadId, draftId, activeReplyId]);
+  }, [draftOwner.userId, draftOwner.connectionId, threadId, draftId, activeReplyId]);
   useEffect(() => {
     if (!editor || editor.isDestroyed) return;
     const publish = () => {
@@ -248,7 +240,6 @@ export function EmailComposer({
   // before replacing; nothing is ever overwritten silently.
   useEffect(() => {
     if (!editor || editor.isDestroyed) return;
-    if (!draftOwner) return; // owner unresolved: no cross-account insert target
     const scopeKey = ownedDraftStorageKey(draftOwner, {
       threadId,
       draftId,
@@ -275,8 +266,8 @@ export function EmailComposer({
     });
   }, [
     editor,
-    draftOwner?.userId,
-    draftOwner?.connectionId,
+    draftOwner.userId,
+    draftOwner.connectionId,
     threadId,
     draftId,
     activeReplyId,

@@ -294,6 +294,24 @@ sûre des clés legacy v1** : ambiguës (sans owner), elles ne sont plus JAMAIS
 lues ni écrites, ni migrées automatiquement, ni supprimées — récupérables
 manuellement dans localStorage. `readLiveDraft` retourne une copie profonde.
 
+**Owner-transition fix (P1, 2026-08-01)** : le partitionnement des clés ne
+suffisait pas quand l'owner CHANGE dans un composeur monté (le formulaire
+retient A, l'effet de persistance ré-exécuté écrivait A sous la clé v2 de
+B). Contrat structurel : (1) l'ownership est résolu par les PARENTS via
+`components/create/composer-owner-gate.tsx` — tant que
+`{userId, connectionId}` manque, AUCUN composeur n'est peint, et
+`EmailComposer` reçoit `draftOwner` en prop OBLIGATOIRE ; (2) l'instance est
+keyée sur l'owner stable (`userId:connectionId`) — un changement de
+compte/connexion force un REMOUNT ATOMIQUE : l'ancienne instance flushe son
+contenu sous SA clé au démontage, la nouvelle s'initialise depuis la
+restauration ownée du nouveau compte ; (3) défense en profondeur dans
+`useComposerDraftPersistence` : le snapshot en attente est TAGGÉ par la clé
+sous laquelle il a été enregistré — un flush enregistré pour B refuse un
+snapshot taggé A, et un callback périmé capturé sous A ne peut écrire que
+sous A, même sans le remount parent. Le soak de robustesse n'utilise plus
+que des clés v2 ownées : hors tests de compatibilité dédiés, aucune clé
+legacy v1 n'est lue ni écrite nulle part.
+
 **Restant** : compteurs d'usage.
 **Tranche 3** : BYOK (prérequis ci-dessus) ; propositions vers `draft_outbox`
 /`/queue` ; récupération sémantique (Vectorize/AutoRAG) si activée ; mobile.

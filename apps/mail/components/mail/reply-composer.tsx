@@ -1,4 +1,5 @@
 import { deriveReplyRecipients, deriveReplySubject } from './reply-recipients';
+import { ComposerOwnerGate } from '@/components/create/composer-owner-gate';
 import { constructReplyBody, constructForwardBody } from '@/lib/utils';
 import { useReplyStatePurge } from '@/hooks/use-reply-state-purge';
 import { lazy, Suspense, useEffect, useMemo, useRef } from 'react';
@@ -305,49 +306,57 @@ export default function ReplyCompose({
           </div>
         }
       >
-        <EmailComposer
-          editorClassName="min-h-[50px]"
-          className="max-w-none! w-full overflow-visible pb-1"
-          onSendEmail={handleSendEmail}
-          onClose={async () => {
-            // Purge ATOMIQUE (une seule écriture d'URL) : trois setters séparés
-            // laissaient l'URL conserver mode/activeReplyId/draftId alors que le
-            // composer était masqué (CUA round 3, échec 3). threadId est ÉPINGLÉ
-            // explicitement dans la même écriture (CUA round 4) : fermer le
-            // reply ne doit ni perdre ni laisser ressusciter le fil ouvert.
-            await purgeReplyState({ threadId });
-          }}
-          onAbandonEmpty={() => {
-            // Composer vidé puis fermé : le brouillon serveur correspondant est
-            // un abandon — supprimé en best-effort (par draftId quand il est
-            // connu) et marqué localement (trace + défense en profondeur).
-            if (latestDraft?.id) markDraftAbandoned(latestDraft.id);
-            const abandonedId = draftId;
-            if (!abandonedId) return;
-            void deleteDraft({ id: abandonedId })
-              .then(() => void refetch())
-              .catch(() => {
-                // Suppression best-effort : un échec ne doit pas bloquer la
-                // fermeture ; le brouillon restera visible dans Drafts.
-              });
-          }}
-          // CUA round 4 (échec 1) : le « a » vu à l'ouverture était le brouillon
-          // serveur abandonné au round 3, resservi par latestDraft?.decodedBody.
-          // Un reply ouvert au raccourci démarre VIDE : la reprise d'un travail
-          // en cours est portée par le snapshot local (restauration issue #34),
-          // celle d'un brouillon par un draftId EXPLICITE (ouverture depuis
-          // Drafts). Aucun contenu serveur n'est ressemé implicitement.
-          initialMessage={draft?.content ?? undefined}
-          initialTo={draft ? ensureEmailArray(draft.to) : replyDefaults.to}
-          initialCc={draft ? ensureEmailArray(draft.cc) : replyDefaults.cc}
-          initialBcc={ensureEmailArray(draft?.bcc)}
-          initialSubject={draft?.subject ?? replyDefaults.subject}
-          autofocus={true}
-          settingsLoading={settingsLoading}
-          replyingTo={replyToMessage?.sender.email}
-          quoteRequest={quoteRequest}
-          onQuoteInserted={onQuoteInserted}
-        />
+        {/* Owner-transition fix : owner résolu par le parent, remount atomique
+            du composeur au changement de compte/connexion (jamais l'état de A
+            peint ou persisté sous B). */}
+        <ComposerOwnerGate>
+          {(draftOwner) => (
+            <EmailComposer
+              draftOwner={draftOwner}
+              editorClassName="min-h-[50px]"
+              className="max-w-none! w-full overflow-visible pb-1"
+              onSendEmail={handleSendEmail}
+              onClose={async () => {
+                // Purge ATOMIQUE (une seule écriture d'URL) : trois setters séparés
+                // laissaient l'URL conserver mode/activeReplyId/draftId alors que le
+                // composer était masqué (CUA round 3, échec 3). threadId est ÉPINGLÉ
+                // explicitement dans la même écriture (CUA round 4) : fermer le
+                // reply ne doit ni perdre ni laisser ressusciter le fil ouvert.
+                await purgeReplyState({ threadId });
+              }}
+              onAbandonEmpty={() => {
+                // Composer vidé puis fermé : le brouillon serveur correspondant est
+                // un abandon — supprimé en best-effort (par draftId quand il est
+                // connu) et marqué localement (trace + défense en profondeur).
+                if (latestDraft?.id) markDraftAbandoned(latestDraft.id);
+                const abandonedId = draftId;
+                if (!abandonedId) return;
+                void deleteDraft({ id: abandonedId })
+                  .then(() => void refetch())
+                  .catch(() => {
+                    // Suppression best-effort : un échec ne doit pas bloquer la
+                    // fermeture ; le brouillon restera visible dans Drafts.
+                  });
+              }}
+              // CUA round 4 (échec 1) : le « a » vu à l'ouverture était le brouillon
+              // serveur abandonné au round 3, resservi par latestDraft?.decodedBody.
+              // Un reply ouvert au raccourci démarre VIDE : la reprise d'un travail
+              // en cours est portée par le snapshot local (restauration issue #34),
+              // celle d'un brouillon par un draftId EXPLICITE (ouverture depuis
+              // Drafts). Aucun contenu serveur n'est ressemé implicitement.
+              initialMessage={draft?.content ?? undefined}
+              initialTo={draft ? ensureEmailArray(draft.to) : replyDefaults.to}
+              initialCc={draft ? ensureEmailArray(draft.cc) : replyDefaults.cc}
+              initialBcc={ensureEmailArray(draft?.bcc)}
+              initialSubject={draft?.subject ?? replyDefaults.subject}
+              autofocus={true}
+              settingsLoading={settingsLoading}
+              replyingTo={replyToMessage?.sender.email}
+              quoteRequest={quoteRequest}
+              onQuoteInserted={onQuoteInserted}
+            />
+          )}
+        </ComposerOwnerGate>
       </Suspense>
     </div>
   );
