@@ -108,8 +108,9 @@ describe('contrat r8 — aucune surface IA exposée', () => {
               'trpc.copilot.setCredential',
               'trpc.copilot.deleteCredential',
             ]);
-            const copilotCalls =
-              source.match(/(?:trpc|trpcClient)\.copilot\.([A-Za-z0-9_]+)/g) ?? [];
+            const copilotCalls = (
+              source.match(/(?:trpc|trpcClient)\.copilot\.([A-Za-z0-9_]+)/g) ?? []
+            ).map((call) => call.replace(/^trpcClient\./, 'trpc.'));
             if (copilotCalls.every((call) => sanctioned.has(call))) continue;
           }
           // r9 (tranche 2) : le transport stream n'est licite que dans la surface.

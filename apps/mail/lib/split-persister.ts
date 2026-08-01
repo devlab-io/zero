@@ -162,6 +162,13 @@ export function createSplitIDBPersister(
     return isValid ? queries : null;
   };
 
+  // P0 3B (secret-cache) : les mutations ne touchent JAMAIS le disque — ni à
+  // l'écriture (les deux blobs les vident) ni à la restauration (un blob
+  // legacy/forgé qui en contiendrait est assaini avant hydratation). Les
+  // `variables` d'une mutation peuvent porter un secret (clé BYOK).
+  const stripMutations = (stored: PersistedClient | undefined): PersistedClient | undefined =>
+    stored ? { ...stored, clientState: { ...stored.clientState, mutations: [] } } : stored;
+
   return {
     persister: {
       persistClient: async (client: PersistedClient) => {
@@ -179,6 +186,9 @@ export function createSplitIDBPersister(
             ...client,
             clientState: {
               ...client.clientState,
+              // Défense en profondeur : même si le provider déshydratait des
+              // mutations, elles n'atteignent jamais IndexedDB.
+              mutations: [],
               queries: selectQueriesForPersistence(rawCritical),
             },
           }),
@@ -210,7 +220,7 @@ export function createSplitIDBPersister(
         // âge/buster du blob principal reste faite par persistQueryClient.
         const priorityThreadId = options.getPriorityThreadId?.() ?? null;
         if (!priorityThreadId) {
-          return (await storage.get(mainKey)) as PersistedClient | undefined;
+          return stripMutations((await storage.get(mainKey)) as PersistedClient | undefined);
         }
 
         // r16 : deep-link — le fil de l'URL est fusionné dans le restore
@@ -226,14 +236,14 @@ export function createSplitIDBPersister(
           // Périmé/corrompu : supprimé, restore listes seules — le lecteur
           // retombe sur le réseau (fallback honnête, jamais de blob mensonger).
           if (storedDetails != null) await storage.del(detailsKey).catch(() => {});
-          return main;
+          return stripMutations(main);
         }
 
         const priority = selectPriorityDetailQueries(
           detailQueries as unknown as PersistableQuery[],
           priorityThreadId,
         ) as unknown as PersistedClient['clientState']['queries'];
-        if (priority.length === 0) return main;
+        if (priority.length === 0) return stripMutations(main);
         if (!main) {
           // Listes absentes mais fil demandé présent : enveloppe détails
           // (timestamp/buster déjà validés) portant les seules entrées du fil.
@@ -247,6 +257,7 @@ export function createSplitIDBPersister(
           ...main,
           clientState: {
             ...main.clientState,
+            mutations: [],
             queries: [...main.clientState.queries, ...priority],
           },
         };

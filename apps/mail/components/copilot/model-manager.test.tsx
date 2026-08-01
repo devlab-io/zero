@@ -27,8 +27,14 @@ vi.mock('@/providers/query-provider', () => ({
         queryOptions: () => ({ kind: 'modelCatalog' }),
         queryKey: () => ['copilot', 'modelCatalog'],
       },
-      setCredential: { mutationOptions: () => ({ kind: 'setCredential' }) },
-      deleteCredential: { mutationOptions: () => ({ kind: 'deleteCredential' }) },
+    },
+  }),
+  // P0 secret-cache: writes go through the IMPERATIVE trpc client — the
+  // component must not build any useMutation for them.
+  useTRPCClient: () => ({
+    copilot: {
+      setCredential: { mutate: harness.setCredentialMutateAsync },
+      deleteCredential: { mutate: harness.deleteCredentialMutateAsync },
     },
   }),
 }));
@@ -36,13 +42,6 @@ vi.mock('@/providers/query-provider', () => ({
 vi.mock('@tanstack/react-query', () => ({
   useQuery: (options: { kind: string }) =>
     options.kind === 'modelCatalog' ? { data: harness.catalogue } : { data: undefined },
-  useMutation: (options: { kind: string }) => ({
-    isPending: false,
-    mutateAsync:
-      options.kind === 'setCredential'
-        ? harness.setCredentialMutateAsync
-        : harness.deleteCredentialMutateAsync,
-  }),
   useQueryClient: () => ({ invalidateQueries: harness.invalidateQueries }),
 }));
 

@@ -120,6 +120,18 @@ const getQueryClient = (cacheOwner: string) => {
 
 const getUrl = () => import.meta.env.VITE_PUBLIC_BACKEND_URL + '/api/trpc';
 
+/**
+ * P0 3B (secret-cache) : les MUTATIONS ne sont JAMAIS déshydratées. Les
+ * `variables` d'une mutation peuvent porter un payload sensible (clé BYOK) ;
+ * une mutation paused (offline) serait sinon écrite dans IndexedDB par le
+ * persister. Barrière globale — le flux BYOK est DE PLUS impératif (hors
+ * MutationCache), ceci est la défense en profondeur.
+ */
+export const QUERY_DEHYDRATE_OPTIONS = {
+  shouldDehydrateQuery: shouldPersistQuery,
+  shouldDehydrateMutation: () => false,
+} as const;
+
 export const { TRPCProvider, useTRPC, useTRPCClient } = createTRPCContext<AppRouter>();
 
 export const trpcClient = createTRPCClient<AppRouter>({
@@ -278,7 +290,7 @@ export function QueryProvider({ children }: PropsWithChildren) {
         queryClient,
         persister,
         buster: CACHE_BURST_KEY,
-        dehydrateOptions: { shouldDehydrateQuery: shouldPersistQuery },
+        dehydrateOptions: QUERY_DEHYDRATE_OPTIONS,
       });
     });
     return () => registerDetailPersistFlusher(null);
@@ -324,7 +336,7 @@ export function QueryProvider({ children }: PropsWithChildren) {
         // classe de cold boot multi-jour éliminée (cause POSSIBLE du spinner
         // Drafts observé, non certaine) — voir QUERY_PERSIST_MAX_AGE_MS.
         maxAge: QUERY_PERSIST_MAX_AGE_MS,
-        dehydrateOptions: { shouldDehydrateQuery: shouldPersistQuery },
+        dehydrateOptions: QUERY_DEHYDRATE_OPTIONS,
       }}
       onSuccess={() => {
         // r6 : recopie les listes persistées sous l'ancienne clé (20 lignes)

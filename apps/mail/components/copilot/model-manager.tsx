@@ -5,8 +5,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useTRPC } from '@/providers/query-provider';
+import { useTRPC, useTRPCClient } from '@/providers/query-provider';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { m } from '@/paraglide/messages';
@@ -16,12 +16,16 @@ import { toast } from 'sonner';
 /**
  * Ask Reta model manager (slice 3B) — lazy chunk, only loaded when opened.
  *
- * SECRET DISCIPLINE (spec docs/spec/mail-copilot.md): the API key exists
- * ONLY as ephemeral state of a card while the dialog is mounted — it is
- * never routed through URL/localStorage/sessionStorage/query cache/
- * analytics/toast/log, never echoed by the server, and cleared on success,
- * error, cancel and unmount (closing the dialog unmounts every card). The
- * ONLY stored facts shown are "configured / not configured" — never a
+ * SECRET DISCIPLINE (spec docs/spec/mail-copilot.md + P0 secret-cache): the
+ * API key exists ONLY as ephemeral state of a card while the dialog is
+ * mounted — it is never routed through URL/localStorage/sessionStorage/
+ * query cache/analytics/toast/log, never echoed by the server, and cleared
+ * on success, error, cancel and unmount (closing the dialog unmounts every
+ * card). The writes are IMPERATIVE tRPC-client calls — NEVER TanStack
+ * useMutation: mutation `variables` are retained by the MutationCache (and a
+ * paused offline mutation could be dehydrated), so the key must never enter
+ * them. The payload is built at the LAST instant from local memory state.
+ * The ONLY stored facts shown are "configured / not configured" — never a
  * verification status, suffix or length.
  */
 
@@ -58,14 +62,13 @@ function ProviderCard({
   catalog: ModelCatalog;
 }) {
   const trpc = useTRPC();
+  const trpcClient = useTRPCClient();
   const queryClient = useQueryClient();
   // Ephemeral ONLY: card-local state, gone on unmount (dialog close / A→B).
   const [apiKey, setApiKey] = useState('');
   const [consented, setConsented] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
-
-  const setCredential = useMutation(trpc.copilot.setCredential.mutationOptions());
-  const deleteCredential = useMutation(trpc.copilot.deleteCredential.mutationOptions());
+  const [busy, setBusy] = useState(false);
 
   const configured = catalog.models.some(
     (model) => model.provider === provider && model.requiresCredential && model.configured,
@@ -78,43 +81,49 @@ function ProviderCard({
     setConsented(false);
   };
 
-  const save = () => {
-    void setCredential
-      .mutateAsync({
+  const save = async () => {
+    setBusy(true);
+    try {
+      // IMPERATIVE call (P0 secret-cache): straight through the tRPC client,
+      // NOT useMutation — the key never enters TanStack mutation variables,
+      // is never retained by the MutationCache and can never be paused/
+      // dehydrated. Payload built at the last instant from local state.
+      await trpcClient.copilot.setCredential.mutate({
         provider: provider as never,
         apiKey,
         acceptsMailboxEgress: true,
         consentVersion: catalog.consentVersion as never,
-      })
-      .then(async () => {
-        clearForm();
-        await invalidateCatalog();
-        toast.success(m['common.askReta.keySaved']());
-      })
-      .catch(() => {
-        // Fixed message only — never the transport error, never the key.
-        clearForm();
-        toast.error(m['common.askReta.keySaveError']());
       });
+      await invalidateCatalog();
+      toast.success(m['common.askReta.keySaved']());
+    } catch {
+      // Fixed message only — never the transport error, never the key, and
+      // NO log of the raw error (the global MutationCache onError is not on
+      // this path either).
+      toast.error(m['common.askReta.keySaveError']());
+    } finally {
+      clearForm();
+      setBusy(false);
+    }
   };
 
-  const remove = () => {
+  const remove = async () => {
     setConfirmingDelete(false);
-    void deleteCredential
-      .mutateAsync({ provider: provider as never })
-      .then(async () => {
-        clearForm();
-        await invalidateCatalog();
-        toast.success(m['common.askReta.keyRemoved']());
-      })
-      .catch(() => {
-        toast.error(m['common.askReta.keyRemoveError']());
-      });
+    setBusy(true);
+    try {
+      await trpcClient.copilot.deleteCredential.mutate({ provider: provider as never });
+      clearForm();
+      await invalidateCatalog();
+      toast.success(m['common.askReta.keyRemoved']());
+    } catch {
+      toast.error(m['common.askReta.keyRemoveError']());
+    } finally {
+      setBusy(false);
+    }
   };
 
   const inputId = `ask-reta-key-${provider}`;
   const consentId = `ask-reta-consent-${provider}`;
-  const busy = setCredential.isPending || deleteCredential.isPending;
 
   return (
     <div className="rounded-lg border p-3" data-testid={`provider-card-${provider}`}>
@@ -165,7 +174,7 @@ function ProviderCard({
             size="sm"
             className="h-7 text-xs"
             disabled={busy || apiKey.trim().length < 8 || !consented}
-            onClick={save}
+            onClick={() => void save()}
           >
             {configured ? m['common.askReta.replaceKey']() : m['common.askReta.saveKey']()}
           </Button>
@@ -181,7 +190,7 @@ function ProviderCard({
                   variant="destructive"
                   className="h-7 text-xs"
                   disabled={busy}
-                  onClick={remove}
+                  onClick={() => void remove()}
                 >
                   {m['common.askReta.confirmRemove']()}
                 </Button>

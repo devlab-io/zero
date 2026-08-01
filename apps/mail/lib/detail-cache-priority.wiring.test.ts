@@ -33,8 +33,13 @@ describe('câblage r16 — priorité cache corps', () => {
     // Le save explicite passe par la MÊME politique de déshydratation que
     // l'abonnement (shouldPersistQuery) et le même buster.
     const saveBlock = queryProvider.slice(saveIndex, saveIndex + 400);
-    expect(saveBlock).toContain('dehydrateOptions: { shouldDehydrateQuery: shouldPersistQuery }');
+    // P0 secret-cache : le flush immédiat passe par les MÊMES options de
+    // déshydratation que le provider — requêtes filtrées ET mutations
+    // JAMAIS déshydratées (une mutation paused peut porter un secret BYOK).
+    expect(saveBlock).toContain('dehydrateOptions: QUERY_DEHYDRATE_OPTIONS');
     expect(saveBlock).toContain('buster: CACHE_BURST_KEY');
+    // …et la constante partagée porte bien la barrière anti-mutations.
+    expect(queryProvider).toContain('shouldDehydrateMutation: () => false');
     // Cleanup du hook : le flusher ne survit jamais à son owner.
     expect(queryProvider).toContain('return () => registerDetailPersistFlusher(null);');
   });
