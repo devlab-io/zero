@@ -29,6 +29,34 @@ export interface LoggingContext {
   userId?: string;
 }
 
+// Content-bearing procedures: their input/output carry mail bodies, draft text or
+// assistant prompts. Exporting those payloads (Datadog) would leak mailbox content —
+// ship an opaque size stub instead. Metadata (procedure, duration, hashed IP) stays.
+const CONTENT_BEARING_PREFIXES = [
+  'ai.',
+  'copilot.',
+  'mail.',
+  'drafts.',
+  'notes.',
+  'templates.',
+  'outbox.',
+];
+
+const isContentBearingProcedure = (path: string) =>
+  CONTENT_BEARING_PREFIXES.some((prefix) => path.startsWith(prefix));
+
+/** Replace a content-bearing payload with `{redacted, size}`; pass others through. */
+export const redactCallPayload = (path: string, value: unknown): unknown => {
+  if (!isContentBearingProcedure(path)) return value;
+  let size = 0;
+  try {
+    size = value === undefined ? 0 : (JSON.stringify(value)?.length ?? 0);
+  } catch {
+    size = -1;
+  }
+  return { redacted: true, size };
+};
+
 export const createLoggingMiddleware = () => {
   return async (opts: {
     path: string;
@@ -126,8 +154,8 @@ export const createLoggingMiddleware = () => {
           userId: userId || 'anonymous',
           sessionId,
           procedure: opts.path,
-          input: opts.input,
-          output: sanitizeOutput(output),
+          input: redactCallPayload(opts.path, opts.input),
+          output: redactCallPayload(opts.path, sanitizeOutput(output)),
           duration: Date.now() - startTime,
           metadata: {
             method: opts.type,
@@ -209,7 +237,7 @@ export const createLoggingMiddleware = () => {
           userId: userId || 'anonymous',
           sessionId,
           procedure: opts.path,
-          input: opts.input,
+          input: redactCallPayload(opts.path, opts.input),
           error,
           duration: Date.now() - startTime,
           metadata: {

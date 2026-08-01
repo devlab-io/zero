@@ -11,7 +11,6 @@ import { ThinkingMCP } from '../lib/sequential-thinking';
 import { contextStorage } from 'hono/context-storage';
 import { createLocalJWKSet, jwtVerify } from 'jose';
 import { trpcServer } from '@hono/trpc-server';
-import { agentsMiddleware } from 'hono-agents';
 import { invariant } from '../lib/invariant';
 import { initTracing } from '../lib/tracing';
 import type { HonoContext } from '../ctx';
@@ -268,7 +267,8 @@ export const app = new Hono<HonoContext>()
       const auth = await createAuth();
       const session = await auth.api.getMcpSession({ headers: request.headers });
       if (!session) {
-        logger.info('Invalid auth provided', Array.from(request.headers.entries()));
+        // Header NAMES only — values carry Authorization/Cookie credentials.
+        logger.info('Invalid auth provided', Array.from(request.headers.keys()));
         return new Response('Unauthorized', { status: 401 });
       }
       ctx.props = {
@@ -299,7 +299,8 @@ export const app = new Hono<HonoContext>()
       const auth = await createAuth();
       const session = await auth.api.getMcpSession({ headers: request.headers });
       if (!session) {
-        logger.info('Invalid auth provided', Array.from(request.headers.entries()));
+        // Header NAMES only — values carry Authorization/Cookie credentials.
+        logger.info('Invalid auth provided', Array.from(request.headers.keys()));
         return new Response('Unauthorized', { status: 401 });
       }
       ctx.props = {
@@ -310,18 +311,11 @@ export const app = new Hono<HonoContext>()
     { replaceRequest: false },
   )
   .route('/api', api)
-  .use(
-    '*',
-    agentsMiddleware({
-      options: {
-        onBeforeConnect: (c) => {
-          if (!c.headers.get('Cookie')) {
-            return new Response('Unauthorized', { status: 401 });
-          }
-        },
-      },
-    }),
-  )
+  // The `agentsMiddleware` websocket mount (legacy AI-chat transport) is intentionally
+  // GONE: its only check was Cookie-header *existence* while the agent name in the URL
+  // was trusted as a connectionId — any logged-in user could attach to any mailbox DO.
+  // No client consumer remains (the chat UI was removed by the r8 contract); Ask Reta
+  // uses authenticated tRPC with server-side connection ownership instead.
   .get('/health', (c) => c.json({ message: 'Zero Server is Up!' }))
   .get('/', (c) => c.redirect(`${env.VITE_PUBLIC_APP_URL}`))
   .post('/monitoring/sentry', async (c) => {

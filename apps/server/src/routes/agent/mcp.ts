@@ -74,6 +74,17 @@ export class ZeroMCP extends McpAgent<typeof env, Record<string, unknown>, { use
 
   activeConnectionId: string | undefined;
 
+  /**
+   * Every mailbox handler must resolve its agent HERE, at call time. A stub captured
+   * at init() stays bound to the first connection even after setActiveConnection —
+   * reads and draft writes would then hit the wrong account.
+   */
+  private async activeAgent() {
+    invariant(this.activeConnectionId, 'No active connection');
+    const { stub } = await getZeroAgent(this.activeConnectionId);
+    return stub;
+  }
+
   async init(): Promise<void> {
     if (!this.props.userId) return;
     const { db, conn } = createDb(env.HYPERDRIVE.connectionString);
@@ -84,8 +95,6 @@ export class ZeroMCP extends McpAgent<typeof env, Record<string, unknown>, { use
       throw new Error('Unauthorized');
     }
     this.activeConnectionId = _connection.id;
-
-    const { stub: agent } = await getZeroAgent(_connection.id);
 
     // DO-storage-backed idempotency for createDraft (spec: mutation tools are idempotent).
     const draftIdempotencyStore: DraftIdempotencyStore = {
@@ -172,6 +181,7 @@ export class ZeroMCP extends McpAgent<typeof env, Record<string, unknown>, { use
       { description: descriptions.listThreads, inputSchema: schemas.listThreads },
       async (s) => {
         // Single projection query (#22/#30) — compact metadata, NO per-row body/N+1.
+        const agent = await this.activeAgent();
         const response = (await agent.getThreadsFromDB({
           folder: s.folder,
           q: s.query,
@@ -187,6 +197,7 @@ export class ZeroMCP extends McpAgent<typeof env, Record<string, unknown>, { use
       'searchThreads',
       { description: descriptions.searchThreads, inputSchema: schemas.searchThreads },
       async (s) => {
+        const agent = await this.activeAgent();
         const response = (await agent.getThreadsFromDB({
           folder: s.folder,
           q: s.query,
@@ -262,6 +273,7 @@ export class ZeroMCP extends McpAgent<typeof env, Record<string, unknown>, { use
       'getUserLabels',
       { description: descriptions.getUserLabels, inputSchema: schemas.getUserLabels },
       async () => {
+        const agent = await this.activeAgent();
         const labels = await agent.getUserLabels();
         return text(
           labels
@@ -275,6 +287,7 @@ export class ZeroMCP extends McpAgent<typeof env, Record<string, unknown>, { use
       'getLabel',
       { description: descriptions.getLabel, inputSchema: schemas.getLabel },
       async (s) => {
+        const agent = await this.activeAgent();
         const label = await agent.getLabel(s.id);
         return {
           content: [
@@ -348,8 +361,8 @@ export class ZeroMCP extends McpAgent<typeof env, Record<string, unknown>, { use
           this.activeConnectionId,
           data.idempotencyKey,
           draftIdempotencyStore,
-          () =>
-            agent.createDraft({
+          async () =>
+            (await this.activeAgent()).createDraft({
               to: formatDraftRecipients(data.to),
               cc: data.cc?.length ? formatDraftRecipients(data.cc) : undefined,
               bcc: data.bcc?.length ? formatDraftRecipients(data.bcc) : undefined,
