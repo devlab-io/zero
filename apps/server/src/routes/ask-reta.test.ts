@@ -11,15 +11,31 @@ const harness = vi.hoisted(() => ({
   runAskReta: vi.fn(),
   createDeps: vi.fn(),
   getActiveConnection: vi.fn(),
+  cancellations: [] as { signal: AbortSignal; abort: () => void; dispose: () => void }[],
 }));
 
 vi.mock('cloudflare:workers', () => ({ env: harness.env }));
 vi.mock('../lib/server-utils', () => ({ getActiveConnection: harness.getActiveConnection }));
 vi.mock('../lib/services', () => ({ redis: () => ({}) }));
 vi.mock('../lib/ask-reta/deps', () => ({ createAskRetaDeps: harness.createDeps }));
+vi.mock('../lib/ask-reta/cancellation', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../lib/ask-reta/cancellation')>();
+  return {
+    createAskRetaCancellation: (params: Parameters<typeof actual.createAskRetaCancellation>[0]) => {
+      const real = actual.createAskRetaCancellation(params);
+      const wrapped = { ...real, dispose: vi.fn(real.dispose) };
+      harness.cancellations.push(wrapped);
+      return wrapped;
+    },
+  };
+});
 vi.mock('../lib/ask-reta/pipeline', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../lib/ask-reta/pipeline')>();
-  return { AskRetaAbortedError: actual.AskRetaAbortedError, runAskReta: harness.runAskReta };
+  return {
+    AskRetaAbortedError: actual.AskRetaAbortedError,
+    ASK_RETA_DEADLINE_MS: actual.ASK_RETA_DEADLINE_MS,
+    runAskReta: harness.runAskReta,
+  };
 });
 
 import { askRetaStreamRouter, serializeBoundedEvent } from './ask-reta';
@@ -78,6 +94,7 @@ beforeEach(() => {
   }));
   harness.getActiveConnection.mockReset();
   harness.getActiveConnection.mockResolvedValue({ id: 'conn-active' });
+  harness.cancellations.length = 0;
 });
 
 describe('/api/ask-reta — CSRF/origin gate (before anything else)', () => {
@@ -190,6 +207,43 @@ describe('/api/ask-reta — authenticated ownership-safe NDJSON stream', () => {
     finishRun();
   });
 
+  it('a pipeline DEADLINE rejection aborts the controller: the underlying op settles', async () => {
+    let depsSignal: AbortSignal | undefined;
+    harness.createDeps.mockImplementation(async ({ signal }: { signal?: AbortSignal }) => {
+      depsSignal = signal;
+      return { deps: { signal }, modelKey: 'llama-4-scout' };
+    });
+    // The pipeline race rejected on deadline while the underlying dependency
+    // (same signal) is still running: only signal.aborted lets it settle.
+    let underlyingSettled = false;
+    harness.runAskReta.mockImplementation(async (deps: { signal?: AbortSignal }) => {
+      deps.signal?.addEventListener('abort', () => {
+        underlyingSettled = true;
+      });
+      throw new AskRetaAbortedError('deadline');
+    });
+
+    const lines = await readLines(await post(makeApp({ id: 'user-1' }), { question: 'x' }));
+    expect(lines).toEqual([{ type: 'error', message: 'aborted' }]);
+    expect(depsSignal?.aborted).toBe(true);
+    expect(underlyingSettled).toBe(true);
+  });
+
+  it('a failure BEFORE the Response exists still disposes timer and listener', async () => {
+    harness.getActiveConnection.mockRejectedValueOnce(new Error('db down'));
+    const response = await post(makeApp({ id: 'user-1' }), { question: 'x' });
+    expect(response.status).toBe(500);
+    expect(harness.cancellations).toHaveLength(1);
+    expect(harness.cancellations[0]!.dispose).toHaveBeenCalled();
+  });
+
+  it('run completion disposes the cancellation on the normal path too', async () => {
+    harness.runAskReta.mockResolvedValueOnce({ answer: 'a', citations: [], steps: [] });
+    await readLines(await post(makeApp({ id: 'user-1' }), { question: 'x' }));
+    expect(harness.cancellations).toHaveLength(1);
+    expect(harness.cancellations[0]!.dispose).toHaveBeenCalled();
+  });
+
   it('fails CLOSED in production without remote Redis (503)', async () => {
     harness.env.NODE_ENV = 'production';
     const response = await post(makeApp({ id: 'user-1' }), { question: 'x' });
@@ -248,18 +302,82 @@ describe('serializeBoundedEvent — server-side event discipline', () => {
     expect(parsed.step.search.threads[0]?.subject).toHaveLength(300);
   });
 
-  it('drops an event whose serialization exceeds its byte budget', () => {
-    expect(
-      serializeBoundedEvent({
-        type: 'result',
-        result: {
-          answer: 'a'.repeat(300_000),
-          citations: [],
-          steps: [],
-          model: 'llama-4-scout',
+  it('an oversize answer is TRUNCATED by boundResult — bounded, never dropped', () => {
+    const line = serializeBoundedEvent({
+      type: 'result',
+      result: {
+        answer: 'a'.repeat(300_000),
+        citations: [],
+        steps: [],
+        model: 'llama-4-scout',
+      },
+    });
+    expect(line).not.toBeNull();
+    const parsed = JSON.parse(line!) as { result: { answer: string } };
+    expect(parsed.result.answer).toHaveLength(12_000);
+  });
+
+  it('BOUNDS the terminal result: 300-char query and overlong mailbox metadata survive', () => {
+    const longQuery = 'q'.repeat(300);
+    const line = serializeBoundedEvent({
+      type: 'result',
+      result: {
+        answer: 'Extraits vérifiés…',
+        citations: [
+          {
+            ref: 's11',
+            kind: 'message',
+            threadId: 't1',
+            subject: 'S'.repeat(2_000), // overlong mailbox subject
+            sender: `${'N'.repeat(1_000)} <x@y.z>`, // overlong sender
+            date: '2026-08-01',
+            excerptHash: 'a'.repeat(64),
+            quote: 'quote suffisamment longue pour le plancher de preuve',
+          },
+        ],
+        // The pipeline detail embeds the query + decor → >300 chars raw.
+        steps: [
+          {
+            kind: 'search',
+            detail: `"${longQuery}" → 3 threads`,
+            sourceRefs: [],
+            search: { query: longQuery, threads: [] },
+          },
+        ],
+        model: 'llama-4-scout',
+      },
+    });
+    // NOT dropped: bounded then valid.
+    expect(line).not.toBeNull();
+    const parsed = JSON.parse(line!) as {
+      result: { citations: { subject: string; sender: string }[]; steps: { detail: string }[] };
+    };
+    expect(parsed.result.citations[0]!.subject).toHaveLength(300);
+    expect(parsed.result.citations[0]!.sender).toHaveLength(300);
+    expect(parsed.result.steps[0]!.detail).toHaveLength(300);
+  });
+
+  it('a terminal STILL invalid after bounding becomes an explicit ask_failed, never silence', async () => {
+    // excerptHash cannot be truncated into validity → the result is dropped
+    // and the envelope substitutes an explicit terminal error.
+    harness.runAskReta.mockResolvedValueOnce({
+      answer: 'a',
+      citations: [
+        {
+          ref: 's1',
+          kind: 'message',
+          threadId: 't',
+          subject: 's',
+          sender: 'x',
+          date: 'd',
+          excerptHash: 'NOT-A-HASH',
+          quote: 'quote suffisamment longue pour le plancher',
         },
-      }),
-    ).toBeNull();
+      ],
+      steps: [],
+    });
+    const lines = await readLines(await post(makeApp({ id: 'user-1' }), { question: 'x' }));
+    expect(lines).toEqual([{ type: 'error', message: 'ask_failed' }]);
   });
 
   it('drops OFF-SCHEMA events at runtime — terminal events included', () => {

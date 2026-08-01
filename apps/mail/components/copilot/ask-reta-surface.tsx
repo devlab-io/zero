@@ -145,9 +145,16 @@ export function AskRetaSurface() {
     if (previous && sameScope(conversationScopeRef.current, previous)) {
       saveAskRetaConversation(previous.userId, previous.connectionId, conversationRef.current);
     }
-    // 2. An in-flight ask belongs to the old scope: abort it, drop live steps.
+    // 2. EVERYTHING of the old scope dies here (review 02-2): the in-flight
+    //    ask is aborted AND its controller invalidated, the unsent question,
+    //    the live steps, the announcement and the asking state are purged —
+    //    a confidential draft question typed under A never exists under B.
     abortRef.current?.abort();
+    abortRef.current = null;
+    setIsAsking(false);
     setLiveSteps([]);
+    setQuestion('');
+    setAnnouncement('');
     // 3. Barrier down: saves AND submits disabled until hydration is observed.
     loadedScopeRef.current = nextScope;
     conversationScopeRef.current = null;
@@ -517,9 +524,10 @@ export function AskRetaSurface() {
         </div>
       </div>
 
-      {/* Compact live region: thinking → latest step → answer ready. */}
+      {/* Compact live region: thinking → latest step → answer ready.
+          Rendered ONLY for the hydrated scope — no stale announcement paint. */}
       <p aria-live="polite" aria-atomic="true" className="sr-only">
-        {announcement}
+        {isHydrated ? announcement : ''}
       </p>
 
       <div ref={scrollRef} className="flex-1 space-y-4 overflow-y-auto p-4">
@@ -629,7 +637,7 @@ export function AskRetaSurface() {
             </div>
           </div>
         ))}
-        {isAsking && (
+        {isAsking && isHydrated && (
           <div className="text-muted-foreground space-y-1 text-xs">
             <div className="flex items-center gap-2">
               <LoaderCircle className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
@@ -655,7 +663,10 @@ export function AskRetaSurface() {
         }}
       >
         <Input
-          value={question}
+          // Render-time gate on top of the effect purge: the unsent question of
+          // a stale scope is never painted, not even the pre-effect frame.
+          value={isHydrated ? question : ''}
+          disabled={!isHydrated}
           onChange={(event) => setQuestion(event.target.value)}
           placeholder={m['common.askReta.placeholder']()}
           aria-label={m['common.askReta.placeholder']()}

@@ -6,9 +6,10 @@ import {
   type AskRetaStepThread,
 } from '../../lib/ask-reta/schema';
 import { activeDriverProcedure, createRateLimiterMiddleware, router } from '../trpc';
+import { AskRetaAbortedError, runAskReta } from '../../lib/ask-reta/pipeline';
+import { createAskRetaCancellation } from '../../lib/ask-reta/cancellation';
 import { createAskRetaDeps } from '../../lib/ask-reta/deps';
 import { getThreadsFromDB } from '../../lib/server-utils';
-import { runAskReta } from '../../lib/ask-reta/pipeline';
 import type { ThreadsResponse } from '@zero/types';
 import { getContext } from 'hono/context-storage';
 import { Ratelimit } from '@upstash/ratelimit';
@@ -43,15 +44,26 @@ export const copilotRouter = router({
       const { activeConnection, sessionUser } = ctx;
       const executionCtx = getContext<HonoContext>().executionCtx;
 
-      const { deps, modelKey } = await createAskRetaDeps({
-        userId: sessionUser.id,
-        connectionId: activeConnection.id,
-        executionCtx,
-        signal: ctx.c.req.raw.signal,
-      });
+      // Owned cancellation (review 02-2): the canonical 45s deadline aborts
+      // the controller so a pipeline deadline rejection also SETTLES the
+      // underlying operation; disposal on every exit path.
+      const cancellation = createAskRetaCancellation({ requestSignal: ctx.c.req.raw.signal });
+      try {
+        const { deps, modelKey } = await createAskRetaDeps({
+          userId: sessionUser.id,
+          connectionId: activeConnection.id,
+          executionCtx,
+          signal: cancellation.signal,
+        });
 
-      const result = await runAskReta(deps, input);
-      return { ...result, model: modelKey };
+        const result = await runAskReta(deps, input);
+        return { ...result, model: modelKey };
+      } catch (error) {
+        if (error instanceof AskRetaAbortedError) cancellation.abort();
+        throw error;
+      } finally {
+        cancellation.dispose();
+      }
     }),
 
   /**

@@ -60,7 +60,11 @@ export class AskRetaAbortedError extends Error {
   }
 }
 
-const DEFAULT_DEADLINE_MS = 45_000;
+/** Canonical Ask Reta wall-clock budget — shared by the pipeline race AND the
+ * transport-level AbortController (review 02-2: a race rejection alone left
+ * the underlying operation running until an unrelated 60s belt). */
+export const ASK_RETA_DEADLINE_MS = 45_000;
+const DEFAULT_DEADLINE_MS = ASK_RETA_DEADLINE_MS;
 
 /** Re-checked after EVERY await (model, overview, search, thread read). */
 type Budget = { signal?: AbortSignal; deadline: number };

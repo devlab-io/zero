@@ -288,11 +288,19 @@ describe('AskRetaSurface — hydration gate', () => {
     expect(harness.streamAskReta).not.toHaveBeenCalled();
     expect(container.textContent).not.toContain('question trop rapide');
 
-    // Scope arrives → hydration completes → enabled.
+    // Scope arrives → hydration completes → the input unlocks (the pre-scope
+    // text was purged: it belonged to no confirmed scope) and typing enables Ask.
     act(() => {
       harness.connectionId = 'conn-a';
     });
     render();
+    const unlockedInput = container.querySelector('input')! as HTMLInputElement;
+    expect(unlockedInput.hasAttribute('disabled')).toBe(false);
+    expect(unlockedInput.value).toBe('');
+    act(() => {
+      setValue.call(unlockedInput, 'nouvelle question');
+      unlockedInput.dispatchEvent(new Event('input', { bubbles: true }));
+    });
     const enabledButton = [...container.querySelectorAll('button')].find((b) =>
       b.textContent?.includes('askReta.send'),
     )!;
@@ -346,6 +354,64 @@ describe('AskRetaSurface — review hardening', () => {
     });
     expect(container.textContent).not.toContain('réponse tardive');
     expect(localStorage.getItem(askRetaConversationKey('user-1', 'conn-a'))).toBeNull();
+  });
+});
+
+describe('AskRetaSurface — scope switch purges EVERYTHING (review 02-2)', () => {
+  it('an UNSENT confidential question typed under A never exists under B', async () => {
+    render();
+    const input = container.querySelector('input')! as HTMLInputElement;
+    const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
+    act(() => {
+      setValue.call(input, 'question confidentielle jamais envoyée');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    expect((container.querySelector('input') as HTMLInputElement).value).toBe(
+      'question confidentielle jamais envoyée',
+    );
+
+    act(() => {
+      harness.connectionId = 'conn-b';
+    });
+    render();
+
+    expect((container.querySelector('input') as HTMLInputElement).value).toBe('');
+    expect(container.textContent).not.toContain('question confidentielle');
+  });
+
+  it('A→B after a stream STEP: progression, announcement and asking state are gone', async () => {
+    let capturedOnStep!: (step: unknown) => void;
+    let capturedSignal: AbortSignal | null = null;
+    harness.streamAskReta.mockImplementationOnce(
+      ({ signal, onStep }: { signal: AbortSignal; onStep: (s: unknown) => void }) =>
+        new Promise(() => {
+          capturedSignal = signal;
+          capturedOnStep = onStep;
+        }),
+    );
+    render();
+    await askQuestion('question de A');
+    await act(async () => {
+      capturedOnStep({ kind: 'search', detail: 'détail étape secrète de A', sourceRefs: [] });
+    });
+    expect(container.textContent).toContain('détail étape secrète de A');
+
+    act(() => {
+      harness.connectionId = 'conn-b';
+    });
+    render();
+
+    // The old stream is aborted, its controller invalidated…
+    expect((capturedSignal as AbortSignal | null)?.aborted).toBe(true);
+    // …and nothing of A's progression paints under B.
+    expect(container.textContent).not.toContain('détail étape secrète de A');
+    expect(
+      [...container.querySelectorAll('button')].some((b) =>
+        b.textContent?.includes('askReta.stop'),
+      ),
+    ).toBe(false);
+    const liveRegion = container.querySelector('[aria-live="polite"]');
+    expect(liveRegion?.textContent ?? '').toBe('');
   });
 });
 

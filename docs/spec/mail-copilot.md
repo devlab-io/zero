@@ -220,7 +220,14 @@ r9 ; tests serveur + client.
   `searchPreview`). **Cancel préemptif RÉEL** (revue 02) : flag wrangler
   `enable_request_signal`, AbortController local nourri par le signal
   requête + `writer.closed` (cancel lecteur sans écriture ultérieure) +
-  deadline dure 60 s ; ressources fermées, signal passé au pipeline. **Gate
+  deadline **canonique 45 s** (la même que la race du pipeline — revue 02-2 :
+  une rejection de race seule laissait l'opération sous-jacente courir) via
+  l'autorité possédée `lib/ask-reta/cancellation.ts`, abort sur
+  AskRetaAbortedError, dispose sur CHAQUE sortie y compris échec avant
+  Response ; ressources fermées, signal passé au pipeline. Le **terminal**
+  est borné déterministiquement (`boundResult` : steps/citations/métadonnées
+  tronquées) — un terminal encore invalide émet un `ask_failed` explicite,
+  jamais une fermeture silencieuse. **Gate
   CSRF/origin AVANT le body** : allowlist d'origine EXACTE
   (`VITE_PUBLIC_APP_URL`) + header `X-Ask-Reta-Csrf` — le CORS racine accepte
   tout sous-domaine du COOKIE_DOMAIN, le sibling worker cookie-partagé meurt

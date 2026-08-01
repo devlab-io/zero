@@ -6,6 +6,7 @@ import {
   type AskRetaStreamEvent,
 } from '../lib/ask-reta/schema';
 import { AskRetaAbortedError, runAskReta } from '../lib/ask-reta/pipeline';
+import { createAskRetaCancellation } from '../lib/ask-reta/cancellation';
 import { getActiveConnection } from '../lib/server-utils';
 import { createAskRetaDeps } from '../lib/ask-reta/deps';
 import { evaluateRateLimit } from '../lib/rate-limit';
@@ -38,9 +39,6 @@ import { z } from 'zod';
  */
 
 const CSRF_HEADER = 'X-Ask-Reta-Csrf';
-// Belt over the pipeline's own 45s budget: whatever happens, the local
-// controller aborts and the resources close.
-const HARD_DEADLINE_MS = 60_000;
 const MAX_STEP_EVENT_BYTES = 32_768;
 const MAX_TERMINAL_EVENT_BYTES = 262_144;
 
@@ -137,10 +135,54 @@ const streamEventSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('error'), message: z.enum(['aborted', 'ask_failed']) }),
 ]);
 
+/**
+ * Deterministic bounding of the TERMINAL result (review 02-2): the result
+ * re-embeds steps, citations and mailbox metadata — a 300-char query yields a
+ * >300 detail, an overlong subject/sender flows straight from the mailbox.
+ * Without this, the terminal fails validation AFTER the whole ask was paid
+ * and the client ends on a protocol error.
+ */
+const boundResult = (
+  result: Extract<AskRetaStreamEvent, { type: 'result' }>['result'],
+): Extract<AskRetaStreamEvent, { type: 'result' }>['result'] => ({
+  answer: truncate(result.answer, 12_000),
+  citations: result.citations.slice(0, askRetaLimits.citations).map((citation) => ({
+    ref: truncate(citation.ref, 16),
+    kind: citation.kind,
+    threadId: truncate(citation.threadId, 200),
+    ...(citation.messageId ? { messageId: truncate(citation.messageId, 200) } : {}),
+    subject: truncate(citation.subject, 300),
+    sender: truncate(citation.sender, 300),
+    date: truncate(citation.date, 64),
+    excerptHash: citation.excerptHash,
+    quote: truncate(citation.quote, 300),
+  })),
+  steps: result.steps.slice(0, 12).map(boundStep),
+  ...(result.proposal
+    ? {
+        proposal: {
+          kind: result.proposal.kind,
+          ...(result.proposal.to ? { to: truncate(result.proposal.to, 500) } : {}),
+          ...(result.proposal.subject ? { subject: truncate(result.proposal.subject, 300) } : {}),
+          bodyHtml: truncate(result.proposal.bodyHtml, 40_000),
+          ...(result.proposal.threadId
+            ? { threadId: truncate(result.proposal.threadId, 200) }
+            : {}),
+        },
+      }
+    : {}),
+  // Union type, ≤40 by construction — the runtime schema still verifies it.
+  model: result.model,
+});
+
 /** Truncate → runtime-validate → size-check; null → drop (never enqueue). */
 export const serializeBoundedEvent = (event: AskRetaStreamEvent): string | null => {
   const bounded: AskRetaStreamEvent =
-    event.type === 'step' ? { type: 'step', step: boundStep(event.step) } : event;
+    event.type === 'step'
+      ? { type: 'step', step: boundStep(event.step) }
+      : event.type === 'result'
+        ? { type: 'result', result: boundResult(event.result) }
+        : event;
   const validated = streamEventSchema.safeParse(bounded);
   if (!validated.success) {
     logger.warn('[ask-reta-stream] off-schema event dropped', { type: bounded.type });
@@ -182,9 +224,16 @@ export function createAskRetaNdjsonResponse(
 
   const emit = (event: AskRetaStreamEvent) => {
     if (consumerGone) return;
-    const line = serializeBoundedEvent(event);
-    if (line === null) return;
-    chain = chain.then(() => writer.write(encoder.encode(line))).catch(markConsumerGone);
+    let line = serializeBoundedEvent(event);
+    if (line === null) {
+      // A dropped STEP is a cosmetic loss; a dropped TERMINAL must never end
+      // in a silent close — the client gets an explicit ask_failed instead.
+      if (event.type === 'step') return;
+      line = serializeBoundedEvent({ type: 'error', message: 'ask_failed' });
+      if (line === null) return; // unreachable: the fallback is always valid
+    }
+    const payload = line;
+    chain = chain.then(() => writer.write(encoder.encode(payload))).catch(markConsumerGone);
   };
 
   void (async () => {
@@ -244,22 +293,27 @@ export const askRetaStreamRouter = new Hono<HonoContext>().post('/', async (c) =
   if (!parsed.success) return c.json({ error: 'Invalid input' }, 400);
   const input = parsed.data;
 
-  // 2. LOCAL cancellation authority, fed by every disconnect path:
-  //    request signal (enable_request_signal), stream cancel, hard deadline.
-  const controller = new AbortController();
-  const requestSignal = c.req.raw.signal;
-  const onRequestAbort = () => controller.abort();
-  if (requestSignal.aborted) controller.abort();
-  else requestSignal.addEventListener('abort', onRequestAbort, { once: true });
-  const deadlineTimer = setTimeout(() => controller.abort(), HARD_DEADLINE_MS);
+  // 2. OWNED cancellation authority (review 02-2): the CANONICAL 45s deadline
+  //    aborts the controller (the pipeline races the same budget), fed also by
+  //    the request signal (enable_request_signal) and the stream-cancel path.
+  //    Disposal is guaranteed on EVERY exit, including failures before the
+  //    Response exists — no leaked timer or listener.
+  const cancellation = createAskRetaCancellation({ requestSignal: c.req.raw.signal });
 
-  const activeConnection = await getActiveConnection();
-  const { deps, modelKey } = await createAskRetaDeps({
-    userId: sessionUser.id,
-    connectionId: activeConnection.id,
-    executionCtx: c.executionCtx,
-    signal: controller.signal,
-  });
+  let deps: Awaited<ReturnType<typeof createAskRetaDeps>>['deps'];
+  let modelKey: Awaited<ReturnType<typeof createAskRetaDeps>>['modelKey'];
+  try {
+    const activeConnection = await getActiveConnection();
+    ({ deps, modelKey } = await createAskRetaDeps({
+      userId: sessionUser.id,
+      connectionId: activeConnection.id,
+      executionCtx: c.executionCtx,
+      signal: cancellation.signal,
+    }));
+  } catch (error) {
+    cancellation.dispose();
+    throw error;
+  }
 
   return createAskRetaNdjsonResponse(
     async (emit) => {
@@ -271,6 +325,9 @@ export const askRetaStreamRouter = new Hono<HonoContext>().post('/', async (c) =
         emit({ type: 'result', result: { ...result, model: modelKey } });
       } catch (error) {
         if (error instanceof AskRetaAbortedError) {
+          // The pipeline race may reject a tick before the controller timer:
+          // abort NOW so the underlying operation observes it and settles.
+          cancellation.abort();
           emit({ type: 'error', message: 'aborted' });
           return;
         }
@@ -278,10 +335,9 @@ export const askRetaStreamRouter = new Hono<HonoContext>().post('/', async (c) =
         logger.error('[ask-reta-stream] ask failed');
         emit({ type: 'error', message: 'ask_failed' });
       } finally {
-        clearTimeout(deadlineTimer);
-        requestSignal.removeEventListener('abort', onRequestAbort);
+        cancellation.dispose();
       }
     },
-    { onConsumerGone: () => controller.abort() },
+    { onConsumerGone: () => cancellation.abort() },
   );
 });
