@@ -38,6 +38,7 @@ import { schema, type EmailComposerProps } from './email-composer.types';
 // Issue #32 — send-and-archive (mod+shift+Enter): the editor has no Mod-Shift-Enter
 // keymap, so it is bound here with useHotkeys and archives the open thread after send.
 import { useOptimisticActions } from '@/hooks/use-optimistic-actions';
+import { WritingAssistantButton } from './writing-assistant-button';
 import { ComposerAttachments } from './email-composer.attachments';
 import { computeArchiveAfterSend } from './send-and-archive';
 import type { ImageQuality } from '@/lib/image-compression';
@@ -118,8 +119,8 @@ export function EmailComposer({
     if (filesToProcess.length > 0) setHasUnsavedChanges(true);
   };
 
-  // Contrat produit r8 : AUCUNE surface IA dans ZERO — les mutations de
-  // génération (corps, sujet) et leurs boutons ont été retirés.
+  // La seule assistance de rédaction exposée est volontairement bornée à la
+  // correction/reformulation du texte déjà saisi (pas de résumé ni de chat).
   const trpc = useTRPC();
   const { mutateAsync: createDraft } = useMutation(trpc.drafts.create.mutationOptions());
   const { mutateAsync: deleteDraftById } = useMutation(trpc.drafts.delete.mutationOptions());
@@ -617,6 +618,7 @@ export function EmailComposer({
               bcc={bccEmails ?? []}
               setRecipients={(field, val) => setValue(field, val)}
             />
+            <WritingAssistantButton editor={editor} />
             <Input
               type="file"
               id="attachment-input"

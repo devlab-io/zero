@@ -126,6 +126,17 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
             };
             meta: object;
         }>;
+        rewriteEmail: import("@trpc/server").TRPCMutationProcedure<{
+            input: {
+                mode: "correct" | "rewrite";
+                content: string;
+                mood?: string | undefined;
+            };
+            output: {
+                html: string;
+            };
+            meta: object;
+        }>;
         webSearch: import("@trpc/server").TRPCMutationProcedure<{
             input: {
                 query: string;

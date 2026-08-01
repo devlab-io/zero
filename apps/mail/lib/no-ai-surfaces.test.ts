@@ -2,12 +2,10 @@ import { readdirSync, readFileSync, existsSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { join } from 'node:path';
 
-// Contrat produit r8 : ZERO n'expose AUCUNE surface IA visible ou utilisable.
-// Ce test est le garde-fou CI : il échoue si une surface IA revient dans les
-// composants UI (palette, composeur, lecteur, sidebar). Les routes serveur
-// ai.* peuvent subsister temporairement derrière leurs gardes isUserTriggered —
-// c'est l'ABSENCE de déclencheur client qui est prouvée ici. La recherche
-// littérale et à opérateurs est préservée (testée par ailleurs).
+// Contrat produit r8 révisé par Thomas le 01/08/2026 : aucune surface IA
+// généraliste (résumés, chat, recherche naturelle). Une seule exception produit
+// est autorisée : l'assistant de correction/reformulation explicite du composeur.
+// Le garde-fou échoue si une autre surface ou route client revient.
 
 const APP_ROOT = join(__dirname, '..');
 
@@ -29,6 +27,7 @@ const PUBLIC_MARKETING_DIRS = [
 // le contrat) — seule exclusion fichier explicite, à retirer si la voix passe
 // dans le périmètre.
 const EXPLICIT_FILE_EXCLUSIONS = new Set(['providers/voice-provider.tsx']);
+const WRITING_ASSISTANT_EXCEPTION = 'components/create/writing-assistant-button.tsx';
 
 // Déclencheurs client des routes IA + promesses/surfaces IA, motifs LARGES.
 const FORBIDDEN_PATTERNS: Array<{ pattern: RegExp; why: string }> = [
@@ -68,6 +67,14 @@ describe('contrat r8 — aucune surface IA exposée', () => {
       for (const file of collectSourceFiles(dir)) {
         const source = readFileSync(file, 'utf8');
         for (const { pattern, why } of FORBIDDEN_PATTERNS) {
+          const relative = file.replace(`${APP_ROOT}/`, '');
+          if (
+            relative === WRITING_ASSISTANT_EXCEPTION &&
+            pattern.source === /trpc\.ai\.|trpcClient\.ai\./.source
+          ) {
+            const routeCalls = source.match(/(?:trpc|trpcClient)\.ai\.([A-Za-z0-9_]+)/g) ?? [];
+            if (routeCalls.every((call) => call === 'trpc.ai.rewriteEmail')) continue;
+          }
           if (pattern.test(source)) {
             offenders.push(`${file.replace(APP_ROOT, '')} → ${why} (${pattern})`);
           }
