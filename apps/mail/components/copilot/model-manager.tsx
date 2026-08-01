@@ -112,12 +112,14 @@ function ProviderCard({
     setBusy(true);
     try {
       await trpcClient.copilot.deleteCredential.mutate({ provider: provider as never });
-      clearForm();
       await invalidateCatalog();
       toast.success(m['common.askReta.keyRemoved']());
     } catch {
       toast.error(m['common.askReta.keyRemoveError']());
     } finally {
+      // P0 lifecycle: a replacement key typed BEFORE the delete must not
+      // survive a FAILED delete either — the form clears on every outcome.
+      clearForm();
       setBusy(false);
     }
   };

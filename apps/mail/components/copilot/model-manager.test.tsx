@@ -266,6 +266,44 @@ describe('ModelManagerDialog — delete with confirmation', () => {
     expect(harness.toastSuccess).toHaveBeenCalledWith('common.askReta.keyRemoved');
   });
 
+  it('delete FAILURE also clears a typed replacement key and consent (P0 lifecycle)', async () => {
+    harness.deleteCredentialMutateAsync.mockRejectedValueOnce(new Error(`offline ${API_KEY}`));
+    render();
+    // A replacement key is typed, THEN the user removes the credential and
+    // the delete fails: the pending key must not survive in state or DOM.
+    typeKey('anthropic', API_KEY);
+    checkConsent('anthropic');
+    act(() => {
+      buttonIn(card('anthropic'), 'askReta.removeKey')!.click();
+    });
+    await act(async () => {
+      buttonIn(card('anthropic'), 'askReta.confirmRemove')!.click();
+    });
+    expect(harness.deleteCredentialMutateAsync).toHaveBeenCalledWith({ provider: 'anthropic' });
+    expect(keyInput('anthropic').value).toBe('');
+    expect(consentBox('anthropic').checked).toBe(false);
+    expect(document.body.innerHTML).not.toContain(API_KEY);
+    expect(localStorage.length).toBe(0);
+    expect(harness.toastError).toHaveBeenCalledWith('common.askReta.keyRemoveError');
+    expect(harness.toastError.mock.calls.flat().join(' ')).not.toContain(API_KEY);
+  });
+
+  it('a stale-KEK credential (server says configured=false) renders NOT configured — save only, no remove', () => {
+    // Server-side truth: the row exists but its KEK version left the ring —
+    // the catalogue reports configured=false and the card follows.
+    const fixture = catalogueFixture();
+    harness.catalogue = {
+      ...fixture,
+      models: fixture.models.map((model) =>
+        model.provider === 'anthropic' ? { ...model, configured: false } : model,
+      ),
+    };
+    render();
+    expect(card('anthropic').textContent).toContain('askReta.notConfigured');
+    expect(buttonIn(card('anthropic'), 'askReta.removeKey')).toBeUndefined();
+    expect(buttonIn(card('anthropic'), 'askReta.saveKey')).toBeTruthy();
+  });
+
   it('an unconfigured provider offers no remove button; cancel backs out without deleting', () => {
     render();
     expect(buttonIn(card('openai'), 'askReta.removeKey')).toBeUndefined();

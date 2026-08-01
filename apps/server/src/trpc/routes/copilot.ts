@@ -154,17 +154,26 @@ export const copilotRouter = router({
       db.findUserSettings(),
       db.listRetaByokCredentialStatus(),
     ]);
-    // "Configured" requires the CURRENT consent version: a credential stored
-    // under an older consent is unusable until re-consent (release-fix 3A).
+    // "Configured" = USABLE, exactly what selectModel will accept: CURRENT
+    // consent version AND a kekVersion the operational ring can open. A
+    // credential under a retired KEK or an older consent must never show as
+    // configured/selectable only to fail at selection (release-tail fix).
+    // Without a ring, every BYOK provider is unusable; Workers is unaffected.
+    const ring = kekRingInfo();
+    const vaultAvailable = ring !== null;
     const configured = new Set(
       credentials
-        .filter((c) => c.consentVersion === RETA_BYOK_CONSENT_VERSION)
+        .filter(
+          (c) =>
+            c.consentVersion === RETA_BYOK_CONSENT_VERSION &&
+            ring !== null &&
+            ring.versions.includes(c.kekVersion),
+        )
         .map((c) => c.provider),
     );
     const selected = resolveSelectedEntry(
       (stored?.settings as { askRetaModel?: unknown } | undefined)?.askRetaModel,
     );
-    const vaultAvailable = kekRingInfo() !== null;
     return {
       selectedModelId: selected.id,
       vaultAvailable,

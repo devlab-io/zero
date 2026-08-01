@@ -510,15 +510,18 @@ export class ZeroDB extends DurableObject<ZeroEnv> {
 
   /**
    * Status only — NEVER envelope fields (no ciphertext/iv/wrappedDek/...).
-   * consentVersion is part of the status: a credential stored under an OLDER
-   * consent is NOT usable ("configured" requires the current consent).
+   * consentVersion and kekVersion are part of the status because BOTH gate
+   * usability: an older consent needs re-consent, and a KEK version the
+   * deployment ring cannot open makes the credential unusable. These fields
+   * are consumed SERVER-SIDE (route computes plain booleans) — neither ever
+   * crosses the tRPC boundary.
    */
   async listRetaByokCredentialStatus(
     userId: string,
-  ): Promise<{ provider: string; consentVersion: string; updatedAt: Date }[]> {
+  ): Promise<{ provider: string; consentVersion: string; kekVersion: string; updatedAt: Date }[]> {
     return await this.db.query.retaByokCredential.findMany({
       where: eq(retaByokCredential.userId, userId),
-      columns: { provider: true, consentVersion: true, updatedAt: true },
+      columns: { provider: true, consentVersion: true, kekVersion: true, updatedAt: true },
     });
   }
 

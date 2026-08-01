@@ -11,7 +11,7 @@ const harness = vi.hoisted(() => ({
   kekV2: undefined as string | undefined,
   kekActive: undefined as string | undefined,
   settings: null as { settings: Record<string, unknown> } | null,
-  status: [] as { provider: string; consentVersion: string; updatedAt: Date }[],
+  status: [] as { provider: string; consentVersion: string; kekVersion: string; updatedAt: Date }[],
   selectResult: { ok: true } as { ok: true } | { ok: false; reason: string },
   findUserSettings: vi.fn(async () => harness.settings),
   listRetaByokCredentialStatus: vi.fn(async () => harness.status),
@@ -134,9 +134,10 @@ beforeEach(() => {
   harness.selectRetaModel.mockClear();
 });
 
-const currentStatus = (provider: string) => ({
+const currentStatus = (provider: string, kekVersion = 'v1') => ({
   provider,
   consentVersion: RETA_BYOK_CONSENT_VERSION,
+  kekVersion,
   updatedAt: new Date(),
 });
 
@@ -160,16 +161,52 @@ describe('copilot.modelCatalog', () => {
       expect(keys).not.toContain(forbidden);
     }
     expect(JSON.stringify(result)).not.toContain('@cf/meta');
+    // kekVersion is server-side status only — it never crosses the boundary.
+    expect(JSON.stringify(result)).not.toContain('kekVersion');
   });
 
   it('a credential under an OLDER consent version is NOT configured (re-consent required)', async () => {
     harness.kekV1 = KEK_SECRET_V1;
     harness.status = [
-      { provider: 'anthropic', consentVersion: '2020-01-01', updatedAt: new Date() },
+      {
+        provider: 'anthropic',
+        consentVersion: '2020-01-01',
+        kekVersion: 'v1',
+        updatedAt: new Date(),
+      },
     ];
     const result = (await call('modelCatalog')) as CatalogResult;
     const anthropic = result.models.find((m) => m.id === 'anthropic:claude-fable-5');
     expect(anthropic?.configured).toBe(false);
+  });
+
+  it('a credential under a KEK version ABSENT from the ring is NOT configured (stale KEK)', async () => {
+    harness.kekV1 = KEK_SECRET_V1; // ring = {v1}
+    harness.status = [currentStatus('anthropic', 'v0')];
+    const result = (await call('modelCatalog')) as CatalogResult;
+    expect(result.vaultAvailable).toBe(true);
+    expect(result.models.find((m) => m.id === 'anthropic:claude-fable-5')?.configured).toBe(false);
+  });
+
+  it('a v1 credential stops being configured once the ring retires v1 — usable again during the rotation window', async () => {
+    harness.status = [currentStatus('anthropic', 'v1')];
+    // v2-only ring: v1 rows are unusable → NOT configured.
+    harness.kekV2 = KEK_SECRET_V2;
+    harness.kekActive = 'v2';
+    let result = (await call('modelCatalog')) as CatalogResult;
+    expect(result.models.find((m) => m.id === 'anthropic:claude-fable-5')?.configured).toBe(false);
+    // Rotation window (both secrets): the v1 row is openable → configured.
+    harness.kekV1 = KEK_SECRET_V1;
+    result = (await call('modelCatalog')) as CatalogResult;
+    expect(result.models.find((m) => m.id === 'anthropic:claude-fable-5')?.configured).toBe(true);
+  });
+
+  it('without any ring, BYOK rows are NOT configured — Workers models stay usable', async () => {
+    harness.status = [currentStatus('anthropic', 'v1')];
+    const result = (await call('modelCatalog')) as CatalogResult;
+    expect(result.vaultAvailable).toBe(false);
+    expect(result.models.find((m) => m.id === 'anthropic:claude-fable-5')?.configured).toBe(false);
+    expect(result.models.find((m) => m.id === DEFAULT_CATALOGUE_ID)?.configured).toBe(true);
   });
 
   it('reports vaultAvailable=false without KEK ring and resolves a stale selection to the default', async () => {
