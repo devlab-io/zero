@@ -122,7 +122,16 @@ export function foldedColumn(column: SQL | SQL.Aliased | unknown): SQL {
 /**
  * Condition `colonne LIKE %aiguille%` insensible aux accents/casse, aiguille
  * traitée littéralement (ESCAPE). L'aiguille est pliée ici : passer le texte brut.
+ *
+ * ESCAPE doit être UN SEUL caractère en SQLite. L'ancien template émettait
+ * `ESCAPE '\\'` dans le SQL final — DEUX backslashes entre quotes — et SQLite
+ * rejetait chaque recherche avec « ESCAPE expression must be a single
+ * character » (la panne prod phase=search kind=dependency, tour 07). Le
+ * caractère d'échappement est désormais un PARAMÈTRE LIÉ : exactement un
+ * backslash, zéro subtilité de quoting SQL, injection impossible par
+ * construction. La neutralisation de `%`, `_` et `\` dans l'aiguille
+ * ({@link toLikePattern}) est inchangée.
  */
 export function foldedLikeCondition(column: SQL | SQL.Aliased | unknown, rawNeedle: string): SQL {
-  return sql`${foldedColumn(column)} LIKE ${toLikePattern(foldSearchText(rawNeedle))} ESCAPE '\\'`;
+  return sql`${foldedColumn(column)} LIKE ${toLikePattern(foldSearchText(rawNeedle))} ESCAPE ${'\\'}`;
 }
