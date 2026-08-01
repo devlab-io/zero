@@ -156,16 +156,15 @@ export async function buildByokModel(params: {
   }
 }
 
-export async function createAskRetaDeps(params: {
-  userId: string;
-  connectionId: string;
-  executionCtx: ExecutionContext;
-  signal?: AbortSignal;
-  onStep?: (step: AskRetaStep) => void;
-}): Promise<{ deps: AskRetaDeps; modelKey: string }> {
-  const { userId, connectionId, executionCtx, signal, onStep } = params;
-  const { stub: agent } = await getZeroAgent(connectionId, executionCtx);
-
+/**
+ * Resolve the user's deployment-owned model selection once, including the
+ * BYOK vault boundary. Shared by Ask Reta and focused writing transforms so a
+ * correction can never silently use a different provider than the model the
+ * user selected.
+ */
+export async function createSelectedRetaModel(
+  userId: string,
+): Promise<{ model: RetaModel; modelKey: string }> {
   const db = await getZeroDB(userId);
   const stored = await db.findUserSettings();
   const entry = resolveSelectedEntry(
@@ -174,8 +173,7 @@ export async function createAskRetaDeps(params: {
 
   const model =
     entry.provider === 'workers-ai'
-      ? // Workers AI path works WITHOUT any KEK/vault — no credential involved.
-        workersAiModel(env.AI as unknown as WorkersAiBinding, {
+      ? workersAiModel(env.AI as unknown as WorkersAiBinding, {
           key: entry.id,
           upstreamModel: entry.upstreamModel,
         })
@@ -189,6 +187,20 @@ export async function createAskRetaDeps(params: {
             RETA_BYOK_KEK_ACTIVE: env.RETA_BYOK_KEK_ACTIVE,
           },
         });
+  return { model, modelKey: model.key };
+}
+
+export async function createAskRetaDeps(params: {
+  userId: string;
+  connectionId: string;
+  executionCtx: ExecutionContext;
+  signal?: AbortSignal;
+  onStep?: (step: AskRetaStep) => void;
+}): Promise<{ deps: AskRetaDeps; modelKey: string }> {
+  const { userId, connectionId, executionCtx, signal, onStep } = params;
+  const { stub: agent } = await getZeroAgent(connectionId, executionCtx);
+
+  const { model, modelKey } = await createSelectedRetaModel(userId);
 
   // DO RPC calls have NO abort contract: a dispatched RPC may complete on its
   // shard regardless. Cooperative discipline only — never dispatch after
@@ -228,5 +240,5 @@ export async function createAskRetaDeps(params: {
     onStep,
   };
 
-  return { deps, modelKey: model.key };
+  return { deps, modelKey };
 }

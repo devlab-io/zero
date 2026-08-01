@@ -26,6 +26,7 @@ interface MailContentProps {
   senderEmail: string;
   senderName?: string;
   onQuoteSelection?: (selection: QuotedMessageSelection) => void;
+  onCommentQuoteSelection?: (selection: QuotedMessageSelection) => void;
   /**
    * r15a : posé après que le corps traité a RÉELLEMENT été injecté dans le
    * shadow DOM et qu'un frame a été présenté (double rAF) — c'est le jalon
@@ -40,6 +41,7 @@ export function MailContent({
   senderEmail,
   senderName,
   onQuoteSelection,
+  onCommentQuoteSelection,
   onContentPainted,
 }: MailContentProps) {
   const { data, refetch } = useSettings();
@@ -125,7 +127,7 @@ export function MailContent({
 
   useEffect(() => {
     const root = shadowRootRef.current;
-    if (!root || !processedData || !onQuoteSelection) return;
+    if (!root || !processedData || (!onQuoteSelection && !onCommentQuoteSelection)) return;
 
     const readSelection = () => {
       const shadowSelection = (
@@ -151,7 +153,7 @@ export function MailContent({
       window.removeEventListener('resize', clearSelectionToolbar);
       window.removeEventListener('scroll', clearSelectionToolbar, true);
     };
-  }, [processedData, onQuoteSelection]);
+  }, [processedData, onCommentQuoteSelection, onQuoteSelection]);
 
   useEffect(() => {
     if (!hostRef.current || shadowRootRef.current) return;
@@ -261,6 +263,24 @@ export function MailContent({
             style={{ left: selectionToolbar.left, top: selectionToolbar.top }}
             onMouseDown={(event) => event.preventDefault()}
           >
+            {onCommentQuoteSelection && (
+              <button
+                type="button"
+                className="flex h-8 items-center gap-1.5 rounded-md bg-amber-500/10 px-2 text-xs font-medium text-amber-900 hover:bg-amber-500/15 dark:text-amber-100"
+                onClick={() => {
+                  onCommentQuoteSelection({
+                    messageId: id,
+                    text: selectionToolbar.text,
+                    authorName: senderName,
+                    authorEmail: senderEmail,
+                  });
+                  setSelectionToolbar(null);
+                }}
+              >
+                <TextQuote className="size-3.5" />
+                {m['common.teams.quoteSelectionInComment']()}
+              </button>
+            )}
             <button
               type="button"
               className="hover:bg-accent flex h-8 items-center gap-1.5 rounded-md px-2 text-xs font-medium"
@@ -275,7 +295,7 @@ export function MailContent({
               }}
             >
               <TextQuote className="size-3.5" />
-              Quote in reply
+              {m['common.threadDisplay.quoteSelectionInReply']()}
             </button>
             <button
               type="button"

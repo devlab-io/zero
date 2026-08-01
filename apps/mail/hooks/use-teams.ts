@@ -94,6 +94,30 @@ export const useTeamNotificationsBadge = () => {
   );
 };
 
+export const useTeamNotifications = (options: { unreadOnly: boolean; limit: number }) => {
+  const trpc = useTRPC();
+  return useQuery(
+    trpc.teams.listNotifications.queryOptions(options, {
+      staleTime: 15_000,
+    }),
+  );
+};
+
+export const useMarkTeamNotificationsRead = () => {
+  const trpc = useTRPC();
+  const queryClient = useQueryClient();
+  return useMutation(
+    trpc.teams.markNotificationsRead.mutationOptions({
+      onSuccess: () => {
+        void queryClient.invalidateQueries({ queryKey: trpc.teams.listNotifications.queryKey() });
+        void queryClient.invalidateQueries({
+          queryKey: trpc.teams.unreadNotificationCount.queryKey(),
+        });
+      },
+    }),
+  );
+};
+
 export const useCollabThreadSets = (enabled: boolean) => {
   const trpc = useTRPC();
   return useQuery(

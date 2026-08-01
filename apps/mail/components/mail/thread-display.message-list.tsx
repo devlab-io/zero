@@ -30,6 +30,7 @@ interface MessageListProps {
    */
   onContentPainted?: () => void;
   onQuoteSelection?: (selection: QuotedMessageSelection) => void;
+  onCommentQuoteSelection?: (selection: QuotedMessageSelection) => void;
   quoteRequest?: ThreadQuoteRequest | null;
   onQuoteInserted?: (id: string) => void;
 }
@@ -44,6 +45,7 @@ export const MessageList = ({
   isMobile,
   onContentPainted,
   onQuoteSelection,
+  onCommentQuoteSelection,
   quoteRequest,
   onQuoteInserted,
 }: MessageListProps) => (
@@ -77,6 +79,7 @@ export const MessageList = ({
               threadAttachments={index === 0 ? allThreadAttachments : undefined}
               onContentPainted={isLastMessage ? onContentPainted : undefined}
               onQuoteSelection={onQuoteSelection}
+              onCommentQuoteSelection={onCommentQuoteSelection}
             />
             {isReplyingToThisMessage && !isLastMessage && (
               <div className="px-4 py-2" id={`reply-composer-${message.id}`}>

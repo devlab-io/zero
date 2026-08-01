@@ -12,13 +12,6 @@ import {
   DropdownMenuPortal,
 } from '@/components/ui/dropdown-menu';
 import {
-  NOTE_COLORS,
-  getNoteColorClass,
-  getNoteColorStyle,
-  formatRelativeTime,
-  borderToBackgroundColorClass,
-} from '@/lib/notes-utils';
-import {
   Edit,
   Trash2,
   Copy,
@@ -29,8 +22,14 @@ import {
   PaintBucket,
   MoreVertical,
 } from 'lucide-react';
-import { useSortable } from '@dnd-kit/sortable';
+import {
+  NOTE_COLORS,
+  getNoteColorStyle,
+  formatRelativeTime,
+  borderToBackgroundColorClass,
+} from '@/lib/notes-utils';
 import { Button } from '@/components/ui/button';
+import { useSortable } from '@dnd-kit/sortable';
 import { m } from '@/paraglide/messages';
 import { CSS } from '@dnd-kit/utilities';
 import type { Note } from '@/types';
@@ -64,22 +63,20 @@ export function SortableNote({
   return (
     <div
       ref={setNodeRef}
-      style={style}
       className={cn(
-        'group relative mb-3 overflow-hidden rounded-md border border-[#E7E7E7] p-3 dark:border-[#252525]',
+        'group relative mb-3 overflow-hidden rounded-md border p-3',
         note.isPinned && 'ring-1 ring-amber-200 dark:ring-amber-800',
-        note.color === 'default' ? 'bg-white dark:bg-[#202020]' : '',
+        note.color === 'default'
+          ? 'border-[#E7E7E7] bg-white dark:border-[#252525] dark:bg-[#202020]'
+          : 'bg-muted/30 dark:bg-muted/20',
       )}
+      style={
+        note.color !== 'default'
+          ? { ...style, borderColor: getNoteColorStyle(note.color).borderLeftColor }
+          : style
+      }
     >
-      <div
-        className={cn(
-          'absolute bottom-0 left-0 top-0 w-1.5 border-l-4',
-          note.color !== 'default' ? getNoteColorClass(note.color) : 'border-transparent',
-        )}
-        style={note.color !== 'default' ? getNoteColorStyle(note.color) : {}}
-      />
-
-      <div className="flex items-start gap-3 pl-1.5">
+      <div className="flex items-start gap-3">
         <div className="min-w-0 flex-1">
           <p className="whitespace-pre-wrap break-words text-sm text-black dark:text-white/90">
             {note.content}

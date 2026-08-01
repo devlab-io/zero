@@ -1,9 +1,11 @@
-import { buildEmailRewriteMessages, normalizeEmailRewriteHtml } from '../../../lib/rewrite-email';
+import {
+  assertPreservedEmailStructure,
+  buildEmailRewriteMessages,
+  normalizeEmailRewriteHtml,
+} from '../../../lib/rewrite-email';
+import { createSelectedRetaModel } from '../../../lib/ask-reta/deps';
 import { activeConnectionProcedure } from '../../trpc';
-import { env } from '../../../env';
 import { z } from 'zod';
-
-const REWRITE_MODEL = '@cf/meta/llama-4-scout-17b-16e-instruct';
 
 export const rewriteEmail = activeConnectionProcedure
   .input(
@@ -13,21 +15,20 @@ export const rewriteEmail = activeConnectionProcedure
       mood: z.string().trim().max(160).optional(),
     }),
   )
-  .mutation(async ({ input }) => {
-    const response = await env.AI.run(REWRITE_MODEL, {
-      messages: buildEmailRewriteMessages(input),
-      max_tokens: 2_500,
+  .mutation(async ({ ctx, input }) => {
+    const messages = buildEmailRewriteMessages(input);
+    const { model, modelKey } = await createSelectedRetaModel(ctx.sessionUser.id);
+    const raw = await model.complete({
+      system: messages[0]!.content,
+      user: messages[1]!.content,
+      maxTokens: 2_500,
       temperature: input.mode === 'correct' ? 0.1 : 0.35,
+      signal: ctx.c.req.raw.signal,
     });
-
-    const raw =
-      typeof response === 'string'
-        ? response
-        : 'response' in response && typeof response.response === 'string'
-          ? response.response
-          : null;
 
     if (!raw) throw new Error('The writing assistant returned an invalid response');
 
-    return { html: normalizeEmailRewriteHtml(raw) };
+    const html = normalizeEmailRewriteHtml(raw);
+    assertPreservedEmailStructure(input.content, html);
+    return { html, model: modelKey };
   });

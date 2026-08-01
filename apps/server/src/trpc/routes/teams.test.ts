@@ -260,6 +260,18 @@ describe('teams.addComment — citation serveur', () => {
     expect(quote.text).toBe('Corps serveur');
   });
 
+  it('quoteText → seul l’extrait présent dans le message devient citation', async () => {
+    harness.db.addTeamThreadComment.mockResolvedValue({ id: 'c-selection' });
+    await call('addComment', {
+      teamThreadId: 'tt-1',
+      body: 'Ce passage est important',
+      quoteMessageId: 'm1',
+      quoteText: 'Corps',
+    });
+    const [, , , quote] = harness.db.addTeamThreadComment.mock.calls[0];
+    expect(quote.text).toBe('Corps');
+  });
+
   it('sans quoteMessageId, aucune citation et aucune lecture boîte', async () => {
     harness.db.addTeamThreadComment.mockResolvedValue({ id: 'c-2' });
     await call('addComment', { teamThreadId: 'tt-1', body: 'Simple note' });

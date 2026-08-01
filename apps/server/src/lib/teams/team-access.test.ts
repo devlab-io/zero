@@ -170,6 +170,17 @@ describe('buildSharedQuote — citation structurée capturée serveur', () => {
     });
   });
 
+  it('conserve uniquement la sélection vérifiée dans le corps ACL-scopé', async () => {
+    const quote = await buildSharedQuote('user-OTHER-mailbox', 'tt-1', 'm1', 'Hello');
+    expect(quote.text).toBe('Hello');
+  });
+
+  it('refuse un texte forgé qui ne figure pas dans le message', async () => {
+    await expect(
+      buildSharedQuote('user-OTHER-mailbox', 'tt-1', 'm1', 'Faux montant 999 €'),
+    ).rejects.toThrow('quote_not_in_message');
+  });
+
   it('rejette un message hors du fil', async () => {
     await expect(buildSharedQuote('u', 'tt-1', 'm-ailleurs')).rejects.toThrow(
       'message_not_in_thread',

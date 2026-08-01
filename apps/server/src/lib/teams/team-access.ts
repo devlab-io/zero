@@ -91,6 +91,7 @@ export async function buildSharedQuote(
   userId: string,
   teamThreadId: string,
   messageId: string,
+  selectedText?: string,
 ): Promise<CommentQuote> {
   const db = await getZeroDB(userId);
   const share = await db.resolveTeamThreadAccess(teamThreadId);
@@ -98,12 +99,20 @@ export async function buildSharedQuote(
   const message = result.messages.find((m) => m.id === messageId);
   if (!message) throw new Error('message_not_in_thread');
   const source = message.decodedBody || message.body || '';
+  const sourceText = stripHtmlToText(source);
+  const requestedText = selectedText?.replace(/\s+/g, ' ').trim();
+  if (requestedText && !sourceText.includes(requestedText)) {
+    // A selected-text quote is client-addressed but never client-authored: the
+    // server verifies the normalized selection is an exact excerpt of the
+    // ACL-scoped message before storing it.
+    throw new Error('quote_not_in_message');
+  }
   return {
     messageId,
     authorEmail: message.sender.email,
     authorName: message.sender.name,
     receivedOn: message.receivedOn,
-    text: stripHtmlToText(source).slice(0, MAX_QUOTE_CHARS),
+    text: (requestedText || sourceText).slice(0, MAX_QUOTE_CHARS),
   };
 }
 

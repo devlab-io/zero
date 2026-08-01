@@ -54,17 +54,22 @@ let container: HTMLDivElement;
 let root: Root;
 let html: string;
 let setContent: ReturnType<typeof vi.fn>;
+let setTextSelection: ReturnType<typeof vi.fn>;
+let focus: ReturnType<typeof vi.fn>;
 
 function makeEditor() {
   setContent = vi.fn((content: string | object) => {
     html = typeof content === 'string' ? content : '<p>Previous content</p>';
   });
+  setTextSelection = vi.fn();
+  focus = vi.fn();
   return {
     isDestroyed: false,
     getHTML: () => html,
     getText: () => 'Bonjor Thomas',
     getJSON: () => ({ type: 'doc', content: [] }),
-    commands: { setContent, focus: vi.fn() },
+    state: { selection: { from: 4, to: 4 }, doc: { content: { size: 40 } } },
+    commands: { setContent, setTextSelection, focus },
   } as unknown as Editor;
 }
 
@@ -105,6 +110,8 @@ describe('WritingAssistantButton', () => {
       mode: 'correct',
     });
     expect(setContent).toHaveBeenCalledWith('<p>Bonjour Thomas</p>');
+    expect(setTextSelection).toHaveBeenCalledWith({ from: 4, to: 4 });
+    expect(focus).toHaveBeenCalled();
     expect(harness.toastSuccess).toHaveBeenCalledWith(
       'Email corrected',
       expect.objectContaining({ action: expect.objectContaining({ label: 'Undo' }) }),

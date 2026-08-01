@@ -9,6 +9,8 @@ export interface ThreadQuoteRequest extends QuotedMessageSelection {
   id: string;
 }
 
+export type InternalCommentQuote = Pick<ThreadQuoteRequest, 'id' | 'messageId' | 'text'>;
+
 export interface QuoteSelectionToolbar {
   left: number;
   text: string;
@@ -31,6 +33,16 @@ export function normalizeQuotedSelection(text: string, maxLength = 8_000): strin
     .replace(/\n{3,}/g, '\n\n')
     .trim()
     .slice(0, maxLength);
+}
+
+export function syncInternalCommentQuote(
+  current: InternalCommentQuote | null,
+  request?: ThreadQuoteRequest | null,
+): InternalCommentQuote | null {
+  if (request) {
+    return { id: request.id, messageId: request.messageId, text: request.text };
+  }
+  return current?.id ? null : current;
 }
 
 export function buildQuotedReplyHtml(quote: QuotedMessageSelection): string {

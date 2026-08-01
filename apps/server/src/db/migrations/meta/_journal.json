@@ -295,6 +295,13 @@
       "when": 1785589186877,
       "tag": "0041_purple_mandroid",
       "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1785605668454,
+      "tag": "0042_public_hellion",
+      "breakpoints": true
     }
   ]
 }

@@ -1,5 +1,6 @@
-import { forwardRef, useCallback, useImperativeHandle, useRef, useState } from 'react';
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import type { HTMLAttributes, MouseEvent as ReactMouseEvent } from 'react';
+import { cn } from '@/lib/utils';
 
 export interface MoonIconHandle {
   startAnimation: () => void;
@@ -7,37 +8,52 @@ export interface MoonIconHandle {
 }
 
 // #44 (gate A8): motion/react removed so this icon no longer pulls the `motion` chunk into the
-// critical inbox path. The rotate wobble is implemented with a self-contained CSS keyframe. `runId`
-// increments on every start/hover-enter and keys the animated <svg>, so a keyed remount re-runs the
-// CSS animation from the start on each call — even when it is already running. The MoonIconHandle
-// (startAnimation/stopAnimation) and the mouse-enter/leave triggers are retained.
+// critical inbox path. Feedback is a brief active-state transition, not a decorative wobble.
 const MoonIcon = forwardRef<MoonIconHandle, HTMLAttributes<HTMLDivElement>>(
   ({ onMouseEnter, onMouseLeave, ...props }, ref) => {
-    const [runId, setRunId] = useState(0);
+    const [isActive, setIsActive] = useState(false);
     const isControlledRef = useRef(false);
+    const resetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+    const stopFeedback = useCallback(() => {
+      if (resetTimerRef.current) clearTimeout(resetTimerRef.current);
+      resetTimerRef.current = null;
+      setIsActive(false);
+    }, []);
+
+    const startFeedback = useCallback(() => {
+      if (resetTimerRef.current) clearTimeout(resetTimerRef.current);
+      setIsActive(true);
+      resetTimerRef.current = setTimeout(() => {
+        resetTimerRef.current = null;
+        setIsActive(false);
+      }, 200);
+    }, []);
+
+    useEffect(() => stopFeedback, [stopFeedback]);
 
     useImperativeHandle(ref, () => {
       isControlledRef.current = true;
       return {
-        startAnimation: () => setRunId((n) => n + 1),
-        stopAnimation: () => setRunId(0),
+        startAnimation: startFeedback,
+        stopAnimation: stopFeedback,
       };
-    });
+    }, [startFeedback, stopFeedback]);
 
     const handleMouseEnter = useCallback(
       (e: ReactMouseEvent<HTMLDivElement>) => {
-        if (!isControlledRef.current) setRunId((n) => n + 1);
+        if (!isControlledRef.current) startFeedback();
         else onMouseEnter?.(e);
       },
-      [onMouseEnter],
+      [onMouseEnter, startFeedback],
     );
 
     const handleMouseLeave = useCallback(
       (e: ReactMouseEvent<HTMLDivElement>) => {
-        if (!isControlledRef.current) setRunId(0);
+        if (!isControlledRef.current) stopFeedback();
         else onMouseLeave?.(e);
       },
-      [onMouseLeave],
+      [onMouseLeave, stopFeedback],
     );
 
     return (
@@ -47,13 +63,7 @@ const MoonIcon = forwardRef<MoonIconHandle, HTMLAttributes<HTMLDivElement>>(
         onMouseLeave={handleMouseLeave}
         {...props}
       >
-        <style>
-          {
-            '@keyframes zero-moon-wobble{0%{transform:rotate(0deg)}20%{transform:rotate(-10deg)}40%{transform:rotate(10deg)}60%{transform:rotate(-5deg)}80%{transform:rotate(5deg)}100%{transform:rotate(0deg)}}'
-          }
-        </style>
         <svg
-          key={runId}
           xmlns="http://www.w3.org/2000/svg"
           width="17"
           height="17"
@@ -63,11 +73,10 @@ const MoonIcon = forwardRef<MoonIconHandle, HTMLAttributes<HTMLDivElement>>(
           strokeWidth="2"
           strokeLinecap="round"
           strokeLinejoin="round"
-          style={
-            runId > 0
-              ? { transformOrigin: 'center', animation: 'zero-moon-wobble 1.2s ease-in-out' }
-              : undefined
-          }
+          className={cn(
+            'origin-center transition-[transform,opacity] duration-200 ease-out motion-reduce:transition-none',
+            isActive ? 'scale-95 opacity-80' : 'scale-100 opacity-100',
+          )}
         >
           <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" />
         </svg>

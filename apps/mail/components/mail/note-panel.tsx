@@ -1,21 +1,17 @@
-import {
-  DndContext,
-  DragOverlay,
-  closestCenter,
-} from '@dnd-kit/core';
-import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
-import { NOTE_COLORS, getNoteColorClass, getNoteColorStyle } from '@/lib/notes-utils';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { StickyNote, X, PlusCircle, Search, AlertCircle, Pin } from 'lucide-react';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
+import { DndContext, DragOverlay, closestCenter } from '@dnd-kit/core';
+import { NOTE_COLORS, getNoteColorStyle } from '@/lib/notes-utils';
+import { SortableNote } from './note-panel-sortable-note';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Textarea } from '@/components/ui/textarea';
+import { useNotesPanel } from './note-panel-logic';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { m } from '@/paraglide/messages';
 import { cn } from '@/lib/utils';
-import { SortableNote } from './note-panel-sortable-note';
-import { useNotesPanel } from './note-panel-logic';
 
 interface NotesPanelProps {
   threadId: string;
@@ -240,20 +236,20 @@ export function NotesPanel({ threadId }: NotesPanelProps) {
                       )}
 
                       {isAddingNewNote && (
-                        <div className="relative mb-3 overflow-hidden rounded-md border-[#E7E7E7] bg-[#FFFFFF] dark:border-[#252525] dark:bg-[#202020]">
-                          <div
-                            className={cn(
-                              'absolute bottom-0 left-0 top-0 w-1.5 border-l-4',
-                              selectedColor !== 'default'
-                                ? getNoteColorClass(selectedColor)
-                                : 'border-transparent',
-                            )}
-                            style={
-                              selectedColor !== 'default' ? getNoteColorStyle(selectedColor) : {}
-                            }
-                          />
-
-                          <div className="">
+                        <div
+                          className={cn(
+                            'relative mb-3 overflow-hidden rounded-md border bg-[#FFFFFF] dark:bg-[#202020]',
+                            selectedColor === 'default'
+                              ? 'border-[#E7E7E7] dark:border-[#252525]'
+                              : 'bg-muted/30 dark:bg-muted/20',
+                          )}
+                          style={
+                            selectedColor !== 'default'
+                              ? { borderColor: getNoteColorStyle(selectedColor).borderLeftColor }
+                              : undefined
+                          }
+                        >
+                          <div>
                             <Textarea
                               ref={textareaRef}
                               value={newNoteContent}
@@ -396,4 +392,3 @@ export function NotesPanel({ threadId }: NotesPanelProps) {
     </div>
   );
 }
-

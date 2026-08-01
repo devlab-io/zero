@@ -2,6 +2,7 @@ import { GOOGLE_CALENDAR_FREEBUSY_SCOPE } from '../google-scopes';
 
 const GOOGLE_FREEBUSY_ENDPOINT = 'https://www.googleapis.com/calendar/v3/freeBusy';
 const MAX_AVAILABILITY_WINDOW_MS = 31 * 24 * 60 * 60_000;
+export const INVALID_CALENDAR_TIME_ZONE = 'Invalid calendar time zone';
 
 export type GoogleAccessTokenResult = {
   accessToken?: string | null;
@@ -26,15 +27,27 @@ export function hasGoogleFreeBusyScope(scopes: readonly string[] | null | undefi
     .includes(GOOGLE_CALENDAR_FREEBUSY_SCOPE);
 }
 
-/** Select only an account owned by the current Better Auth session. */
+/** Select only the exact Google account backing the active mail connection. */
 export function selectGoogleFreeBusyAccount(
   accounts: readonly LinkedCalendarAccount[],
+  preferredAccountId: string,
 ): LinkedCalendarAccount | null {
   return (
     accounts.find(
-      (account) => account.providerId === 'google' && hasGoogleFreeBusyScope(account.scopes),
+      (account) =>
+        account.accountId === preferredAccountId &&
+        account.providerId === 'google' &&
+        hasGoogleFreeBusyScope(account.scopes),
     ) ?? null
   );
+}
+
+export function isValidIanaTimeZone(timeZone: string): boolean {
+  try {
+    return timeZone === 'UTC' || Intl.supportedValuesOf('timeZone').includes(timeZone);
+  } catch {
+    return false;
+  }
 }
 
 function parseAvailabilityWindow(timeMin: string, timeMax: string) {
@@ -62,6 +75,9 @@ export async function loadGoogleAvailability(
     fetchImpl?: typeof fetch;
   },
 ): Promise<GoogleAvailabilityResult> {
+  if (!isValidIanaTimeZone(input.timeZone)) {
+    throw new Error(INVALID_CALENDAR_TIME_ZONE);
+  }
   const window = parseAvailabilityWindow(input.timeMin, input.timeMax);
   const credential = await deps.getAccessToken().catch(() => null);
   if (!credential?.accessToken || !hasGoogleFreeBusyScope(credential.scopes)) {

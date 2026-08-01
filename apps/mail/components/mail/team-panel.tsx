@@ -14,10 +14,15 @@ import {
   useTeamPresenceFallback,
   useTeamRealtime,
 } from '@/hooks/use-teams';
+import {
+  syncInternalCommentQuote,
+  type InternalCommentQuote,
+  type ThreadQuoteRequest,
+} from '@/lib/thread-quote';
 import { Check, CircleDot, Loader2, Quote, Trash2, UserPlus, Users, X } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { useCallback, useMemo, useRef, useState } from 'react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useTRPC } from '@/providers/query-provider';
 import { Textarea } from '@/components/ui/textarea';
@@ -48,8 +53,19 @@ type Share = {
   commentCount: number;
 };
 
-export function TeamPanel({ threadId }: { threadId: string }) {
+export function TeamPanel({
+  threadId,
+  quoteRequest,
+  onQuoteConsumed,
+}: {
+  threadId: string;
+  quoteRequest?: ThreadQuoteRequest | null;
+  onQuoteConsumed?: (requestId: string) => void;
+}) {
   const [isOpen, setIsOpen] = useState(false);
+  useEffect(() => {
+    if (quoteRequest) setIsOpen(true);
+  }, [quoteRequest]);
   // Toujours interrogé (badge compteur visible panneau fermé) ; staleTime 30 s.
   const { data: sharesData } = useSharesForThread(threadId);
   const shares = (sharesData?.shares ?? []) as Share[];
@@ -116,7 +132,13 @@ export function TeamPanel({ threadId }: { threadId: string }) {
             <div className="space-y-3 p-3">
               <ShareControls threadId={threadId} shares={shares} />
               {shares.map((share) => (
-                <SharedThreadSection key={share.id} share={share} threadId={threadId} />
+                <SharedThreadSection
+                  key={share.id}
+                  share={share}
+                  threadId={threadId}
+                  quoteRequest={quoteRequest}
+                  onQuoteConsumed={onQuoteConsumed}
+                />
               ))}
             </div>
           </ScrollArea>
@@ -186,7 +208,17 @@ function ShareControls({ threadId, shares }: { threadId: string; shares: Share[]
   );
 }
 
-function SharedThreadSection({ share, threadId }: { share: Share; threadId: string }) {
+function SharedThreadSection({
+  share,
+  threadId,
+  quoteRequest,
+  onQuoteConsumed,
+}: {
+  share: Share;
+  threadId: string;
+  quoteRequest?: ThreadQuoteRequest | null;
+  onQuoteConsumed?: (requestId: string) => void;
+}) {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
   const { data: session } = useSession();
@@ -297,6 +329,8 @@ function SharedThreadSection({ share, threadId }: { share: Share; threadId: stri
         members={members}
         live={realtime.connected}
         sendTyping={realtime.sendTyping}
+        quoteRequest={quoteRequest}
+        onQuoteConsumed={onQuoteConsumed}
       />
     </section>
   );
@@ -363,12 +397,16 @@ function CommentsBlock({
   members,
   live,
   sendTyping,
+  quoteRequest,
+  onQuoteConsumed,
 }: {
   share: Share;
   threadId: string;
   members: MentionMember[];
   live: boolean;
   sendTyping: () => void;
+  quoteRequest?: ThreadQuoteRequest | null;
+  onQuoteConsumed?: (requestId: string) => void;
 }) {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
@@ -382,9 +420,22 @@ function CommentsBlock({
 
   const [body, setBody] = useState('');
   const [caret, setCaret] = useState(0);
-  const [quoteLatest, setQuoteLatest] = useState(false);
+  const [selectedQuote, setSelectedQuote] = useState<InternalCommentQuote | null>(null);
   const trackedMentions = useRef<MentionMember[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+
+  useEffect(() => {
+    if (quoteRequest) {
+      setSelectedQuote((current) => syncInternalCommentQuote(current, quoteRequest));
+      queueMicrotask(() => textareaRef.current?.focus());
+      return;
+    }
+
+    // The same selection is offered to every shared-team section. Once one
+    // section consumes or dismisses it, clear the externally addressed quote
+    // everywhere without touching a local "quote latest message" choice.
+    setSelectedQuote((current) => syncInternalCommentQuote(current, quoteRequest));
+  }, [quoteRequest]);
 
   const invalidateComments = useCallback(() => {
     void queryClient.invalidateQueries({
@@ -397,7 +448,8 @@ function CommentsBlock({
     trpc.teams.addComment.mutationOptions({
       onSuccess: () => {
         setBody('');
-        setQuoteLatest(false);
+        if (selectedQuote?.id) onQuoteConsumed?.(selectedQuote.id);
+        setSelectedQuote(null);
         trackedMentions.current = [];
         invalidateComments();
       },
@@ -429,7 +481,8 @@ function CommentsBlock({
       teamThreadId: share.id,
       body: trimmed,
       mentions: resolveMentions(trimmed, trackedMentions.current),
-      quoteMessageId: quoteLatest && latestMessage?.id ? latestMessage.id : undefined,
+      quoteMessageId: selectedQuote?.messageId,
+      quoteText: selectedQuote?.text || undefined,
     });
   };
 
@@ -529,6 +582,25 @@ function CommentsBlock({
       )}
 
       <div className="relative mt-2">
+        {selectedQuote && (
+          <div className="mb-2 flex items-start justify-between gap-2 rounded-lg border border-amber-500/25 bg-amber-500/[0.07] px-2.5 py-2 text-xs">
+            <div className="min-w-0">
+              <p className="font-medium">{m['common.teams.internalQuote']()}</p>
+              <p className="text-muted-foreground mt-0.5 line-clamp-2">{selectedQuote.text}</p>
+            </div>
+            <button
+              type="button"
+              aria-label={m['common.actions.remove']()}
+              className="hover:bg-foreground/5 rounded p-1"
+              onClick={() => {
+                if (selectedQuote.id) onQuoteConsumed?.(selectedQuote.id);
+                setSelectedQuote(null);
+              }}
+            >
+              <X className="size-3.5" />
+            </button>
+          </div>
+        )}
         {candidates.length > 0 && (
           <ul
             role="listbox"
@@ -583,14 +655,20 @@ function CommentsBlock({
           {latestMessage?.id ? (
             <button
               type="button"
-              aria-pressed={quoteLatest}
+              aria-pressed={selectedQuote?.messageId === latestMessage.id && !selectedQuote.text}
               className={cn(
                 'flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
-                quoteLatest
+                selectedQuote?.messageId === latestMessage.id && !selectedQuote.text
                   ? 'bg-blue-50 text-blue-900 dark:bg-blue-900/40 dark:text-blue-100'
                   : 'text-muted-foreground hover:bg-gray-50 dark:hover:bg-white/5',
               )}
-              onClick={() => setQuoteLatest((value) => !value)}
+              onClick={() =>
+                setSelectedQuote((current) =>
+                  current?.messageId === latestMessage.id && !current.text
+                    ? null
+                    : { id: '', messageId: latestMessage.id, text: '' },
+                )
+              }
             >
               <Quote className="h-3 w-3" /> {m['common.teams.quoteLatest']()}
             </button>

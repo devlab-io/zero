@@ -54,6 +54,7 @@ type Props = {
   /** r15a : jalon content-painted, fourni uniquement pour le message actif. */
   onContentPainted?: () => void;
   onQuoteSelection?: (selection: QuotedMessageSelection) => void;
+  onCommentQuoteSelection?: (selection: QuotedMessageSelection) => void;
 };
 
 const cleanEmailDisplay = (email?: string) => {
@@ -75,6 +76,7 @@ const MailDisplay = ({
   threadAttachments,
   onContentPainted,
   onQuoteSelection,
+  onCommentQuoteSelection,
 }: Props) => {
   const [isCollapsed, setIsCollapsed] = useState<boolean>(false);
   const { data: threadData } = useThread(emailData.threadId ?? null);
@@ -705,6 +707,7 @@ const MailDisplay = ({
                     senderEmail={emailData.sender.email}
                     senderName={emailData.sender.name}
                     onQuoteSelection={onQuoteSelection}
+                    onCommentQuoteSelection={onCommentQuoteSelection}
                     onContentPainted={onContentPainted}
                   />
                 ) : null}

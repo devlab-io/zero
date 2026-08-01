@@ -1,4 +1,5 @@
 import {
+  INVALID_CALENDAR_TIME_ZONE,
   hasGoogleFreeBusyScope,
   loadGoogleAvailability,
   selectGoogleFreeBusyAccount,
@@ -19,19 +20,33 @@ describe('P11 Google FreeBusy — scope minimal et lecture seule', () => {
     expect(hasGoogleFreeBusyScope(['openid', 'email'])).toBe(false);
   });
 
-  it('sélectionne le compte Google autorisé, jamais un autre provider ou scope', () => {
-    expect(
-      selectGoogleFreeBusyAccount([
-        { providerId: 'microsoft', accountId: 'ms', scopes: [GOOGLE_CALENDAR_FREEBUSY_SCOPE] },
-        { providerId: 'google', accountId: 'gmail-only', scopes: ['openid'] },
-        {
-          providerId: 'google',
-          accountId: 'calendar-authorized',
-          scopes: [GOOGLE_CALENDAR_FREEBUSY_SCOPE],
-        },
-      ])?.accountId,
-    ).toBe('calendar-authorized');
-    expect(selectGoogleFreeBusyAccount([])).toBeNull();
+  it('accepte UTC, mais rejette les identifiants de fuseau non-IANA', async () => {
+    await expect(
+      loadGoogleAvailability({ ...input, timeZone: 'UTC' }, { getAccessToken: async () => ({}) }),
+    ).resolves.toEqual({ authorizationRequired: true, busy: [] });
+  });
+
+  it('sélectionne exclusivement le compte Google actif, jamais le premier compte éligible', () => {
+    const accounts = [
+      {
+        providerId: 'google',
+        accountId: 'other-calendar-authorized',
+        scopes: [GOOGLE_CALENDAR_FREEBUSY_SCOPE],
+      },
+      { providerId: 'microsoft', accountId: 'ms', scopes: [GOOGLE_CALENDAR_FREEBUSY_SCOPE] },
+      { providerId: 'google', accountId: 'gmail-only', scopes: ['openid'] },
+      {
+        providerId: 'google',
+        accountId: 'calendar-authorized',
+        scopes: [GOOGLE_CALENDAR_FREEBUSY_SCOPE],
+      },
+    ];
+    expect(selectGoogleFreeBusyAccount(accounts, 'calendar-authorized')?.accountId).toBe(
+      'calendar-authorized',
+    );
+    expect(selectGoogleFreeBusyAccount(accounts, 'gmail-only')).toBeNull();
+    expect(selectGoogleFreeBusyAccount(accounts, 'missing-account')).toBeNull();
+    expect(selectGoogleFreeBusyAccount([], 'calendar-authorized')).toBeNull();
   });
 
   it('sans token ou scope dédié : demande une autorisation et ne contacte jamais Google', async () => {
@@ -91,6 +106,16 @@ describe('P11 Google FreeBusy — scope minimal et lecture seule', () => {
       loadGoogleAvailability({ ...input, timeMax: '2026-10-03T01:00:00.000Z' }, { getAccessToken }),
     ).rejects.toThrow('Availability window is too large');
     expect(getAccessToken).not.toHaveBeenCalled();
+  });
+
+  it('rejette un fuseau non-IANA avant tout accès aux credentials ou à Google', async () => {
+    const getAccessToken = vi.fn();
+    const fetchImpl = vi.fn();
+    await expect(
+      loadGoogleAvailability({ ...input, timeZone: 'Mars/Olympus' }, { getAccessToken, fetchImpl }),
+    ).rejects.toThrow(INVALID_CALENDAR_TIME_ZONE);
+    expect(getAccessToken).not.toHaveBeenCalled();
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 
   it('échoue avec un message fixe sans relayer le corps Google', async () => {

@@ -70,6 +70,7 @@ const TEAM_ERROR_CODES: Record<string, 'NOT_FOUND' | 'FORBIDDEN' | 'BAD_REQUEST'
   label_not_found: 'NOT_FOUND',
   message_not_in_thread: 'NOT_FOUND',
   attachment_not_found: 'NOT_FOUND',
+  quote_not_in_message: 'BAD_REQUEST',
   not_a_member: 'FORBIDDEN',
   forbidden: 'FORBIDDEN',
   invite_email_mismatch: 'FORBIDDEN',
@@ -436,6 +437,7 @@ export const teamsRouter = router({
         body: commentBodySchema,
         mentions: z.array(z.string().min(1).max(64)).max(20).default([]),
         quoteMessageId: z.string().min(1).max(256).optional(),
+        quoteText: z.string().trim().min(1).max(8_000).optional(),
       }),
     )
     .mutation(async ({ ctx, input }) =>
@@ -443,7 +445,12 @@ export const teamsRouter = router({
         // The quote is captured SERVER-SIDE from the shared thread (same ACL
         // gate as readSharedThread) — client text never becomes a citation.
         const quote = input.quoteMessageId
-          ? await buildSharedQuote(ctx.sessionUser.id, input.teamThreadId, input.quoteMessageId)
+          ? await buildSharedQuote(
+              ctx.sessionUser.id,
+              input.teamThreadId,
+              input.quoteMessageId,
+              input.quoteText,
+            )
           : null;
         const db = await getZeroDB(ctx.sessionUser.id);
         const comment = await db.addTeamThreadComment(

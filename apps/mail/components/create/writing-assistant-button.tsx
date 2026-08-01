@@ -32,6 +32,19 @@ export function WritingAssistantButton({ editor }: { editor: Editor | null }) {
     }
 
     const previousContent = editor.getJSON();
+    const previousSelection = {
+      from: editor.state.selection.from,
+      to: editor.state.selection.to,
+    };
+
+    const restoreSelection = () => {
+      const max = editor.state.doc.content.size;
+      editor.commands.setTextSelection({
+        from: Math.min(previousSelection.from, max),
+        to: Math.min(previousSelection.to, max),
+      });
+      editor.commands.focus();
+    };
 
     try {
       const result = await rewrite.mutateAsync({
@@ -47,14 +60,17 @@ export function WritingAssistantButton({ editor }: { editor: Editor | null }) {
       }
 
       editor.commands.setContent(result.html);
-      editor.commands.focus('end');
+      restoreSelection();
       setOpen(false);
 
       toast.success(mode === 'correct' ? 'Email corrected' : 'Email reformulated', {
         action: {
           label: 'Undo',
           onClick: () => {
-            if (!editor.isDestroyed) editor.commands.setContent(previousContent);
+            if (!editor.isDestroyed) {
+              editor.commands.setContent(previousContent);
+              restoreSelection();
+            }
           },
         },
       });

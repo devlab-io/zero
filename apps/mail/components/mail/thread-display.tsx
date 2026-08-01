@@ -196,6 +196,7 @@ export function ThreadDisplay() {
   const [activeReplyId, setActiveReplyId] = useQueryState('activeReplyId');
   const [, setDraftId] = useQueryState('draftId');
   const [quoteRequest, setQuoteRequest] = useState<ThreadQuoteRequest | null>(null);
+  const [commentQuoteRequest, setCommentQuoteRequest] = useState<ThreadQuoteRequest | null>(null);
 
   const openLatestReply = useCallback(
     (nextMode: ThreadReplyMode) => {
@@ -228,8 +229,13 @@ export function ThreadDisplay() {
     setQuoteRequest((current) => (current?.id === requestId ? null : current));
   }, []);
 
+  const handleCommentQuoteSelection = useCallback((selection: QuotedMessageSelection) => {
+    setCommentQuoteRequest({ ...selection, id: crypto.randomUUID() });
+  }, []);
+
   useEffect(() => {
     setQuoteRequest(null);
+    setCommentQuoteRequest(null);
   }, [id]);
 
   // Devlab: threads can be opened directly in reply/replyAll/forward mode from the
@@ -556,7 +562,15 @@ export function ThreadDisplay() {
                   </div>
                 </button>
                 <NotesPanel threadId={id} />
-                <TeamPanel threadId={id} />
+                <TeamPanel
+                  threadId={id}
+                  quoteRequest={commentQuoteRequest}
+                  onQuoteConsumed={(requestId) =>
+                    setCommentQuoteRequest((current) =>
+                      current?.id === requestId ? null : current,
+                    )
+                  }
+                />
                 <MeetingPanel threadId={id} />
                 <TooltipProvider delayDuration={0}>
                   <Tooltip>
@@ -689,6 +703,7 @@ export function ThreadDisplay() {
                   isMobile,
                   onContentPainted: handleContentPainted,
                   onQuoteSelection: handleQuoteSelection,
+                  onCommentQuoteSelection: handleCommentQuoteSelection,
                   quoteRequest,
                   onQuoteInserted: handleQuoteInserted,
                 };

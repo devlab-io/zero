@@ -984,6 +984,14 @@ export async function addComment(
       .update(teamThread)
       .set({ lastActivityAt: now, updatedAt: now })
       .where(eq(teamThread.id, teamThreadId));
+    await audit(tx, {
+      teamId: row.teamId,
+      actorUserId: userId,
+      action: 'comment.created',
+      subjectType: 'comment',
+      subjectId: id,
+      metadata: { teamThreadId, mentionedUserIds: uniqueMentions },
+    });
     // Mention on a restricted thread WIDENS access — visibly: the access row
     // carries source='mention', the audit trail records it, the target is
     // notified access_granted (pref-independent) in addition to the mention.
@@ -1047,13 +1055,31 @@ export async function addComment(
 }
 
 export async function editComment(db: DB, userId: string, commentId: string, body: string) {
-  const updated = await db
-    .update(teamThreadComment)
-    .set({ body, updatedAt: new Date() })
-    .where(and(eq(teamThreadComment.id, commentId), eq(teamThreadComment.authorUserId, userId)))
-    .returning({ id: teamThreadComment.id, teamThreadId: teamThreadComment.teamThreadId });
-  if (updated.length === 0 || !updated[0]) throw new TeamStoreError('not_found');
-  return { teamThreadId: updated[0].teamThreadId };
+  const [comment] = await db
+    .select({
+      teamThreadId: teamThreadComment.teamThreadId,
+      authorUserId: teamThreadComment.authorUserId,
+    })
+    .from(teamThreadComment)
+    .where(eq(teamThreadComment.id, commentId))
+    .limit(1);
+  if (!comment || comment.authorUserId !== userId) throw new TeamStoreError('not_found');
+  const row = await resolveAccess(db, userId, comment.teamThreadId);
+  await db.transaction(async (tx) => {
+    await tx
+      .update(teamThreadComment)
+      .set({ body, updatedAt: new Date() })
+      .where(and(eq(teamThreadComment.id, commentId), eq(teamThreadComment.authorUserId, userId)));
+    await audit(tx, {
+      teamId: row.teamId,
+      actorUserId: userId,
+      action: 'comment.edited',
+      subjectType: 'comment',
+      subjectId: commentId,
+      metadata: { teamThreadId: comment.teamThreadId },
+    });
+  });
+  return { teamThreadId: comment.teamThreadId };
 }
 
 export async function deleteComment(db: DB, userId: string, commentId: string) {
@@ -1063,20 +1089,24 @@ export async function deleteComment(db: DB, userId: string, commentId: string) {
     .where(eq(teamThreadComment.id, commentId))
     .limit(1);
   if (!comment) throw new TeamStoreError('not_found');
+  const row = await resolveAccess(db, userId, comment.teamThreadId);
+  let action = 'comment.deleted';
   if (comment.authorUserId !== userId) {
-    const row = await resolveAccess(db, userId, comment.teamThreadId);
     const membership = await requireMembership(db, row.teamId, userId);
     if (membership.role !== 'owner') throw new TeamStoreError('forbidden');
-    await audit(db, {
+    action = 'comment.deleted_by_owner';
+  }
+  await db.transaction(async (tx) => {
+    await audit(tx, {
       teamId: row.teamId,
       actorUserId: userId,
-      action: 'comment.deleted_by_owner',
+      action,
       subjectType: 'comment',
       subjectId: commentId,
       metadata: { authorUserId: comment.authorUserId },
     });
-  }
-  await db.delete(teamThreadComment).where(eq(teamThreadComment.id, commentId));
+    await tx.delete(teamThreadComment).where(eq(teamThreadComment.id, commentId));
+  });
   return { teamThreadId: comment.teamThreadId };
 }
 

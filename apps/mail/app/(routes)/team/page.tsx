@@ -1,9 +1,15 @@
+import {
+  useMarkTeamNotificationsRead,
+  useMyTeams,
+  useTeamNotifications,
+  useTeamThreads,
+} from '@/hooks/use-teams';
+import { resolveTeamWorkspaceView, selectMentionNotifications } from '@/lib/team-workspace-view';
 import { SharedThreadViewer } from '@/components/team/shared-thread-viewer';
-import { useMyTeams, useTeamThreads } from '@/hooks/use-teams';
+import { ArrowLeft, AtSign, Loader2, UserCheck, Users } from 'lucide-react';
+import { Link, useNavigate, useSearchParams } from 'react-router';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useConnections } from '@/hooks/use-connections';
-import { ArrowLeft, Loader2, Users } from 'lucide-react';
-import { Link, useNavigate } from 'react-router';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { useMemo, useState } from 'react';
@@ -24,6 +30,8 @@ type AssigneeFilter = 'all' | 'me' | 'unassigned';
 
 export default function TeamWorkspacePage() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const view = resolveTeamWorkspaceView(searchParams.get('view'));
   const { data: teamsData, isLoading: teamsLoading } = useMyTeams();
   const teams = teamsData?.teams ?? [];
   const [teamId, setTeamId] = useState<string | null>(null);
@@ -34,9 +42,12 @@ export default function TeamWorkspacePage() {
 
   const { data: threadsData, isLoading: threadsLoading } = useTeamThreads(selectedTeamId, {
     status: statusFilter === 'all' ? undefined : statusFilter,
-    assignee: assigneeFilter === 'all' ? undefined : assigneeFilter,
+    assignee: view === 'assigned' ? 'me' : assigneeFilter === 'all' ? undefined : assigneeFilter,
   });
   const threads = threadsData?.threads ?? [];
+  const notificationsQuery = useTeamNotifications({ unreadOnly: false, limit: 100 });
+  const markNotificationsRead = useMarkTeamNotificationsRead();
+  const mentions = selectMentionNotifications(notificationsQuery.data?.notifications ?? []);
 
   const { data: connectionsData } = useConnections();
   const myMailboxes = useMemo(() => {
@@ -78,40 +89,78 @@ export default function TeamWorkspacePage() {
         )}
       </header>
 
-      <div className="flex flex-wrap items-center gap-1.5 border-b border-[#E7E7E7] px-4 py-2 dark:border-[#252525]">
+      <nav
+        aria-label={m['common.teams.workspaceViews']()}
+        className="flex items-center gap-1 border-b border-[#E7E7E7] px-4 py-2 dark:border-[#252525]"
+      >
         {(
           [
-            ['open', m['common.teams.filterOpen']()],
-            ['closed', m['common.teams.filterDone']()],
-            ['all', m['common.teams.filterAll']()],
+            ['shared', m['common.teams.workspaceViewShared'](), Users],
+            ['assigned', m['common.teams.workspaceViewAssigned'](), UserCheck],
+            ['mentions', m['common.teams.workspaceViewMentions'](), AtSign],
           ] as const
-        ).map(([value, label]) => (
-          <FilterChip
+        ).map(([value, label, Icon]) => (
+          <button
             key={value}
-            active={statusFilter === value}
-            label={label}
-            onClick={() => setStatusFilter(value)}
-          />
+            type="button"
+            aria-current={view === value ? 'page' : undefined}
+            onClick={() => {
+              const next = new URLSearchParams(searchParams);
+              next.set('view', value);
+              setSearchParams(next, { replace: true });
+            }}
+            className={cn(
+              'flex h-9 items-center gap-1.5 rounded-lg px-3 text-sm transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+              view === value
+                ? 'bg-foreground text-background'
+                : 'text-muted-foreground hover:bg-muted hover:text-foreground',
+            )}
+          >
+            <Icon className="size-4" aria-hidden />
+            {label}
+          </button>
         ))}
-        <span className="mx-1 h-4 w-px bg-[#E7E7E7] dark:bg-[#252525]" aria-hidden />
-        {(
-          [
-            ['all', m['common.teams.filterAll']()],
-            ['me', m['common.teams.filterMine']()],
-            ['unassigned', m['common.teams.filterUnassigned']()],
-          ] as const
-        ).map(([value, label]) => (
-          <FilterChip
-            key={value}
-            active={assigneeFilter === value}
-            label={label}
-            onClick={() => setAssigneeFilter(value)}
-          />
-        ))}
-      </div>
+      </nav>
+
+      {view !== 'mentions' && (
+        <div className="flex flex-wrap items-center gap-1.5 border-b border-[#E7E7E7] px-4 py-2 dark:border-[#252525]">
+          {(
+            [
+              ['open', m['common.teams.filterOpen']()],
+              ['closed', m['common.teams.filterDone']()],
+              ['all', m['common.teams.filterAll']()],
+            ] as const
+          ).map(([value, label]) => (
+            <FilterChip
+              key={value}
+              active={statusFilter === value}
+              label={label}
+              onClick={() => setStatusFilter(value)}
+            />
+          ))}
+          {view === 'shared' && (
+            <span className="mx-1 h-4 w-px bg-[#E7E7E7] dark:bg-[#252525]" aria-hidden />
+          )}
+          {view === 'shared' &&
+            (
+              [
+                ['all', m['common.teams.filterAll']()],
+                ['me', m['common.teams.filterMine']()],
+                ['unassigned', m['common.teams.filterUnassigned']()],
+              ] as const
+            ).map(([value, label]) => (
+              <FilterChip
+                key={value}
+                active={assigneeFilter === value}
+                label={label}
+                onClick={() => setAssigneeFilter(value)}
+              />
+            ))}
+        </div>
+      )}
 
       <ScrollArea className="min-h-0 flex-1">
-        {teamsLoading || threadsLoading ? (
+        {teamsLoading || (view === 'mentions' ? notificationsQuery.isLoading : threadsLoading) ? (
           <div className="text-muted-foreground flex items-center justify-center gap-2 py-16 text-sm">
             <Loader2 className="h-4 w-4 animate-spin" />
           </div>
@@ -122,6 +171,44 @@ export default function TeamWorkspacePage() {
               {m['common.teams.manageTeams']()}
             </Link>
           </div>
+        ) : view === 'mentions' && mentions.length === 0 ? (
+          <p className="text-muted-foreground px-4 py-16 text-center text-sm">
+            {m['common.teams.noMentions']()}
+          </p>
+        ) : view === 'mentions' ? (
+          <ul className="divide-y divide-[#E7E7E7] dark:divide-[#252525]">
+            {mentions.map((notification) => (
+              <li key={notification.id}>
+                <button
+                  type="button"
+                  className="hover:bg-muted focus-visible:bg-muted flex w-full items-start gap-3 px-4 py-3 text-left transition-colors duration-150 focus-visible:outline-none"
+                  onClick={() => {
+                    setViewerThreadId(notification.teamThreadId!);
+                    if (!notification.readAt) {
+                      markNotificationsRead.mutate({ ids: [notification.id] });
+                    }
+                  }}
+                >
+                  <AtSign className="mt-0.5 size-4 shrink-0 text-rose-500" aria-hidden />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-medium">
+                      {notification.threadSubject || m['common.teams.untitledThread']()}
+                    </span>
+                    <span className="text-muted-foreground mt-0.5 block text-xs">
+                      {notification.actorName} · {notification.teamName} ·{' '}
+                      {format(new Date(notification.createdAt), 'd MMM HH:mm')}
+                    </span>
+                  </span>
+                  {!notification.readAt && (
+                    <span
+                      className="mt-1 size-2 rounded-full bg-blue-500"
+                      aria-label={m['common.teams.unread']()}
+                    />
+                  )}
+                </button>
+              </li>
+            ))}
+          </ul>
         ) : threads.length === 0 ? (
           <p className="text-muted-foreground px-4 py-16 text-center text-sm">
             {m['common.teams.noSharedThreads']()}

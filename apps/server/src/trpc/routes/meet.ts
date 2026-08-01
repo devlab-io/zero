@@ -1,4 +1,9 @@
-import { loadGoogleAvailability, selectGoogleFreeBusyAccount } from '../../lib/meetings/freebusy';
+import {
+  INVALID_CALENDAR_TIME_ZONE,
+  isValidIanaTimeZone,
+  loadGoogleAvailability,
+  selectGoogleFreeBusyAccount,
+} from '../../lib/meetings/freebusy';
 import { activeDriverProcedure, createRateLimiterMiddleware, router } from '../trpc';
 import { buildMeetingPreview } from '../../lib/meetings/prepare-from-thread';
 import { getThread, getZeroDB } from '../../lib/server-utils';
@@ -67,11 +72,20 @@ export const meetRouter = router({
           message: 'Availability is currently supported for Google Calendar only',
         });
       }
+      if (!isValidIanaTimeZone(input.timeZone)) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: INVALID_CALENDAR_TIME_ZONE });
+      }
+      if (!ctx.activeConnection.authAccountId) {
+        return { authorizationRequired: true as const, busy: [] };
+      }
       try {
         const accounts = await ctx.c.var.auth.api.listUserAccounts({
           headers: ctx.c.req.raw.headers,
         });
-        const calendarAccount = selectGoogleFreeBusyAccount(accounts);
+        const calendarAccount = selectGoogleFreeBusyAccount(
+          accounts,
+          ctx.activeConnection.authAccountId,
+        );
         if (!calendarAccount) return { authorizationRequired: true as const, busy: [] };
         return await loadGoogleAvailability(input, {
           getAccessToken: () =>

@@ -168,6 +168,7 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
             };
             output: {
                 html: string;
+                model: string;
             };
             meta: object;
         }>;
@@ -2758,6 +2759,7 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
                 teamThreadId: string;
                 mentions?: string[] | undefined;
                 quoteMessageId?: string | undefined;
+                quoteText?: string | undefined;
             };
             output: {
                 comment: {

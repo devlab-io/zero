@@ -125,6 +125,8 @@ export const connection = createTable(
     email: text('email').notNull(),
     name: text('name'),
     picture: text('picture'),
+    /** Better Auth provider accountId used to select the exact calendar account. */
+    authAccountId: text('auth_account_id'),
     accessToken: text('access_token'),
     refreshToken: text('refresh_token'),
     scope: text('scope').notNull(),
@@ -138,6 +140,7 @@ export const connection = createTable(
     index('connection_user_id_idx').on(t.userId),
     index('connection_expires_at_idx').on(t.expiresAt),
     index('connection_provider_id_idx').on(t.providerId),
+    index('connection_auth_account_idx').on(t.userId, t.providerId, t.authAccountId),
   ],
 );
 

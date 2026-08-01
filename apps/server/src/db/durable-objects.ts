@@ -135,6 +135,7 @@ export class DbRpcDO extends RpcTarget {
     updatingInfo: {
       expiresAt: Date;
       scope: string;
+      authAccountId?: string;
     },
   ): Promise<{ id: string }[]> {
     return await this.mainDo.createConnection(providerId, email, this.userId, updatingInfo);
@@ -998,6 +999,7 @@ export class ZeroDB extends DurableObject<ZeroEnv> {
     updatingInfo: {
       expiresAt: Date;
       scope: string;
+      authAccountId?: string;
     },
   ): Promise<{ id: string }[]> {
     this.invalidateActiveConnectionCache();

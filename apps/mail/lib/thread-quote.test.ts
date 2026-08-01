@@ -2,6 +2,7 @@ import {
   buildQuotedReplyHtml,
   normalizeQuotedSelection,
   resolveQuoteSelectionToolbar,
+  syncInternalCommentQuote,
   insertQuotedReply,
 } from './thread-quote';
 import { describe, expect, it } from 'vitest';
@@ -38,6 +39,19 @@ describe('resolveQuoteSelectionToolbar', () => {
       left: 200,
       top: 36,
     });
+  });
+});
+
+describe('syncInternalCommentQuote', () => {
+  it('clears a consumed selected-text quote in every mounted team section', () => {
+    expect(
+      syncInternalCommentQuote({ id: 'selection-1', messageId: 'm1', text: 'Excerpt' }, null),
+    ).toBeNull();
+  });
+
+  it('preserves a local quote-latest choice when no external request exists', () => {
+    const local = { id: '', messageId: 'm2', text: '' };
+    expect(syncInternalCommentQuote(local, null)).toBe(local);
   });
 });
 
