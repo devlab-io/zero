@@ -101,14 +101,31 @@ export function toLikePattern(foldedNeedle: string): string {
   return `%${foldedNeedle.replace(/[\\%_]/g, (char) => `\\${char}`)}%`;
 }
 
-/** Expression SQL pliant une colonne texte avec la même table que {@link foldSearchText}. */
+/**
+ * Littéral chaîne SQLite pour CONSTANTES INTERNES UNIQUEMENT (quotes simples
+ * doublées). JAMAIS pour une donnée utilisateur : l'aiguille et le caractère
+ * ESCAPE restent des paramètres liés — seul l'alphabet de pliage hardcodé
+ * ci-dessus passe par ce chemin.
+ */
+export const sqliteStringLiteral = (value: string): string => `'${value.replaceAll("'", "''")}'`;
+
+/**
+ * Expression SQL pliant une colonne texte avec la même table que
+ * {@link foldSearchText}. Les paires sont insérées comme LITTÉRAUX SQL
+ * statiques, pas comme paramètres liés (tour 08) : le SQLite des Durable
+ * Objects plafonne à 100 paramètres liés par requête — ~54 paires × 2 params
+ * × 2 colonnes (subject OR sender) dépassaient 200 bindings et CHAQUE
+ * recherche projection échouait en production (le node:sqlite local, plus
+ * permissif, ne le montrait pas). La condition compilée complète ne lie plus
+ * que le motif utilisateur et le caractère ESCAPE.
+ */
 export function foldedColumn(column: SQL | SQL.Aliased | unknown): SQL {
   let expr = sql`${column}`;
   for (const [from, to] of SEARCH_FOLD_PAIRS) {
-    expr = sql`replace(${expr}, ${from}, ${to})`;
+    expr = sql`replace(${expr}, ${sql.raw(sqliteStringLiteral(from))}, ${sql.raw(sqliteStringLiteral(to))})`;
   }
   for (const [from, to] of SEARCH_SEPARATOR_PAIRS) {
-    expr = sql`replace(${expr}, ${from}, ${to})`;
+    expr = sql`replace(${expr}, ${sql.raw(sqliteStringLiteral(from))}, ${sql.raw(sqliteStringLiteral(to))})`;
   }
   // SQLite has no regexp replace in Durable Objects. Three deterministic
   // passes collapse runs up to eight spaces, enough for adjacent separators
