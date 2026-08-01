@@ -117,7 +117,8 @@
       "keySaved": "Clé enregistrée",
       "keyRemoved": "Clé supprimée — retour à Workers AI",
       "keySaveError": "Impossible d'enregistrer la clé. Réessayez.",
-      "keyRemoveError": "Impossible de supprimer la clé. Réessayez."
+      "keyRemoveError": "Impossible de supprimer la clé. Réessayez.",
+      "currentThreadIncluded": "Fil actuel inclus"
     },
     "commandPalette": {
       "title": "Palette de commandes",

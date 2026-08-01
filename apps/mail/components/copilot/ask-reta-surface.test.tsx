@@ -56,6 +56,7 @@ const harness = vi.hoisted(() => ({
   selectModelMutateAsync: vi.fn(),
   invalidateQueries: vi.fn(async () => {}),
   catalogue: undefined as unknown,
+  getQueryData: vi.fn((_key: unknown) => undefined as unknown),
   toastSuccess: vi.fn(),
   toastError: vi.fn(),
   toastPlain: vi.fn(),
@@ -93,6 +94,9 @@ vi.mock('@/providers/query-provider', () => ({
       create: { mutationOptions: () => ({ kind: 'drafts' }) },
       list: { queryKey: () => ['drafts'] },
     },
+    mail: {
+      get: { queryKey: (input: unknown) => ['mail', 'get', input] },
+    },
   }),
 }));
 
@@ -106,6 +110,7 @@ vi.mock('@tanstack/react-query', () => ({
   useQueryClient: () => ({
     invalidateQueries: harness.invalidateQueries,
     fetchQuery: harness.fetchQuery,
+    getQueryData: harness.getQueryData,
   }),
 }));
 
@@ -206,6 +211,8 @@ beforeEach(() => {
   harness.selectModelMutateAsync.mockResolvedValue({ selectedModelId: 'workers-ai:llama-3.3-70b' });
   harness.invalidateQueries.mockClear();
   harness.catalogue = defaultCatalogue();
+  harness.getQueryData.mockReset();
+  harness.getQueryData.mockReturnValue(undefined);
   harness.toastSuccess.mockClear();
   harness.toastError.mockClear();
   harness.toastPlain.mockClear();
@@ -1013,5 +1020,63 @@ describe('AskRetaSurface — model catalogue select (slice 3B)', () => {
     harness.connectionId = 'conn-b';
     render();
     expect(container.querySelector('[data-testid="model-manager"]')).toBeNull();
+  });
+});
+
+describe('AskRetaSurface — chip « fil actuel inclus » (prod CUA fix)', () => {
+  const chip = () => container.querySelector('[data-testid="ask-reta-thread-chip"]');
+
+  it('Y sur un fil ouvert : le chip localisé apparaît, SANS aucun fetch supplémentaire', async () => {
+    harness.queryStore.threadId = 'thread-9';
+    render();
+    await act(async () => {});
+    expect(chip()).not.toBeNull();
+    expect(chip()!.textContent).toContain('askReta.currentThreadIncluded');
+    // Sujet absent du cache → chip générique, et JAMAIS de fetch pour l'obtenir.
+    expect(harness.fetchQuery).not.toHaveBeenCalled();
+    // La lecture est bien le cache existant du compte (getQueryData seul).
+    expect(harness.getQueryData).toHaveBeenCalledWith(['mail', 'get', { id: 'thread-9' }]);
+  });
+
+  it('le sujet apparaît UNIQUEMENT s’il est déjà dans le cache (jamais de corps)', async () => {
+    harness.queryStore.threadId = 'thread-9';
+    harness.getQueryData.mockReturnValue({
+      latest: { subject: 'Relance facture Socredo', decodedBody: '<p>CORPS SECRET</p>' },
+    });
+    render();
+    await act(async () => {});
+    expect(chip()!.textContent).toContain('Relance facture Socredo');
+    expect(chip()!.textContent).not.toContain('CORPS SECRET');
+  });
+
+  it('fermeture du fil : le chip disparaît', async () => {
+    harness.queryStore.threadId = 'thread-9';
+    render();
+    await act(async () => {});
+    expect(chip()).not.toBeNull();
+    harness.queryStore.threadId = null;
+    render();
+    await act(async () => {});
+    expect(chip()).toBeNull();
+  });
+
+  it('A→B avec le même threadId : le chip de A ne réapparaît JAMAIS sous B', async () => {
+    harness.queryStore.threadId = 'thread-9';
+    render();
+    await act(async () => {});
+    expect(chip()).not.toBeNull();
+
+    // Bascule de connexion, le paramètre threadId de l'URL persiste.
+    harness.connectionId = 'conn-b';
+    render();
+    await act(async () => {}); // purge + réhydratation sous B
+    await act(async () => {});
+    expect(chip()).toBeNull();
+
+    // Un NOUVEAU fil ouvert sous B recapture le chip pour B.
+    harness.queryStore.threadId = 'thread-b1';
+    render();
+    await act(async () => {});
+    expect(chip()).not.toBeNull();
   });
 });

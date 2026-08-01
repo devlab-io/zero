@@ -69,6 +69,13 @@ export const copilotRouter = router({
         // Redis this expensive surface DENIES instead of running unlimited.
         key: 'userId',
         failClosed: true,
+        // Prod fix 2026-08-01: without remote Redis the per-user ZeroDB DO is
+        // the durable fallback (same 20/5min window) — ask surfaces ONLY.
+        durableFallback: async (ctx) => {
+          if (!ctx.sessionUser) throw new Error('unreachable: identity checked upstream');
+          const db = await getZeroDB(ctx.sessionUser.id);
+          return db.consumeAskRetaRateLimit();
+        },
       }),
     )
     .input(askRetaInputSchema)

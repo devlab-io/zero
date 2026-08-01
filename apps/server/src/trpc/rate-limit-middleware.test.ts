@@ -78,6 +78,56 @@ describe('createRateLimiterMiddleware — real middleware, copilot configuration
     expect(next).not.toHaveBeenCalled();
   });
 
+  it('prod sans Redis AVEC durableFallback : le DO autorise → next() ; refuse → TOO_MANY_REQUESTS ; panne → PRECONDITION_FAILED', async () => {
+    const consume = vi.fn(async () => ({ allowed: true, limit: 20, remaining: 19, reset: 1 }));
+    const withFallback = () =>
+      middlewareFn(
+        createRateLimiterMiddleware({
+          limiter: Ratelimit.slidingWindow(20, '5 m'),
+          generatePrefix: () => 'ratelimit:copilot-ask',
+          key: 'userId',
+          failClosed: true,
+          durableFallback: async () => consume(),
+        }),
+      );
+
+    const next = vi.fn(async () => 'result');
+    await expect(withFallback()({ next, ctx: makeCtx('user-1'), input: {} })).resolves.toBe(
+      'result',
+    );
+    expect(consume).toHaveBeenCalledTimes(1);
+    expect(harness.limit).not.toHaveBeenCalled(); // pas de Redis → pas d'Upstash
+
+    consume.mockResolvedValueOnce({ allowed: false, limit: 20, remaining: 0, reset: 9 });
+    await expect(
+      withFallback()({ next: vi.fn(async () => 'x'), ctx: makeCtx('user-1'), input: {} }),
+    ).rejects.toMatchObject({ code: 'TOO_MANY_REQUESTS' });
+
+    consume.mockRejectedValueOnce(new Error('DO unreachable'));
+    await expect(
+      withFallback()({ next: vi.fn(async () => 'x'), ctx: makeCtx('user-1'), input: {} }),
+    ).rejects.toMatchObject({ code: 'PRECONDITION_FAILED' });
+  });
+
+  it('Redis distant présent : Upstash reste PRIMAIRE, le fallback DO est ignoré', async () => {
+    harness.env.REDIS_URL = 'https://upstash.example.com';
+    harness.env.REDIS_TOKEN = 'token';
+    const consume = vi.fn(async () => ({ allowed: true, limit: 20, remaining: 19, reset: 1 }));
+    const built = middlewareFn(
+      createRateLimiterMiddleware({
+        limiter: Ratelimit.slidingWindow(20, '5 m'),
+        generatePrefix: () => 'ratelimit:copilot-ask',
+        key: 'userId',
+        failClosed: true,
+        durableFallback: async () => consume(),
+      }),
+    );
+    const next = vi.fn(async () => 'result');
+    await expect(built({ next, ctx: makeCtx('user-1'), input: {} })).resolves.toBe('result');
+    expect(harness.limit).toHaveBeenCalledTimes(1);
+    expect(consume).not.toHaveBeenCalled();
+  });
+
   it('strict userId key: a missing session user is UNAUTHORIZED, never a shared bucket', async () => {
     harness.env.REDIS_URL = 'https://real-redis.upstash.io';
     harness.env.REDIS_TOKEN = 'token';

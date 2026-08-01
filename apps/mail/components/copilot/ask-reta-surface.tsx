@@ -173,6 +173,39 @@ export function AskRetaSurface() {
   // answer ready / error. Screen readers follow the ask without spam.
   const [announcement, setAnnouncement] = useState('');
 
+  // Chip « fil actuel inclus » (prod CUA fix 2026-08-01) : capturé sous le
+  // scope hydraté où CE threadId est apparu. Un changement de compte/
+  // connexion avec le même threadId le masque (le fil de A n'est jamais
+  // annoncé « inclus » sous B) ; il meurt à la fermeture du fil. Le serveur
+  // reste l'autorité d'ownership sur context.threadId — affichage seulement.
+  const [threadChip, setThreadChip] = useState<{ threadId: string; scopeKey: string } | null>(null);
+  useEffect(() => {
+    if (!threadId || !userId || !connectionId) {
+      setThreadChip(null);
+      return;
+    }
+    const key = scopeKeyOf({ userId, connectionId });
+    setThreadChip((prev) =>
+      prev && prev.threadId === threadId ? prev : { threadId, scopeKey: key },
+    );
+  }, [threadId, userId, connectionId]);
+  const showThreadChip =
+    !!threadId &&
+    isHydrated &&
+    !!userId &&
+    !!connectionId &&
+    !!threadChip &&
+    threadChip.threadId === threadId &&
+    threadChip.scopeKey === scopeKeyOf({ userId, connectionId });
+  // Sujet UNIQUEMENT s'il est DÉJÀ dans le cache react-query du compte
+  // (getQueryData — zéro fetch, jamais de corps) ; sinon chip générique.
+  const cachedThread = showThreadChip
+    ? (queryClient.getQueryData(trpc.mail.get.queryKey({ id: threadId })) as
+        | { latest?: { subject?: string } }
+        | undefined)
+    : undefined;
+  const threadChipSubject = cachedThread?.latest?.subject?.slice(0, 80);
+
   const loadedScopeRef = useRef<ConversationScope | null>(null);
   const conversationScopeRef = useRef<ConversationScope | null>(null);
   const conversationRef = useRef<AskRetaTurn[]>(conversation);
@@ -752,6 +785,20 @@ export function AskRetaSurface() {
         )}
       </div>
 
+      {/* Visual context (prod CUA fix 2026-08-01): the open thread rides along
+          with the ask — say so. Subject ONLY if already cached (getQueryData,
+          zero fetch, zero body); the chip dies with the thread AND with the
+          account/connection it was captured under. Server-side ownership of
+          context.threadId stays the authority — this is display only. */}
+      {showThreadChip && (
+        <p
+          data-testid="ask-reta-thread-chip"
+          className="text-muted-foreground border-t px-3 pt-2 text-[11px]"
+        >
+          {m['common.askReta.currentThreadIncluded']()}
+          {threadChipSubject ? ` — ${threadChipSubject}` : ''}
+        </p>
+      )}
       {/* Small render-time hint: the live composer's current draft will ride
           along with the next ask (read once at submit, live registry first). */}
       {isHydrated &&

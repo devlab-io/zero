@@ -24,6 +24,20 @@ export type RateLimitCheck = {
     remaining: number;
     reset: number;
   }>;
+  /**
+   * Durable per-user fallback (prod fix 2026-08-01): consulted ONLY when no
+   * remote Redis exists AND the surface is fail-closed in production —
+   * exactly the case that used to 503 unconditionally. Upstash stays PRIMARY
+   * whenever configured; a fallback failure stays fail-closed (unavailable).
+   * The callback must be structurally scoped (per-user DO) — it receives no
+   * identifier.
+   */
+  durableFallback?: () => Promise<{
+    allowed: boolean;
+    limit: number;
+    remaining: number;
+    reset: number;
+  }>;
 };
 
 export type RateLimitDecision =
@@ -39,7 +53,16 @@ export async function evaluateRateLimit(check: RateLimitCheck): Promise<RateLimi
   if (!check.identifier) return { outcome: 'missing-identity' };
 
   if (!check.hasRemoteRedis) {
-    if (check.failClosed && check.isProduction) return { outcome: 'unavailable' };
+    if (check.failClosed && check.isProduction) {
+      if (!check.durableFallback) return { outcome: 'unavailable' };
+      try {
+        const { allowed, limit, remaining, reset } = await check.durableFallback();
+        return { outcome: allowed ? 'allowed' : 'limited', headers: { limit, remaining, reset } };
+      } catch {
+        // The durable fallback itself failed: NEVER fail open.
+        return { outcome: 'unavailable' };
+      }
+    }
     return { outcome: 'skip' };
   }
 
@@ -47,5 +70,37 @@ export async function evaluateRateLimit(check: RateLimitCheck): Promise<RateLimi
   return {
     outcome: success ? 'allowed' : 'limited',
     headers: { limit, remaining, reset },
+  };
+}
+
+export type SlidingWindowResult = {
+  allowed: boolean;
+  remaining: number;
+  /** Epoch ms when the oldest counted call leaves the window. */
+  reset: number;
+  /** Timestamps to persist back (expired entries purged; grant appended). */
+  timestamps: number[];
+};
+
+/**
+ * Exact sliding window over persisted timestamps (pure — the ZeroDB Durable
+ * Object wraps it in a storage transaction). No PII: timestamps only.
+ */
+export function consumeSlidingWindow(
+  stored: readonly number[],
+  now: number,
+  limit: number,
+  windowMs: number,
+): SlidingWindowResult {
+  const live = stored.filter((t) => t > now - windowMs);
+  if (live.length >= limit) {
+    return { allowed: false, remaining: 0, reset: Math.min(...live) + windowMs, timestamps: live };
+  }
+  const timestamps = [...live, now];
+  return {
+    allowed: true,
+    remaining: limit - timestamps.length,
+    reset: (timestamps[0] ?? now) + windowMs,
+    timestamps,
   };
 }

@@ -117,7 +117,8 @@
       "keySaved": "Key saved",
       "keyRemoved": "Key removed — back to Workers AI",
       "keySaveError": "Could not save the key. Try again.",
-      "keyRemoveError": "Could not remove the key. Try again."
+      "keyRemoveError": "Could not remove the key. Try again.",
+      "currentThreadIncluded": "Current thread included"
     },
     "commandPalette": {
       "title": "Command Palette",

@@ -7,7 +7,7 @@ import {
 } from '../lib/ask-reta/schema';
 import { AskRetaAbortedError, runAskReta } from '../lib/ask-reta/pipeline';
 import { createAskRetaCancellation } from '../lib/ask-reta/cancellation';
-import { getActiveConnection } from '../lib/server-utils';
+import { getActiveConnection, getZeroDB } from '../lib/server-utils';
 import { createAskRetaDeps } from '../lib/ask-reta/deps';
 import { evaluateRateLimit } from '../lib/rate-limit';
 import { hasRemoteRedis } from '../lib/auth-cache';
@@ -273,8 +273,10 @@ export const askRetaStreamRouter = new Hono<HonoContext>().post('/', async (c) =
   const sessionUser = c.var.sessionUser;
   if (!sessionUser) return c.json({ error: 'Unauthorized' }, 401);
 
-  // Same limits and posture as tRPC copilot.ask: strict userId key,
-  // fail-closed in production without remote Redis.
+  // Same limits and posture as tRPC copilot.ask: strict userId key. Without
+  // remote Redis in production the per-user ZeroDB Durable Object is the
+  // DURABLE fallback (prod fix 2026-08-01: the missing-Redis 503 hit every
+  // ask before the pipeline); a fallback failure stays fail-closed.
   const decision = await evaluateRateLimit({
     hasRemoteRedis: hasRemoteRedis(zenv),
     isProduction: zenv.NODE_ENV === 'production',
@@ -287,6 +289,10 @@ export const askRetaStreamRouter = new Hono<HonoContext>().post('/', async (c) =
         analytics: true,
         prefix: 'ratelimit:copilot-ask',
       }).limit(id),
+    durableFallback: async () => {
+      const db = await getZeroDB(sessionUser.id);
+      return db.consumeAskRetaRateLimit();
+    },
   });
   if (decision.outcome === 'missing-identity') return c.json({ error: 'Unauthorized' }, 401);
   if (decision.outcome === 'unavailable')

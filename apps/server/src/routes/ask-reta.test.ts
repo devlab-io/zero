@@ -11,11 +11,15 @@ const harness = vi.hoisted(() => ({
   runAskReta: vi.fn(),
   createDeps: vi.fn(),
   getActiveConnection: vi.fn(),
+  consumeRate: vi.fn(async () => ({ allowed: true, limit: 20, remaining: 19, reset: 1 })),
   cancellations: [] as { signal: AbortSignal; abort: () => void; dispose: () => void }[],
 }));
 
 vi.mock('cloudflare:workers', () => ({ env: harness.env }));
-vi.mock('../lib/server-utils', () => ({ getActiveConnection: harness.getActiveConnection }));
+vi.mock('../lib/server-utils', () => ({
+  getActiveConnection: harness.getActiveConnection,
+  getZeroDB: vi.fn(async () => ({ consumeAskRetaRateLimit: harness.consumeRate })),
+}));
 vi.mock('../lib/services', () => ({ redis: () => ({}) }));
 vi.mock('../lib/ask-reta/deps', () => ({ createAskRetaDeps: harness.createDeps }));
 vi.mock('../lib/ask-reta/cancellation', async (importOriginal) => {
@@ -94,6 +98,8 @@ beforeEach(() => {
   }));
   harness.getActiveConnection.mockReset();
   harness.getActiveConnection.mockResolvedValue({ id: 'conn-active' });
+  harness.consumeRate.mockReset();
+  harness.consumeRate.mockResolvedValue({ allowed: true, limit: 20, remaining: 19, reset: 1 });
   harness.cancellations.length = 0;
 });
 
@@ -244,9 +250,34 @@ describe('/api/ask-reta — authenticated ownership-safe NDJSON stream', () => {
     expect(harness.cancellations[0]!.dispose).toHaveBeenCalled();
   });
 
-  it('fails CLOSED in production without remote Redis (503)', async () => {
+  it('prod sans Redis distant : le fallback DO durable AUTORISE et le pipeline tourne (fini le 503 systématique)', async () => {
     harness.env.NODE_ENV = 'production';
+    harness.runAskReta.mockResolvedValueOnce({ answer: 'ok', citations: [], steps: [] });
     const response = await post(makeApp({ id: 'user-1' }), { question: 'x' });
+    expect(response.status).toBe(200);
+    expect(harness.consumeRate).toHaveBeenCalledTimes(1);
+    expect(harness.runAskReta).toHaveBeenCalledTimes(1);
+  });
+
+  it('prod sans Redis : le 21e appel (fallback DO refuse) → 429', async () => {
+    harness.env.NODE_ENV = 'production';
+    harness.consumeRate.mockResolvedValueOnce({
+      allowed: false,
+      limit: 20,
+      remaining: 0,
+      reset: 9,
+    });
+    const response = await post(makeApp({ id: 'user-1' }), { question: 'x' });
+    expect(response.status).toBe(429);
+    expect(harness.runAskReta).not.toHaveBeenCalled();
+  });
+
+  it('panne TOTALE (pas de Redis, DO en échec) → 503 fail-closed, jamais fail-open, aucun contenu loggé', async () => {
+    harness.env.NODE_ENV = 'production';
+    harness.consumeRate.mockRejectedValueOnce(new Error('DO unreachable'));
+    const response = await post(makeApp({ id: 'user-1' }), {
+      question: 'question confidentielle brouillon',
+    });
     expect(response.status).toBe(503);
     expect(harness.runAskReta).not.toHaveBeenCalled();
   });

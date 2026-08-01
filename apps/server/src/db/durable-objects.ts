@@ -30,6 +30,7 @@ import {
 } from '../services/writing-style-service';
 import { DurableObject, RpcTarget } from 'cloudflare:workers';
 import { eq, and, desc, asc, inArray } from 'drizzle-orm';
+import { consumeSlidingWindow } from '../lib/rate-limit';
 import { defaultUserSettings } from '../lib/schemas';
 import { createDb, type DB } from './index';
 import { EProviders } from '../types';
@@ -223,6 +224,15 @@ export class DbRpcDO extends RpcTarget {
     return await this.mainDo.selectRetaModel(this.userId, params);
   }
 
+  /**
+   * Ask Reta durable rate limit (prod fix 2026-08-01) — STRUCTURALLY scoped:
+   * no identifier crosses this façade; the bucket lives in the per-user DO's
+   * own storage (idFromName(userId)) under a fixed, PII-free key.
+   */
+  async consumeAskRetaRateLimit() {
+    return await this.mainDo.consumeAskRetaRateLimit();
+  }
+
   async rewrapRetaByokCredential(
     provider: string,
     params: {
@@ -239,6 +249,45 @@ export class DbRpcDO extends RpcTarget {
 
 export class ZeroDB extends DurableObject<ZeroEnv> {
   db: DB = createDb(this.env.HYPERDRIVE.connectionString).db;
+
+  // Ask Reta durable rate limit (prod fix 2026-08-01): fixed, PII-free
+  // storage key — this DO is DEDICATED to one user (idFromName(userId)), so
+  // its own storage IS the per-user isolation.
+  private static readonly ASK_RETA_RATE_KEY = 'reta:ask-rate:v1';
+  private static readonly ASK_RETA_RATE_LIMIT = 20;
+  private static readonly ASK_RETA_RATE_WINDOW_MS = 5 * 60 * 1000;
+
+  /**
+   * Exact 20-calls / 5-minute sliding window, persisted in ctx.storage and
+   * consumed inside a storage TRANSACTION (concurrent requests serialize —
+   * two racing calls each consume a distinct slot, never a lost update).
+   * Expired timestamps are purged on every consume. Fallback path of
+   * evaluateRateLimit when no remote Redis exists in production; Upstash
+   * stays primary when configured.
+   */
+  async consumeAskRetaRateLimit(): Promise<{
+    allowed: boolean;
+    limit: number;
+    remaining: number;
+    reset: number;
+  }> {
+    return await this.ctx.storage.transaction(async (txn) => {
+      const stored = (await txn.get<number[]>(ZeroDB.ASK_RETA_RATE_KEY)) ?? [];
+      const result = consumeSlidingWindow(
+        stored,
+        Date.now(),
+        ZeroDB.ASK_RETA_RATE_LIMIT,
+        ZeroDB.ASK_RETA_RATE_WINDOW_MS,
+      );
+      await txn.put(ZeroDB.ASK_RETA_RATE_KEY, result.timestamps);
+      return {
+        allowed: result.allowed,
+        limit: ZeroDB.ASK_RETA_RATE_LIMIT,
+        remaining: result.remaining,
+        reset: result.reset,
+      };
+    });
+  }
 
   // Ce DO est dédié à un utilisateur (idFromName(userId)) et toutes les écritures
   // user/connection transitent par lui : un cache mémoire local invalidé par ces

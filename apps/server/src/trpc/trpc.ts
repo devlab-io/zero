@@ -228,6 +228,14 @@ export const createRateLimiterMiddleware = (config: {
    * call is denied (PRECONDITION_FAILED) instead of silently unlimited.
    */
   failClosed?: boolean;
+  /**
+   * Durable per-user fallback for the NO-remote-Redis production case (prod
+   * fix 2026-08-01) — used by the ASK surfaces only, never a blanket default.
+   * A fallback failure stays fail-closed.
+   */
+  durableFallback?: (
+    ctx: TrpcContext,
+  ) => Promise<{ allowed: boolean; limit: number; remaining: number; reset: number }>;
 }) =>
   t.middleware(async ({ next, ctx, input }) => {
     // Devlab self-host: hasRemoteRedis rejette les URLs locales (incident
@@ -250,6 +258,7 @@ export const createRateLimiterMiddleware = (config: {
           analytics: true,
           prefix: config.generatePrefix(ctx, input),
         }).limit(id),
+      durableFallback: config.durableFallback ? () => config.durableFallback!(ctx) : undefined,
     });
 
     if (decision.outcome === 'missing-identity') {
