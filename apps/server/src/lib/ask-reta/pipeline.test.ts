@@ -668,10 +668,10 @@ describe('tour 09 — intent de récence : list_recent grounded', () => {
       folder: 'inbox',
       maxResults: 3,
     });
-    // Tour 10 : AUCUN corps lu, AUCUN appel de synthèse (1 seul appel modèle,
-    // le plan) — la réponse est construite serveur depuis les métadonnées.
+    // Tour 13 : le MODÈLE n'est JAMAIS consulté — ni plan ni synthèse. La
+    // réponse est entièrement serveur depuis les métadonnées listées.
     expect(deps.readThread).not.toHaveBeenCalled();
-    expect(model.complete).toHaveBeenCalledTimes(1);
+    expect(model.complete).not.toHaveBeenCalled();
     // Step visible au détail FIXE.
     expect(result.steps.some((step) => step.detail === 'recent inbox → 3 threads')).toBe(true);
     // 3 citations METADATA, trois fils distincts, expéditeurs issus des rows.
@@ -711,15 +711,16 @@ describe('tour 09 — intent de récence : list_recent grounded', () => {
         { type: 'read_thread', target: 'top_results' },
       ],
     });
-    // Tour 11 : le court-circuit dépend du PRÉDICAT question, jamais du plan
-    // seul — ici la question est strictement metadata, le plan modèle passe.
-    const deps = makeDeps(scriptedModel([modelPlan]));
+    // Tour 13 : sur une question de CONTENU, le plan modèle list_recent est
+    // bien accepté par zod, la limite clampée, et la synthèse suit son cours.
+    const deps = makeDeps(scriptedModel([modelPlan, 'garbage', 'garbage']));
     const result = await runAskReta(
       deps,
-      input({ question: 'Who are my latest senders in the inbox?' }),
+      input({ question: 'Résume le contenu de mes emails les plus récents' }),
     );
     expect(deps.searchThreads).toHaveBeenCalledWith({ query: '', folder: 'inbox', maxResults: 3 });
-    expect(result.citations.every((citation) => citation.kind === 'metadata')).toBe(true);
+    expect(deps.readThread).toHaveBeenCalled();
+    expect(result.citations.every((citation) => citation.kind === 'message')).toBe(true);
   });
 
   it('NÉGATIF FR : « Résume le contenu de mes trois emails les plus récents » → lecture + SYNTHÈSE, jamais metadata-only', async () => {
@@ -813,15 +814,34 @@ describe('tour 09 — intent de récence : list_recent grounded', () => {
     expect(degraded.citations).toHaveLength(0);
   });
 
-  it('variante anglaise : mêmes citations metadata, zéro synthèse', async () => {
+  it('variante anglaise : mêmes citations metadata, ZÉRO appel modèle', async () => {
     const model = scriptedModel(['still not json']);
     const deps = makeDeps(model);
     const result = await runAskReta(
       deps,
       input({ question: 'Who are my latest senders in the inbox?' }),
     );
-    expect(model.complete).toHaveBeenCalledTimes(1);
+    expect(model.complete).not.toHaveBeenCalled();
     expect(result.citations.length).toBeGreaterThan(0);
+    expect(result.citations.every((citation) => citation.kind === 'metadata')).toBe(true);
+  });
+
+  it('un modèle qui AURAIT proposé search/read ne peut jamais être consulté sur le positif strict', async () => {
+    // Le script est un plan CONTENU parfaitement valide : s'il était consulté,
+    // il déroulerait recherche + lecture + synthèse. Le bypass le rend inerte.
+    const poisonedPlan = JSON.stringify({
+      actions: [
+        { type: 'search', query: 'balguerie' },
+        { type: 'read_thread', target: 'top_results' },
+      ],
+    });
+    const model = scriptedModel([poisonedPlan]);
+    const deps = makeDeps(model);
+    const result = await runAskReta(deps, input({ question: FRENCH_QUESTION }));
+    expect(model.complete).not.toHaveBeenCalled();
+    expect(deps.readThread).not.toHaveBeenCalled();
+    expect(deps.searchThreads).toHaveBeenCalledTimes(1);
+    expect(deps.searchThreads).toHaveBeenCalledWith({ query: '', folder: 'inbox', maxResults: 3 });
     expect(result.citations.every((citation) => citation.kind === 'metadata')).toBe(true);
   });
 

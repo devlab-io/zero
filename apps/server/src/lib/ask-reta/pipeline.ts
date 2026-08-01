@@ -898,28 +898,29 @@ export async function runAskReta(
     deadline: Date.now() + (deps.deadlineMs ?? DEFAULT_DEADLINE_MS),
   };
   checkBudget(budget);
-  const plan = normalizePlan(await getPlan(deps, budget, input), input);
-  const gathered = await executePlan(deps, budget, input, plan);
 
-  // Tour 10/11 : une question STRICTEMENT metadata reçoit une réponse serveur
-  // déterministe, SANS appel de synthèse. La porte est le PRÉDICAT dérivé de
-  // la question — jamais le plan seul : un plan modèle list_recent pour une
-  // demande de CONTENU (« résume mes derniers emails ») continue vers la
-  // lecture + synthèse et ses preuves MESSAGE.
-  if (
-    plan.actions.some((action) => action.type === 'list_recent') &&
-    isStrictRecentMetadataQuestion(input.question)
-  ) {
-    const recent = buildRecentSendersResult(gathered);
+  // Tour 13 : question STRICTEMENT metadata → le PLANIFICATEUR n'est jamais
+  // consulté (zéro appel modèle). Plan déterministe list_recent borné, puis
+  // réponse metadata serveur — le modèle ne peut pas dérouter la question
+  // vers un plan contenu plus lent (12,6 s observées en prod quand il le
+  // faisait). Les demandes de CONTENU récentes gardent plan/lecture/synthèse.
+  if (isStrictRecentMetadataQuestion(input.question)) {
+    const recentPlan: AskRetaPlan = {
+      actions: [{ type: 'list_recent', folder: 'inbox', limit: askRetaLimits.threadsRead }],
+    };
+    const listed = await executePlan(deps, budget, input, recentPlan);
+    const recent = buildRecentSendersResult(listed);
     if (recent) return recent;
     return {
       answer: INSUFFICIENT_EVIDENCE_ANSWER,
       citations: [],
       proposal: undefined,
-      steps: gathered.steps,
+      steps: listed.steps,
     };
   }
 
+  const plan = normalizePlan(await getPlan(deps, budget, input), input);
+  const gathered = await executePlan(deps, budget, input, plan);
   const synthesis = await getSynthesis(deps, budget, input, gathered);
   // Synthesis unavailable after both attempts (tour 06): degrade to a
   // DETERMINISTIC grounded result from the retrieved evidence — never throw,
