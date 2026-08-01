@@ -494,6 +494,29 @@ const normalizeForQuoteMatch = (value: string) => value.replace(/\s+/g, ' ').tri
 export const INSUFFICIENT_EVIDENCE_ANSWER =
   "Preuve insuffisante dans la boîte pour fonder cette réponse — précisez l'expéditeur, le sujet ou la période. (Insufficient mailbox evidence to ground this answer.)";
 
+/** Served when only a draft proposal exists — a proposal is reviewable, not proof. */
+export const PROPOSAL_ONLY_ANSWER =
+  'Brouillon proposé ci-dessous — à vérifier avant utilisation ; aucune preuve de la boîte ne fonde une réponse factuelle. (Draft proposed below — review before use; no mailbox evidence grounds a factual answer.)';
+
+const EXTRACTIVE_ANSWER_MAX_CITATIONS = 6;
+
+/**
+ * v1 answer contract (re-review 4, P1): a validated quote does NOT entail the
+ * model's prose — "Bonjour merci" can be quoted under a fabricated "wire
+ * 100 000". So with sources, the displayed answer is EXTRACTIVE: assembled
+ * server-side from validated citations only (sender/date + verbatim quote,
+ * bounded). The model's free text is never displayed.
+ */
+export const formatExtractiveAnswer = (citations: AskRetaCitation[]): string => {
+  const shown = citations.slice(0, EXTRACTIVE_ANSWER_MAX_CITATIONS);
+  const lines = shown.map(
+    (citation) => `— ${citation.sender} (${citation.date}) : « ${citation.quote} »`,
+  );
+  const hidden = citations.length - shown.length;
+  const suffix = hidden > 0 ? `\n(+ ${hidden} autre(s) extrait(s) cité(s))` : '';
+  return `Extraits vérifiés de votre boîte :\n${lines.join('\n')}${suffix}`;
+};
+
 // Whitelisted numeric overview fields — the ONLY values a citation-free answer
 // may display, formatted server-side (re-review 3, P1: a free model answer must
 // never pass uncited, overview questions included).
@@ -575,19 +598,6 @@ export async function runAskReta(
     citations.push({ ...citation, kind: 'message', quote: cite.quote });
   }
 
-  // Evidence gate (re-review 3): a FREE model answer NEVER ships without at
-  // least one valid citation. Zero citations → either the server-formatted
-  // overview (whitelisted numbers only, model controls no displayed text) or
-  // the explicit insufficient-evidence answer. Proposals/steps survive: a
-  // draft is reviewable content, not a factual claim.
-  let answer = synthesis.answer;
-  if (citations.length === 0) {
-    const overviewAnswer = gathered.overviewJson
-      ? formatOverviewAnswer(JSON.parse(gathered.overviewJson))
-      : null;
-    answer = overviewAnswer ?? INSUFFICIENT_EVIDENCE_ANSWER;
-  }
-
   // Reply proposals require the open thread to have been read successfully
   // within this connection during THIS ask — never a client-asserted id alone.
   const replyThreadId =
@@ -606,6 +616,22 @@ export async function runAskReta(
         ...(replyThreadId ? { threadId: replyThreadId } : {}),
       }
     : undefined;
+
+  // Answer contract (re-review 4, P1): the model's free prose is NEVER
+  // displayed — a validated quote does not entail whatever text surrounds it.
+  // Priority: extractive from validated citations → deterministic overview →
+  // proposal notice (the draft stays reviewable) → insufficient evidence.
+  let answer: string;
+  if (citations.length > 0) {
+    answer = formatExtractiveAnswer(citations);
+  } else {
+    const overviewAnswer = gathered.overviewJson
+      ? formatOverviewAnswer(JSON.parse(gathered.overviewJson))
+      : null;
+    if (overviewAnswer) answer = overviewAnswer;
+    else if (proposal) answer = PROPOSAL_ONLY_ANSWER;
+    else answer = INSUFFICIENT_EVIDENCE_ANSWER;
+  }
 
   return { answer, citations, proposal, steps: gathered.steps };
 }

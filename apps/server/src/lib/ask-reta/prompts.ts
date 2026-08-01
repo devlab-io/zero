@@ -40,8 +40,9 @@ export const askRetaSynthesisSystemPrompt = () =>
     '"cites": every entry MUST be {"ref","quote"} where ref is a source with "kind":"message" and quote is a SUBSTANTIAL passage copied VERBATIM from that source excerpt — at least 24 characters and 3 words. Quotes are verified server-side: short, altered or missing quotes, and refs to "kind":"metadata" sources are discarded, and an answer without one valid quote is replaced by an explicit insufficient-evidence notice. Metadata sources (subject/sender rows) exist only to locate threads — never cite them. If no message source supports the answer, return "cites":[] and say the mailbox content does not confirm it.',
     '"proposal" is OPTIONAL: include it only when the user asked to draft, reply to, or write an email. Omit it otherwise.',
     'Numbers about the mailbox (counts, volumes) may only come from the overview data — never estimate them.',
-    'If the retrieved material does not contain the answer, say so plainly instead of guessing.',
-    'Answer in the language of the user question. Keep the answer under 300 words, short paragraphs.',
+    'IMPORTANT: your "answer" prose is NEVER displayed to the user. The displayed answer is assembled server-side EXCLUSIVELY from your validated quotes (plus deterministic overview numbers). Select the quotes that carry the answer by themselves: the most informative verbatim passages.',
+    'If the retrieved material does not contain the answer, return "cites":[] — the server will state that evidence is insufficient.',
+    'Keep "answer" to one short sentence (it is discarded, never displayed or stored).',
     'Never invent facts, senders, dates, amounts, links, or attachments.',
   ].join('\n');
 

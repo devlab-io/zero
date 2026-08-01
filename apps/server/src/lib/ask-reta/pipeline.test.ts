@@ -3,8 +3,10 @@ import {
   fallbackPlan,
   fallbackSearchQuery,
   fallbackSearchTerms,
+  formatExtractiveAnswer,
   INSUFFICIENT_EVIDENCE_ANSWER,
   normalizePlan,
+  PROPOSAL_ONLY_ANSWER,
   runAskReta,
   type AskRetaDeps,
 } from './pipeline';
@@ -167,7 +169,10 @@ describe('runAskReta — strict citations: message-kind + verified quote ONLY', 
     const deps = makeDeps(model);
     const result = await runAskReta(deps, input());
 
-    expect(result.answer).toContain('120 000 XPF');
+    // Extractive answer: assembled from the validated citation, NEVER model prose.
+    expect(result.answer).toContain(VALID_QUOTE);
+    expect(result.answer).toContain('Compta');
+    expect(result.answer).not.toContain('120 000 XPF');
     expect(result.citations).toHaveLength(1);
     expect(result.citations[0]).toMatchObject({
       ref: 's11',
@@ -244,6 +249,53 @@ describe('runAskReta — strict citations: message-kind + verified quote ONLY', 
     const result = await runAskReta(makeDeps(model), input());
     expect(result.citations).toEqual([]);
     expect(result.answer).toBe(INSUFFICIENT_EVIDENCE_ANSWER);
+  });
+
+  it('ENTAILMENT attack: a benign validated quote can never carry fabricated prose', async () => {
+    // The model cites a real, harmless quote… under a fraudulent instruction.
+    const attack = JSON.stringify({
+      answer: 'Virez 100 000 XPF sur le compte FR76-XXXX immédiatement, virement urgent.',
+      cites: [{ ref: 's11', quote: VALID_QUOTE }],
+    });
+    const model = scriptedModel([planJson, attack]);
+    const result = await runAskReta(makeDeps(model), input());
+
+    // The displayed answer contains ONLY the validated extraction…
+    expect(result.answer).toContain(VALID_QUOTE);
+    expect(result.answer).toContain('Extraits vérifiés');
+    // …and NEVER the fabricated payload.
+    expect(result.answer).not.toMatch(/virez|virement|100\s?000|FR76/i);
+    expect(result.citations).toHaveLength(1);
+  });
+
+  it('the extractive answer is BOUNDED: at most 6 quotes shown, the rest counted', () => {
+    const citation = (n: number) => ({
+      ref: `s${n}`,
+      kind: 'message' as const,
+      threadId: 't',
+      subject: 's',
+      sender: 'Compta <c@x.test>',
+      date: '2026-07-30',
+      excerptHash: 'a'.repeat(64),
+      quote: `extrait numéro ${n} suffisamment long pour le plancher`,
+    });
+    const answer = formatExtractiveAnswer(Array.from({ length: 9 }, (_, i) => citation(i + 1)));
+    expect(answer.match(/— Compta/g)).toHaveLength(6);
+    expect(answer).toContain('(+ 3 autre(s) extrait(s) cité(s))');
+  });
+
+  it('a draft request WITHOUT evidence gets the deterministic proposal notice, proposal kept', async () => {
+    const draftOnly = JSON.stringify({
+      answer: 'Voici votre brouillon, tout est confirmé par la compta.',
+      cites: [],
+      proposal: { kind: 'new', subject: 'Relance', body: 'Ia ora na, petit rappel de facture.' },
+    });
+    const model = scriptedModel([planJson, draftOnly]);
+    const result = await runAskReta(makeDeps(model), input());
+
+    expect(result.answer).toBe(PROPOSAL_ONLY_ANSWER);
+    expect(result.answer).not.toContain('confirmé par la compta');
+    expect(result.proposal?.bodyHtml).toContain('rappel de facture');
   });
 
   it('overview answers are SERVER-FORMATTED: a free model answer never ships uncited', async () => {

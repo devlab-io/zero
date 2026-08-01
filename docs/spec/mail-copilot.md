@@ -117,11 +117,15 @@ Reta vise mieux sur quatre axes mesurables :
   vérifiée sous-chaîne de l'extrait côté serveur. Refs inconnus, refs
   metadata, quotes courtes/absentes/altérées, cites string legacy → zéro
   citation ; les **marqueurs techniques du sanitizer** sont retirés du texte
-  citable et toute quote en contenant un est rejetée (re-review 3). Sans
-  citation valide, **aucun texte libre du modèle ne sort** : réponse overview
-  **formatée côté serveur** depuis les seuls champs numériques whitelist,
-  sinon réponse « preuve insuffisante ». Les sources metadata servent à
-  localiser les fils (sources/steps), jamais de preuve de contenu.
+  citable et toute quote en contenant un est rejetée (re-review 3). Contrat de
+  réponse v1 (re-review 4) : **le texte libre du modèle n'est JAMAIS affiché**
+  — une quote valide n'implique pas la prose qui l'entoure. Avec citations :
+  réponse **extractive** assemblée serveur (expéditeur/date + quote verbatim,
+  ≤ 6 extraits affichés). Sans citation : overview **formaté serveur** (champs
+  numériques whitelist), sinon notice déterministe « brouillon proposé, à
+  vérifier » quand une proposition existe, sinon « preuve insuffisante ». Les
+  sources metadata servent à localiser les fils (sources/steps), jamais de
+  preuve de contenu.
 - **proposition** : brouillon suggéré (réponse ou nouveau mail), texte
   sanitisé par `normalizeEmailRewriteHtml`, jamais envoyé — inséré ou créé en
   brouillon Gmail sur clic explicite.
