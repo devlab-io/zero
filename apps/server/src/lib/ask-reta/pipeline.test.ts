@@ -11,7 +11,13 @@ import {
   runAskReta,
   type AskRetaDeps,
 } from './pipeline';
-import { askRetaInputSchema, askRetaLimits, type AskRetaPlan } from './schema';
+import {
+  askRetaInputSchema,
+  askRetaLimits,
+  askRetaPlanJsonSchema,
+  askRetaSynthesisJsonSchema,
+  type AskRetaPlan,
+} from './schema';
 import type { IGetThreadResponse, ThreadsResponse } from '@zero/types';
 import { describe, expect, it, vi } from 'vitest';
 import type { RetaModel } from './model';
@@ -640,5 +646,122 @@ describe('tour 06 — classification typée, confinement par action, non-fuite',
       expect(params.jsonSchema).toBeTruthy();
       expect(typeof params.jsonSchema).toBe('object');
     }
+  });
+});
+
+describe('tour 09 — intent de récence : list_recent grounded', () => {
+  const FRENCH_QUESTION =
+    'Quels sont les trois expéditeurs les plus récents visibles dans ma boîte de réception ? Cite les emails utilisés.';
+
+  it('la question prod EXACTE (fallback plan) liste la réception, lit le top 3 et CITE', async () => {
+    // Plan model rejeté (le cas du tail prod) + synthèse rejetée : tout le
+    // chemin est déterministe — et pourtant grounded.
+    const model = scriptedModel(['not json at all', 'garbage', 'garbage']);
+    const deps = makeDeps(model);
+    const result = await runAskReta(deps, input({ question: FRENCH_QUESTION }));
+
+    // Récupération : listing multi-shard q VIDE, dossier inbox, borné à 3.
+    expect(deps.searchThreads).toHaveBeenCalledWith({
+      query: '',
+      folder: 'inbox',
+      maxResults: 3,
+    });
+    // Lecture du top 3 issu du listing.
+    expect(deps.readThread).toHaveBeenCalledWith('thread-1');
+    expect(deps.readThread).toHaveBeenCalledWith('thread-2');
+    expect(deps.readThread).toHaveBeenCalledWith('thread-3');
+    // Step visible au détail FIXE.
+    expect(result.steps.some((step) => step.detail === 'recent inbox → 3 threads')).toBe(true);
+    // Réponse extractive DIVERSE : trois fils distincts cités, jamais vide.
+    expect(result.citations.length).toBeGreaterThanOrEqual(3);
+    expect(new Set(result.citations.slice(0, 3).map((c) => c.threadId)).size).toBe(3);
+    expect(result.answer).not.toBe(INSUFFICIENT_EVIDENCE_ANSWER);
+  });
+
+  it('variante anglaise « latest senders » prend le même chemin', async () => {
+    const deps = makeDeps(scriptedModel(['still not json', 'garbage', 'garbage']));
+    await runAskReta(deps, input({ question: 'Who are my latest senders in the inbox?' }));
+    expect(deps.searchThreads).toHaveBeenCalledWith({ query: '', folder: 'inbox', maxResults: 3 });
+  });
+
+  it('« la dernière facture Balguerie » reste une RECHERCHE littérale (pas de listing)', async () => {
+    const deps = makeDeps(scriptedModel(['not json', 'garbage', 'garbage']));
+    await runAskReta(deps, input({ question: 'Que dit la dernière facture Balguerie ?' }));
+    expect(deps.searchThreads).toHaveBeenCalledWith(
+      expect.objectContaining({ query: 'balguerie' }),
+    );
+    expect(deps.searchThreads).not.toHaveBeenCalledWith(expect.objectContaining({ query: '' }));
+  });
+
+  it('un plan MODÈLE list_recent est accepté par zod et exécuté avec limit clampée', async () => {
+    const modelPlan = JSON.stringify({
+      actions: [
+        { type: 'list_recent', folder: 'inbox', limit: 3 },
+        { type: 'read_thread', target: 'top_results' },
+      ],
+    });
+    const deps = makeDeps(scriptedModel([modelPlan, 'garbage', 'garbage']));
+    await runAskReta(deps, input());
+    expect(deps.searchThreads).toHaveBeenCalledWith({ query: '', folder: 'inbox', maxResults: 3 });
+    expect(deps.readThread).toHaveBeenCalled();
+  });
+
+  it('normalizePlan clampe la limite list_recent (50 → 10) et garde le read top_results', () => {
+    const plan = normalizePlan(
+      {
+        actions: [
+          { type: 'list_recent', folder: 'inbox', limit: 50 } as never,
+          { type: 'read_thread', target: 'top_results' },
+        ],
+      },
+      input(),
+    );
+    expect(plan.actions[0]).toEqual({ type: 'list_recent', folder: 'inbox', limit: 10 });
+    expect(plan.actions[1]).toEqual({ type: 'read_thread', target: 'top_results' });
+  });
+
+  it('des corps VIDES ne stoppent pas la lecture : scan borné vers les candidats suivants', async () => {
+    // Chemin recherche (pool de 10 candidats) : thread-1 et thread-2 sans
+    // corps exploitables → le scan continue vers 3,4,5 (3 lectures
+    // PRODUCTIVES), borné à 2× threadsRead — jamais tout le pool.
+    const twoActionPlan = JSON.stringify({
+      actions: [
+        { type: 'search', query: 'balguerie' },
+        { type: 'read_thread', target: 'top_results' },
+      ],
+    });
+    const deps = makeDeps(scriptedModel([twoActionPlan, 'garbage', 'garbage']), {
+      readThread: vi.fn(async (id: string) =>
+        id === 'thread-1' || id === 'thread-2'
+          ? ({ messages: [] } as never)
+          : threadWithMessages(id, 5),
+      ),
+    });
+    const result = await runAskReta(deps, input());
+    expect(deps.readThread).toHaveBeenCalledTimes(5);
+    expect(result.citations.length).toBeGreaterThanOrEqual(3);
+
+    // Le listing de récence, lui, garde son contrat d'appel exact (max 3) :
+    // à pool épuisé et corps vides, la réponse reste honnêtement insuffisante.
+    const allEmpty = makeDeps(scriptedModel(['not json', 'garbage', 'garbage']), {
+      readThread: vi.fn(async () => ({ messages: [] }) as never),
+    });
+    const degraded = await runAskReta(allEmpty, input({ question: FRENCH_QUESTION }));
+    expect(allEmpty.readThread).toHaveBeenCalledTimes(3);
+    expect(degraded.answer).toBe(INSUFFICIENT_EVIDENCE_ANSWER);
+  });
+
+  it('les JSON schemas plan/synthèse sont STRICTS : additionalProperties=false sur chaque objet', () => {
+    const assertClosed = (node: unknown, path: string): void => {
+      if (!node || typeof node !== 'object') return;
+      const record = node as Record<string, unknown>;
+      if (record.type === 'object') {
+        expect(record.additionalProperties, path).toBe(false);
+      }
+      for (const [key, value] of Object.entries(record)) assertClosed(value, `${path}.${key}`);
+    };
+    assertClosed(askRetaPlanJsonSchema, 'plan');
+    assertClosed(askRetaSynthesisJsonSchema, 'synthesis');
+    expect(JSON.stringify(askRetaPlanJsonSchema)).toContain('list_recent');
   });
 });

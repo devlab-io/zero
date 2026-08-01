@@ -91,6 +91,14 @@ export const askRetaPlanSchema = z.object({
           query: z.string().trim().min(1).max(300),
           folder: askRetaFolderSchema.optional(),
         }),
+        // Recency listing (tour 09): READ-ONLY folder listing ordered by
+        // latest-received — the retrieval intent behind "derniers/latest"
+        // questions, which no literal LIKE term can express.
+        z.object({
+          type: z.literal('list_recent'),
+          folder: askRetaFolderSchema.optional(),
+          limit: z.number().int().min(1).max(10).optional(),
+        }),
         z.object({
           type: z.literal('read_thread'),
           target: z.enum(['open', 'top_results']),
@@ -110,18 +118,25 @@ export type AskRetaPlan = z.infer<typeof askRetaPlanSchema>;
  * schema-conforming-but-hostile output still goes through the same strict
  * parse, quote verification and caps).
  */
+// `additionalProperties: false` on EVERY object node (tour 09): the current
+// Cloudflare Workers AI json_schema mode follows the strict structured-output
+// convention — closed objects steer the model harder and are accepted by both
+// catalogue models. Zod above remains the ONLY validation authority.
 export const askRetaPlanJsonSchema: Record<string, unknown> = {
   type: 'object',
+  additionalProperties: false,
   properties: {
     actions: {
       type: 'array',
       maxItems: askRetaLimits.planActions,
       items: {
         type: 'object',
+        additionalProperties: false,
         properties: {
-          type: { type: 'string', enum: ['overview', 'search', 'read_thread'] },
+          type: { type: 'string', enum: ['overview', 'search', 'list_recent', 'read_thread'] },
           query: { type: 'string' },
           folder: { type: 'string' },
+          limit: { type: 'integer', minimum: 1, maximum: 10 },
           target: { type: 'string', enum: ['open', 'top_results'] },
         },
         required: ['type'],
@@ -133,6 +148,7 @@ export const askRetaPlanJsonSchema: Record<string, unknown> = {
 
 export const askRetaSynthesisJsonSchema: Record<string, unknown> = {
   type: 'object',
+  additionalProperties: false,
   properties: {
     answer: { type: 'string' },
     cites: {
@@ -140,6 +156,7 @@ export const askRetaSynthesisJsonSchema: Record<string, unknown> = {
       maxItems: askRetaLimits.citations,
       items: {
         type: 'object',
+        additionalProperties: false,
         properties: {
           ref: { type: 'string' },
           quote: { type: 'string' },
@@ -149,6 +166,7 @@ export const askRetaSynthesisJsonSchema: Record<string, unknown> = {
     },
     proposal: {
       type: 'object',
+      additionalProperties: false,
       properties: {
         kind: { type: 'string', enum: ['reply', 'new'] },
         to: { type: 'string' },

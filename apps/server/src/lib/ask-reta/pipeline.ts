@@ -200,6 +200,25 @@ const STOPWORDS = new Set([
   'courriels',
   'message',
   'messages',
+  // Recency/inbox vocabulary (tour 09): these words describe the RETRIEVAL
+  // intent, not content — searching them literally matches nothing.
+  'expediteur',
+  'expediteurs',
+  'reception',
+  'boite',
+  'inbox',
+  'sender',
+  'senders',
+  'recent',
+  'recents',
+  'recente',
+  'recentes',
+  'derniers',
+  'dernieres',
+  'latest',
+  'last',
+  'visible',
+  'visibles',
 ]);
 
 const stripDiacritics = (word: string) => word.normalize('NFD').replace(/[̀-ͯ]/g, '');
@@ -235,9 +254,31 @@ export const fallbackSearchQuery = (question: string): string =>
 
 const COUNT_QUESTION = /\bcombien\b|\bhow many\b|\bcount\b|\bnombre\b|\bunread\b|\bnon lus?\b/i;
 
+/** Recency intent (tour 09): latest/most-recent questions, FR and EN. */
+const RECENCY_QUESTION =
+  /\b(r[ée]cents?|r[ée]centes?|derni[eè]rs?|derni[eè]res?|latest|most recent|newest)\b|\blast\s+(email|emails|mail|mails|message|messages|sender|senders)\b/i;
+
+/**
+ * The recency LISTING only fires when the question is about the mailbox
+ * stream itself (inbox/senders/messages) — « la dernière facture Balguerie »
+ * stays a literal search (already ordered latest-first by the projection).
+ */
+const RECENT_LISTING_HINT =
+  /\b(bo[îi]te|r[ée]ception|inbox|exp[ée]diteurs?|senders?|messages?|emails?|mails?|courriels?)\b/i;
+
 export const fallbackPlan = (input: AskRetaInput): AskRetaPlan => {
   const terms = fallbackSearchTerms(input.question, askRetaLimits.searchesPerAsk);
   const actions: AskRetaPlan['actions'] = [];
+  // Recency questions ("les 3 expéditeurs les plus récents", "latest
+  // senders") are a RETRIEVAL intent, not a literal needle: list the most
+  // recent inbox threads then READ the top results so the answer can cite
+  // real messages. A remaining discriminating term still gets its search.
+  if (RECENCY_QUESTION.test(input.question) && RECENT_LISTING_HINT.test(input.question)) {
+    actions.push({ type: 'list_recent', folder: 'inbox', limit: askRetaLimits.threadsRead });
+    actions.push({ type: 'read_thread', target: 'top_results' });
+    if (terms[0]) actions.push({ type: 'search', query: terms[0] });
+    return { actions: actions.slice(0, askRetaLimits.planActions) };
+  }
   if (COUNT_QUESTION.test(input.question)) actions.push({ type: 'overview' });
   // No discriminating token → the search is OMITTED (an empty plan yields the
   // insufficient-evidence answer); the full phrase is never reused as a query.
@@ -262,6 +303,16 @@ export const normalizePlan = (plan: AskRetaPlan, input: AskRetaInput): AskRetaPl
       if (searches >= askRetaLimits.searchesPerAsk) continue;
       searches += 1;
       actions.push(action);
+    } else if (action.type === 'list_recent') {
+      // Shares the search budget (it IS a listing retrieval) and produces
+      // top results a read_thread can consume. Limit hard-clamped 1..10.
+      if (searches >= askRetaLimits.searchesPerAsk) continue;
+      searches += 1;
+      actions.push({
+        type: 'list_recent',
+        ...(action.folder ? { folder: action.folder } : {}),
+        limit: Math.min(Math.max(action.limit ?? askRetaLimits.threadsRead, 1), 10),
+      });
     } else if (action.type === 'read_thread') {
       if (action.target === 'open' && !input.context.threadId) continue;
       if (action.target === 'top_results' && searches === 0) continue;
@@ -374,7 +425,7 @@ const executePlan = async (
   };
 
   const phaseOfAction = (action: AskRetaPlan['actions'][number]): AskRetaPhase =>
-    action.type === 'overview' ? 'overview' : action.type === 'search' ? 'search' : 'read';
+    action.type === 'overview' ? 'overview' : action.type === 'read_thread' ? 'read' : 'search';
 
   let failedActions = 0;
   let firstFailurePhase: AskRetaPhase | null = null;
@@ -397,13 +448,18 @@ const executePlan = async (
         kind: 'dependency',
       });
       pushStep({
-        kind: action.type === 'read_thread' ? 'read_thread' : action.type,
+        kind:
+          action.type === 'read_thread'
+            ? 'read_thread'
+            : action.type === 'overview'
+              ? 'overview'
+              : 'search',
         detail:
           action.type === 'overview'
             ? 'mailbox overview unavailable'
-            : action.type === 'search'
-              ? 'search unavailable'
-              : 'thread read unavailable',
+            : action.type === 'read_thread'
+              ? 'thread read unavailable'
+              : 'search unavailable',
         sourceRefs: [],
       });
     }
@@ -426,6 +482,45 @@ const executePlan = async (
       checkBudget(budget);
       gathered.overviewJson = JSON.stringify(overview);
       pushStep({ kind: 'overview', detail: 'exact mailbox counts', sourceRefs: [] });
+    } else if (action.type === 'list_recent') {
+      // Recency retrieval (tour 09): empty query = pure folder listing,
+      // ordered latest-received first by the projection. READ-ONLY, bounded.
+      const limit = Math.min(Math.max(action.limit ?? askRetaLimits.threadsRead, 1), 10);
+      const response = await withBudget(budget, () =>
+        deps.searchThreads({ query: '', folder: action.folder, maxResults: limit }),
+      );
+      checkBudget(budget);
+      const rows = response.threads.slice(0, limit);
+      if (topResultIds.length === 0) topResultIds = rows.map((row) => row.id);
+      const refs: string[] = [];
+      for (const row of rows) {
+        const source = await addSource(gathered, {
+          kind: 'metadata',
+          threadId: row.id,
+          subject: row.subject ?? '(no subject)',
+          sender: formatSender(row.sender),
+          date: row.receivedOn ?? 'unknown',
+          excerpt: `${row.subject ?? '(no subject)'} — ${formatSender(row.sender)}`,
+        });
+        checkBudget(budget);
+        refs.push(source.ref);
+      }
+      pushStep({
+        kind: 'search',
+        // FIXED detail shape: canonical folder token + count, nothing user-derived.
+        detail: `recent ${action.folder ?? 'all'} → ${rows.length} threads`,
+        sourceRefs: refs,
+        search: {
+          query: '',
+          ...(action.folder ? { folder: action.folder } : {}),
+          threads: rows.map((row) => ({
+            threadId: row.id,
+            subject: row.subject ?? '(no subject)',
+            sender: formatSender(row.sender),
+            date: row.receivedOn ?? 'unknown',
+          })),
+        },
+      });
     } else if (action.type === 'search') {
       const response = await withBudget(budget, () =>
         deps.searchThreads({
@@ -467,17 +562,26 @@ const executePlan = async (
         },
       });
     } else {
+      // Bounded productive scan (tour 09): a thread whose bodies are empty
+      // yields no message source — keep reading the NEXT candidates, capped
+      // at 2× threadsRead scanned and threadsRead PRODUCTIVE reads.
+      const scanCap = askRetaLimits.threadsRead * 2;
       const targets =
         action.target === 'open'
           ? input.context.threadId
             ? [input.context.threadId]
             : []
-          : topResultIds.slice(0, askRetaLimits.threadsRead);
+          : topResultIds.slice(0, scanCap);
       const refs: string[] = [];
-      for (const threadId of targets.slice(0, askRetaLimits.threadsRead)) {
+      let productiveReads = 0;
+      let scanned = 0;
+      for (const threadId of targets) {
+        if (productiveReads >= askRetaLimits.threadsRead) break;
         checkBudget(budget);
+        scanned += 1;
         const read = await readOneThread(deps, budget, gathered, threadId);
         refs.push(...read.refs);
+        if (read.refs.length > 0) productiveReads += 1;
         // Reply proposals may only target an open thread PROVEN readable
         // within this connection — a forged id never validates.
         if (action.target === 'open' && read.found && threadId === input.context.threadId) {
@@ -489,7 +593,7 @@ const executePlan = async (
         detail:
           action.target === 'open'
             ? 'read the open thread'
-            : `read top ${Math.min(targets.length, askRetaLimits.threadsRead)} results`,
+            : `read top ${Math.min(scanned, scanCap)} results`,
         sourceRefs: refs,
       });
     }
@@ -695,15 +799,24 @@ export const formatOverviewAnswer = (overview: unknown): string | null => {
  */
 const buildDeterministicFallbackResult = (gathered: Gathered): Omit<AskRetaResult, 'model'> => {
   const citations: AskRetaCitation[] = [];
-  for (const source of gathered.sources) {
-    if (citations.length >= EXTRACTIVE_ANSWER_MAX_CITATIONS) break;
-    if (source.kind !== 'message') continue;
+  const citedThreads = new Set<string>();
+  const tryCite = (source: AskRetaSource, requireNewThread: boolean): void => {
+    if (citations.length >= EXTRACTIVE_ANSWER_MAX_CITATIONS) return;
+    if (source.kind !== 'message') return;
+    if (requireNewThread && citedThreads.has(source.threadId)) return;
+    if (citations.some((citation) => citation.ref === source.ref)) return;
     const quote = source.excerpt.replace(/\s+/g, ' ').trim().slice(0, 240).trim();
     // Same evidence floor as model citations; a sanitizer marker is never citable.
-    if (quote.length < 24 || containsSanitizerMarker(quote)) continue;
+    if (quote.length < 24 || containsSanitizerMarker(quote)) return;
     const { excerpt: _excerpt, kind: _kind, ...rest } = source;
     citations.push({ ...rest, kind: 'message', quote });
-  }
+    citedThreads.add(source.threadId);
+  };
+  // THREAD-DIVERSE first (tour 09): one citation per distinct thread — a
+  // "latest senders" degraded answer shows the distinct recent senders, not
+  // six quotes of the same thread — then fill up to the cap.
+  for (const source of gathered.sources) tryCite(source, true);
+  for (const source of gathered.sources) tryCite(source, false);
   const answer = citations.length
     ? formatExtractiveAnswer(citations)
     : ((gathered.overviewJson ? formatOverviewAnswer(JSON.parse(gathered.overviewJson)) : null) ??
