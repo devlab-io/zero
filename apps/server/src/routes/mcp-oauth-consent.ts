@@ -42,7 +42,7 @@ export function handleMcpToken(auth: AuthHandler, request: Request) {
 function consentHeaders() {
   return {
     'Cache-Control': 'no-store',
-    'Content-Security-Policy': `default-src 'none'; style-src 'unsafe-inline'; script-src ${MCP_CONSENT_SCRIPT_CSP_HASH}; form-action 'self'; frame-ancestors 'none'; base-uri 'none'`,
+    'Content-Security-Policy': `default-src 'none'; style-src 'unsafe-inline'; script-src ${MCP_CONSENT_SCRIPT_CSP_HASH}; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'`,
     Pragma: 'no-cache',
     'Referrer-Policy': 'no-referrer',
     'X-Content-Type-Options': 'nosniff',
@@ -107,6 +107,9 @@ export const mcpOAuthConsentRouter = new Hono<HonoContext>()
         headers: c.req.raw.headers,
         body: { accept: decision === 'accept', consent_code: consentCode },
       });
+      if (c.req.header('accept')?.includes('application/json')) {
+        return c.json({ redirectURI: result.redirectURI }, 200, consentHeaders());
+      }
       return c.redirect(result.redirectURI, 303);
     } catch (error) {
       const safeError = consentError(error);

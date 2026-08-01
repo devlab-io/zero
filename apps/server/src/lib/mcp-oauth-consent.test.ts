@@ -100,6 +100,7 @@ describe('MCP OAuth explicit consent boundary', () => {
     expect(html).toContain('name="decision" value=""');
     expect(html).toContain('data-decision="deny"');
     expect(html).toContain('data-decision="accept"');
+    expect(html).toContain('role="status"');
     expect(html).toContain(MCP_CONSENT_SUBMISSION_SCRIPT);
     expect(MCP_CONSENT_SUBMISSION_SCRIPT).toContain("form.dataset.submitting === 'true'");
     expect(MCP_CONSENT_SUBMISSION_SCRIPT).toContain('event.preventDefault()');
@@ -111,9 +112,11 @@ describe('MCP OAuth explicit consent boundary', () => {
     expect(MCP_CONSENT_SCRIPT_CSP_HASH).toBe(`'sha256-${hash}'`);
   });
 
-  it('allows the first explicit decision and blocks a double activation', () => {
-    let submit: ((event: Record<string, unknown>) => void) | undefined;
-    let scheduledSubmit: (() => void) | undefined;
+  it('allows the first explicit decision and blocks a double activation', async () => {
+    let submit: ((event: Record<string, unknown>) => Promise<void>) | undefined;
+    let resolveFetch:
+      | ((response: { ok: boolean; json(): Promise<{ redirectURI: string }> }) => void)
+      | undefined;
     const buttons = [
       { attributes: {} as Record<string, string> },
       { attributes: {} as Record<string, string> },
@@ -122,45 +125,70 @@ describe('MCP OAuth explicit consent boundary', () => {
       setAttribute: (name: string, value: string) => {
         button.attributes[name] = value;
       },
+      removeAttribute: (name: string) => {
+        delete button.attributes[name];
+      },
     }));
     const form = {
+      action: `${BASE_URL}/api/oauth/mcp/consent`,
       dataset: {} as Record<string, string>,
-      submit: vi.fn(),
       addEventListener: (_type: string, listener: typeof submit) => {
         submit = listener;
       },
       querySelectorAll: () => buttons,
     };
     const decision = { value: '' };
+    const status = { textContent: '' };
     const document = {
-      querySelector: (selector: string) => (selector === 'form' ? form : decision),
+      querySelector: (selector: string) => {
+        if (selector === 'form') return form;
+        if (selector === 'input[name="decision"]') return decision;
+        return status;
+      },
     };
+    const fetch = vi.fn(
+      () =>
+        new Promise<{ ok: boolean; json(): Promise<{ redirectURI: string }> }>((resolve) => {
+          resolveFetch = resolve;
+        }),
+    );
+    const assign = vi.fn();
     runInNewContext(MCP_CONSENT_SUBMISSION_SCRIPT, {
       document,
-      setTimeout: (callback: () => void) => {
-        scheduledSubmit = callback;
+      fetch,
+      FormData: class FormData {
+        constructor(readonly source: unknown) {}
       },
+      window: { location: { assign } },
     });
 
     const first = {
       submitter: { dataset: { decision: 'accept' } },
       preventDefault: vi.fn(),
     };
-    submit?.(first);
+    const firstSubmission = submit?.(first);
     expect(first.preventDefault).toHaveBeenCalledOnce();
     expect(decision.value).toBe('accept');
     expect(form.dataset.submitting).toBe('true');
     expect(buttons.every((button) => button.attributes['aria-disabled'] === 'true')).toBe(true);
-    expect(form.submit).not.toHaveBeenCalled();
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(status.textContent).toBe('Authorizing…');
 
     const duplicate = {
       submitter: { dataset: { decision: 'accept' } },
       preventDefault: vi.fn(),
     };
-    submit?.(duplicate);
+    await submit?.(duplicate);
     expect(duplicate.preventDefault).toHaveBeenCalledOnce();
-    scheduledSubmit?.();
-    expect(form.submit).toHaveBeenCalledOnce();
+    expect(fetch).toHaveBeenCalledOnce();
+
+    resolveFetch?.({
+      ok: true,
+      json: async () => ({ redirectURI: CALLBACK_URL }),
+    });
+    await firstSubmission;
+    expect(assign).toHaveBeenCalledOnce();
+    expect(assign).toHaveBeenCalledWith(CALLBACK_URL);
   });
 
   it('blocks callback and token exchange until the signed-in user explicitly consents', async () => {

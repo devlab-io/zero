@@ -17,8 +17,9 @@ type McpScope = (typeof MCP_SCOPES)[number];
 export const MCP_CONSENT_SUBMISSION_SCRIPT = `(() => {
   const form = document.querySelector('form');
   const decision = document.querySelector('input[name="decision"]');
+  const status = document.querySelector('[data-consent-status]');
   if (!form || !decision) return;
-  form.addEventListener('submit', (event) => {
+  form.addEventListener('submit', async (event) => {
     event.preventDefault();
     if (form.dataset.submitting === 'true') {
       return;
@@ -30,12 +31,27 @@ export const MCP_CONSENT_SUBMISSION_SCRIPT = `(() => {
     decision.value = value;
     form.dataset.submitting = 'true';
     for (const button of form.querySelectorAll('button')) button.setAttribute('aria-disabled', 'true');
-    setTimeout(() => form.submit(), 0);
+    if (status) status.textContent = 'Authorizing…';
+    try {
+      const response = await fetch(form.action, {
+        method: 'POST',
+        body: new FormData(form),
+        credentials: 'same-origin',
+        headers: { Accept: 'application/json' },
+      });
+      const payload = await response.json();
+      if (!response.ok || typeof payload.redirectURI !== 'string') throw new Error('invalid response');
+      window.location.assign(payload.redirectURI);
+    } catch {
+      form.dataset.submitting = 'false';
+      for (const button of form.querySelectorAll('button')) button.removeAttribute('aria-disabled');
+      if (status) status.textContent = 'Authorization failed. Try again.';
+    }
   });
 })();`;
 
 // sha256 of MCP_CONSENT_SUBMISSION_SCRIPT, base64 encoded. A test prevents drift.
-export const MCP_CONSENT_SCRIPT_CSP_HASH = "'sha256-fYGJvef4ZKpI9hev4WkgYwUTvF/+Z0VmsAr6L6zRWzc='";
+export const MCP_CONSENT_SCRIPT_CSP_HASH = "'sha256-fkPXpkyGp7ggXLrqeQY4Op00YW31NfmfbeZDyo6CGdg='";
 
 const scopeCopy: Record<McpScope, { title: string; description: string }> = {
   openid: {
@@ -327,6 +343,7 @@ export function renderMcpConsentPage(context: McpConsentContext): string {
     code { position: absolute; top: 13px; right: 12px; font-size: 11px; color: color-mix(in srgb, CanvasText 54%, transparent); }
     .capabilities { margin-top: 18px; font-size: 13px; }
     form { display: flex; justify-content: flex-end; gap: 10px; border-top: 1px solid color-mix(in srgb, CanvasText 12%, transparent); }
+    .consent-status { align-self: center; margin-right: auto; font-size: 13px; }
     form[data-submitting="true"] button { cursor: wait; opacity: .65; pointer-events: none; }
     button { min-height: 42px; border-radius: 10px; padding: 0 16px; border: 1px solid color-mix(in srgb, CanvasText 16%, transparent); font: inherit; font-weight: 650; cursor: pointer; transition: background-color 180ms ease, color 180ms ease, transform 180ms ease; }
     button:focus-visible { outline: 3px solid color-mix(in srgb, #2563eb 65%, transparent); outline-offset: 2px; }
@@ -359,6 +376,7 @@ export function renderMcpConsentPage(context: McpConsentContext): string {
       <input type="hidden" name="consent_code" value="${escapeHtml(context.consentCode)}" />
       <input type="hidden" name="client_id" value="${escapeHtml(context.clientId)}" />
       <input type="hidden" name="decision" value="" />
+      <p class="consent-status" role="status" aria-live="polite" data-consent-status></p>
       <button class="deny" type="submit" data-decision="deny">Deny</button>
       <button class="allow" type="submit" data-decision="accept">Authorize</button>
     </form>
