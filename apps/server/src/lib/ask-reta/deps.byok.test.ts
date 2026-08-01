@@ -41,7 +41,9 @@ vi.mock('../../env', () => ({
 }));
 
 vi.mock('../server-utils', () => ({
-  getZeroAgent: vi.fn(async () => ({ stub: { getMailboxCounts: vi.fn() } })),
+  getZeroAgent: vi.fn(async () => ({
+    stub: { getMailboxCounts: vi.fn(async () => ({ inbox: 418, drafts: 7, sent: 1204 })) },
+  })),
   getThreadsFromDB: vi.fn(),
   getThread: vi.fn(),
   getZeroDB: vi.fn(async () => ({
@@ -52,7 +54,14 @@ vi.mock('../server-utils', () => ({
 }));
 
 vi.mock('../../db', () => ({
-  createDb: () => ({ db: {}, conn: { end: vi.fn(async () => {}) } }),
+  createDb: () => ({
+    db: {
+      select: () => {
+        throw new Error('relation does not exist at postgres://fake-hyperdrive');
+      },
+    },
+    conn: { end: vi.fn(async () => {}) },
+  }),
 }));
 
 import { buildByokModel, createAskRetaDeps } from './deps';
@@ -382,5 +391,17 @@ describe('KEK ring rotation — lazy TRUE rewrap with CAS persistence', () => {
         kekSecrets: { RETA_BYOK_KEK_V2: KEK_SECRET_V2, RETA_BYOK_KEK_ACTIVE: 'v2' },
       }),
     ).rejects.toBeInstanceOf(RetaVaultUnavailableError);
+  });
+});
+
+describe('deps.overview — activity failure NEVER takes Ask Reta down (prod fix 2026-08-01)', () => {
+  it('resolves with EXACT folder counts and zeroed activity when the aggregate db throws', async () => {
+    const { deps } = await makeDeps();
+    // The mocked createDb db.select throws (the exact prod failure class):
+    // overview still resolves — counts intact, activity degraded to zeros.
+    await expect(deps.overview()).resolves.toEqual({
+      folders: { inbox: 418, drafts: 7, sent: 1204, queue: 0 },
+      activity: { processedToday: 0, processedWeek: 0, estimatedMinutesSaved: 0 },
+    });
   });
 });

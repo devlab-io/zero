@@ -1079,4 +1079,17 @@ describe('AskRetaSurface — chip « fil actuel inclus » (prod CUA fix)', () =>
     await act(async () => {});
     expect(chip()).not.toBeNull();
   });
+
+  it('changement de fil sous le MÊME compte : le badge suit le nouveau fil', async () => {
+    harness.queryStore.threadId = 'thread-1';
+    render();
+    await act(async () => {});
+    expect(chip()).not.toBeNull();
+    harness.queryStore.threadId = 'thread-2';
+    harness.getQueryData.mockReturnValue({ latest: { subject: 'Sujet du fil 2' } });
+    render();
+    await act(async () => {});
+    expect(chip()).not.toBeNull();
+    expect(chip()!.textContent).toContain('Sujet du fil 2');
+  });
 });

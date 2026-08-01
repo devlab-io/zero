@@ -17,8 +17,8 @@ import {
   modifyThreadLabelsInDB,
   deleteAllSpam,
 } from '../../lib/server-utils';
+import { buildMailboxOverview, getMailboxActivityOrZero } from '../../lib/mailbox-overview';
 import { IGetThreadResponseSchema, type IGetThreadsResponse } from '../../lib/driver/types';
-import { buildMailboxOverview, getMailboxActivity } from '../../lib/mailbox-overview';
 import { activeDriverProcedure, router, privateProcedure } from '../trpc';
 import { processEmailHtml } from '../../lib/email-processor';
 import { previewSearchText } from '../../lib/search-preview';
@@ -71,7 +71,9 @@ export const mailRouter = router({
       const [folders, activity] = await Promise.all([
         agent.getMailboxCounts(),
         withSendDb((db) =>
-          getMailboxActivity(db, {
+          // Secondary signal: degrades to zeros on failure, never a 500 while
+          // the folder counts are available (prod fix 2026-08-01).
+          getMailboxActivityOrZero(db, {
             connectionId: ctx.activeConnection.id,
             todayStart: new Date(input.todayStartMs),
             weekStart: new Date(input.weekStartMs),

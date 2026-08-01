@@ -13,8 +13,8 @@ import {
   type RetaCatalogueEntry,
 } from './catalogue';
 import { getThread, getThreadsFromDB, getZeroAgent, getZeroDB } from '../server-utils';
+import { buildMailboxOverview, getMailboxActivityOrZero } from '../mailbox-overview';
 import { workersAiModel, type RetaModel, type WorkersAiBinding } from './model';
-import { buildMailboxOverview, getMailboxActivity } from '../mailbox-overview';
 import { createProviderModel, RetaVaultUnavailableError } from './providers';
 import type { AskRetaDeps } from './pipeline';
 import type { AskRetaStep } from './schema';
@@ -203,9 +203,12 @@ export async function createAskRetaDeps(params: {
         const weekStart = new Date(now - 7 * 24 * 60 * 60 * 1000);
         const { db: sendDb, conn } = createDb(env.HYPERDRIVE.connectionString);
         try {
+          // Activity is SECONDARY (prod fix 2026-08-01): its failure degrades
+          // to zeros inside getMailboxActivityOrZero — the exact folder
+          // counts alone never take Ask Reta down.
           const [folders, activity] = await Promise.all([
             agent.getMailboxCounts(),
-            getMailboxActivity(sendDb, { connectionId, todayStart, weekStart }),
+            getMailboxActivityOrZero(sendDb, { connectionId, todayStart, weekStart }),
           ]);
           return buildMailboxOverview(folders, activity);
         } finally {

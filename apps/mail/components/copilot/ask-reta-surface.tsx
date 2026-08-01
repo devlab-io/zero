@@ -21,10 +21,10 @@ import { insertIntoComposer, type ComposerInsertPayload } from '@/lib/composer-i
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { hasLiveComposer, readLiveDraft } from '@/lib/live-draft-registry';
 import { AskRetaStreamError, streamAskReta } from '@/lib/ask-reta-stream';
+import { LoaderCircle, Mail, Sparkles, Trash2 } from 'lucide-react';
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { useReplyStatePurge } from '@/hooks/use-reply-state-purge';
 import { useActiveConnection } from '@/hooks/use-connections';
-import { LoaderCircle, Sparkles, Trash2 } from 'lucide-react';
 import { useTRPC } from '@/providers/query-provider';
 import { Button } from '@/components/ui/button';
 import { useSession } from '@/lib/auth-client';
@@ -173,30 +173,33 @@ export function AskRetaSurface() {
   // answer ready / error. Screen readers follow the ask without spam.
   const [announcement, setAnnouncement] = useState('');
 
-  // Chip « fil actuel inclus » (prod CUA fix 2026-08-01) : capturé sous le
-  // scope hydraté où CE threadId est apparu. Un changement de compte/
-  // connexion avec le même threadId le masque (le fil de A n'est jamais
-  // annoncé « inclus » sous B) ; il meurt à la fermeture du fil. Le serveur
-  // reste l'autorité d'ownership sur context.threadId — affichage seulement.
-  const [threadChip, setThreadChip] = useState<{ threadId: string; scopeKey: string } | null>(null);
-  useEffect(() => {
-    if (!threadId || !userId || !connectionId) {
-      setThreadChip(null);
-      return;
+  // Badge « fil actuel inclus » (prod CUA fix, durci tour 05) : la liaison
+  // fil↔owner est DÉRIVÉE au rendu (ref latchée), plus aucun état posé par
+  // effet — l'ancienne capture asynchrone laissait une fenêtre où le badge
+  // pouvait ne jamais se peindre selon l'ordre des effets au montage lazy.
+  // Sémantique inchangée : lié au owner+connexion où CE threadId est apparu ;
+  // un changement de compte avec le même threadId le masque, la fermeture du
+  // fil le tue, un nouveau fil le recapture. Le serveur reste l'autorité
+  // d'ownership sur context.threadId — affichage seulement.
+  const threadChipBindingRef = useRef<{ threadId: string; scopeKey: string } | null>(null);
+  if (!threadId) {
+    threadChipBindingRef.current = null;
+  } else if (userId && connectionId) {
+    const currentScopeKey = scopeKeyOf({ userId, connectionId });
+    if (!threadChipBindingRef.current || threadChipBindingRef.current.threadId !== threadId) {
+      // Premier rendu où CE fil est visible : lié au owner+connexion COURANTS.
+      threadChipBindingRef.current = { threadId, scopeKey: currentScopeKey };
     }
-    const key = scopeKeyOf({ userId, connectionId });
-    setThreadChip((prev) =>
-      prev && prev.threadId === threadId ? prev : { threadId, scopeKey: key },
-    );
-  }, [threadId, userId, connectionId]);
+  }
+  const threadChipBinding = threadChipBindingRef.current;
   const showThreadChip =
     !!threadId &&
     isHydrated &&
     !!userId &&
     !!connectionId &&
-    !!threadChip &&
-    threadChip.threadId === threadId &&
-    threadChip.scopeKey === scopeKeyOf({ userId, connectionId });
+    !!threadChipBinding &&
+    threadChipBinding.threadId === threadId &&
+    threadChipBinding.scopeKey === scopeKeyOf({ userId, connectionId });
   // Sujet UNIQUEMENT s'il est DÉJÀ dans le cache react-query du compte
   // (getQueryData — zéro fetch, jamais de corps) ; sinon chip générique.
   const cachedThread = showThreadChip
@@ -791,13 +794,18 @@ export function AskRetaSurface() {
           account/connection it was captured under. Server-side ownership of
           context.threadId stays the authority — this is display only. */}
       {showThreadChip && (
-        <p
-          data-testid="ask-reta-thread-chip"
-          className="text-muted-foreground border-t px-3 pt-2 text-[11px]"
-        >
-          {m['common.askReta.currentThreadIncluded']()}
-          {threadChipSubject ? ` — ${threadChipSubject}` : ''}
-        </p>
+        <div className="border-t px-3 pt-2">
+          <span
+            data-testid="ask-reta-thread-chip"
+            className="bg-primary/10 text-primary inline-flex max-w-full items-center gap-1.5 truncate rounded-full px-2.5 py-1 text-xs font-medium"
+          >
+            <Mail className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+            <span className="truncate">
+              {m['common.askReta.currentThreadIncluded']()}
+              {threadChipSubject ? ` — ${threadChipSubject}` : ''}
+            </span>
+          </span>
+        </div>
       )}
       {/* Small render-time hint: the live composer's current draft will ride
           along with the next ask (read once at submit, live registry first). */}

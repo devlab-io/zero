@@ -1,5 +1,6 @@
 import { draftOutbox, sendJob } from '../db/schema';
 import { eq, sql } from 'drizzle-orm';
+import { logger } from './logger';
 import type { DB } from '../db';
 
 export type MailboxActivity = {
@@ -15,6 +16,32 @@ type ActivityWindow = {
 };
 
 const numeric = (value: unknown) => Number(value ?? 0);
+
+export const EMPTY_MAILBOX_ACTIVITY: MailboxActivity = {
+  queue: 0,
+  processedToday: 0,
+  processedWeek: 0,
+};
+
+/**
+ * Activity is a SECONDARY signal (prod fix 2026-08-01): a failure on the
+ * send_job/draft_outbox aggregates must NEVER take the overview — or Ask
+ * Reta, whose deps.overview() shares this path — down while the folder
+ * counts are exact and available. Degrades to zeroed activity with ONE
+ * fixed-classification log line: no error text (SQL/connection URLs could
+ * leak), no mail content, no keys, no PII.
+ */
+export async function getMailboxActivityOrZero(
+  db: DB,
+  input: ActivityWindow,
+): Promise<MailboxActivity> {
+  try {
+    return await getMailboxActivity(db, input);
+  } catch {
+    logger.error('[mailbox-overview] activity aggregate failed; degraded to zeroed activity');
+    return { ...EMPTY_MAILBOX_ACTIVITY };
+  }
+}
 
 /**
  * Productive activity is deliberately evidence-based: a message counts once
