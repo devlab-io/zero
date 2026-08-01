@@ -280,7 +280,9 @@ export const oauthApplication = createTable(
     metadata: text('metadata'),
     clientId: text('client_id').unique(),
     clientSecret: text('client_secret'),
-    redirectURLs: text('redirect_u_r_ls'),
+    // Better Auth 1.6 MCP dynamic registration looks up this exact field key.
+    // Keep the legacy SQL column name to avoid a destructive data migration.
+    redirectUrls: text('redirect_u_r_ls'),
     type: text('type'),
     disabled: boolean('disabled'),
     userId: text('user_id'),
