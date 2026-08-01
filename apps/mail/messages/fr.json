@@ -118,7 +118,8 @@
       "keyRemoved": "Clé supprimée — retour à Workers AI",
       "keySaveError": "Impossible d'enregistrer la clé. Réessayez.",
       "keyRemoveError": "Impossible de supprimer la clé. Réessayez.",
-      "currentThreadIncluded": "Fil actuel inclus"
+      "currentThreadIncluded": "Fil actuel inclus",
+      "metadataCitation": "Métadonnées du fil"
     },
     "commandPalette": {
       "title": "Palette de commandes",

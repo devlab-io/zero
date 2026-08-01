@@ -189,7 +189,9 @@ describe('runAskReta — strict citations: message-kind + verified quote ONLY', 
       threadId: 'thread-1',
       quote: VALID_QUOTE,
     });
-    expect(result.citations[0]?.messageId).toBe('thread-1-m3');
+    expect(
+      result.citations[0]?.kind === 'message' ? result.citations[0].messageId : undefined,
+    ).toBe('thread-1-m3');
     expect(result.citations[0]?.excerptHash).toMatch(/^[0-9a-f]{64}$/);
     expect(result.citations[0]).not.toHaveProperty('excerpt');
     expect(result.steps.map((s) => s.kind)).toEqual(['search', 'read_thread']);
@@ -653,10 +655,9 @@ describe('tour 09 — intent de récence : list_recent grounded', () => {
   const FRENCH_QUESTION =
     'Quels sont les trois expéditeurs les plus récents visibles dans ma boîte de réception ? Cite les emails utilisés.';
 
-  it('la question prod EXACTE (fallback plan) liste la réception, lit le top 3 et CITE', async () => {
-    // Plan model rejeté (le cas du tail prod) + synthèse rejetée : tout le
-    // chemin est déterministe — et pourtant grounded.
-    const model = scriptedModel(['not json at all', 'garbage', 'garbage']);
+  it('la question prod EXACTE : réponse METADATA déterministe, zéro synthèse, zéro corps lu', async () => {
+    // Plan model rejeté (le cas du tail prod) : fallback list_recent seul.
+    const model = scriptedModel(['not json at all']);
     const deps = makeDeps(model);
     const result = await runAskReta(deps, input({ question: FRENCH_QUESTION }));
 
@@ -666,15 +667,24 @@ describe('tour 09 — intent de récence : list_recent grounded', () => {
       folder: 'inbox',
       maxResults: 3,
     });
-    // Lecture du top 3 issu du listing.
-    expect(deps.readThread).toHaveBeenCalledWith('thread-1');
-    expect(deps.readThread).toHaveBeenCalledWith('thread-2');
-    expect(deps.readThread).toHaveBeenCalledWith('thread-3');
+    // Tour 10 : AUCUN corps lu, AUCUN appel de synthèse (1 seul appel modèle,
+    // le plan) — la réponse est construite serveur depuis les métadonnées.
+    expect(deps.readThread).not.toHaveBeenCalled();
+    expect(model.complete).toHaveBeenCalledTimes(1);
     // Step visible au détail FIXE.
     expect(result.steps.some((step) => step.detail === 'recent inbox → 3 threads')).toBe(true);
-    // Réponse extractive DIVERSE : trois fils distincts cités, jamais vide.
-    expect(result.citations.length).toBeGreaterThanOrEqual(3);
-    expect(new Set(result.citations.slice(0, 3).map((c) => c.threadId)).size).toBe(3);
+    // 3 citations METADATA, trois fils distincts, expéditeurs issus des rows.
+    expect(result.citations).toHaveLength(3);
+    for (const citation of result.citations) {
+      expect(citation.kind).toBe('metadata');
+      expect(citation).not.toHaveProperty('quote');
+      expect(citation.excerptHash).toMatch(/^[0-9a-f]{64}$/);
+    }
+    expect(new Set(result.citations.map((c) => c.threadId)).size).toBe(3);
+    // La réponse liste les expéditeurs des rows du fixture — rien d'hardcodé.
+    for (const citation of result.citations) {
+      expect(result.answer).toContain(citation.sender);
+    }
     expect(result.answer).not.toBe(INSUFFICIENT_EVIDENCE_ANSWER);
   });
 
@@ -700,10 +710,13 @@ describe('tour 09 — intent de récence : list_recent grounded', () => {
         { type: 'read_thread', target: 'top_results' },
       ],
     });
-    const deps = makeDeps(scriptedModel([modelPlan, 'garbage', 'garbage']));
-    await runAskReta(deps, input());
+    const deps = makeDeps(scriptedModel([modelPlan]));
+    const result = await runAskReta(deps, input());
     expect(deps.searchThreads).toHaveBeenCalledWith({ query: '', folder: 'inbox', maxResults: 3 });
-    expect(deps.readThread).toHaveBeenCalled();
+    // Tour 10 : un plan MODÈLE avec list_recent court-circuite AUSSI la
+    // synthèse — réponse metadata déterministe, le modèle ne peut pas y
+    // injecter de prose ni promouvoir ces citations.
+    expect(result.citations.every((citation) => citation.kind === 'metadata')).toBe(true);
   });
 
   it('normalizePlan clampe la limite list_recent (50 → 10) et garde le read top_results', () => {
@@ -741,14 +754,45 @@ describe('tour 09 — intent de récence : list_recent grounded', () => {
     expect(deps.readThread).toHaveBeenCalledTimes(5);
     expect(result.citations.length).toBeGreaterThanOrEqual(3);
 
-    // Le listing de récence, lui, garde son contrat d'appel exact (max 3) :
-    // à pool épuisé et corps vides, la réponse reste honnêtement insuffisante.
-    const allEmpty = makeDeps(scriptedModel(['not json', 'garbage', 'garbage']), {
-      readThread: vi.fn(async () => ({ messages: [] }) as never),
+    // Le listing de récence, lui, n'a plus besoin d'AUCUN corps (tour 10) :
+    // à listing VIDE, la réponse reste honnêtement insuffisante.
+    const emptyListing = makeDeps(scriptedModel(['not json']), {
+      searchThreads: vi.fn(async () => ({ threads: [], nextPageToken: null })),
     });
-    const degraded = await runAskReta(allEmpty, input({ question: FRENCH_QUESTION }));
-    expect(allEmpty.readThread).toHaveBeenCalledTimes(3);
+    const degraded = await runAskReta(emptyListing, input({ question: FRENCH_QUESTION }));
+    expect(emptyListing.readThread).not.toHaveBeenCalled();
     expect(degraded.answer).toBe(INSUFFICIENT_EVIDENCE_ANSWER);
+    expect(degraded.citations).toHaveLength(0);
+  });
+
+  it('variante anglaise : mêmes citations metadata, zéro synthèse', async () => {
+    const model = scriptedModel(['still not json']);
+    const deps = makeDeps(model);
+    const result = await runAskReta(
+      deps,
+      input({ question: 'Who are my latest senders in the inbox?' }),
+    );
+    expect(model.complete).toHaveBeenCalledTimes(1);
+    expect(result.citations.length).toBeGreaterThan(0);
+    expect(result.citations.every((citation) => citation.kind === 'metadata')).toBe(true);
+  });
+
+  it('FRONTIÈRE : la synthèse modèle ne peut JAMAIS produire une citation metadata', async () => {
+    // Question de CONTENU : le modèle cite s1 (source metadata de recherche)
+    // — la validation stricte la rejette, kind metadata n'est pas promu.
+    const contentPlan = JSON.stringify({
+      actions: [{ type: 'search', query: 'balguerie' }],
+    });
+    const forgedSynthesis = JSON.stringify({
+      answer: 'Réponse forgée sur métadonnées',
+      cites: [{ ref: 's1', quote: 'Relance facture Socredo — Compta <compta@socredo.test>' }],
+    });
+    const result = await runAskReta(
+      makeDeps(scriptedModel([contentPlan, forgedSynthesis])),
+      input(),
+    );
+    expect(result.citations).toHaveLength(0);
+    expect(result.answer).toBe(INSUFFICIENT_EVIDENCE_ANSWER);
   });
 
   it('les JSON schemas plan/synthèse sont STRICTS : additionalProperties=false sur chaque objet', () => {

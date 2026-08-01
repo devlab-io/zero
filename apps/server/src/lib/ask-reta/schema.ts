@@ -253,13 +253,27 @@ export type AskRetaSource = {
   excerptHash: string;
 };
 
-/** v1: a citation is ALWAYS message-kind with a server-verified quote. */
-export type AskRetaCitation = Omit<AskRetaSource, 'excerpt' | 'kind' | 'messageId'> & {
+/** Content citation: non-empty quote, verified substring of a MESSAGE excerpt. */
+export type AskRetaMessageCitation = Omit<AskRetaSource, 'excerpt' | 'kind' | 'messageId'> & {
   kind: 'message';
   messageId?: string;
   /** Non-empty, verified as a substring of the source excerpt. */
   quote: string;
 };
+
+/**
+ * Metadata citation (tour 10): produced EXCLUSIVELY by deterministic
+ * server-side answers to strictly-metadata questions (recency listing,
+ * sender/subject/date facts) — NEVER from model prose or model cites (the
+ * synthesis validation still rejects any metadata ref). References a
+ * metadata source retrieved THIS run; carries the fields themselves
+ * (sender/subject/date), no quote — it must never look like a body excerpt.
+ */
+export type AskRetaMetadataCitation = Omit<AskRetaSource, 'excerpt' | 'kind' | 'messageId'> & {
+  kind: 'metadata';
+};
+
+export type AskRetaCitation = AskRetaMessageCitation | AskRetaMetadataCitation;
 
 /** Metadata row of a search step — the exact thread set the search returned. */
 export type AskRetaStepThread = {

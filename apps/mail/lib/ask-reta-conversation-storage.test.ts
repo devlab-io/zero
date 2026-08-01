@@ -66,7 +66,8 @@ describe('ask-reta conversation storage — strict versioned projection', () => 
     const loaded = loadAskRetaConversation('u1', 'c1');
     expect(loaded[0]?.payload?.proposal).toBeUndefined();
     // Citations (bounded quotes) and steps metadata DO survive.
-    expect(loaded[0]?.payload?.citations[0]?.quote).toContain('quote vérifiée');
+    const persisted = loaded[0]?.payload?.citations[0];
+    expect(persisted?.kind === 'message' ? persisted.quote : undefined).toContain('quote vérifiée');
     expect(loaded[0]?.payload?.steps[0]?.search?.folder).toBe('sent');
   });
 

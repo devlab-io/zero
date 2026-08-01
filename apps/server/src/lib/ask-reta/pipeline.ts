@@ -6,6 +6,7 @@ import {
   askRetaSynthesisSchema,
   type AskRetaCitation,
   type AskRetaInput,
+  type AskRetaMessageCitation,
   type AskRetaPlan,
   type AskRetaResult,
   type AskRetaSource,
@@ -274,9 +275,9 @@ export const fallbackPlan = (input: AskRetaInput): AskRetaPlan => {
   // recent inbox threads then READ the top results so the answer can cite
   // real messages. A remaining discriminating term still gets its search.
   if (RECENCY_QUESTION.test(input.question) && RECENT_LISTING_HINT.test(input.question)) {
+    // Tour 10 : la réponse de récence est METADATA et déterministe — le
+    // listing seul suffit (zéro corps lu, zéro appel de synthèse, plus vite).
     actions.push({ type: 'list_recent', folder: 'inbox', limit: askRetaLimits.threadsRead });
-    actions.push({ type: 'read_thread', target: 'top_results' });
-    if (terms[0]) actions.push({ type: 'search', query: terms[0] });
     return { actions: actions.slice(0, askRetaLimits.planActions) };
   }
   if (COUNT_QUESTION.test(input.question)) actions.push({ type: 'overview' });
@@ -341,6 +342,9 @@ type Gathered = {
   overviewJson: string | null;
   /** Set ONLY after the open thread was read successfully within this connection. */
   validatedOpenThreadId: string | null;
+  /** First list_recent execution of this run — feeds the deterministic
+   * metadata answer (tour 10). */
+  recentListing: { folder?: string; limit: number; refs: string[] } | null;
 };
 
 const addSource = async (
@@ -411,6 +415,7 @@ const executePlan = async (
     steps: [],
     overviewJson: null,
     validatedOpenThreadId: null,
+    recentListing: null,
   };
   let topResultIds: string[] = [];
 
@@ -505,6 +510,11 @@ const executePlan = async (
         checkBudget(budget);
         refs.push(source.ref);
       }
+      gathered.recentListing ??= {
+        ...(action.folder ? { folder: action.folder } : {}),
+        limit,
+        refs,
+      };
       pushStep({
         kind: 'search',
         // FIXED detail shape: canonical folder token + count, nothing user-derived.
@@ -732,7 +742,7 @@ const EXTRACTIVE_ANSWER_MAX_CITATIONS = 6;
  * server-side from validated citations only (sender/date + verbatim quote,
  * bounded). The model's free text is never displayed.
  */
-export const formatExtractiveAnswer = (citations: AskRetaCitation[]): string => {
+export const formatExtractiveAnswer = (citations: AskRetaMessageCitation[]): string => {
   const shown = citations.slice(0, EXTRACTIVE_ANSWER_MAX_CITATIONS);
   const lines = shown.map(
     (citation) => `— ${citation.sender} (${citation.date}) : « ${citation.quote} »`,
@@ -798,7 +808,7 @@ export const formatOverviewAnswer = (overview: unknown): string | null => {
  * are NEVER promoted to evidence (unchanged contract).
  */
 const buildDeterministicFallbackResult = (gathered: Gathered): Omit<AskRetaResult, 'model'> => {
-  const citations: AskRetaCitation[] = [];
+  const citations: AskRetaMessageCitation[] = [];
   const citedThreads = new Set<string>();
   const tryCite = (source: AskRetaSource, requireNewThread: boolean): void => {
     if (citations.length >= EXTRACTIVE_ANSWER_MAX_CITATIONS) return;
@@ -824,6 +834,33 @@ const buildDeterministicFallbackResult = (gathered: Gathered): Omit<AskRetaResul
   return { answer, citations, proposal: undefined, steps: gathered.steps };
 };
 
+/**
+ * Deterministic METADATA answer for a recency listing (tour 10): built
+ * server-side from the rows retrieved THIS run — one line and ONE metadata
+ * citation per listed thread (sender/date/subject as FIELDS, never dressed
+ * as a body excerpt). Zero model involvement, zero body read. Returns null
+ * when the listing is empty — the caller stays honestly insufficient.
+ */
+const buildRecentSendersResult = (gathered: Gathered): Omit<AskRetaResult, 'model'> | null => {
+  const listing = gathered.recentListing;
+  if (!listing) return null;
+  const byRef = new Map(gathered.sources.map((source) => [source.ref, source]));
+  const rows = listing.refs
+    .map((ref) => byRef.get(ref))
+    .filter((source): source is AskRetaSource => !!source)
+    .slice(0, listing.limit);
+  if (rows.length === 0) return null;
+  const citations: AskRetaCitation[] = [];
+  const lines: string[] = [];
+  for (const source of rows) {
+    const { excerpt: _excerpt, kind: _kind, messageId: _messageId, ...rest } = source;
+    citations.push({ ...rest, kind: 'metadata' });
+    lines.push(`${citations.length}. ${source.sender} — ${source.date} — « ${source.subject} »`);
+  }
+  const answer = `Expéditeurs les plus récents (${listing.folder ?? 'boîte'}) / Most recent senders:\n${lines.join('\n')}`;
+  return { answer, citations, proposal: undefined, steps: gathered.steps };
+};
+
 export async function runAskReta(
   deps: AskRetaDeps,
   input: AskRetaInput,
@@ -835,6 +872,23 @@ export async function runAskReta(
   checkBudget(budget);
   const plan = normalizePlan(await getPlan(deps, budget, input), input);
   const gathered = await executePlan(deps, budget, input, plan);
+
+  // Tour 10 : une question STRICTEMENT metadata (plan avec list_recent) reçoit
+  // une réponse serveur déterministe, SANS appel de synthèse — plus rapide et
+  // jamais de refus inutile quand les métadonnées exactes suffisent. Le
+  // modèle ne participe pas : il ne peut ni inventer ni promouvoir ces
+  // citations.
+  if (plan.actions.some((action) => action.type === 'list_recent')) {
+    const recent = buildRecentSendersResult(gathered);
+    if (recent) return recent;
+    return {
+      answer: INSUFFICIENT_EVIDENCE_ANSWER,
+      citations: [],
+      proposal: undefined,
+      steps: gathered.steps,
+    };
+  }
+
   const synthesis = await getSynthesis(deps, budget, input, gathered);
   // Synthesis unavailable after both attempts (tour 06): degrade to a
   // DETERMINISTIC grounded result from the retrieved evidence — never throw,
@@ -849,7 +903,7 @@ export async function runAskReta(
   // quote is a substring of that source's excerpt. Everything else — unknown
   // refs, metadata refs, missing/altered quotes — yields ZERO citations.
   // Metadata sources still power sources/steps (thread discovery), never proof.
-  const citations: AskRetaCitation[] = [];
+  const citations: AskRetaMessageCitation[] = [];
   for (const cite of synthesis.cites) {
     const source = byRef.get(cite.ref);
     if (!source) continue;

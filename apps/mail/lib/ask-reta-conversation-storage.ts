@@ -31,17 +31,29 @@ export const askRetaConversationKey = (userId: string, connectionId: string) =>
 
 const bounded = (max: number) => z.string().max(max);
 
-const persistedCitationSchema = z.object({
-  ref: bounded(16),
-  kind: z.literal('message'),
-  threadId: bounded(200),
-  messageId: bounded(200).optional(),
-  subject: bounded(300),
-  sender: bounded(300),
-  date: bounded(64),
-  excerptHash: z.string().regex(/^[0-9a-f]{64}$/),
-  quote: bounded(300),
-});
+const persistedCitationSchema = z.discriminatedUnion('kind', [
+  z.object({
+    ref: bounded(16),
+    kind: z.literal('message'),
+    threadId: bounded(200),
+    messageId: bounded(200).optional(),
+    subject: bounded(300),
+    sender: bounded(300),
+    date: bounded(64),
+    excerptHash: z.string().regex(/^[0-9a-f]{64}$/),
+    quote: bounded(300),
+  }),
+  // Tour 10 : citation metadata — champs seuls, jamais de quote.
+  z.object({
+    ref: bounded(16),
+    kind: z.literal('metadata'),
+    threadId: bounded(200),
+    subject: bounded(300),
+    sender: bounded(300),
+    date: bounded(64),
+    excerptHash: z.string().regex(/^[0-9a-f]{64}$/),
+  }),
+]);
 
 const persistedStepThreadSchema = z.object({
   threadId: bounded(200),

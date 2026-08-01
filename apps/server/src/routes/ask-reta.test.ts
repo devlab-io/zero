@@ -472,7 +472,7 @@ describe('serializeBoundedEvent — server-side event discipline', () => {
         step: { kind: 'exfiltrate' as never, detail: 'x', sourceRefs: [] },
       }),
     ).toBeNull();
-    // A result whose citation violates the contract (metadata kind).
+    // A result whose citation violates the contract (unknown kind).
     expect(
       serializeBoundedEvent({
         type: 'result',
@@ -481,7 +481,7 @@ describe('serializeBoundedEvent — server-side event discipline', () => {
           citations: [
             {
               ref: 's1',
-              kind: 'metadata' as never,
+              kind: 'exfil' as never,
               threadId: 't',
               subject: 's',
               sender: 'x',
@@ -495,6 +495,31 @@ describe('serializeBoundedEvent — server-side event discipline', () => {
         },
       }),
     ).toBeNull();
+    // Tour 10 : une citation METADATA valide passe — et une quote qui s'y
+    // glisserait est STRIPPÉE (jamais présentée comme extrait de corps).
+    const metadataLine = serializeBoundedEvent({
+      type: 'result',
+      result: {
+        answer: 'ok',
+        citations: [
+          {
+            ref: 's1',
+            kind: 'metadata',
+            threadId: 't',
+            subject: 's',
+            sender: 'x',
+            date: 'd',
+            excerptHash: 'a'.repeat(64),
+            quote: 'corps forgé',
+          } as never,
+        ],
+        steps: [],
+        model: 'workers-ai:llama-4-scout',
+      },
+    });
+    expect(metadataLine).not.toBeNull();
+    expect(metadataLine).toContain('"kind":"metadata"');
+    expect(metadataLine).not.toContain('corps forgé');
     // A terminal error outside the enum vocabulary.
     expect(
       serializeBoundedEvent({ type: 'error', message: 'stack trace détaillée' as never }),

@@ -732,10 +732,25 @@ export function AskRetaSurface() {
                         key={citation.ref}
                         type="button"
                         onClick={() => openCitation(citation.threadId)}
-                        title={`${citation.sender} — ${citation.date}${citation.quote ? ` — « ${citation.quote} »` : ''}`}
+                        title={
+                          citation.kind === 'metadata'
+                            ? // Métadonnées présentées comme CHAMPS — jamais
+                              // comme un extrait du corps (tour 10).
+                              `${m['common.askReta.metadataCitation']()} — ${citation.sender} — ${citation.date}`
+                            : `${citation.sender} — ${citation.date}${citation.quote ? ` — « ${citation.quote} »` : ''}`
+                        }
                         className="bg-background hover:bg-accent max-w-[240px] truncate rounded-full border px-2 py-0.5 text-[11px] transition-colors"
                       >
-                        {citation.subject}
+                        {citation.kind === 'metadata' ? (
+                          <>
+                            <span className="text-muted-foreground">
+                              {m['common.askReta.metadataCitation']()} ·{' '}
+                            </span>
+                            {citation.sender} — {citation.subject}
+                          </>
+                        ) : (
+                          citation.subject
+                        )}
                       </button>
                     ))}
                   </div>

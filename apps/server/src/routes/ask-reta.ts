@@ -107,17 +107,30 @@ const streamResultSchema = z.object({
   answer: z.string().max(12_000),
   citations: z
     .array(
-      z.object({
-        ref: z.string().max(16),
-        kind: z.literal('message'),
-        threadId: z.string().max(200),
-        messageId: z.string().max(200).optional(),
-        subject: z.string().max(300),
-        sender: z.string().max(300),
-        date: z.string().max(64),
-        excerptHash: z.string().regex(/^[0-9a-f]{64}$/),
-        quote: z.string().max(300),
-      }),
+      // Union discriminée (tour 10) : message = quote vérifiée ; metadata =
+      // champs seuls (récence/expéditeur), jamais présentée comme extrait.
+      z.discriminatedUnion('kind', [
+        z.object({
+          ref: z.string().max(16),
+          kind: z.literal('message'),
+          threadId: z.string().max(200),
+          messageId: z.string().max(200).optional(),
+          subject: z.string().max(300),
+          sender: z.string().max(300),
+          date: z.string().max(64),
+          excerptHash: z.string().regex(/^[0-9a-f]{64}$/),
+          quote: z.string().max(300),
+        }),
+        z.object({
+          ref: z.string().max(16),
+          kind: z.literal('metadata'),
+          threadId: z.string().max(200),
+          subject: z.string().max(300),
+          sender: z.string().max(300),
+          date: z.string().max(64),
+          excerptHash: z.string().regex(/^[0-9a-f]{64}$/),
+        }),
+      ]),
     )
     .max(askRetaLimits.citations),
   steps: z.array(streamStepSchema).max(12),
@@ -150,17 +163,26 @@ const boundResult = (
   result: Extract<AskRetaStreamEvent, { type: 'result' }>['result'],
 ): Extract<AskRetaStreamEvent, { type: 'result' }>['result'] => ({
   answer: truncate(result.answer, 12_000),
-  citations: result.citations.slice(0, askRetaLimits.citations).map((citation) => ({
-    ref: truncate(citation.ref, 16),
-    kind: citation.kind,
-    threadId: truncate(citation.threadId, 200),
-    ...(citation.messageId ? { messageId: truncate(citation.messageId, 200) } : {}),
-    subject: truncate(citation.subject, 300),
-    sender: truncate(citation.sender, 300),
-    date: truncate(citation.date, 64),
-    excerptHash: citation.excerptHash,
-    quote: truncate(citation.quote, 300),
-  })),
+  citations: result.citations.slice(0, askRetaLimits.citations).map((citation) => {
+    const base = {
+      ref: truncate(citation.ref, 16),
+      threadId: truncate(citation.threadId, 200),
+      subject: truncate(citation.subject, 300),
+      sender: truncate(citation.sender, 300),
+      date: truncate(citation.date, 64),
+      excerptHash: citation.excerptHash,
+    };
+    return citation.kind === 'message'
+      ? {
+          ...base,
+          kind: 'message' as const,
+          ...(citation.messageId ? { messageId: truncate(citation.messageId, 200) } : {}),
+          quote: truncate(citation.quote, 300),
+        }
+      : // kind préservé TEL QUEL : un kind hors contrat n'est jamais blanchi
+        // en metadata — le schéma de validation rejette l'événement entier.
+        { ...base, kind: citation.kind };
+  }),
   steps: result.steps.slice(0, 12).map(boundStep),
   ...(result.proposal
     ? {

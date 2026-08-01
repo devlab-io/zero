@@ -1143,3 +1143,60 @@ describe('AskRetaSurface — chip « fil actuel inclus » (prod CUA fix)', () =>
     expect(chip()!.textContent).toContain('Sujet du fil 2');
   });
 });
+
+describe('AskRetaSurface — citations METADATA (tour 10)', () => {
+  const metadataResult = () => ({
+    answer:
+      'Expéditeurs les plus récents (inbox) / Most recent senders:\n1. Compta <compta@socredo.test> — 2026-07-30 — « Relance facture »',
+    citations: [
+      {
+        ref: 's1',
+        kind: 'metadata',
+        threadId: 'thread-meta-1',
+        subject: 'Relance facture',
+        sender: 'Compta <compta@socredo.test>',
+        date: '2026-07-30T10:00:00.000Z',
+        excerptHash: 'a'.repeat(64),
+      },
+    ],
+    steps: [],
+    model: 'workers-ai:llama-4-scout',
+  });
+
+  it('rend la citation metadata comme MÉTADONNÉES (label + sender), jamais comme extrait, et le clic ouvre le fil', async () => {
+    harness.streamAskReta.mockResolvedValueOnce(metadataResult());
+    render();
+    await askQuestion('Mes derniers expéditeurs ?');
+
+    const chipButton = [...container.querySelectorAll('button')].find((button) =>
+      button.textContent?.includes('Relance facture'),
+    )!;
+    expect(chipButton.textContent).toContain('askReta.metadataCitation');
+    expect(chipButton.textContent).toContain('Compta <compta@socredo.test>');
+    expect(chipButton.getAttribute('title')).toContain('askReta.metadataCitation');
+    expect(chipButton.getAttribute('title')).not.toContain('«');
+
+    await act(async () => {
+      chipButton.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    // Le clic ouvre le fil cité (purge reply + fermeture du panneau).
+    expect(harness.purge).toHaveBeenCalledWith({ threadId: 'thread-meta-1' });
+    expect(harness.queryStore.isAskRetaOpen).toBeNull();
+  });
+
+  it('la citation metadata SURVIT à la persistance/rechargement (projection v2)', async () => {
+    harness.streamAskReta.mockResolvedValueOnce(metadataResult());
+    render();
+    await askQuestion('Mes derniers expéditeurs ?');
+    // Remount : recharge depuis le storage device-local.
+    act(() => root.unmount());
+    root = createRoot(container);
+    render();
+    await act(async () => {});
+    const chip = [...container.querySelectorAll('button')].find((button) =>
+      button.textContent?.includes('Relance facture'),
+    );
+    expect(chip).toBeTruthy();
+    expect(chip!.textContent).toContain('askReta.metadataCitation');
+  });
+});

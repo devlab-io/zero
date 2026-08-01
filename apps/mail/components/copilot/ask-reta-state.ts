@@ -6,18 +6,33 @@ import { atom } from 'jotai';
  * in slice 1 (spec docs/spec/mail-copilot.md).
  */
 
-export type AskRetaCitationView = {
-  ref: string;
-  /** v1 contract: citations are always message-kind with a verified quote. */
-  kind: 'message';
-  threadId: string;
-  messageId?: string;
-  subject: string;
-  sender: string;
-  date: string;
-  excerptHash: string;
-  quote: string;
-};
+export type AskRetaCitationView =
+  | {
+      ref: string;
+      /** Content citation: server-verified quote, substring of a message body. */
+      kind: 'message';
+      threadId: string;
+      messageId?: string;
+      subject: string;
+      sender: string;
+      date: string;
+      excerptHash: string;
+      quote: string;
+    }
+  | {
+      ref: string;
+      /**
+       * Metadata citation (tour 10): deterministic server answer to a
+       * strictly-metadata question — fields only, NEVER rendered as a body
+       * excerpt.
+       */
+      kind: 'metadata';
+      threadId: string;
+      subject: string;
+      sender: string;
+      date: string;
+      excerptHash: string;
+    };
 
 export type AskRetaProposalView = {
   kind: 'reply' | 'new';
