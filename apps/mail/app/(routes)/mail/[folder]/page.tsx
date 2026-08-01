@@ -1,5 +1,6 @@
 import { useLoaderData, useNavigate } from 'react-router';
 
+import { DraftWorkspace } from '@/components/drafts/draft-workspace';
 import { MailLayout } from '@/components/mail/mail';
 import { useLabels } from '@/hooks/use-labels';
 import { authProxy } from '@/lib/auth-proxy';
@@ -88,6 +89,8 @@ export default function MailPage() {
       </div>
     );
   }
+
+  if (folder === 'draft') return <DraftWorkspace />;
 
   return <MailLayout />;
 }

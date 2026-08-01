@@ -98,7 +98,7 @@ const getPreview = (body: string) =>
     .replace(/\s+/g, ' ')
     .trim();
 
-export function QueueReview() {
+export function QueueReview({ embedded = false }: { embedded?: boolean } = {}) {
   const trpc = useTRPC();
   const trpcClient = useTRPCClient();
   const queryClient = useQueryClient();
@@ -298,28 +298,41 @@ export function QueueReview() {
     approveMutation.isPending || cancelMutation.isPending || retryMutation.isPending;
 
   return (
-    <section className="flex h-screen min-w-0 flex-1 flex-col overflow-hidden bg-[#FAFAFA] text-zinc-950 dark:bg-[#141414] dark:text-zinc-50">
-      <header className="border-b border-zinc-200/80 px-4 py-4 sm:px-6 dark:border-zinc-800">
+    <section
+      className={cn(
+        'bg-background text-foreground flex min-w-0 flex-1 flex-col overflow-hidden',
+        embedded ? 'min-h-0' : 'h-screen',
+      )}
+    >
+      <header className={cn('border-border/60 border-b px-4 sm:px-6', embedded ? 'py-3' : 'py-4')}>
         <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
-          <div className="min-w-0 space-y-2">
-            <div className="flex flex-wrap items-center gap-2">
-              <h1 className="text-2xl font-semibold tracking-normal">{m['queue.title']()}</h1>
+          {embedded ? (
+            <div className="flex min-w-0 flex-wrap items-center gap-2">
               <Badge
                 variant="outline"
                 className="border-emerald-300 text-emerald-700 dark:border-emerald-500/40 dark:text-emerald-300"
               >
                 {m['queue.pendingForReview']({ count: pendingReviewCount })}
               </Badge>
+              <p className="text-muted-foreground text-sm">{m['queue.subtitle']()}</p>
             </div>
-            <p className="max-w-3xl text-sm text-zinc-600 dark:text-zinc-400">
-              {m['queue.subtitle']()}
-            </p>
-          </div>
+          ) : (
+            <div className="min-w-0 space-y-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <h1 className="text-2xl font-semibold tracking-normal">{m['queue.title']()}</h1>
+                <Badge
+                  variant="outline"
+                  className="border-emerald-300 text-emerald-700 dark:border-emerald-500/40 dark:text-emerald-300"
+                >
+                  {m['queue.pendingForReview']({ count: pendingReviewCount })}
+                </Badge>
+              </div>
+              <p className="text-muted-foreground max-w-3xl text-sm">{m['queue.subtitle']()}</p>
+            </div>
+          )}
 
-          <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-500 dark:text-zinc-400">
-            <span className="font-medium text-zinc-700 dark:text-zinc-300">
-              {m['queue.keyboardTitle']()}
-            </span>
+          <div className="text-muted-foreground flex flex-wrap items-center gap-2 text-xs">
+            <span className="text-foreground font-medium">{m['queue.keyboardTitle']()}</span>
             <ShortcutHint keys="D/A" label={m['queue.keyboardApprove']()} />
             <ShortcutHint keys="R" label={m['queue.keyboardReject']()} />
             <ShortcutHint keys="F/H" label={m['queue.keyboardOpen']()} />

@@ -1,4 +1,4 @@
-import { ArrowRight, Clock3, FilePenLine, Gauge, Inbox, Send } from 'lucide-react';
+import { ArrowRight, Bot, Clock3, FilePenLine, Gauge, Send } from 'lucide-react';
 import { useMailboxOverview } from '@/hooks/use-mailbox-overview';
 import { Link } from 'react-router';
 import { cn } from '@/lib/utils';
@@ -142,15 +142,17 @@ export function InboxDashboard({ onCompose }: InboxDashboardProps) {
           </Link>
 
           <Link
-            to="/queue"
+            to="/mail/draft?view=agent"
             className="group flex items-center justify-between rounded-2xl border border-black/[0.06] bg-white/70 p-4 shadow-sm transition hover:border-blue-500/20 hover:bg-blue-500/[0.035] dark:border-white/[0.08] dark:bg-white/[0.035] dark:hover:bg-blue-500/[0.08]"
           >
             <div className="flex items-center gap-3">
               <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-500/10 text-blue-600 dark:text-blue-300">
-                <Inbox className="h-4.5 w-4.5" />
+                <Bot className="h-4.5 w-4.5" />
               </span>
               <div>
-                <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100">Open queue</p>
+                <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
+                  Review agent drafts
+                </p>
                 <p className="text-xs text-zinc-500">{number.format(data.folders.queue)} active</p>
               </div>
             </div>

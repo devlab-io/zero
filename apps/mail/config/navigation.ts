@@ -64,12 +64,6 @@ export const navigationConfig: Record<string, NavConfig> = {
             shortcut: 'g + d',
           },
           {
-            id: 'queue',
-            title: m['navigation.sidebar.queue'](),
-            url: '/queue',
-            icon: Clock,
-          },
-          {
             id: 'sent',
             title: m['navigation.sidebar.sent'](),
             url: '/mail/sent',

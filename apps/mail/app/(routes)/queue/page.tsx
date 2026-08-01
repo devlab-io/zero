@@ -1,13 +1,6 @@
-import { QueueReview } from '@/components/queue/queue-review';
-import { OnboardingWrapper } from '@/components/onboarding';
-import { AppSidebar } from '@/components/ui/app-sidebar';
+import { Navigate } from 'react-router';
 
 export default function QueuePage() {
-  return (
-    <>
-      <AppSidebar />
-      <QueueReview />
-      <OnboardingWrapper />
-    </>
-  );
+  // Legacy deep links remain valid, but Queue is now one surface inside Drafts.
+  return <Navigate to="/mail/draft?view=agent" replace />;
 }
