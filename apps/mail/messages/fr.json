@@ -66,6 +66,28 @@
       "light": "Clair",
       "system": "Système"
     },
+    "askReta": {
+      "open": "Ask Reta",
+      "title": "Ask Reta",
+      "subtitle": "Des réponses ancrées dans votre boîte, avec sources.",
+      "placeholder": "Posez une question sur votre boîte…",
+      "send": "Demander",
+      "thinking": "Reta lit votre boîte…",
+      "clear": "Effacer la conversation",
+      "sources": "Sources",
+      "proposal": "Brouillon proposé",
+      "openInComposer": "Ouvrir dans le composeur",
+      "inserted": "Inséré dans le composeur",
+      "replacePrompt": "Un brouillon est déjà en cours",
+      "replace": "Remplacer",
+      "createDraft": "Enregistrer en brouillon Gmail",
+      "copy": "Copier",
+      "copied": "Copié dans le presse-papier",
+      "model": "Modèle",
+      "error": "Reta n'a pas pu répondre. Réessayez.",
+      "draftCreated": "Brouillon enregistré dans Gmail",
+      "empty": "Posez n'importe quelle question sur votre boîte — Reta répond avec des sources."
+    },
     "commandPalette": {
       "title": "Palette de commandes",
       "description": "Navigation rapide et actions pour Mail-0",

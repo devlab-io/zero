@@ -128,8 +128,8 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
         }>;
         rewriteEmail: import("@trpc/server").TRPCMutationProcedure<{
             input: {
-                mode: "correct" | "rewrite";
                 content: string;
+                mode: "correct" | "rewrite";
                 mood?: string | undefined;
             };
             output: {
@@ -142,6 +142,67 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
                 query: string;
             };
             output: import("ai").GenerateTextResult<import("ai").ToolSet, never>;
+            meta: object;
+        }>;
+    }>>;
+    copilot: import("@trpc/server").TRPCBuiltRouter<{
+        ctx: {
+            c: import("hono").Context<{
+                Bindings: Record<string, unknown>;
+                Variables: {
+                    auth: {
+                        api: {
+                            signOut: (input: {
+                                headers: Headers;
+                            }) => Promise<unknown>;
+                            deleteUser: (input: {
+                                body: {
+                                    callbackURL: string;
+                                };
+                                headers: Headers;
+                                request: Request;
+                            }) => Promise<{
+                                success: boolean;
+                                message: string;
+                            }>;
+                        };
+                    };
+                    sessionUser?: {
+                        id: string;
+                        name: string;
+                        email: string;
+                    };
+                    traceId?: string;
+                    requestId?: string;
+                };
+            }>;
+            sessionUser?: {
+                id: string;
+                name: string;
+                email: string;
+            };
+        };
+        meta: object;
+        errorShape: import("@trpc/server").TRPCDefaultErrorShape;
+        transformer: true;
+    }, import("@trpc/server").TRPCDecorateCreateRouterOptions<{
+        ask: import("@trpc/server").TRPCMutationProcedure<{
+            input: {
+                question: string;
+                history?: {
+                    role: "user" | "assistant";
+                    content: string;
+                }[] | undefined;
+                context?: {
+                    threadId?: string | undefined;
+                    draft?: {
+                        subject?: string | undefined;
+                        to?: string | undefined;
+                        body?: string | undefined;
+                    } | undefined;
+                } | undefined;
+            };
+            output: import("../lib/ask-reta/schema").AskRetaResult;
             meta: object;
         }>;
     }>>;
@@ -1481,11 +1542,11 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
                 notes: {
                     id: string;
                     threadId: string;
+                    content: string;
                     order: number;
                     createdAt: Date;
                     updatedAt: Date;
                     userId: string;
-                    content: string;
                     color: string;
                     isPinned: boolean | null;
                 }[];
@@ -1503,11 +1564,11 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
                 note: {
                     id: string;
                     threadId: string;
+                    content: string;
                     order: number;
                     createdAt: Date;
                     updatedAt: Date;
                     userId: string;
-                    content: string;
                     color: string;
                     isPinned: boolean | null;
                 };
@@ -1528,11 +1589,11 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
                 note: {
                     id: string;
                     threadId: string;
+                    content: string;
                     order: number;
                     createdAt: Date;
                     updatedAt: Date;
                     userId: string;
-                    content: string;
                     color: string;
                     isPinned: boolean | null;
                 };
@@ -1763,6 +1824,7 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
                     imageCompression: "low" | "medium" | "original";
                     autoRead: boolean;
                     animations: boolean;
+                    askRetaModel: "llama-4-scout" | "llama-3.3-70b";
                     dynamicContent?: boolean | undefined;
                     isOnboarded?: boolean | undefined;
                     trustedSenders?: string[] | undefined;
@@ -1803,6 +1865,7 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
                 imageCompression?: "low" | "medium" | "original" | undefined;
                 autoRead?: boolean | undefined;
                 animations?: boolean | undefined;
+                askRetaModel?: "llama-4-scout" | "llama-3.3-70b" | undefined;
             };
             output: {
                 success: boolean;

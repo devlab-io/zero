@@ -2,10 +2,15 @@ import { readdirSync, readFileSync, existsSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { join } from 'node:path';
 
-// Contrat produit r8 révisé par Thomas le 01/08/2026 : aucune surface IA
-// généraliste (résumés, chat, recherche naturelle). Une seule exception produit
-// est autorisée : l'assistant de correction/reformulation explicite du composeur.
-// Le garde-fou échoue si une autre surface ou route client revient.
+// Contrat produit r9 (01/08/2026) : supersession PARTIELLE du r8 par la mission
+// mail-copilot (spec docs/spec/mail-copilot.md). Aucune surface IA généraliste
+// non sollicitée (résumés automatiques, recherche naturelle) ; DEUX exceptions
+// nominatives, toutes deux invoquées explicitement par l'utilisateur :
+//   1. l'assistant de correction/reformulation du composeur (r8) ;
+//   2. le panneau Ask Reta (components/copilot/**), seul autorisé à appeler
+//      trpc.copilot.*.
+// Le garde-fou échoue si une autre surface ou route client revient, ou si
+// copilot.* est appelé hors de la surface sanctionnée.
 
 const APP_ROOT = join(__dirname, '..');
 
@@ -28,10 +33,16 @@ const PUBLIC_MARKETING_DIRS = [
 // dans le périmètre.
 const EXPLICIT_FILE_EXCLUSIONS = new Set(['providers/voice-provider.tsx']);
 const WRITING_ASSISTANT_EXCEPTION = 'components/create/writing-assistant-button.tsx';
+// r9 : la surface Ask Reta — seule autorisée à appeler les routes copilot.*.
+const ASK_RETA_SANCTIONED_DIR = 'components/copilot/';
 
 // Déclencheurs client des routes IA + promesses/surfaces IA, motifs LARGES.
 const FORBIDDEN_PATTERNS: Array<{ pattern: RegExp; why: string }> = [
   { pattern: /trpc\.ai\.|trpcClient\.ai\./, why: 'appel client à une route ai.*' },
+  {
+    pattern: /trpc\.copilot\.|trpcClient\.copilot\./,
+    why: 'appel client copilot.* hors de la surface Ask Reta sanctionnée',
+  },
   { pattern: /Try Natural Language/, why: 'section NL du command palette' },
   { pattern: /parseNaturalLanguageSearch/, why: 'interprétation langage naturel' },
   { pattern: /generateSearchQuery/, why: 'réécriture IA de la recherche' },
@@ -74,6 +85,15 @@ describe('contrat r8 — aucune surface IA exposée', () => {
           ) {
             const routeCalls = source.match(/(?:trpc|trpcClient)\.ai\.([A-Za-z0-9_]+)/g) ?? [];
             if (routeCalls.every((call) => call === 'trpc.ai.rewriteEmail')) continue;
+          }
+          // r9 : dans components/copilot/**, seuls les appels copilot.ask sont admis.
+          if (
+            relative.startsWith(ASK_RETA_SANCTIONED_DIR) &&
+            pattern.source === /trpc\.copilot\.|trpcClient\.copilot\./.source
+          ) {
+            const copilotCalls =
+              source.match(/(?:trpc|trpcClient)\.copilot\.([A-Za-z0-9_]+)/g) ?? [];
+            if (copilotCalls.every((call) => call === 'trpc.copilot.ask')) continue;
           }
           if (pattern.test(source)) {
             offenders.push(`${file.replace(APP_ROOT, '')} → ${why} (${pattern})`);

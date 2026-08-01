@@ -1,11 +1,13 @@
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip';
 import { createDraftSaveLifecycle } from '@/lib/draft-save-lifecycle';
+import { registerComposerInsertHandler } from '@/lib/composer-insert';
 import { resolveComposerChord } from '@/lib/hotkeys/composer-chords';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { resolveComposerEscape } from '@/lib/composer-escape';
 import { useEmailAliases } from '@/hooks/use-email-aliases';
 import { ScheduleSendPicker } from './schedule-send-picker';
 import useComposeEditor from '@/hooks/use-compose-editor';
+import { draftStorageKey } from '@/lib/draft-storage';
 import { Command, Plus, Type } from 'lucide-react';
 import { zodResolver } from '@/lib/zod-resolver';
 import { CurvedArrow } from '../icons/icons';
@@ -186,6 +188,25 @@ export function EmailComposer({
     placeholder: 'Start your email here',
     autofocus,
   });
+
+  // Ask Reta live-insert seam (spec docs/spec/mail-copilot.md): this composer
+  // instance accepts a proposal under its EXACT persistence scope key. Without
+  // `force` a non-empty body reports 'occupied' — the panel must ask the user
+  // before replacing; nothing is ever overwritten silently.
+  useEffect(() => {
+    if (!editor || editor.isDestroyed) return;
+    const scopeKey = draftStorageKey({ threadId, draftId, replyId: activeReplyId });
+    return registerComposerInsertHandler(scopeKey, (payload, { force }) => {
+      if (!force && editor.getText().trim().length > 0) return 'occupied';
+      editor.commands.setContent(payload.message);
+      if (payload.subject && !getValues('subject')) {
+        setValue('subject', payload.subject, { shouldDirty: true });
+      }
+      setHasUnsavedChanges(true);
+      editor.commands.focus('end');
+      return 'inserted';
+    });
+  }, [editor, threadId, draftId, activeReplyId, getValues, setValue]);
 
   // Add effect to focus editor when component mounts
   useEffect(() => {

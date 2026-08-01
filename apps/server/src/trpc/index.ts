@@ -5,6 +5,9 @@ import { categoriesRouter } from './routes/categories';
 import { templatesRouter } from './routes/templates';
 import { shortcutRouter } from './routes/shortcut';
 import { settingsRouter } from './routes/settings';
+import { loggingRouter } from './routes/logging';
+import { copilotRouter } from './routes/copilot';
+import { outboxRouter } from './routes/outbox';
 import { draftsRouter } from './routes/drafts';
 import { labelsRouter } from './routes/label';
 import { notesRouter } from './routes/notes';
@@ -15,11 +18,10 @@ import { mailRouter } from './routes/mail';
 import { bimiRouter } from './routes/bimi';
 import { aiRouter } from './routes/ai';
 import { router } from './trpc';
-import { loggingRouter } from './routes/logging';
-import { outboxRouter } from './routes/outbox';
 
 export const appRouter = router({
   ai: aiRouter,
+  copilot: copilotRouter,
   bimi: bimiRouter,
   brain: brainRouter,
   categories: categoriesRouter,

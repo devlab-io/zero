@@ -10,6 +10,7 @@ import { Sidebar, SidebarContent, SidebarFooter, SidebarHeader } from '@/compone
 import { ComposeSurface, preloadComposeSurface } from '../create/compose-surface';
 import { SidebarThemeSwitch } from '@/components/theme/sidebar-theme-switcher';
 import { navigationConfig, bottomNavItems } from '@/config/navigation';
+import { AskRetaButton } from '@/components/copilot/ask-reta-button';
 import { useMailboxOverview } from '@/hooks/use-mailbox-overview';
 import { preloadThreadReader } from '../mail/mail-lazy-surfaces';
 import React, { useEffect, useMemo, useState } from 'react';
@@ -128,9 +129,14 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
           {session && <NavUser />}
 
           {showComposeButton && (
-            <div className="flex gap-1">
+            <div className="flex flex-col gap-0">
               <div className={cn('w-full')}>
                 <ComposeButton />
+              </div>
+              {/* Ask Reta (r9): the one sanctioned assistant entry, strictly
+                  user-invoked — spec docs/spec/mail-copilot.md. */}
+              <div className={cn('w-full')}>
+                <AskRetaButton />
               </div>
               {/* {isPro ? (
                   <button

@@ -66,6 +66,28 @@
       "light": "Light",
       "system": "System"
     },
+    "askReta": {
+      "open": "Ask Reta",
+      "title": "Ask Reta",
+      "subtitle": "Answers grounded in your mailbox, with sources.",
+      "placeholder": "Ask about your mailbox…",
+      "send": "Ask",
+      "thinking": "Reta is reading your mailbox…",
+      "clear": "Clear conversation",
+      "sources": "Sources",
+      "proposal": "Proposed draft",
+      "openInComposer": "Open in composer",
+      "inserted": "Inserted into the composer",
+      "replacePrompt": "A draft is already in progress",
+      "replace": "Replace",
+      "createDraft": "Save as Gmail draft",
+      "copy": "Copy",
+      "copied": "Copied to clipboard",
+      "model": "Model",
+      "error": "Reta could not answer. Try again.",
+      "draftCreated": "Draft saved to Gmail",
+      "empty": "Ask anything about your mailbox — Reta answers with sources."
+    },
     "commandPalette": {
       "title": "Command Palette",
       "description": "Quick navigation and actions for Mail-0",

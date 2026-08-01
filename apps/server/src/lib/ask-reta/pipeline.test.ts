@@ -1,0 +1,230 @@
+import {
+  AskRetaAbortedError,
+  fallbackPlan,
+  fallbackSearchQuery,
+  normalizePlan,
+  runAskReta,
+  type AskRetaDeps,
+} from './pipeline';
+import { askRetaInputSchema, askRetaLimits, type AskRetaPlan } from './schema';
+import type { IGetThreadResponse, ThreadsResponse } from '@zero/types';
+import { describe, expect, it, vi } from 'vitest';
+import type { RetaModel } from './model';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
+const input = (overrides: Partial<ReturnType<typeof askRetaInputSchema.parse>> = {}) =>
+  askRetaInputSchema.parse({ question: 'Que dit la dernière facture Balguerie ?', ...overrides });
+
+const scriptedModel = (responses: string[]): RetaModel & { calls: number } => {
+  const state = { calls: 0 };
+  return {
+    key: 'llama-4-scout',
+    get calls() {
+      return state.calls;
+    },
+    complete: vi.fn(async () => {
+      const response = responses[state.calls] ?? responses[responses.length - 1] ?? '';
+      state.calls += 1;
+      return response;
+    }),
+  } as RetaModel & { calls: number };
+};
+
+const searchRow = (n: number) => ({
+  id: `thread-${n}`,
+  historyId: null,
+  subject: `Facture ${n}`,
+  sender: { name: 'Compta', email: 'compta@balguerie.test' },
+  receivedOn: '2026-07-30T10:00:00.000Z',
+  unread: false,
+  labels: [],
+});
+
+const threadWithMessages = (threadId: string, count: number): IGetThreadResponse => {
+  const messages = Array.from({ length: count }, (_, i) => ({
+    id: `${threadId}-m${i + 1}`,
+    subject: `Facture — message ${i + 1}`,
+    sender: { name: 'Compta', email: 'compta@balguerie.test' },
+    receivedOn: `2026-07-${String(i + 1).padStart(2, '0')}T10:00:00.000Z`,
+    decodedBody: `<p>Montant dû message ${i + 1} : ${'détail '.repeat(400)}</p>`,
+    isDraft: i === 0,
+  }));
+  return { messages } as unknown as IGetThreadResponse;
+};
+
+const makeDeps = (
+  model: RetaModel,
+  overrides: Partial<AskRetaDeps> = {},
+): AskRetaDeps & { searchThreads: ReturnType<typeof vi.fn> } => {
+  const searchThreads = vi.fn(
+    async (): Promise<ThreadsResponse> => ({
+      threads: Array.from({ length: 12 }, (_, i) => searchRow(i + 1)),
+      nextPageToken: null,
+    }),
+  );
+  return {
+    model,
+    overview: vi.fn(async () => ({ folders: { inbox: 42 } })),
+    searchThreads,
+    readThread: vi.fn(async (id: string) => threadWithMessages(id, 14)),
+    ...overrides,
+  } as AskRetaDeps & { searchThreads: ReturnType<typeof vi.fn> };
+};
+
+const planJson = JSON.stringify({
+  actions: [
+    { type: 'search', query: 'facture balguerie' },
+    { type: 'read_thread', target: 'top_results' },
+  ],
+});
+
+const synthesisJson = JSON.stringify({
+  answer: 'La dernière facture Balguerie réclame 120 000 XPF.',
+  cites: ['s1', 's99'],
+});
+
+describe('fallbackSearchQuery', () => {
+  it('keeps discriminating words, drops fr/en stopwords', () => {
+    expect(fallbackSearchQuery('Que dit la dernière facture de Balguerie ?')).toBe(
+      'dit facture balguerie',
+    );
+    expect(fallbackSearchQuery('How many unread emails from Github ?')).toContain('github');
+  });
+});
+
+describe('normalizePlan — every cap enforced, degradation never throws', () => {
+  it('clamps searches, drops read-open without an open thread, keeps ≤ 3 actions', () => {
+    const plan: AskRetaPlan = {
+      actions: [
+        { type: 'search', query: 'a' },
+        { type: 'search', query: 'b' },
+        { type: 'search', query: 'c' },
+        { type: 'read_thread', target: 'open' },
+        { type: 'overview' },
+      ],
+    };
+    const normalized = normalizePlan(plan, input());
+    expect(normalized.actions.length).toBeLessThanOrEqual(askRetaLimits.planActions);
+    expect(normalized.actions.filter((a) => a.type === 'search')).toHaveLength(2);
+    expect(normalized.actions.some((a) => a.type === 'read_thread')).toBe(false);
+  });
+
+  it('drops top_results reads when no search exists, falls back when empty', () => {
+    const normalized = normalizePlan(
+      { actions: [{ type: 'read_thread', target: 'top_results' }] },
+      input(),
+    );
+    expect(normalized).toEqual(fallbackPlan(input()));
+  });
+});
+
+describe('runAskReta — grounded, capped, read-only', () => {
+  it('answers with server-resolved citations; forged refs are dropped', async () => {
+    const model = scriptedModel([planJson, synthesisJson]);
+    const deps = makeDeps(model);
+    const result = await runAskReta(deps, input());
+
+    expect(result.answer).toContain('120 000 XPF');
+    // s99 was never retrieved: containment drops it.
+    expect(result.citations).toHaveLength(1);
+    expect(result.citations[0]).toMatchObject({ ref: 's1', threadId: 'thread-1' });
+    expect(result.citations[0]?.excerptHash).toMatch(/^[0-9a-f]{64}$/);
+    // No raw excerpt leaves the server in a citation.
+    expect(result.citations[0]).not.toHaveProperty('excerpt');
+    // The retrieval trace is visible.
+    expect(result.steps.map((s) => s.kind)).toEqual(['search', 'read_thread']);
+  });
+
+  it('hard-caps retrieval: 10 search results, 3 threads, 12 messages, bounded excerpts', async () => {
+    const model = scriptedModel([planJson, synthesisJson]);
+    const deps = makeDeps(model);
+    await runAskReta(deps, input());
+
+    expect(deps.searchThreads).toHaveBeenCalledWith(
+      expect.objectContaining({ maxResults: askRetaLimits.searchResults }),
+    );
+    const readThread = deps.readThread as ReturnType<typeof vi.fn>;
+    expect(readThread).toHaveBeenCalledTimes(askRetaLimits.threadsRead);
+  });
+
+  it('uses the deterministic fallback plan when the planner returns garbage', async () => {
+    const model = scriptedModel(['not json at all', synthesisJson]);
+    const deps = makeDeps(model);
+    const result = await runAskReta(deps, input({ context: { threadId: 'open-thread' } }));
+
+    // Fallback = search(question words) + read the open thread.
+    expect(deps.searchThreads).toHaveBeenCalledWith(
+      expect.objectContaining({ query: 'dit facture balguerie' }),
+    );
+    expect(deps.readThread).toHaveBeenCalledWith('open-thread');
+    expect(result.answer).toBeTruthy();
+  });
+
+  it('sanitizes proposals and downgrades reply→new without an open thread', async () => {
+    const withProposal = JSON.stringify({
+      answer: 'Réponse préparée.',
+      cites: [],
+      proposal: {
+        kind: 'reply',
+        subject: 'Re: Facture',
+        body: "Ia ora na,\n\nC'est réglé.<script>alert(1)</script>",
+      },
+    });
+    const model = scriptedModel([planJson, withProposal]);
+    const result = await runAskReta(makeDeps(model), input());
+
+    expect(result.proposal?.kind).toBe('new');
+    expect(result.proposal?.threadId).toBeUndefined();
+    expect(result.proposal?.bodyHtml).toContain('<p>Ia ora na,</p>');
+    expect(result.proposal?.bodyHtml).not.toContain('script');
+  });
+
+  it('keeps reply proposals attached to the open thread', async () => {
+    const withProposal = JSON.stringify({
+      answer: 'Réponse préparée.',
+      cites: [],
+      proposal: { kind: 'reply', body: 'Bien reçu, merci.' },
+    });
+    const model = scriptedModel([planJson, withProposal]);
+    const result = await runAskReta(
+      makeDeps(model),
+      input({ context: { threadId: 'open-thread' } }),
+    );
+    expect(result.proposal?.kind).toBe('reply');
+    expect(result.proposal?.threadId).toBe('open-thread');
+  });
+
+  it('aborts between steps when the signal fires', async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const model = scriptedModel([planJson, synthesisJson]);
+    await expect(
+      runAskReta(makeDeps(model, { signal: controller.signal }), input()),
+    ).rejects.toBeInstanceOf(AskRetaAbortedError);
+  });
+
+  it('retries synthesis once, then fails without leaking content', async () => {
+    const model = scriptedModel([planJson, 'garbage', 'still garbage']);
+    await expect(runAskReta(makeDeps(model), input())).rejects.toThrow(
+      'Ask Reta could not produce a grounded answer',
+    );
+  });
+});
+
+describe('read-only guarantee — structural', () => {
+  it('the pipeline source references no mutating mailbox capability', () => {
+    const source = readFileSync(join(__dirname, 'pipeline.ts'), 'utf8');
+    for (const forbidden of [
+      'createDraft',
+      'sendDraft',
+      'modifyThreadLabels',
+      'markAs',
+      'bulkArchive',
+      'delete(',
+      'webSearch',
+    ]) {
+      expect(source.includes(forbidden), `pipeline.ts must not reference ${forbidden}`).toBe(false);
+    }
+  });
+});
