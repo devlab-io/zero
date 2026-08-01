@@ -724,7 +724,12 @@ export function AskRetaSurface() {
               {turn.payload?.citations && turn.payload.citations.length > 0 && (
                 <div className="mt-2">
                   <p className="text-muted-foreground text-[11px] font-medium">
-                    {m['common.askReta.sources']()}
+                    {/* Tour 12 : un tour DONT TOUTES les citations sont
+                        metadata est titré « Métadonnées du fil » — la nature
+                        de la preuve se lit au premier coup d'œil. */}
+                    {turn.payload.citations.every((citation) => citation.kind === 'metadata')
+                      ? m['common.askReta.metadataCitation']()
+                      : m['common.askReta.sources']()}
                   </p>
                   <div className="mt-1 flex flex-wrap gap-1.5">
                     {turn.payload.citations.map((citation) => (

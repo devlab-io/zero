@@ -1184,6 +1184,40 @@ describe('AskRetaSurface — citations METADATA (tour 10)', () => {
     expect(harness.queryStore.isAskRetaOpen).toBeNull();
   });
 
+  it('titre du bloc : METADATA exactement quand toutes les citations le sont', async () => {
+    harness.streamAskReta.mockResolvedValueOnce(metadataResult());
+    render();
+    await askQuestion('Mes derniers expéditeurs ?');
+    const headings = [...container.querySelectorAll('p')].map((p) => p.textContent);
+    expect(headings).toContain('common.askReta.metadataCitation');
+    expect(headings).not.toContain('common.askReta.sources');
+  });
+
+  it('non-régression : des citations MESSAGE gardent le titre Sources', async () => {
+    harness.streamAskReta.mockResolvedValueOnce({
+      answer: 'Réponse extractive',
+      citations: [
+        {
+          ref: 's1',
+          kind: 'message',
+          threadId: 'thread-msg-1',
+          subject: 'Facture Socredo',
+          sender: 'Compta <compta@socredo.test>',
+          date: '2026-07-30T10:00:00.000Z',
+          excerptHash: 'b'.repeat(64),
+          quote: 'Montant dû : détail vérifié du corps du message',
+        },
+      ],
+      steps: [],
+      model: 'workers-ai:llama-4-scout',
+    });
+    render();
+    await askQuestion('Que dit la facture ?');
+    const headings = [...container.querySelectorAll('p')].map((p) => p.textContent);
+    expect(headings).toContain('common.askReta.sources');
+    expect(headings).not.toContain('common.askReta.metadataCitation');
+  });
+
   it('la citation metadata SURVIT à la persistance/rechargement (projection v2)', async () => {
     harness.streamAskReta.mockResolvedValueOnce(metadataResult());
     render();
