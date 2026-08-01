@@ -2,6 +2,7 @@ import {
   AskRetaAbortedError,
   AskRetaPhaseError,
   fallbackPlan,
+  isStrictRecentMetadataQuestion,
   fallbackSearchQuery,
   fallbackSearchTerms,
   formatExtractiveAnswer,
@@ -710,13 +711,60 @@ describe('tour 09 — intent de récence : list_recent grounded', () => {
         { type: 'read_thread', target: 'top_results' },
       ],
     });
+    // Tour 11 : le court-circuit dépend du PRÉDICAT question, jamais du plan
+    // seul — ici la question est strictement metadata, le plan modèle passe.
     const deps = makeDeps(scriptedModel([modelPlan]));
-    const result = await runAskReta(deps, input());
+    const result = await runAskReta(
+      deps,
+      input({ question: 'Who are my latest senders in the inbox?' }),
+    );
     expect(deps.searchThreads).toHaveBeenCalledWith({ query: '', folder: 'inbox', maxResults: 3 });
-    // Tour 10 : un plan MODÈLE avec list_recent court-circuite AUSSI la
-    // synthèse — réponse metadata déterministe, le modèle ne peut pas y
-    // injecter de prose ni promouvoir ces citations.
     expect(result.citations.every((citation) => citation.kind === 'metadata')).toBe(true);
+  });
+
+  it('NÉGATIF FR : « Résume le contenu de mes trois emails les plus récents » → lecture + SYNTHÈSE, jamais metadata-only', async () => {
+    const modelPlan = JSON.stringify({
+      actions: [
+        { type: 'list_recent', folder: 'inbox', limit: 3 },
+        { type: 'read_thread', target: 'top_results' },
+      ],
+    });
+    const model = scriptedModel([modelPlan, 'garbage', 'garbage']);
+    const deps = makeDeps(model);
+    const result = await runAskReta(
+      deps,
+      input({ question: 'Résume le contenu de mes trois emails les plus récents' }),
+    );
+    // La synthèse EST appelée (plan + 2 tentatives) et les corps sont lus.
+    expect(model.complete).toHaveBeenCalledTimes(3);
+    expect(deps.readThread).toHaveBeenCalled();
+    // Dégradé déterministe fondé sur les MESSAGES lus — pas metadata-only.
+    expect(result.citations.length).toBeGreaterThan(0);
+    expect(result.citations.every((citation) => citation.kind === 'message')).toBe(true);
+  });
+
+  it('NÉGATIF EN : « Summarize the content of my latest emails » → même contrat contenu', async () => {
+    const model = scriptedModel(['not json', 'garbage', 'garbage']);
+    const deps = makeDeps(model);
+    const result = await runAskReta(
+      deps,
+      input({ question: 'Summarize the content of my latest emails' }),
+    );
+    // Fallback plan CONTENU récent : listing + lecture, synthèse tentée.
+    expect(deps.searchThreads).toHaveBeenCalledWith({ query: '', folder: 'inbox', maxResults: 3 });
+    expect(deps.readThread).toHaveBeenCalled();
+    expect(model.complete).toHaveBeenCalledTimes(3);
+    expect(result.citations.every((citation) => citation.kind === 'message')).toBe(true);
+  });
+
+  it('prédicat strict : positifs exacts vrais, demandes de contenu fausses, « Cite » ne déclenche pas la garde', () => {
+    expect(isStrictRecentMetadataQuestion(FRENCH_QUESTION)).toBe(true);
+    expect(isStrictRecentMetadataQuestion('Who are my latest senders in the inbox?')).toBe(true);
+    expect(
+      isStrictRecentMetadataQuestion('Résume le contenu de mes trois emails les plus récents'),
+    ).toBe(false);
+    expect(isStrictRecentMetadataQuestion('Summarize the content of my latest emails')).toBe(false);
+    expect(isStrictRecentMetadataQuestion('Que dit la dernière facture Balguerie ?')).toBe(false);
   });
 
   it('normalizePlan clampe la limite list_recent (50 → 10) et garde le read top_results', () => {

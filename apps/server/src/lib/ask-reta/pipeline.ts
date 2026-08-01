@@ -267,6 +267,25 @@ const RECENCY_QUESTION =
 const RECENT_LISTING_HINT =
   /\b(bo[îi]te|r[ée]ception|inbox|exp[ée]diteurs?|senders?|messages?|emails?|mails?|courriels?)\b/i;
 
+/**
+ * Negative guard (revue Codex, tour 11) : toute demande de CONTENU — résumé,
+ * corps, « que dit », rédaction/réponse — exige des preuves MESSAGE. NB :
+ * « cite » seul n'y figure pas (citer ses sources est compatible metadata).
+ */
+const CONTENT_DEMAND =
+  /\b(r[ée]sum[ée]?s?|r[ée]sumer|contenus?|corps|dit|disent|parlent?|say|says|said|talk(s|ing)? about|content|body|bodies|summar(y|ies|ize|ise|izing)|extraits?|excerpts?|r[ée]pond(re|s|ez)?|r[ée]ponses?|reply|draft|r[ée]dige[rz]?|write)\b/i;
+
+/**
+ * Prédicat DÉTERMINISTE du court-circuit metadata (tour 11) : dérivé de la
+ * QUESTION uniquement — jamais du plan choisi par le modèle. Vrai seulement
+ * pour une question de récence STRICTEMENT metadata (qui/quand : expéditeurs,
+ * flux de la boîte) SANS demande de contenu/résumé/corps/action.
+ */
+export const isStrictRecentMetadataQuestion = (question: string): boolean =>
+  RECENCY_QUESTION.test(question) &&
+  RECENT_LISTING_HINT.test(question) &&
+  !CONTENT_DEMAND.test(question);
+
 export const fallbackPlan = (input: AskRetaInput): AskRetaPlan => {
   const terms = fallbackSearchTerms(input.question, askRetaLimits.searchesPerAsk);
   const actions: AskRetaPlan['actions'] = [];
@@ -275,9 +294,18 @@ export const fallbackPlan = (input: AskRetaInput): AskRetaPlan => {
   // recent inbox threads then READ the top results so the answer can cite
   // real messages. A remaining discriminating term still gets its search.
   if (RECENCY_QUESTION.test(input.question) && RECENT_LISTING_HINT.test(input.question)) {
-    // Tour 10 : la réponse de récence est METADATA et déterministe — le
-    // listing seul suffit (zéro corps lu, zéro appel de synthèse, plus vite).
+    if (isStrictRecentMetadataQuestion(input.question)) {
+      // Tour 10 : la réponse de récence est METADATA et déterministe — le
+      // listing seul suffit (zéro corps lu, zéro appel de synthèse, plus vite).
+      actions.push({ type: 'list_recent', folder: 'inbox', limit: askRetaLimits.threadsRead });
+      return { actions: actions.slice(0, askRetaLimits.planActions) };
+    }
+    // Tour 11 : demande de CONTENU récent (« résume mes derniers emails ») —
+    // le listing fournit les fils, la LECTURE fournit les preuves message,
+    // la synthèse tourne normalement.
     actions.push({ type: 'list_recent', folder: 'inbox', limit: askRetaLimits.threadsRead });
+    actions.push({ type: 'read_thread', target: 'top_results' });
+    if (terms[0]) actions.push({ type: 'search', query: terms[0] });
     return { actions: actions.slice(0, askRetaLimits.planActions) };
   }
   if (COUNT_QUESTION.test(input.question)) actions.push({ type: 'overview' });
@@ -873,12 +901,15 @@ export async function runAskReta(
   const plan = normalizePlan(await getPlan(deps, budget, input), input);
   const gathered = await executePlan(deps, budget, input, plan);
 
-  // Tour 10 : une question STRICTEMENT metadata (plan avec list_recent) reçoit
-  // une réponse serveur déterministe, SANS appel de synthèse — plus rapide et
-  // jamais de refus inutile quand les métadonnées exactes suffisent. Le
-  // modèle ne participe pas : il ne peut ni inventer ni promouvoir ces
-  // citations.
-  if (plan.actions.some((action) => action.type === 'list_recent')) {
+  // Tour 10/11 : une question STRICTEMENT metadata reçoit une réponse serveur
+  // déterministe, SANS appel de synthèse. La porte est le PRÉDICAT dérivé de
+  // la question — jamais le plan seul : un plan modèle list_recent pour une
+  // demande de CONTENU (« résume mes derniers emails ») continue vers la
+  // lecture + synthèse et ses preuves MESSAGE.
+  if (
+    plan.actions.some((action) => action.type === 'list_recent') &&
+    isStrictRecentMetadataQuestion(input.question)
+  ) {
     const recent = buildRecentSendersResult(gathered);
     if (recent) return recent;
     return {
