@@ -1,4 +1,11 @@
 import {
+  askRetaConversationAtom,
+  askRetaThreadCaptureAtom,
+  type AskRetaAssistantPayload,
+  type AskRetaStepView,
+  type AskRetaTurn,
+} from './ask-reta-state';
+import {
   draftHasContent,
   loadLocalDraft,
   ownedDraftStorageKey,
@@ -6,12 +13,6 @@ import {
   type ComposerDraftScope,
   type DraftOwner,
 } from '@/lib/draft-storage';
-import {
-  askRetaConversationAtom,
-  type AskRetaAssistantPayload,
-  type AskRetaStepView,
-  type AskRetaTurn,
-} from './ask-reta-state';
 import {
   clearAskRetaConversation,
   loadAskRetaConversation,
@@ -112,6 +113,17 @@ export function AskRetaSurface() {
   const [, setAskRetaOpen] = useQueryState('isAskRetaOpen');
   const [, setComposeOpen] = useQueryState('isComposeOpen');
   const purgeReplyState = useReplyStatePurge();
+  // Capture du raccourci (tour 06) : Y fige le fil ouvert au moment de la
+  // frappe, Cmd+J fige « aucun fil ». Prioritaire sur l'URL pour l'affichage
+  // ET le contexte serveur ; sans capture (bouton/palette), l'URL fait foi.
+  const [threadCapture, setThreadCapture] = useAtom(askRetaThreadCaptureAtom);
+  const effectiveThreadId = threadCapture ? threadCapture.threadId : threadId;
+  // Éphémère : mort à la fermeture du panneau (unmount) et à la fermeture du
+  // fil sous-jacent ; le changement de compte/connexion purge plus bas.
+  useEffect(() => () => setThreadCapture(null), [setThreadCapture]);
+  useEffect(() => {
+    if (!threadId) setThreadCapture(null);
+  }, [threadId, setThreadCapture]);
   // The EXACT persistence scope of whatever composer is (or would be) mounted.
   const composerScope: ComposerDraftScope = { threadId, draftId, replyId: activeReplyId };
   // The BARE compose scope for 'new' proposals. NO threadId: the composer's
@@ -182,28 +194,31 @@ export function AskRetaSurface() {
   // fil le tue, un nouveau fil le recapture. Le serveur reste l'autorité
   // d'ownership sur context.threadId — affichage seulement.
   const threadChipBindingRef = useRef<{ threadId: string; scopeKey: string } | null>(null);
-  if (!threadId) {
+  if (!effectiveThreadId) {
     threadChipBindingRef.current = null;
   } else if (userId && connectionId) {
     const currentScopeKey = scopeKeyOf({ userId, connectionId });
-    if (!threadChipBindingRef.current || threadChipBindingRef.current.threadId !== threadId) {
+    if (
+      !threadChipBindingRef.current ||
+      threadChipBindingRef.current.threadId !== effectiveThreadId
+    ) {
       // Premier rendu où CE fil est visible : lié au owner+connexion COURANTS.
-      threadChipBindingRef.current = { threadId, scopeKey: currentScopeKey };
+      threadChipBindingRef.current = { threadId: effectiveThreadId, scopeKey: currentScopeKey };
     }
   }
   const threadChipBinding = threadChipBindingRef.current;
   const showThreadChip =
-    !!threadId &&
+    !!effectiveThreadId &&
     isHydrated &&
     !!userId &&
     !!connectionId &&
     !!threadChipBinding &&
-    threadChipBinding.threadId === threadId &&
+    threadChipBinding.threadId === effectiveThreadId &&
     threadChipBinding.scopeKey === scopeKeyOf({ userId, connectionId });
   // Sujet UNIQUEMENT s'il est DÉJÀ dans le cache react-query du compte
   // (getQueryData — zéro fetch, jamais de corps) ; sinon chip générique.
   const cachedThread = showThreadChip
-    ? (queryClient.getQueryData(trpc.mail.get.queryKey({ id: threadId })) as
+    ? (queryClient.getQueryData(trpc.mail.get.queryKey({ id: effectiveThreadId })) as
         | { latest?: { subject?: string } }
         | undefined)
     : undefined;
@@ -241,6 +256,11 @@ export function AskRetaSurface() {
     // ephemeral secret state that must never survive an account switch (the
     // dialog is ALSO keyed on the owner, this close is the first barrier).
     setManageOpen(false);
+    // Tour 06 : la capture de fil du raccourci meurt avec le compte — le fil
+    // de A n'est jamais transmis comme contexte sous B. UNIQUEMENT sur un
+    // vrai changement (previous non nul) : la première hydratation ne doit
+    // pas tuer la capture que le raccourci vient de poser.
+    if (previous) setThreadCapture(null);
     // 3. Barrier down: saves AND submits disabled until hydration is observed.
     loadedScopeRef.current = nextScope;
     conversationScopeRef.current = null;
@@ -310,7 +330,9 @@ export function AskRetaSurface() {
           question: trimmed,
           history,
           context: {
-            ...(threadId ? { threadId } : {}),
+            // Capture du raccourci prioritaire (tour 06) ; le serveur reste
+            // l'autorité d'ownership et rejette tout fil étranger.
+            ...(effectiveThreadId ? { threadId: effectiveThreadId } : {}),
             ...(draftContext ? { draft: draftContext } : {}),
           },
         },

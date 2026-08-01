@@ -63,3 +63,16 @@ export type AskRetaTurn = {
 };
 
 export const askRetaConversationAtom = atom<AskRetaTurn[]>([]);
+
+/**
+ * Capture EXPLICITE du contexte de fil au moment du raccourci (tour 06) :
+ * le handler Y fige le threadId ouvert À L'INSTANT de la frappe ; Cmd+J fige
+ * « aucun fil » (jamais d'héritage d'un vieux fil). null = pas de capture —
+ * la surface retombe alors sur le threadId de l'URL (ouverture bouton/
+ * palette). ÉPHÉMÈRE : purgé à la fermeture du panneau, au changement de
+ * compte/connexion et à la fermeture du fil. Le serveur reste l'autorité
+ * d'ownership sur context.threadId.
+ */
+export type AskRetaThreadCapture = { threadId: string | null } | null;
+
+export const askRetaThreadCaptureAtom = atom<AskRetaThreadCapture>(null);

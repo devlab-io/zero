@@ -2,6 +2,7 @@ import {
   useCommandPalette,
   preloadCommandPalette,
 } from '@/components/context/command-palette-context';
+import { askRetaThreadCaptureAtom } from '@/components/copilot/ask-reta-state';
 import { preloadAskRetaSurface } from '@/components/copilot/ask-reta-button';
 import { preloadComposeSurface } from '@/components/create/compose-surface';
 import { useOptimisticActions } from '@/hooks/use-optimistic-actions';
@@ -13,6 +14,7 @@ import { useShortcuts } from './use-hotkey-utils';
 import { useNavigate } from 'react-router';
 import { useTheme } from 'next-themes';
 import { useQueryState } from 'nuqs';
+import { useSetAtom } from 'jotai';
 
 export function GlobalHotkeys() {
   const navigate = useNavigate();
@@ -20,6 +22,8 @@ export function GlobalHotkeys() {
   const { toggleSidebar } = useSidebar();
   const [, setComposeOpen] = useQueryState('isComposeOpen');
   const [, setAskRetaOpen] = useQueryState('isAskRetaOpen');
+  const [threadId] = useQueryState('threadId');
+  const setAskRetaThreadCapture = useSetAtom(askRetaThreadCaptureAtom);
   const { clearAllFilters } = useCommandPalette();
   const [, setIsCommandPaletteOpen] = useQueryState('isCommandPaletteOpen');
   const { undoLastAction } = useOptimisticActions();
@@ -32,18 +36,22 @@ export function GlobalHotkeys() {
       preloadComposeSurface();
       setComposeOpen('true');
     },
-    // Shortwave parity: Y = ask about the current thread (the panel reads the
-    // open-thread context from the URL), Mod+J = open Ask Reta. Same
-    // warm-at-keydown pattern as compose. Y is guarded by the binder (single
-    // key); Mod+J is a chord the binder keeps live in dialogs, so it applies
-    // its own guard — never over an input, a dialog, or the open palette.
+    // Shortwave parity: Y = ask about the current thread, Mod+J = open Ask
+    // Reta without thread context. Tour 06 : le contexte de fil est CAPTURÉ
+    // EXPLICITEMENT ici, au moment de la frappe — Y fige le fil ouvert À CET
+    // INSTANT, Cmd+J fige « aucun fil » (jamais d'héritage d'un vieux fil).
+    // Same warm-at-keydown pattern as compose. Y is guarded by the binder
+    // (single key); Mod+J is a chord the binder keeps live in dialogs, so it
+    // applies its own guard — never over an input, a dialog, or the palette.
     askRetaThread: () => {
       preloadAskRetaSurface();
+      setAskRetaThreadCapture({ threadId: threadId ?? null });
       setAskRetaOpen('true');
     },
     askRetaOpen: () => {
       if (!shouldOpenAskRetaFromHotkey(document.activeElement)) return;
       preloadAskRetaSurface();
+      setAskRetaThreadCapture({ threadId: null });
       setAskRetaOpen('true');
     },
     // `/` opens the command palette — Zero's fast lexical search surface (its dialog

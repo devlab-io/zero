@@ -23,6 +23,16 @@ export interface RetaModel {
     maxTokens: number;
     temperature: number;
     signal?: AbortSignal;
+    /**
+     * OPTIONAL structured-output hint (tour 06): a JSON Schema the response
+     * should satisfy. Workers AI forwards it as
+     * `response_format: { type: 'json_schema', json_schema }` — the mechanism
+     * the LOCAL generated types expose for BOTH catalogue Workers models
+     * (`guided_json` exists only on the Scout input type, so response_format
+     * is the portable choice). Adapters whose upstream API has no equivalent
+     * (BYOK) IGNORE it safely — the parsing path is unchanged either way.
+     */
+    jsonSchema?: Record<string, unknown>;
   }): Promise<string>;
 }
 
@@ -33,6 +43,7 @@ export type WorkersAiBinding = {
       messages: { role: 'system' | 'user'; content: string }[];
       max_tokens: number;
       temperature: number;
+      response_format?: { type: 'json_schema'; json_schema: Record<string, unknown> };
     },
   ) => Promise<unknown>;
 };
@@ -46,7 +57,7 @@ export const workersAiModel = (
   // refuse to dispatch after abort, discard a late result after abort. The
   // dispatched inference itself may run to completion on Cloudflare's side.
   abortMode: 'cooperative',
-  async complete({ system, user, maxTokens, temperature, signal }) {
+  async complete({ system, user, maxTokens, temperature, signal, jsonSchema }) {
     if (signal?.aborted) throw new AskRetaAbortedError('aborted');
     const response = await ai.run(entry.upstreamModel, {
       messages: [
@@ -55,16 +66,18 @@ export const workersAiModel = (
       ],
       max_tokens: maxTokens,
       temperature,
+      ...(jsonSchema
+        ? { response_format: { type: 'json_schema' as const, json_schema: jsonSchema } }
+        : {}),
     });
     if (signal?.aborted) throw new AskRetaAbortedError('aborted');
     if (typeof response === 'string') return response;
-    if (
-      response &&
-      typeof response === 'object' &&
-      'response' in response &&
-      typeof (response as { response: unknown }).response === 'string'
-    ) {
-      return (response as { response: string }).response;
+    if (response && typeof response === 'object' && 'response' in response) {
+      const inner = (response as { response: unknown }).response;
+      if (typeof inner === 'string') return inner;
+      // json_schema mode may return the structured object directly: normalize
+      // to a JSON string so the shared extract/parse path stays unchanged.
+      if (inner && typeof inner === 'object') return JSON.stringify(inner);
     }
     return '';
   },

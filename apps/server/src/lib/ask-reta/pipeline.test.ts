@@ -1,5 +1,6 @@
 import {
   AskRetaAbortedError,
+  AskRetaPhaseError,
   fallbackPlan,
   fallbackSearchQuery,
   fallbackSearchTerms,
@@ -15,6 +16,7 @@ import type { IGetThreadResponse, ThreadsResponse } from '@zero/types';
 import { describe, expect, it, vi } from 'vitest';
 import type { RetaModel } from './model';
 import { readFileSync } from 'node:fs';
+import { logger } from '../logger';
 import { join } from 'node:path';
 
 const input = (overrides: Partial<ReturnType<typeof askRetaInputSchema.parse>> = {}) =>
@@ -497,11 +499,34 @@ describe('runAskReta — abort & deadline', () => {
     await new Promise((resolve) => setTimeout(resolve, 10));
   });
 
-  it('retries synthesis once, then fails without leaking content', async () => {
+  it('retries synthesis once, then DEGRADES deterministically — never throws, never model prose', async () => {
+    // Tour 06: two malformed synthesis attempts must not kill the ask. The
+    // result is built server-side from what was RETRIEVED: message sources →
+    // extractive citations whose quotes are verbatim excerpt prefixes.
     const model = scriptedModel([planJson, 'garbage', 'still garbage']);
-    await expect(runAskReta(makeDeps(model), input())).rejects.toThrow(
-      'Ask Reta could not produce a grounded answer',
-    );
+    const result = await runAskReta(makeDeps(model), input());
+    expect(result.citations.length).toBeGreaterThan(0);
+    for (const citation of result.citations) {
+      expect(citation.kind).toBe('message');
+    }
+    expect(result.answer).not.toContain('garbage');
+    expect(result.proposal).toBeUndefined();
+  });
+
+  it('synthesis PROVIDER failure (both attempts reject) degrades the same way', async () => {
+    const planOnly = scriptedModel([planJson]);
+    const model = {
+      ...planOnly,
+      complete: vi.fn(async () => {
+        const calls = (model.complete as ReturnType<typeof vi.fn>).mock.calls.length;
+        if (calls <= 1) return planJson; // plan succeeds
+        throw new Error('provider down: socket hangup at api.internal:443');
+      }),
+    };
+    const result = await runAskReta(makeDeps(model), input());
+    // Grounded degraded result — and the upstream error text leaks NOWHERE.
+    expect(JSON.stringify(result)).not.toContain('socket hangup');
+    expect(result.citations.length).toBeGreaterThan(0);
   });
 });
 
@@ -518,6 +543,102 @@ describe('read-only guarantee — structural', () => {
       'webSearch',
     ]) {
       expect(source.includes(forbidden), `pipeline.ts must not reference ${forbidden}`).toBe(false);
+    }
+  });
+});
+
+describe('tour 06 — classification typée, confinement par action, non-fuite', () => {
+  it("UN échec de recherche n'emporte pas l'ask : les autres actions répondent, step d'échec FIXE", async () => {
+    const model = scriptedModel([planJson, 'garbage', 'garbage']);
+    let searchCalls = 0;
+    const flakySearch = vi.fn(async (): Promise<ThreadsResponse> => {
+      searchCalls += 1;
+      if (searchCalls === 1) {
+        throw new Error('SELECT secret FROM mail0_threads at postgres://hyperdrive');
+      }
+      return {
+        threads: Array.from({ length: 3 }, (_, i) => searchRow(i + 1)),
+        nextPageToken: null,
+      };
+    });
+    const twoSearchPlan = JSON.stringify({
+      actions: [
+        { type: 'search', query: 'premiere' },
+        { type: 'search', query: 'seconde' },
+        { type: 'read_thread', target: 'top_results' },
+      ],
+    });
+    const result = await runAskReta(
+      makeDeps(scriptedModel([twoSearchPlan, 'garbage', 'garbage']), {
+        searchThreads: flakySearch,
+      }),
+      input(),
+    );
+    void model;
+    // La 2e recherche + lecture ont fourni des sources message → extractif.
+    expect(result.citations.length).toBeGreaterThan(0);
+    // Le step d'échec est HONNÊTE et FIXE — jamais le message upstream.
+    const failed = result.steps.find((step) => step.detail === 'search unavailable');
+    expect(failed).toBeTruthy();
+    expect(JSON.stringify(result)).not.toContain('postgres://');
+    expect(JSON.stringify(result)).not.toContain('SELECT secret');
+  });
+
+  it('TOUTES les actions échouent sans rien récupérer → AskRetaPhaseError typée, message FIXE sans contenu', async () => {
+    const failingSearch = vi.fn(async (): Promise<ThreadsResponse> => {
+      throw new Error('ECONNREFUSED postgres://user:pass@hyperdrive.internal:5432');
+    });
+    const failure = await runAskReta(
+      makeDeps(scriptedModel([planJson]), {
+        searchThreads: failingSearch,
+        readThread: vi.fn(async () => {
+          throw new Error('same outage');
+        }),
+      }),
+      input({ question: 'Question CONFIDENTIELLE sur Balguerie' }),
+    ).catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(AskRetaPhaseError);
+    const typed = failure as AskRetaPhaseError;
+    expect(typed.phase).toBe('search');
+    expect(typed.kind).toBe('dependency');
+    expect(typed.message).toBe('Ask Reta failed (phase=search kind=dependency)');
+    expect(typed.message).not.toContain('CONFIDENTIELLE');
+    expect(typed.message).not.toContain('postgres');
+  });
+
+  it('les logs de classification ne portent JAMAIS question/mail/SQL/URL (spy exhaustif)', async () => {
+    const warnSpy = vi.spyOn(logger, 'warn');
+    const errorSpy = vi.spyOn(logger, 'error');
+    const failingSearch = vi.fn(async (): Promise<ThreadsResponse> => {
+      throw new Error('leak: SELECT * FROM mail WHERE q=CONFIDENTIEL at https://hyper.example');
+    });
+    await runAskReta(
+      makeDeps(scriptedModel(['not json', 'garbage', 'garbage']), {
+        searchThreads: failingSearch,
+        readThread: vi.fn(async () => {
+          throw new Error('leak too');
+        }),
+      }),
+      input({ question: 'Virement CONFIDENTIEL 987654' }),
+    ).catch(() => {});
+    const allLogged = JSON.stringify([...warnSpy.mock.calls, ...errorSpy.mock.calls]);
+    for (const forbidden of ['CONFIDENTIEL', '987654', 'SELECT', 'https://', 'leak']) {
+      expect(allLogged, forbidden).not.toContain(forbidden);
+    }
+    warnSpy.mockRestore();
+    errorSpy.mockRestore();
+  });
+
+  it('les appels plan et synthèse portent le jsonSchema Workers AI (response_format côté modèle)', async () => {
+    const model = scriptedModel([planJson, 'garbage', 'garbage']);
+    await runAskReta(makeDeps(model), input());
+    const completeCalls = (model.complete as ReturnType<typeof vi.fn>).mock.calls as [
+      { jsonSchema?: Record<string, unknown> },
+    ][];
+    expect(completeCalls.length).toBeGreaterThanOrEqual(3);
+    for (const [params] of completeCalls) {
+      expect(params.jsonSchema).toBeTruthy();
+      expect(typeof params.jsonSchema).toBe('object');
     }
   });
 });

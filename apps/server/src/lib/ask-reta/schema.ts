@@ -103,6 +103,65 @@ export const askRetaPlanSchema = z.object({
 export type AskRetaPlan = z.infer<typeof askRetaPlanSchema>;
 
 /**
+ * Hand-written JSON Schemas (tour 06) mirroring the zod contracts above, fed
+ * to Workers AI `response_format: json_schema` for the plan and synthesis
+ * calls. Deliberately PERMISSIVE mirrors: they steer the model toward the
+ * right shape — the zod schemas remain the ONLY validation authority (a
+ * schema-conforming-but-hostile output still goes through the same strict
+ * parse, quote verification and caps).
+ */
+export const askRetaPlanJsonSchema: Record<string, unknown> = {
+  type: 'object',
+  properties: {
+    actions: {
+      type: 'array',
+      maxItems: askRetaLimits.planActions,
+      items: {
+        type: 'object',
+        properties: {
+          type: { type: 'string', enum: ['overview', 'search', 'read_thread'] },
+          query: { type: 'string' },
+          folder: { type: 'string' },
+          target: { type: 'string', enum: ['open', 'top_results'] },
+        },
+        required: ['type'],
+      },
+    },
+  },
+  required: ['actions'],
+};
+
+export const askRetaSynthesisJsonSchema: Record<string, unknown> = {
+  type: 'object',
+  properties: {
+    answer: { type: 'string' },
+    cites: {
+      type: 'array',
+      maxItems: askRetaLimits.citations,
+      items: {
+        type: 'object',
+        properties: {
+          ref: { type: 'string' },
+          quote: { type: 'string' },
+        },
+        required: ['ref', 'quote'],
+      },
+    },
+    proposal: {
+      type: 'object',
+      properties: {
+        kind: { type: 'string', enum: ['reply', 'new'] },
+        to: { type: 'string' },
+        subject: { type: 'string' },
+        body: { type: 'string' },
+      },
+      required: ['kind', 'body'],
+    },
+  },
+  required: ['answer', 'cites'],
+};
+
+/**
  * Model output 2 — the grounded answer. Citation contract (v1, strict): every
  * cite MUST be `{ref, quote}` with a non-empty quote — the server then verifies
  * the quote is a substring of a MESSAGE source excerpt. Legacy string cites,

@@ -1,10 +1,10 @@
 import { draftStorageKey, ownedDraftStorageKey, saveLocalDraft } from '@/lib/draft-storage';
+import { askRetaConversationAtom, askRetaThreadCaptureAtom } from './ask-reta-state';
 import { askRetaConversationKey } from '@/lib/ask-reta-conversation-storage';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ButtonHTMLAttributes, InputHTMLAttributes } from 'react';
 import { registerComposerInsertHandler } from '@/lib/composer-insert';
 import { registerLiveDraft } from '@/lib/live-draft-registry';
-import { askRetaConversationAtom } from './ask-reta-state';
 import { createRoot, type Root } from 'react-dom/client';
 import { AskRetaSurface } from './ask-reta-surface';
 import { getDefaultStore } from 'jotai';
@@ -196,6 +196,7 @@ beforeEach(() => {
   root = createRoot(container);
   localStorage.clear();
   getDefaultStore().set(askRetaConversationAtom, []);
+  getDefaultStore().set(askRetaThreadCaptureAtom, null);
   harness.userId = 'user-1';
   harness.connectionId = 'conn-a';
   harness.queryStore.threadId = null;
@@ -1078,6 +1079,55 @@ describe('AskRetaSurface — chip « fil actuel inclus » (prod CUA fix)', () =>
     render();
     await act(async () => {});
     expect(chip()).not.toBeNull();
+  });
+
+  it("capture Cmd+J (« aucun fil ») : badge ABSENT et contexte serveur SANS threadId malgré un fil ouvert dans l'URL", async () => {
+    harness.queryStore.threadId = 'thread-9';
+    getDefaultStore().set(askRetaThreadCaptureAtom, { threadId: null });
+    render();
+    await act(async () => {});
+    expect(chip()).toBeNull();
+    await askQuestion('Question générique');
+    const sent = harness.streamAskReta.mock.calls[0]![0] as {
+      input: { context: { threadId?: string } };
+    };
+    expect(sent.input.context.threadId).toBeUndefined();
+  });
+
+  it('capture Y : le fil figé à la frappe pilote badge ET contexte serveur', async () => {
+    harness.queryStore.threadId = 'thread-9';
+    getDefaultStore().set(askRetaThreadCaptureAtom, { threadId: 'thread-9' });
+    render();
+    await act(async () => {});
+    expect(chip()).not.toBeNull();
+    await askQuestion('Question sur le fil');
+    const sent = harness.streamAskReta.mock.calls[0]![0] as {
+      input: { context: { threadId?: string } };
+    };
+    expect(sent.input.context.threadId).toBe('thread-9');
+  });
+
+  it('A→B : la capture du raccourci est PURGÉE — le fil de A ne part jamais sous B', async () => {
+    harness.queryStore.threadId = 'thread-9';
+    getDefaultStore().set(askRetaThreadCaptureAtom, { threadId: 'thread-9' });
+    render();
+    await act(async () => {});
+    expect(chip()).not.toBeNull();
+    harness.connectionId = 'conn-b';
+    render();
+    await act(async () => {});
+    expect(getDefaultStore().get(askRetaThreadCaptureAtom)).toBeNull();
+    expect(chip()).toBeNull();
+  });
+
+  it('fermeture du panneau (unmount) : la capture meurt avec lui', async () => {
+    harness.queryStore.threadId = 'thread-9';
+    getDefaultStore().set(askRetaThreadCaptureAtom, { threadId: 'thread-9' });
+    render();
+    await act(async () => {});
+    act(() => root.unmount());
+    root = createRoot(container);
+    expect(getDefaultStore().get(askRetaThreadCaptureAtom)).toBeNull();
   });
 
   it('changement de fil sous le MÊME compte : le badge suit le nouveau fil', async () => {

@@ -46,6 +46,7 @@ vi.mock('../lib/ask-reta/pipeline', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../lib/ask-reta/pipeline')>();
   return {
     AskRetaAbortedError: actual.AskRetaAbortedError,
+    AskRetaPhaseError: actual.AskRetaPhaseError,
     ASK_RETA_DEADLINE_MS: actual.ASK_RETA_DEADLINE_MS,
     runAskReta: harness.runAskReta,
   };

@@ -54,6 +54,13 @@ type ChatParams = {
   maxTokens: number;
   temperature: number;
   signal?: AbortSignal;
+  /**
+   * Accepted for interface parity with Workers AI and IGNORED here (tour 06):
+   * the five BYOK upstreams have no portable structured-output contract, and
+   * the shared extract/parse path never depends on it — a schema hint must
+   * never break a provider call.
+   */
+  jsonSchema?: Record<string, unknown>;
 };
 
 const isAbort = (error: unknown, signal?: AbortSignal) =>

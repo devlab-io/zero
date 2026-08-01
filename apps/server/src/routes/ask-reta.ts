@@ -5,7 +5,7 @@ import {
   type AskRetaStep,
   type AskRetaStreamEvent,
 } from '../lib/ask-reta/schema';
-import { AskRetaAbortedError, runAskReta } from '../lib/ask-reta/pipeline';
+import { AskRetaAbortedError, AskRetaPhaseError, runAskReta } from '../lib/ask-reta/pipeline';
 import { createAskRetaCancellation } from '../lib/ask-reta/cancellation';
 import { getActiveConnection, getZeroDB } from '../lib/server-utils';
 import { createAskRetaDeps } from '../lib/ask-reta/deps';
@@ -357,8 +357,14 @@ export const askRetaStreamRouter = new Hono<HonoContext>().post('/', async (c) =
           emit({ type: 'error', message: 'aborted' });
           return;
         }
-        // No question/mail content in logs or in the error surface.
-        logger.error('[ask-reta-stream] ask failed');
+        // No question/mail content in logs or in the error surface — ONLY the
+        // fixed phase+kind classification (tour 06): a production tail shows
+        // exactly where the pipeline broke, and nothing else.
+        const classification =
+          error instanceof AskRetaPhaseError
+            ? { phase: error.phase, kind: error.kind }
+            : { phase: 'unknown', kind: 'unknown' };
+        logger.error('[ask-reta-stream] ask failed', classification);
         emit({ type: 'error', message: 'ask_failed' });
       } finally {
         cancellation.dispose();

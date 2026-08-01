@@ -1,6 +1,8 @@
 import {
   askRetaLimits,
+  askRetaPlanJsonSchema,
   askRetaPlanSchema,
+  askRetaSynthesisJsonSchema,
   askRetaSynthesisSchema,
   type AskRetaCitation,
   type AskRetaInput,
@@ -27,6 +29,27 @@ import { AskRetaAbortedError } from './errors';
 import sanitizeHtml from 'sanitize-html';
 import { logger } from '../logger';
 import { z } from 'zod';
+
+/**
+ * Typed failure classification (tour 06): every terminal pipeline failure is
+ * an AskRetaPhaseError carrying ONLY a phase and a kind — the message is a
+ * FIXED template of those two enums. No question text, mail content, ids,
+ * SQL, URLs, keys or raw upstream messages ever enter it: a production tail
+ * shows exactly WHERE the pipeline broke and WHAT CLASS of failure it was,
+ * and nothing else.
+ */
+export type AskRetaPhase = 'plan' | 'overview' | 'search' | 'read' | 'synthesis' | 'finalize';
+export type AskRetaFailureKind = 'provider' | 'dependency' | 'schema' | 'deadline' | 'unknown';
+
+export class AskRetaPhaseError extends Error {
+  constructor(
+    public readonly phase: AskRetaPhase,
+    public readonly kind: AskRetaFailureKind,
+  ) {
+    super(`Ask Reta failed (phase=${phase} kind=${kind})`);
+    this.name = 'AskRetaPhaseError';
+  }
+}
 
 /**
  * Ask Reta pipeline — bounded plan → retrieve → synthesize (spec
@@ -350,9 +373,54 @@ const executePlan = async (
     }
   };
 
+  const phaseOfAction = (action: AskRetaPlan['actions'][number]): AskRetaPhase =>
+    action.type === 'overview' ? 'overview' : action.type === 'search' ? 'search' : 'read';
+
+  let failedActions = 0;
+  let firstFailurePhase: AskRetaPhase | null = null;
+
   for (const action of plan.actions) {
     checkBudget(budget);
+    // Per-action containment (tour 06): ONE failing search/read/overview must
+    // not kill the ask when other actions can still gather evidence. The
+    // failure surfaces as an honest fixed-detail step; deadlines/abort stay
+    // STRICT (rethrown immediately, never degraded).
+    try {
+      await runPlanAction(action);
+    } catch (error) {
+      if (error instanceof AskRetaAbortedError) throw error;
+      failedActions += 1;
+      firstFailurePhase ??= phaseOfAction(action);
+      // FIXED classification only — never the query, ids or upstream message.
+      logger.warn('[ask-reta] action failed', {
+        phase: phaseOfAction(action),
+        kind: 'dependency',
+      });
+      pushStep({
+        kind: action.type === 'read_thread' ? 'read_thread' : action.type,
+        detail:
+          action.type === 'overview'
+            ? 'mailbox overview unavailable'
+            : action.type === 'search'
+              ? 'search unavailable'
+              : 'thread read unavailable',
+        sourceRefs: [],
+      });
+    }
+  }
 
+  // At least one action FAILED and NOTHING was gathered (no sources, no
+  // overview): retrieval was at least partly down and there is zero evidence
+  // either way — surface a TYPED failure. Answering "insufficient evidence"
+  // here would be a false statement about the mailbox (an outage dressed up
+  // as a confident empty result).
+  if (failedActions > 0 && gathered.sources.length === 0 && gathered.overviewJson === null) {
+    throw new AskRetaPhaseError(firstFailurePhase ?? 'search', 'dependency');
+  }
+
+  return gathered;
+
+  async function runPlanAction(action: AskRetaPlan['actions'][number]): Promise<void> {
     if (action.type === 'overview') {
       const overview = await withBudget(budget, () => deps.overview());
       checkBudget(budget);
@@ -426,8 +494,6 @@ const executePlan = async (
       });
     }
   }
-
-  return gathered;
 };
 
 const getPlan = async (
@@ -444,17 +510,28 @@ const getPlan = async (
         maxTokens: 400,
         temperature: 0.1,
         signal: deps.signal,
+        jsonSchema: askRetaPlanJsonSchema,
       }),
     );
   } catch (error) {
     if (error instanceof AskRetaAbortedError) throw error;
-    logger.warn('[ask-reta] plan call failed, using fallback plan');
+    // FIXED classification only — never the question or the upstream message.
+    logger.warn('[ask-reta] plan call failed, using fallback plan', {
+      phase: 'plan',
+      kind: 'provider',
+    });
     checkBudget(budget);
     return fallbackPlan(input);
   }
   checkBudget(budget);
   const parsed = askRetaPlanSchema.safeParse(extractJsonObject(raw));
-  if (!parsed.success) return fallbackPlan(input);
+  if (!parsed.success) {
+    logger.warn('[ask-reta] plan output rejected, using fallback plan', {
+      phase: 'plan',
+      kind: 'schema',
+    });
+    return fallbackPlan(input);
+  }
   return normalizePlan(parsed.data, input);
 };
 
@@ -495,25 +572,38 @@ const getSynthesis = async (
     sourcesJson,
   });
 
+  // NEVER fatal (tour 06): an unavailable or twice-malformed synthesis
+  // returns null — the caller degrades to a DETERMINISTIC grounded result
+  // built from what was actually retrieved. Deadlines/abort stay strict.
   for (const attempt of [0, 1]) {
     checkBudget(budget);
-    const raw = await withBudget(budget, () =>
-      deps.model.complete({
-        system: askRetaSynthesisSystemPrompt(),
-        user:
-          attempt === 0
-            ? user
-            : `${user}\n\nREMINDER: return ONLY the JSON object described by the system prompt.`,
-        maxTokens: 1_400,
-        temperature: 0.2,
-        signal: deps.signal,
-      }),
-    );
+    let raw: string;
+    try {
+      raw = await withBudget(budget, () =>
+        deps.model.complete({
+          system: askRetaSynthesisSystemPrompt(),
+          user:
+            attempt === 0
+              ? user
+              : `${user}\n\nREMINDER: return ONLY the JSON object described by the system prompt.`,
+          maxTokens: 1_400,
+          temperature: 0.2,
+          signal: deps.signal,
+          jsonSchema: askRetaSynthesisJsonSchema,
+        }),
+      );
+    } catch (error) {
+      if (error instanceof AskRetaAbortedError) throw error;
+      // FIXED classification only — no upstream message, no content.
+      logger.warn('[ask-reta] synthesis call failed', { phase: 'synthesis', kind: 'provider' });
+      continue;
+    }
     checkBudget(budget);
     const parsed = askRetaSynthesisSchema.safeParse(extractJsonObject(raw));
     if (parsed.success) return parsed.data;
+    logger.warn('[ask-reta] synthesis output rejected', { phase: 'synthesis', kind: 'schema' });
   }
-  throw new Error('Ask Reta could not produce a grounded answer');
+  return null;
 };
 
 const normalizeForQuoteMatch = (value: string) => value.replace(/\s+/g, ' ').trim().toLowerCase();
@@ -595,6 +685,32 @@ export const formatOverviewAnswer = (overview: unknown): string | null => {
   return parts.length ? parts.join(' ') : null;
 };
 
+/**
+ * Deterministic SAFE result when synthesis is unavailable: built ONLY from
+ * what was actually retrieved this run — zero model prose. Message sources →
+ * server-picked extractive citations (verbatim excerpt prefixes, so the
+ * quote⊂excerpt invariant holds by construction); else the deterministic
+ * overview; else the explicit insufficient-evidence answer. Metadata sources
+ * are NEVER promoted to evidence (unchanged contract).
+ */
+const buildDeterministicFallbackResult = (gathered: Gathered): Omit<AskRetaResult, 'model'> => {
+  const citations: AskRetaCitation[] = [];
+  for (const source of gathered.sources) {
+    if (citations.length >= EXTRACTIVE_ANSWER_MAX_CITATIONS) break;
+    if (source.kind !== 'message') continue;
+    const quote = source.excerpt.replace(/\s+/g, ' ').trim().slice(0, 240).trim();
+    // Same evidence floor as model citations; a sanitizer marker is never citable.
+    if (quote.length < 24 || containsSanitizerMarker(quote)) continue;
+    const { excerpt: _excerpt, kind: _kind, ...rest } = source;
+    citations.push({ ...rest, kind: 'message', quote });
+  }
+  const answer = citations.length
+    ? formatExtractiveAnswer(citations)
+    : ((gathered.overviewJson ? formatOverviewAnswer(JSON.parse(gathered.overviewJson)) : null) ??
+      INSUFFICIENT_EVIDENCE_ANSWER);
+  return { answer, citations, proposal: undefined, steps: gathered.steps };
+};
+
 export async function runAskReta(
   deps: AskRetaDeps,
   input: AskRetaInput,
@@ -607,6 +723,12 @@ export async function runAskReta(
   const plan = normalizePlan(await getPlan(deps, budget, input), input);
   const gathered = await executePlan(deps, budget, input, plan);
   const synthesis = await getSynthesis(deps, budget, input, gathered);
+  // Synthesis unavailable after both attempts (tour 06): degrade to a
+  // DETERMINISTIC grounded result from the retrieved evidence — never throw,
+  // never model prose. An infra-wide outage never reaches here (executePlan
+  // throws typed when NOTHING was gathered), so this cannot dress a global
+  // provider failure up as a confident answer.
+  if (!synthesis) return buildDeterministicFallbackResult(gathered);
 
   const byRef = new Map(gathered.sources.map((source) => [source.ref, source]));
   // Server-side containment, strict v1 contract: a citation exists ONLY when
