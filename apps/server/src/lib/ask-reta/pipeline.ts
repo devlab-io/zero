@@ -63,6 +63,27 @@ const checkBudget = (budget: Budget) => {
   if (Date.now() > budget.deadline) throw new AskRetaAbortedError('deadline');
 };
 
+/**
+ * PREEMPTIVE budget (re-review Codex 2026-08-01, P2): the awaited work races
+ * the deadline timer, so a slow model/dep call is interrupted the moment the
+ * budget expires — not merely detected after it eventually resolves.
+ */
+const withBudget = async <T>(budget: Budget, run: () => Promise<T>): Promise<T> => {
+  checkBudget(budget);
+  const remaining = Math.max(0, budget.deadline - Date.now());
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const expiry = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new AskRetaAbortedError('deadline')), remaining);
+  });
+  try {
+    const result = await Promise.race([run(), expiry]);
+    if (budget.signal?.aborted) throw new AskRetaAbortedError('aborted');
+    return result;
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+};
+
 const STOPWORDS = new Set([
   'the',
   'a',
@@ -155,9 +176,13 @@ export const fallbackSearchTerms = (question: string, count: number): string[] =
     .map((entry) => entry.word);
 };
 
-/** Deterministic fallback query: the single most discriminating term. */
+/**
+ * Deterministic fallback query: the single most discriminating term, or ''
+ * when the question has none. NEVER the raw phrase (re-review P2): a joined
+ * sentence matches nothing in the literal LIKE and leaks the question.
+ */
 export const fallbackSearchQuery = (question: string): string =>
-  fallbackSearchTerms(question, 1)[0] ?? question.trim().slice(0, 60);
+  fallbackSearchTerms(question, 1)[0] ?? '';
 
 const COUNT_QUESTION = /\bcombien\b|\bhow many\b|\bcount\b|\bnombre\b|\bunread\b|\bnon lus?\b/i;
 
@@ -165,7 +190,9 @@ export const fallbackPlan = (input: AskRetaInput): AskRetaPlan => {
   const terms = fallbackSearchTerms(input.question, askRetaLimits.searchesPerAsk);
   const actions: AskRetaPlan['actions'] = [];
   if (COUNT_QUESTION.test(input.question)) actions.push({ type: 'overview' });
-  actions.push({ type: 'search', query: terms[0] ?? input.question.trim().slice(0, 60) });
+  // No discriminating token → the search is OMITTED (an empty plan yields the
+  // insufficient-evidence answer); the full phrase is never reused as a query.
+  if (terms[0]) actions.push({ type: 'search', query: terms[0] });
   if (input.context.threadId) actions.push({ type: 'read_thread', target: 'open' });
   if (terms[1]) actions.push({ type: 'search', query: terms[1] });
   return { actions: actions.slice(0, askRetaLimits.planActions) };
@@ -239,8 +266,9 @@ const readOneThread = async (
 ): Promise<{ refs: string[]; found: boolean }> => {
   let thread: IGetThreadResponse;
   try {
-    thread = await deps.readThread(threadId);
-  } catch {
+    thread = await withBudget(budget, () => deps.readThread(threadId));
+  } catch (error) {
+    if (error instanceof AskRetaAbortedError) throw error;
     logger.warn('[ask-reta] readThread failed', { threadId });
     return { refs: [], found: false };
   }
@@ -285,16 +313,18 @@ const executePlan = async (
     checkBudget(budget);
 
     if (action.type === 'overview') {
-      const overview = await deps.overview();
+      const overview = await withBudget(budget, () => deps.overview());
       checkBudget(budget);
       gathered.overviewJson = JSON.stringify(overview);
       gathered.steps.push({ kind: 'overview', detail: 'exact mailbox counts', sourceRefs: [] });
     } else if (action.type === 'search') {
-      const response = await deps.searchThreads({
-        query: action.query,
-        folder: action.folder,
-        maxResults: askRetaLimits.searchResults,
-      });
+      const response = await withBudget(budget, () =>
+        deps.searchThreads({
+          query: action.query,
+          folder: action.folder,
+          maxResults: askRetaLimits.searchResults,
+        }),
+      );
       checkBudget(budget);
       const rows = response.threads.slice(0, askRetaLimits.searchResults);
       if (topResultIds.length === 0) topResultIds = rows.map((row) => row.id);
@@ -355,13 +385,15 @@ const getPlan = async (
 ): Promise<AskRetaPlan> => {
   let raw: string;
   try {
-    raw = await deps.model.complete({
-      system: askRetaPlanSystemPrompt(),
-      user: askRetaPlanUserPrompt(input),
-      maxTokens: 400,
-      temperature: 0.1,
-      signal: deps.signal,
-    });
+    raw = await withBudget(budget, () =>
+      deps.model.complete({
+        system: askRetaPlanSystemPrompt(),
+        user: askRetaPlanUserPrompt(input),
+        maxTokens: 400,
+        temperature: 0.1,
+        signal: deps.signal,
+      }),
+    );
   } catch (error) {
     if (error instanceof AskRetaAbortedError) throw error;
     logger.warn('[ask-reta] plan call failed, using fallback plan');
@@ -413,16 +445,18 @@ const getSynthesis = async (
 
   for (const attempt of [0, 1]) {
     checkBudget(budget);
-    const raw = await deps.model.complete({
-      system: askRetaSynthesisSystemPrompt(),
-      user:
-        attempt === 0
-          ? user
-          : `${user}\n\nREMINDER: return ONLY the JSON object described by the system prompt.`,
-      maxTokens: 1_400,
-      temperature: 0.2,
-      signal: deps.signal,
-    });
+    const raw = await withBudget(budget, () =>
+      deps.model.complete({
+        system: askRetaSynthesisSystemPrompt(),
+        user:
+          attempt === 0
+            ? user
+            : `${user}\n\nREMINDER: return ONLY the JSON object described by the system prompt.`,
+        maxTokens: 1_400,
+        temperature: 0.2,
+        signal: deps.signal,
+      }),
+    );
     checkBudget(budget);
     const parsed = askRetaSynthesisSchema.safeParse(extractJsonObject(raw));
     if (parsed.success) return parsed.data;
@@ -431,6 +465,13 @@ const getSynthesis = async (
 };
 
 const normalizeForQuoteMatch = (value: string) => value.replace(/\s+/g, ' ').trim().toLowerCase();
+
+/**
+ * Served VERBATIM when a mailbox answer (beyond pure overview counts) has zero
+ * valid citations: the assistant must say so instead of sounding grounded.
+ */
+export const INSUFFICIENT_EVIDENCE_ANSWER =
+  "Preuve insuffisante dans la boîte pour fonder cette réponse — précisez l'expéditeur, le sujet ou la période. (Insufficient mailbox evidence to ground this answer.)";
 
 export async function runAskReta(
   deps: AskRetaDeps,
@@ -464,6 +505,14 @@ export async function runAskReta(
     citations.push({ ...citation, kind: 'message', quote: cite.quote });
   }
 
+  // Evidence gate: a mailbox answer that goes beyond pure overview counts and
+  // carries ZERO valid citations must not sound grounded — replace it with the
+  // explicit insufficient-evidence answer. Proposals/steps survive: a draft is
+  // reviewable content, not a factual claim.
+  const overviewOnly = gathered.sources.length === 0 && gathered.overviewJson !== null;
+  const answer =
+    citations.length > 0 || overviewOnly ? synthesis.answer : INSUFFICIENT_EVIDENCE_ANSWER;
+
   // Reply proposals require the open thread to have been read successfully
   // within this connection during THIS ask — never a client-asserted id alone.
   const replyThreadId =
@@ -483,5 +532,5 @@ export async function runAskReta(
       }
     : undefined;
 
-  return { answer: synthesis.answer, citations, proposal, steps: gathered.steps };
+  return { answer, citations, proposal, steps: gathered.steps };
 }

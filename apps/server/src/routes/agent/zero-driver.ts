@@ -456,6 +456,14 @@ export class ZeroDriver extends DurableObject<ZeroEnv> {
     return projection.getThreadFromDB(internal(this), id, includeDrafts);
   }
 
+  /** Ownership-honest read: absent on this shard → null, no sync side effect. */
+  async getThreadIfPresent(
+    id: string,
+    includeDrafts: boolean = false,
+  ): Promise<IGetThreadResponse | null> {
+    return projection.getThreadFromDBIfPresent(internal(this), id, includeDrafts);
+  }
+
   async unsnoozeThreadsHandler(payload: ISnoozeBatch) {
     const { connectionId, threadIds, keyNames } = payload;
     try {

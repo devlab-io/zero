@@ -167,7 +167,7 @@ describe('copilot.ask — multi-shard reads, connection-scoped, strict citations
       searchOnlyPlan,
       JSON.stringify({
         answer: 'La facture réclame 120 000 XPF.',
-        cites: [{ ref: 's1', quote: 'Relance facture Socredo' }, 's1'],
+        cites: [{ ref: 's1', quote: 'Relance facture Socredo — Compta' }, 's1'],
       }),
     );
     const result = await ask({ question: 'Combien réclame Socredo ?' });

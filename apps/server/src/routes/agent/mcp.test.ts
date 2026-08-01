@@ -39,6 +39,9 @@ const harness = vi.hoisted(() => {
     makeAgentStub,
     agents: new Map<string, ReturnType<typeof makeAgentStub>>(),
     getZeroAgent: vi.fn(),
+    getThreadHelper: vi.fn(),
+    vectorizeGetByIds: vi.fn(),
+    aiRun: vi.fn(),
     findFirst: vi.fn(),
     registered: new Map<string, AnyFn>(),
   };
@@ -64,7 +67,11 @@ vi.mock('@modelcontextprotocol/sdk/server/mcp.js', () => ({
 }));
 
 vi.mock('cloudflare:workers', () => ({
-  env: { HYPERDRIVE: { connectionString: 'postgres://fake' } },
+  env: {
+    HYPERDRIVE: { connectionString: 'postgres://fake' },
+    VECTORIZE: { getByIds: harness.vectorizeGetByIds },
+    AI: { run: harness.aiRun },
+  },
 }));
 
 vi.mock('../../db', () => ({
@@ -76,7 +83,7 @@ vi.mock('../../db', () => ({
 
 vi.mock('../../lib/server-utils', () => ({
   getZeroAgent: harness.getZeroAgent,
-  getThread: vi.fn(),
+  getThread: harness.getThreadHelper,
 }));
 
 // compose.ts drags the @ai-sdk/env graph; the compose tool is out of scope here.
@@ -121,6 +128,10 @@ beforeEach(() => {
     if (!stub) throw new Error(`no agent for ${connectionId}`);
     return { stub };
   });
+  harness.getThreadHelper.mockReset();
+  harness.vectorizeGetByIds.mockReset();
+  harness.aiRun.mockReset();
+  harness.aiRun.mockResolvedValue({ summary: 'short summary' });
 });
 
 const agentOf = (conn: { id: string }) => harness.agents.get(conn.id)!;
@@ -251,6 +262,38 @@ describe('ZeroMCP — mailbox tools follow the ACTIVE connection (A → B → A)
     const result = (await call('createDraft', payload)) as { content: { text: string }[] };
     expect(agentOf(CONN_A).createDraft).toHaveBeenCalledTimes(2);
     expect(result.content[0]?.text).toContain('draft-of-conn-a');
+  });
+
+  it('getThreadSummary captures the connection BEFORE awaits: a switch during VECTORIZE cannot retarget it', async () => {
+    await bootMcp();
+    let releaseVectorize!: (value: unknown) => void;
+    harness.vectorizeGetByIds.mockImplementation(
+      () => new Promise((resolve) => (releaseVectorize = resolve)),
+    );
+    harness.getThreadHelper.mockResolvedValue({
+      shardId: 'shard-1',
+      result: {
+        latest: {
+          subject: 'Facture Balguerie',
+          sender: { name: 'Compta', email: 'compta@balguerie.test' },
+          receivedOn: '2026-07-30',
+        },
+      },
+    });
+
+    const pending = call('getThreadSummary', { id: 'thread-1' }) as Promise<{
+      content: { text: string }[];
+    }>;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    // The user switches account while VECTORIZE is still in flight…
+    harness.findFirst.mockResolvedValueOnce(CONN_B);
+    await call('setActiveConnection', { email: CONN_B.email });
+    releaseVectorize([{ metadata: { summary: 'long stored summary', connection: CONN_A.id } }]);
+    const result = await pending;
+
+    // …and the read AND the ownership comparison both used the CAPTURED conn-a.
+    expect(harness.getThreadHelper).toHaveBeenCalledWith(CONN_A.id, 'thread-1');
+    expect(result.content[0]?.text).toBe('short summary');
   });
 
   it('setActiveConnection never reveals other-user connections', async () => {

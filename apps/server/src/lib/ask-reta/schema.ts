@@ -93,9 +93,27 @@ export type AskRetaPlan = z.infer<typeof askRetaPlanSchema>;
  * quote-less cites and malformed entries are DISCARDED at parse (the answer
  * survives with zero citations); metadata sources can never become evidence.
  */
+/**
+ * Substantial-evidence floor (re-review Codex 2026-08-01, P1): a one-character
+ * "quote" is a substring of almost anything — it proves nothing. A quote must
+ * be long enough and worded enough to be falsifiable evidence.
+ */
+export const askRetaEvidenceRules = {
+  quoteMinChars: 24,
+  quoteMinWords: 3,
+} as const;
+
 const askRetaCiteShape = z.object({
   ref: z.string().trim().min(1).max(16),
-  quote: z.string().trim().min(1).max(300),
+  quote: z
+    .string()
+    .trim()
+    .min(askRetaEvidenceRules.quoteMinChars)
+    .max(300)
+    .refine(
+      (quote) => quote.split(/\s+/).filter(Boolean).length >= askRetaEvidenceRules.quoteMinWords,
+      { message: 'quote must contain at least 3 words' },
+    ),
 });
 
 export type AskRetaCite = z.infer<typeof askRetaCiteShape>;

@@ -248,14 +248,17 @@ export class ZeroMCP extends McpAgent<typeof env, Record<string, unknown>, { use
       'getThreadSummary',
       { description: descriptions.getThreadSummary, inputSchema: schemas.getThreadSummary },
       async (s) => {
-        if (!this.activeConnectionId) {
+        // Captured ONCE before any await: a concurrent setActiveConnection must
+        // not make the read and the ownership comparison disagree mid-handler.
+        const connectionId = this.activeConnectionId;
+        if (!connectionId) {
           return text('No active connection');
         }
         const response = await env.VECTORIZE.getByIds([s.id]);
-        const { result: thread } = await getThread(this.activeConnectionId, s.id);
+        const { result: thread } = await getThread(connectionId, s.id);
         if (response.length && response?.[0]?.metadata?.['summary'] && thread?.latest?.subject) {
           const result = response[0].metadata as { summary: string; connection: string };
-          if (result.connection !== this.activeConnectionId) {
+          if (result.connection !== connectionId) {
             return text('No summary found for this connection');
           }
           const shortResponse = await env.AI.run('@cf/facebook/bart-large-cnn', {

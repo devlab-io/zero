@@ -112,11 +112,14 @@ Reta vise mieux sur quatre axes mesurables :
   (`s1`…), un `kind` (`metadata` = ligne sujet/expéditeur, `message` = corps
   réel avec `messageId`), le threadId réel (propriété de la connexion active),
   un extrait borné et son `excerptHash` (sha-256).
-- **citation** (contrat strict v1, revue Codex 01/08) : exclusivement
-  `kind=message` avec `quote` non vide vérifiée sous-chaîne de l'extrait côté
-  serveur. Refs inconnus, refs metadata, quotes absentes/altérées, cites
-  string legacy → zéro citation. Les sources metadata servent à localiser les
-  fils (sources/steps), jamais de preuve de contenu.
+- **citation** (contrat strict v1, revues Codex 01/08) : exclusivement
+  `kind=message` avec `quote` **substantielle** (≥ 24 caractères ET ≥ 3 mots)
+  vérifiée sous-chaîne de l'extrait côté serveur. Refs inconnus, refs
+  metadata, quotes courtes/absentes/altérées, cites string legacy → zéro
+  citation ; et toute réponse mailbox hors overview sans au moins une preuve
+  valide est **remplacée par la réponse « preuve insuffisante »** — jamais un
+  ton fondé sans preuve. Les sources metadata servent à localiser les fils
+  (sources/steps), jamais de preuve de contenu.
 - **proposition** : brouillon suggéré (réponse ou nouveau mail), texte
   sanitisé par `normalizeEmailRewriteHtml`, jamais envoyé — inséré ou créé en
   brouillon Gmail sur clic explicite.
@@ -171,7 +174,11 @@ threadId)`) — jamais le stub du shard actif seul.
 - Rate limit `copilot.ask` : clé **userId stricte** (session absente =
   UNAUTHORIZED) et **fail-closed en production sans Redis distant**
   (PRECONDITION_FAILED) — testé sur le vrai middleware.
-- Deadline murale 45 s + AbortSignal revérifiés après chaque await ;
+- `getThread` multi-shard : lecture **no-sync** `getThreadIfPresent` (absent →
+  null, jamais un objet vide truthy ni de syncThread parasite) + résolveur
+  premier-NON-null — un miss rapide ne bat jamais le shard propriétaire lent.
+- Deadline murale 45 s **préemptive** (Promise.race avec timer sur chaque
+  appel modèle/dépendance) + AbortSignal revérifiés après chaque await ;
   proposition `reply` uniquement si le fil ouvert a été **lu avec succès dans
   la connexion pendant la requête** (`validatedOpenThreadId`), sinon
   rétrogradée `new`.

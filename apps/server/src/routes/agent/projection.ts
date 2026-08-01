@@ -425,14 +425,59 @@ export async function getThreadsFromDB(
   }
 }
 
+/**
+ * Read a thread ONLY if this shard owns it: absent → `null`, with NO sync side
+ * effect and never a truthy empty response. This is the read the multi-shard
+ * race (server-utils getThread) must use — a non-owner shard answering fast
+ * with `{messages: []}` would otherwise win over the owning shard (re-review
+ * Codex 2026-08-01, P1).
+ */
+export async function getThreadFromDBIfPresent(
+  self: ZeroDriverInternal,
+  id: string,
+  includeDrafts: boolean = false,
+): Promise<IGetThreadResponse | null> {
+  const result = await get(self.db, { id });
+  if (!result) return null;
+
+  const bodyCacheKey = `${self.name}:${id}`;
+  let messages = threadBodyCache.get(bodyCacheKey);
+  if (!messages) {
+    const storedThread = await self.env.THREADS_BUCKET.get(threadKey(self.name, id));
+    messages = storedThread
+      ? (JSON.parse(await storedThread.text()) as IGetThreadResponse).messages
+      : [];
+    // Cache positive hits only: a missing body may just precede the sync write.
+    if (storedThread) threadBodyCache.set(bodyCacheKey, messages);
+  }
+
+  const isLatestDraft = messages.some((e) => e.isDraft === true);
+
+  if (!includeDrafts) {
+    messages = messages.filter((e) => e.isDraft !== true);
+  }
+
+  const labelsList = await getThreadLabels(self.db, id);
+  const labelIds = labelsList.map((l) => l.id);
+
+  return {
+    messages,
+    latest: messages.findLast((e) => e.isDraft !== true),
+    hasUnread: labelIds.includes('UNREAD'),
+    totalReplies: messages.filter((e) => e.isDraft !== true).length,
+    labels: labelsList,
+    isLatestDraft,
+  } satisfies IGetThreadResponse;
+}
+
 export async function getThreadFromDB(
   self: ZeroDriverInternal,
   id: string,
   includeDrafts: boolean = false,
 ): Promise<IGetThreadResponse> {
   try {
-    const result = await get(self.db, { id });
-    if (!result) {
+    const present = await getThreadFromDBIfPresent(self, id, includeDrafts);
+    if (!present) {
       await self.syncThread({ threadId: id });
       return {
         messages: [],
@@ -442,34 +487,7 @@ export async function getThreadFromDB(
         labels: [],
       } satisfies IGetThreadResponse;
     }
-    const bodyCacheKey = `${self.name}:${id}`;
-    let messages = threadBodyCache.get(bodyCacheKey);
-    if (!messages) {
-      const storedThread = await self.env.THREADS_BUCKET.get(threadKey(self.name, id));
-      messages = storedThread
-        ? (JSON.parse(await storedThread.text()) as IGetThreadResponse).messages
-        : [];
-      // Cache positive hits only: a missing body may just precede the sync write.
-      if (storedThread) threadBodyCache.set(bodyCacheKey, messages);
-    }
-
-    const isLatestDraft = messages.some((e) => e.isDraft === true);
-
-    if (!includeDrafts) {
-      messages = messages.filter((e) => e.isDraft !== true);
-    }
-
-    const labelsList = await getThreadLabels(self.db, id);
-    const labelIds = labelsList.map((l) => l.id);
-
-    return {
-      messages,
-      latest: messages.findLast((e) => e.isDraft !== true),
-      hasUnread: labelIds.includes('UNREAD'),
-      totalReplies: messages.filter((e) => e.isDraft !== true).length,
-      labels: labelsList,
-      isLatestDraft,
-    } satisfies IGetThreadResponse;
+    return present;
   } catch (error) {
     logger.error('Failed to get thread from database:', error);
     throw error;

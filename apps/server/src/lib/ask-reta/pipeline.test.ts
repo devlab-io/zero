@@ -3,6 +3,7 @@ import {
   fallbackPlan,
   fallbackSearchQuery,
   fallbackSearchTerms,
+  INSUFFICIENT_EVIDENCE_ANSWER,
   normalizePlan,
   runAskReta,
   type AskRetaDeps,
@@ -83,9 +84,14 @@ const planJson = JSON.stringify({
 // Search yields s1..s10 (metadata). Reading the top 3 threads then yields
 // message sources: thread-1 non-draft messages 3..14 → s11..s22, thread-2 →
 // s23.., etc. s11 = thread-1 message 3.
+const VALID_QUOTE = 'Montant dû message 3 : détail détail';
 const synthesisJson = JSON.stringify({
   answer: 'La dernière facture Balguerie réclame 120 000 XPF.',
-  cites: [{ ref: 's11', quote: 'Montant dû message 3' }, { ref: 's99', quote: 'forged' }, 's1'],
+  cites: [
+    { ref: 's11', quote: VALID_QUOTE },
+    { ref: 's99', quote: 'forged quote that is long enough here' },
+    's1',
+  ],
 });
 
 describe('fallback search terms — single literal LIKE means single terms', () => {
@@ -111,6 +117,21 @@ describe('fallback search terms — single literal LIKE means single terms', () 
     for (const search of searches) {
       expect(search.type === 'search' && search.query.includes(' ')).toBe(false);
     }
+  });
+
+  it('NO discriminating token → the search is omitted, the phrase is never reused', async () => {
+    const stopwordQuestion = 'Que est quoi comment ?';
+    expect(fallbackSearchQuery(stopwordQuestion)).toBe('');
+    const plan = fallbackPlan(input({ question: stopwordQuestion }));
+    expect(plan.actions.some((a) => a.type === 'search')).toBe(false);
+
+    // End to end: the planner fails, the fallback has no search → searchThreads
+    // is NEVER called with the raw phrase, and the answer admits insufficiency.
+    const model = scriptedModel(['garbage', JSON.stringify({ answer: 'invented', cites: [] })]);
+    const deps = makeDeps(model);
+    const result = await runAskReta(deps, input({ question: stopwordQuestion }));
+    expect(deps.searchThreads).not.toHaveBeenCalled();
+    expect(result.answer).toBe(INSUFFICIENT_EVIDENCE_ANSWER);
   });
 });
 
@@ -152,7 +173,7 @@ describe('runAskReta — strict citations: message-kind + verified quote ONLY', 
       ref: 's11',
       kind: 'message',
       threadId: 'thread-1',
-      quote: 'Montant dû message 3',
+      quote: VALID_QUOTE,
     });
     expect(result.citations[0]?.messageId).toBe('thread-1-m3');
     expect(result.citations[0]?.excerptHash).toMatch(/^[0-9a-f]{64}$/);
@@ -160,14 +181,15 @@ describe('runAskReta — strict citations: message-kind + verified quote ONLY', 
     expect(result.steps.map((s) => s.kind)).toEqual(['search', 'read_thread']);
   });
 
-  it('a claim citing a METADATA ref yields zero citations', async () => {
+  it('a claim citing a METADATA ref yields zero citations and the insufficient-evidence answer', async () => {
     const claim = JSON.stringify({
       answer: 'La facture réclame 120 000 XPF.',
-      cites: [{ ref: 's1', quote: 'Facture 1' }],
+      cites: [{ ref: 's1', quote: 'Facture 1 — Compta metadata row' }],
     });
     const model = scriptedModel([planJson, claim]);
     const result = await runAskReta(makeDeps(model), input());
     expect(result.citations).toEqual([]);
+    expect(result.answer).toBe(INSUFFICIENT_EVIDENCE_ANSWER);
   });
 
   it('a claim without quotes (legacy string cites) yields zero citations', async () => {
@@ -178,15 +200,42 @@ describe('runAskReta — strict citations: message-kind + verified quote ONLY', 
     const model = scriptedModel([planJson, claim]);
     const result = await runAskReta(makeDeps(model), input());
     expect(result.citations).toEqual([]);
+    expect(result.answer).toBe(INSUFFICIENT_EVIDENCE_ANSWER);
+  });
+
+  it("the 'quote e' attack — trivially-matching micro-quotes — yields zero citations", async () => {
+    const claim = JSON.stringify({
+      answer: 'La facture réclame 120 000 XPF.',
+      cites: [
+        { ref: 's11', quote: 'e' },
+        { ref: 's12', quote: 'dû' },
+        // Long enough but only two words — still not substantial evidence.
+        { ref: 's13', quote: 'détaildétaildétaildétail détail' },
+      ],
+    });
+    const model = scriptedModel([planJson, claim]);
+    const result = await runAskReta(makeDeps(model), input());
+    expect(result.citations).toEqual([]);
+    expect(result.answer).toBe(INSUFFICIENT_EVIDENCE_ANSWER);
   });
 
   it('an altered quote on a real message source yields zero citations', async () => {
     const claim = JSON.stringify({
       answer: 'La facture réclame 999 999 XPF.',
-      cites: [{ ref: 's11', quote: 'Montant dû 999 999 XPF' }],
+      cites: [{ ref: 's11', quote: 'Montant réclamé 999 999 XPF immédiatement' }],
     });
     const model = scriptedModel([planJson, claim]);
     const result = await runAskReta(makeDeps(model), input());
+    expect(result.citations).toEqual([]);
+    expect(result.answer).toBe(INSUFFICIENT_EVIDENCE_ANSWER);
+  });
+
+  it('an overview-only answer (exact counts) stands WITHOUT citations', async () => {
+    const overviewPlan = JSON.stringify({ actions: [{ type: 'overview' }] });
+    const countAnswer = JSON.stringify({ answer: 'Vous avez 42 mails en inbox.', cites: [] });
+    const model = scriptedModel([overviewPlan, countAnswer]);
+    const result = await runAskReta(makeDeps(model), input({ question: 'Combien de mails ?' }));
+    expect(result.answer).toBe('Vous avez 42 mails en inbox.');
     expect(result.citations).toEqual([]);
   });
 
@@ -288,6 +337,29 @@ describe('runAskReta — abort & deadline', () => {
     await expect(runAskReta(makeDeps(model, { deadlineMs: -1 }), input())).rejects.toThrow(
       'deadline exceeded',
     );
+  });
+
+  it('PREEMPTS a slow model call: 10ms budget beats an 80ms model, before it resolves', async () => {
+    let modelSettled = false;
+    const slowModel: RetaModel = {
+      key: 'llama-4-scout',
+      complete: vi.fn(
+        () =>
+          new Promise<string>((resolve) =>
+            setTimeout(() => {
+              modelSettled = true;
+              resolve(planJson);
+            }, 80),
+          ),
+      ),
+    };
+    const started = Date.now();
+    await expect(runAskReta(makeDeps(slowModel, { deadlineMs: 10 }), input())).rejects.toThrow(
+      'deadline exceeded',
+    );
+    // The rejection came from the timer race, not from waiting the model out.
+    expect(modelSettled).toBe(false);
+    expect(Date.now() - started).toBeLessThan(80);
   });
 
   it('retries synthesis once, then fails without leaking content', async () => {

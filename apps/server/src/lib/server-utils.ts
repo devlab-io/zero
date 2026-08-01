@@ -4,6 +4,7 @@ import {
   type ShardListPage,
 } from './shard-list-merge';
 import type { IGetThreadResponse, IGetThreadsResponse } from './driver/types';
+import { resolveThreadAcrossShards } from './thread-shard-resolution';
 import { OutgoingMessageType } from '../routes/agent/types';
 import { defaultPageSize, FOLDERS } from './utils';
 import { getContext } from 'hono/context-storage';
@@ -287,25 +288,30 @@ export const raceShardDataEffect = <T, E = never>(
   });
 };
 
+// Re-review Codex 2026-08-01 (P1) : l'ancien raceAll sur `getThread` laissait un
+// shard NON propriétaire gagner — sa réponse absente était un objet vide truthy
+// (avec un syncThread parasite). La résolution passe par la lecture no-sync
+// `getThreadIfPresent` (absent → null) et le résolveur premier-NON-NULL :
+// un miss rapide ne bat jamais le propriétaire lent.
 const getThreadEffect = (connectionId: string, threadId: string) => {
-  return raceShardDataEffect(
-    connectionId,
-    (shard, shardId) =>
-      Effect.gen(function* () {
-        const thread = yield* Effect.tryPromise({
-          try: async () => shard.stub.getThread(threadId, true),
-          catch: (error) =>
-            new Error(`Failed to setup auth or get thread from shard ${shardId}: ${error}`),
-        });
-
-        if (thread) {
-          return thread;
-        }
-
-        return yield* Effect.fail(new Error(`Thread ${threadId} not found in shard ${shardId}`));
-      }),
-    null,
-  );
+  return Effect.tryPromise({
+    try: async () => {
+      const allShards = await listShardsCached(connectionId);
+      const resolved = await resolveThreadAcrossShards(
+        allShards.map(({ shard_id }: { shard_id: string }) => ({
+          shardId: shard_id,
+          read: async () => {
+            const shard = await getShardClient(connectionId, shard_id);
+            return await shard.stub.getThreadIfPresent(threadId, true);
+          },
+        })),
+        (shardId, error) =>
+          logger.warn('[getThread] shard read failed', { shardId, error: String(error) }),
+      );
+      return resolved ?? { result: null, shardId: null };
+    },
+    catch: (error) => new Error(`Failed to resolve thread ${threadId}: ${error}`),
+  });
 };
 
 export const getThread: (
