@@ -12,6 +12,7 @@ const harness = vi.hoisted(() => ({
   createDeps: vi.fn(),
   getActiveConnection: vi.fn(),
   consumeRate: vi.fn(async () => ({ allowed: true, limit: 20, remaining: 19, reset: 1 })),
+  upstashLimit: vi.fn(async () => ({ success: true, limit: 20, remaining: 12, reset: 777 })),
   cancellations: [] as { signal: AbortSignal; abort: () => void; dispose: () => void }[],
 }));
 
@@ -21,6 +22,14 @@ vi.mock('../lib/server-utils', () => ({
   getZeroDB: vi.fn(async () => ({ consumeAskRetaRateLimit: harness.consumeRate })),
 }));
 vi.mock('../lib/services', () => ({ redis: () => ({}) }));
+vi.mock('@upstash/ratelimit', () => ({
+  Ratelimit: Object.assign(
+    class {
+      limit = harness.upstashLimit;
+    },
+    { slidingWindow: () => 'sliding-window-config' },
+  ),
+}));
 vi.mock('../lib/ask-reta/deps', () => ({ createAskRetaDeps: harness.createDeps }));
 vi.mock('../lib/ask-reta/cancellation', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../lib/ask-reta/cancellation')>();
@@ -100,6 +109,10 @@ beforeEach(() => {
   harness.getActiveConnection.mockResolvedValue({ id: 'conn-active' });
   harness.consumeRate.mockReset();
   harness.consumeRate.mockResolvedValue({ allowed: true, limit: 20, remaining: 19, reset: 1 });
+  harness.upstashLimit.mockReset();
+  harness.upstashLimit.mockResolvedValue({ success: true, limit: 20, remaining: 12, reset: 777 });
+  delete harness.env.REDIS_URL;
+  delete harness.env.REDIS_TOKEN;
   harness.cancellations.length = 0;
 });
 
@@ -257,6 +270,10 @@ describe('/api/ask-reta — authenticated ownership-safe NDJSON stream', () => {
     expect(response.status).toBe(200);
     expect(harness.consumeRate).toHaveBeenCalledTimes(1);
     expect(harness.runAskReta).toHaveBeenCalledTimes(1);
+    // En-têtes de quota EXACTS depuis la décision DO — rien d'autre.
+    expect(response.headers.get('X-RateLimit-Limit')).toBe('20');
+    expect(response.headers.get('X-RateLimit-Remaining')).toBe('19');
+    expect(response.headers.get('X-RateLimit-Reset')).toBe('1');
   });
 
   it('prod sans Redis : le 21e appel (fallback DO refuse) → 429', async () => {
@@ -270,6 +287,41 @@ describe('/api/ask-reta — authenticated ownership-safe NDJSON stream', () => {
     const response = await post(makeApp({ id: 'user-1' }), { question: 'x' });
     expect(response.status).toBe(429);
     expect(harness.runAskReta).not.toHaveBeenCalled();
+    expect(response.headers.get('X-RateLimit-Limit')).toBe('20');
+    expect(response.headers.get('X-RateLimit-Remaining')).toBe('0');
+    expect(response.headers.get('X-RateLimit-Reset')).toBe('9');
+  });
+
+  it('Redis distant PRIMAIRE : autorisé → 200 + en-têtes Upstash ; limité → 429 + en-têtes ; DO jamais consulté', async () => {
+    harness.env.NODE_ENV = 'production';
+    harness.env.REDIS_URL = 'https://real.upstash.io';
+    harness.env.REDIS_TOKEN = 'token';
+    harness.runAskReta.mockResolvedValueOnce({ answer: 'ok', citations: [], steps: [] });
+    const allowed = await post(makeApp({ id: 'user-1' }), { question: 'x' });
+    expect(allowed.status).toBe(200);
+    expect(allowed.headers.get('X-RateLimit-Limit')).toBe('20');
+    expect(allowed.headers.get('X-RateLimit-Remaining')).toBe('12');
+    expect(allowed.headers.get('X-RateLimit-Reset')).toBe('777');
+    expect(harness.consumeRate).not.toHaveBeenCalled();
+
+    harness.upstashLimit.mockResolvedValueOnce({
+      success: false,
+      limit: 20,
+      remaining: 0,
+      reset: 888,
+    });
+    const limited = await post(makeApp({ id: 'user-1' }), { question: 'x' });
+    expect(limited.status).toBe(429);
+    expect(limited.headers.get('X-RateLimit-Remaining')).toBe('0');
+    expect(limited.headers.get('X-RateLimit-Reset')).toBe('888');
+    expect(harness.consumeRate).not.toHaveBeenCalled();
+  });
+
+  it('dev local (skip) : aucun en-tête X-RateLimit-* fantôme', async () => {
+    harness.runAskReta.mockResolvedValueOnce({ answer: 'ok', citations: [], steps: [] });
+    const response = await post(makeApp({ id: 'user-1' }), { question: 'x' });
+    expect(response.status).toBe(200);
+    expect(response.headers.get('X-RateLimit-Limit')).toBeNull();
   });
 
   it('panne TOTALE (pas de Redis, DO en échec) → 503 fail-closed, jamais fail-open, aucun contenu loggé', async () => {

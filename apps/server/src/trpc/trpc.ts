@@ -266,8 +266,10 @@ export const createRateLimiterMiddleware = (config: {
     }
     if (decision.outcome === 'unavailable') {
       logger.error('[rate-limit] fail-closed: remote Redis unavailable in production');
+      // Contract: fail-closed = HTTP 503. PRECONDITION_FAILED mapped to 412
+      // in tRPC 11 — SERVICE_UNAVAILABLE is the honest wire status.
       throw new TRPCError({
-        code: 'PRECONDITION_FAILED',
+        code: 'SERVICE_UNAVAILABLE',
         message: 'Rate limiting unavailable. Please try again later.',
       });
     }

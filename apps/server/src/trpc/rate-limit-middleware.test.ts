@@ -70,15 +70,16 @@ beforeEach(() => {
 });
 
 describe('createRateLimiterMiddleware — real middleware, copilot configuration', () => {
-  it('fail-closed: production WITHOUT remote Redis denies with PRECONDITION_FAILED', async () => {
+  it('fail-closed: production WITHOUT remote Redis denies with SERVICE_UNAVAILABLE (HTTP 503, never 412)', async () => {
     const next = vi.fn(async () => 'result');
     await expect(buildAsk()({ next, ctx: makeCtx('user-1'), input: {} })).rejects.toMatchObject({
-      code: 'PRECONDITION_FAILED',
+      code: 'SERVICE_UNAVAILABLE',
+      message: 'Rate limiting unavailable. Please try again later.',
     });
     expect(next).not.toHaveBeenCalled();
   });
 
-  it('prod sans Redis AVEC durableFallback : le DO autorise → next() ; refuse → TOO_MANY_REQUESTS ; panne → PRECONDITION_FAILED', async () => {
+  it('prod sans Redis AVEC durableFallback : le DO autorise → next() ; refuse → TOO_MANY_REQUESTS ; panne → SERVICE_UNAVAILABLE', async () => {
     const consume = vi.fn(async () => ({ allowed: true, limit: 20, remaining: 19, reset: 1 }));
     const withFallback = () =>
       middlewareFn(
@@ -106,7 +107,7 @@ describe('createRateLimiterMiddleware — real middleware, copilot configuration
     consume.mockRejectedValueOnce(new Error('DO unreachable'));
     await expect(
       withFallback()({ next: vi.fn(async () => 'x'), ctx: makeCtx('user-1'), input: {} }),
-    ).rejects.toMatchObject({ code: 'PRECONDITION_FAILED' });
+    ).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE' });
   });
 
   it('Redis distant présent : Upstash reste PRIMAIRE, le fallback DO est ignoré', async () => {

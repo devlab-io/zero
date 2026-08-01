@@ -208,7 +208,7 @@ export const serializeBoundedEvent = (event: AskRetaStreamEvent): string | null 
  */
 export function createAskRetaNdjsonResponse(
   run: (emit: (event: AskRetaStreamEvent) => void) => Promise<void>,
-  options: { onConsumerGone?: () => void } = {},
+  options: { onConsumerGone?: () => void; headers?: Record<string, string> } = {},
 ): Response {
   const encoder = new TextEncoder();
   const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
@@ -254,7 +254,12 @@ export function createAskRetaNdjsonResponse(
   })();
 
   return new Response(readable, {
-    headers: { 'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-store' },
+    headers: {
+      'Content-Type': 'application/x-ndjson; charset=utf-8',
+      'Cache-Control': 'no-store',
+      // Quota metadata only (X-RateLimit-*) — never content or identifiers.
+      ...options.headers,
+    },
   });
 }
 
@@ -297,7 +302,18 @@ export const askRetaStreamRouter = new Hono<HonoContext>().post('/', async (c) =
   if (decision.outcome === 'missing-identity') return c.json({ error: 'Unauthorized' }, 401);
   if (decision.outcome === 'unavailable')
     return c.json({ error: 'Rate limiting unavailable' }, 503);
-  if (decision.outcome === 'limited') return c.json({ error: 'Too many requests' }, 429);
+  // Rate headers from the ALREADY-computed decision (Upstash primary or DO
+  // fallback alike) — numeric quota values only, never content/question/ids.
+  const rateHeaders =
+    decision.outcome === 'allowed' || decision.outcome === 'limited'
+      ? {
+          'X-RateLimit-Limit': String(decision.headers.limit),
+          'X-RateLimit-Remaining': String(decision.headers.remaining),
+          'X-RateLimit-Reset': String(decision.headers.reset),
+        }
+      : undefined;
+  if (decision.outcome === 'limited')
+    return c.json({ error: 'Too many requests' }, 429, rateHeaders);
 
   const parsed = askRetaInputSchema.safeParse(await c.req.json().catch(() => null));
   if (!parsed.success) return c.json({ error: 'Invalid input' }, 400);
@@ -348,6 +364,6 @@ export const askRetaStreamRouter = new Hono<HonoContext>().post('/', async (c) =
         cancellation.dispose();
       }
     },
-    { onConsumerGone: () => cancellation.abort() },
+    { onConsumerGone: () => cancellation.abort(), headers: rateHeaders },
   );
 });
