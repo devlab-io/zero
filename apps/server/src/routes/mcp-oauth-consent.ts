@@ -5,6 +5,7 @@ import {
   handleConsentGatedMcpToken,
   isSameOriginMcpConsentSubmission,
   loadMcpConsentContext,
+  MCP_CONSENT_SCRIPT_CSP_HASH,
   McpConsentError,
   renderMcpConsentPage,
   requireExplicitMcpConsent,
@@ -41,8 +42,7 @@ export function handleMcpToken(auth: AuthHandler, request: Request) {
 function consentHeaders() {
   return {
     'Cache-Control': 'no-store',
-    'Content-Security-Policy':
-      "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
+    'Content-Security-Policy': `default-src 'none'; style-src 'unsafe-inline'; script-src ${MCP_CONSENT_SCRIPT_CSP_HASH}; form-action 'self'; frame-ancestors 'none'; base-uri 'none'`,
     Pragma: 'no-cache',
     'Referrer-Policy': 'no-referrer',
     'X-Content-Type-Options': 'nosniff',

@@ -6,6 +6,37 @@ import type { DB } from '../db';
 const MCP_SCOPES = ['openid', 'profile', 'email', 'offline_access'] as const;
 type McpScope = (typeof MCP_SCOPES)[number];
 
+/**
+ * A focused browser button can emit more than one submit activation through
+ * accessibility tooling. Keep the first explicit decision and reject every
+ * subsequent submit before it can consume the single-use OAuth consent code.
+ *
+ * This literal is covered by a CSP hash in the consent route. Keep the script
+ * static: user/client data must never be interpolated into it.
+ */
+export const MCP_CONSENT_SUBMISSION_SCRIPT = `(() => {
+  const form = document.querySelector('form');
+  const decision = document.querySelector('input[name="decision"]');
+  if (!form || !decision) return;
+  form.addEventListener('submit', (event) => {
+    if (form.dataset.submitting === 'true') {
+      event.preventDefault();
+      return;
+    }
+    const value = event.submitter?.dataset?.decision;
+    if (value !== 'accept' && value !== 'deny') {
+      event.preventDefault();
+      return;
+    }
+    decision.value = value;
+    form.dataset.submitting = 'true';
+    for (const button of form.querySelectorAll('button')) button.disabled = true;
+  });
+})();`;
+
+// sha256 of MCP_CONSENT_SUBMISSION_SCRIPT, base64 encoded. A test prevents drift.
+export const MCP_CONSENT_SCRIPT_CSP_HASH = "'sha256-/5pIK8Jq4nFxe3ni+30O9PDj2sJMbm5VC2XCNGfWQhU='";
+
 const scopeCopy: Record<McpScope, { title: string; description: string }> = {
   openid: {
     title: 'Verify your Reta identity',
@@ -326,9 +357,11 @@ export function renderMcpConsentPage(context: McpConsentContext): string {
     <form method="post" action="/api/oauth/mcp/consent">
       <input type="hidden" name="consent_code" value="${escapeHtml(context.consentCode)}" />
       <input type="hidden" name="client_id" value="${escapeHtml(context.clientId)}" />
-      <button class="deny" type="submit" name="decision" value="deny">Deny</button>
-      <button class="allow" type="submit" name="decision" value="accept">Authorize</button>
+      <input type="hidden" name="decision" value="" />
+      <button class="deny" type="submit" data-decision="deny">Deny</button>
+      <button class="allow" type="submit" data-decision="accept">Authorize</button>
     </form>
+    <script>${MCP_CONSENT_SUBMISSION_SCRIPT}</script>
   </main>
 </body>
 </html>`;

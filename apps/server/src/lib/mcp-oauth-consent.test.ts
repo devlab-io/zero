@@ -1,12 +1,15 @@
 import { getTestInstance } from 'better-auth/test';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { mcp } from 'better-auth/plugins';
+import { runInNewContext } from 'node:vm';
 import { createHash } from 'node:crypto';
 
 import {
   handleConsentGatedMcpToken,
   isPendingMcpConsent,
   isSameOriginMcpConsentSubmission,
+  MCP_CONSENT_SCRIPT_CSP_HASH,
+  MCP_CONSENT_SUBMISSION_SCRIPT,
   renderMcpConsentPage,
   requireExplicitMcpConsent,
 } from './mcp-oauth-consent';
@@ -94,9 +97,52 @@ describe('MCP OAuth explicit consent boundary', () => {
     expect(html).toContain('email');
     expect(html).toContain('offline_access');
     expect(html).toContain('Issues a refresh token');
-    expect(html).toContain('name="decision" value="deny"');
-    expect(html).toContain('name="decision" value="accept"');
+    expect(html).toContain('name="decision" value=""');
+    expect(html).toContain('data-decision="deny"');
+    expect(html).toContain('data-decision="accept"');
+    expect(html).toContain(MCP_CONSENT_SUBMISSION_SCRIPT);
+    expect(MCP_CONSENT_SUBMISSION_SCRIPT).toContain("form.dataset.submitting === 'true'");
+    expect(MCP_CONSENT_SUBMISSION_SCRIPT).toContain('event.preventDefault()');
     expect(html).not.toContain('Codex <unsafe>');
+  });
+
+  it('pins the one-submit consent script to its CSP hash', () => {
+    const hash = createHash('sha256').update(MCP_CONSENT_SUBMISSION_SCRIPT).digest('base64');
+    expect(MCP_CONSENT_SCRIPT_CSP_HASH).toBe(`'sha256-${hash}'`);
+  });
+
+  it('allows the first explicit decision and blocks a double activation', () => {
+    let submit: ((event: Record<string, unknown>) => void) | undefined;
+    const buttons = [{ disabled: false }, { disabled: false }];
+    const form = {
+      dataset: {} as Record<string, string>,
+      addEventListener: (_type: string, listener: typeof submit) => {
+        submit = listener;
+      },
+      querySelectorAll: () => buttons,
+    };
+    const decision = { value: '' };
+    const document = {
+      querySelector: (selector: string) => (selector === 'form' ? form : decision),
+    };
+    runInNewContext(MCP_CONSENT_SUBMISSION_SCRIPT, { document });
+
+    const first = {
+      submitter: { dataset: { decision: 'accept' } },
+      preventDefault: vi.fn(),
+    };
+    submit?.(first);
+    expect(first.preventDefault).not.toHaveBeenCalled();
+    expect(decision.value).toBe('accept');
+    expect(form.dataset.submitting).toBe('true');
+    expect(buttons.every((button) => button.disabled)).toBe(true);
+
+    const duplicate = {
+      submitter: { dataset: { decision: 'accept' } },
+      preventDefault: vi.fn(),
+    };
+    submit?.(duplicate);
+    expect(duplicate.preventDefault).toHaveBeenCalledOnce();
   });
 
   it('blocks callback and token exchange until the signed-in user explicitly consents', async () => {
