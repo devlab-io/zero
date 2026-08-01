@@ -8,6 +8,7 @@ import {
   buildMcpProtectedResourceMetadata,
   mcpUnauthorizedResponse,
 } from '../lib/mcp-auth-discovery';
+import { handleMcpAuthorize, handleMcpToken, mcpOAuthConsentRouter } from './mcp-oauth-consent';
 import { handleGetSessionFast } from '../lib/auth-fast-path';
 import { oAuthDiscoveryMetadata } from 'better-auth/plugins';
 import { getZeroDB, verifyToken } from '../lib/server-utils';
@@ -211,6 +212,11 @@ export const api = new Hono<HonoContext>()
   // Team realtime (P2) — upgrade WebSocket par fil partagé, ACL résolue
   // AVANT tout contact avec le DO (voir routes/team-realtime.ts).
   .route('/team-rt', teamRealtimeRouter)
+  .route('/oauth/mcp', mcpOAuthConsentRouter)
+  // Better Auth 1.6's deprecated MCP plugin auto-approves a live session unless
+  // prompt=consent is present. These exact routes MUST stay before /auth/*.
+  .get('/auth/mcp/authorize', (c) => handleMcpAuthorize(c.var.auth, c.req.raw))
+  .post('/auth/mcp/token', (c) => handleMcpToken(c.var.auth, c.req.raw))
   .on(['GET', 'POST', 'OPTIONS'], '/auth/*', (c) => {
     return c.var.auth.handler(c.req.raw);
   })

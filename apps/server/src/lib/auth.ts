@@ -180,6 +180,13 @@ export const createAuth = async () => {
       ...(dubPlugin ? [dubPlugin] : []),
       mcp({
         loginPage: env.VITE_PUBLIC_APP_URL + '/login',
+        oidcConfig: {
+          // The legacy MCP plugin only redirects here when prompt=consent.
+          // routes/index.ts forces that prompt for every MCP client.
+          loginPage: env.VITE_PUBLIC_APP_URL + '/login',
+          consentPage: env.VITE_PUBLIC_BACKEND_URL + '/api/oauth/mcp/consent',
+          requirePKCE: true,
+        },
       }),
       jwt(),
       bearer(),

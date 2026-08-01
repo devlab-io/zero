@@ -13,6 +13,8 @@ describe('ordre de routage /api (r14)', () => {
   const fastRoute = source.indexOf(".get('/auth/get-session'");
   const globalMiddleware = source.indexOf(".use('*', async (c, next) => {");
   const genericAuthRoute = source.indexOf("'/auth/*'");
+  const mcpAuthorizeGuard = source.indexOf(".get('/auth/mcp/authorize'");
+  const mcpTokenGuard = source.indexOf(".post('/auth/mcp/token'");
   const trpcMount = source.indexOf('trpcServer({');
   const preAuthResolution = source.indexOf(
     'await auth.api.getSession({ headers: c.req.raw.headers })',
@@ -28,6 +30,15 @@ describe('ordre de routage /api (r14)', () => {
   it('la route générique /auth/* (OAuth, callbacks, sign-out) reste APRÈS le middleware complet', () => {
     expect(genericAuthRoute).toBeGreaterThan(globalMiddleware);
     expect(source).toContain(".on(['GET', 'POST', 'OPTIONS'], '/auth/*'");
+  });
+
+  it('les gardes MCP consent/token précèdent toujours le wildcard Better Auth', () => {
+    expect(mcpAuthorizeGuard).toBeGreaterThan(globalMiddleware);
+    expect(mcpTokenGuard).toBeGreaterThan(mcpAuthorizeGuard);
+    expect(mcpAuthorizeGuard).toBeLessThan(genericAuthRoute);
+    expect(mcpTokenGuard).toBeLessThan(genericAuthRoute);
+    expect(source).toContain('handleMcpAuthorize(c.var.auth, c.req.raw)');
+    expect(source).toContain('handleMcpToken(c.var.auth, c.req.raw)');
   });
 
   it('tRPC reste monté APRÈS le middleware : pré-auth inchangée', () => {

@@ -2,14 +2,17 @@ import { readFile } from 'node:fs/promises';
 
 const read = (path) => readFile(new URL(`../../${path}`, import.meta.url), 'utf8');
 
-const [toolRegistry, mcp, scopes, auth, prompt, legacyPrompt] = await Promise.all([
-  read('apps/server/src/routes/agent/tools.ts'),
-  read('apps/server/src/routes/agent/mcp.ts'),
-  read('apps/server/src/lib/google-scopes.ts'),
-  read('apps/server/src/lib/auth.ts'),
-  read('apps/server/src/lib/prompts.ts'),
-  read('apps/server/src/services/call-service/system-prompt.ts'),
-]);
+const [toolRegistry, mcp, scopes, auth, prompt, legacyPrompt, routes, consentBoundary] =
+  await Promise.all([
+    read('apps/server/src/routes/agent/tools.ts'),
+    read('apps/server/src/routes/agent/mcp.ts'),
+    read('apps/server/src/lib/google-scopes.ts'),
+    read('apps/server/src/lib/auth.ts'),
+    read('apps/server/src/lib/prompts.ts'),
+    read('apps/server/src/services/call-service/system-prompt.ts'),
+    read('apps/server/src/routes/index.ts'),
+    read('apps/server/src/lib/mcp-oauth-consent.ts'),
+  ]);
 
 const failures = [];
 const assert = (condition, message) => {
@@ -187,6 +190,27 @@ assert(
   auth.includes('maxAge: 60 * 5'),
   'session cookie cache revocation window is not five minutes',
 );
+assert(
+  auth.includes("consentPage: env.VITE_PUBLIC_BACKEND_URL + '/api/oauth/mcp/consent'") &&
+    auth.includes('requirePKCE: true'),
+  'MCP OAuth must use the explicit consent page and require PKCE',
+);
+assert(
+  routes.indexOf(".get('/auth/mcp/authorize'") < routes.indexOf("'/auth/*'") &&
+    routes.indexOf(".post('/auth/mcp/token'") < routes.indexOf("'/auth/*'"),
+  'MCP authorize/token consent guards must precede the generic Better Auth route',
+);
+for (const consentGuarantee of [
+  "url.searchParams.set('prompt', 'consent')",
+  "error: 'consent_required'",
+  'requireConsent === true',
+  'offline_access',
+]) {
+  assert(
+    consentBoundary.includes(consentGuarantee),
+    `MCP explicit-consent boundary is missing ${consentGuarantee}`,
+  );
+}
 
 if (failures.length) {
   console.error(`Security surface check failed (${failures.length}):`);
@@ -195,5 +219,5 @@ if (failures.length) {
 }
 
 console.log(
-  'Security surface check passed: least scopes, bounded session cache, draft-first MCP with one elicitation-gated send.',
+  'Security surface check passed: least scopes, explicit MCP OAuth consent, bounded session cache, draft-first MCP with one elicitation-gated send.',
 );
