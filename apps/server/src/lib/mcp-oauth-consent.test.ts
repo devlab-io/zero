@@ -113,7 +113,15 @@ describe('MCP OAuth explicit consent boundary', () => {
 
   it('allows the first explicit decision and blocks a double activation', () => {
     let submit: ((event: Record<string, unknown>) => void) | undefined;
-    const buttons = [{ disabled: false }, { disabled: false }];
+    const buttons = [
+      { attributes: {} as Record<string, string> },
+      { attributes: {} as Record<string, string> },
+    ].map((button) => ({
+      ...button,
+      setAttribute: (name: string, value: string) => {
+        button.attributes[name] = value;
+      },
+    }));
     const form = {
       dataset: {} as Record<string, string>,
       addEventListener: (_type: string, listener: typeof submit) => {
@@ -135,7 +143,7 @@ describe('MCP OAuth explicit consent boundary', () => {
     expect(first.preventDefault).not.toHaveBeenCalled();
     expect(decision.value).toBe('accept');
     expect(form.dataset.submitting).toBe('true');
-    expect(buttons.every((button) => button.disabled)).toBe(true);
+    expect(buttons.every((button) => button.attributes['aria-disabled'] === 'true')).toBe(true);
 
     const duplicate = {
       submitter: { dataset: { decision: 'accept' } },

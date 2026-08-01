@@ -30,12 +30,12 @@ export const MCP_CONSENT_SUBMISSION_SCRIPT = `(() => {
     }
     decision.value = value;
     form.dataset.submitting = 'true';
-    for (const button of form.querySelectorAll('button')) button.disabled = true;
+    for (const button of form.querySelectorAll('button')) button.setAttribute('aria-disabled', 'true');
   });
 })();`;
 
 // sha256 of MCP_CONSENT_SUBMISSION_SCRIPT, base64 encoded. A test prevents drift.
-export const MCP_CONSENT_SCRIPT_CSP_HASH = "'sha256-/5pIK8Jq4nFxe3ni+30O9PDj2sJMbm5VC2XCNGfWQhU='";
+export const MCP_CONSENT_SCRIPT_CSP_HASH = "'sha256-ddk5dH8dG6H7i+DFnxeaxB0O9nX7LoVSCKkvhZTlhaY='";
 
 const scopeCopy: Record<McpScope, { title: string; description: string }> = {
   openid: {
@@ -327,6 +327,7 @@ export function renderMcpConsentPage(context: McpConsentContext): string {
     code { position: absolute; top: 13px; right: 12px; font-size: 11px; color: color-mix(in srgb, CanvasText 54%, transparent); }
     .capabilities { margin-top: 18px; font-size: 13px; }
     form { display: flex; justify-content: flex-end; gap: 10px; border-top: 1px solid color-mix(in srgb, CanvasText 12%, transparent); }
+    form[data-submitting="true"] button { cursor: wait; opacity: .65; pointer-events: none; }
     button { min-height: 42px; border-radius: 10px; padding: 0 16px; border: 1px solid color-mix(in srgb, CanvasText 16%, transparent); font: inherit; font-weight: 650; cursor: pointer; transition: background-color 180ms ease, color 180ms ease, transform 180ms ease; }
     button:focus-visible { outline: 3px solid color-mix(in srgb, #2563eb 65%, transparent); outline-offset: 2px; }
     button:active { transform: translateY(1px); }
