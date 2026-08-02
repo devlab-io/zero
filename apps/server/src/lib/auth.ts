@@ -84,7 +84,7 @@ const scheduleCampaign = (userInfo: { address: string; name: string }) =>
     );
   });
 
-const connectionHandlerHook = async (account: Account) => {
+const syncConnection = async (account: Account) => {
   if (!account.accessToken || !account.refreshToken) {
     logger.error('Missing Access/Refresh Tokens', { account });
     throw new APIError('EXPECTATION_FAILED', {
@@ -140,17 +140,31 @@ const connectionHandlerHook = async (account: Account) => {
     updatingInfo,
   );
 
-  if (env.NODE_ENV === 'production') {
-    await Effect.runPromise(
-      scheduleCampaign({ address: userInfo.address, name: userInfo.name || 'there' }),
-    );
-  }
-
   if (env.GOOGLE_S_ACCOUNT && env.GOOGLE_S_ACCOUNT !== '{}') {
     await env.subscribe_queue.send({
       connectionId: result.id,
       providerId: account.providerId,
     });
+  }
+
+  return userInfo;
+};
+
+const connectionHandlerHook = async (account: Account) => {
+  await syncConnection(account);
+};
+
+/**
+ * The Mail0 onboarding sequence belongs to the initial account creation only.
+ * Incremental OAuth grants (Calendar, contacts, etc.) update the existing
+ * Better Auth account and must never replay onboarding emails.
+ */
+const connectionCreatedHook = async (account: Account) => {
+  const userInfo = await syncConnection(account);
+  if (env.NODE_ENV === 'production') {
+    await Effect.runPromise(
+      scheduleCampaign({ address: userInfo.address, name: userInfo.name || 'there' }),
+    );
   }
 };
 
@@ -274,7 +288,7 @@ export const createAuth = async () => {
     databaseHooks: {
       account: {
         create: {
-          after: connectionHandlerHook,
+          after: connectionCreatedHook,
         },
         update: {
           after: connectionHandlerHook,

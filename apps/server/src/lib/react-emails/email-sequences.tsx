@@ -9,6 +9,11 @@ import {
   Preview,
   Heading,
 } from '@react-email/components';
+import * as React from 'react';
+
+// Wrangler compiles this lazy .tsx module with the classic JSX transform.
+// Keep the namespace as an explicit runtime dependency, not a type-only import.
+void React;
 
 // Common styles
 const main = {
