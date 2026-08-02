@@ -4,6 +4,8 @@ vi.mock('@/lib/auth-client', () => ({ $fetch: vi.fn() }));
 
 import {
   buildCalendarAuthorizationRequest,
+  buildCalendarEventsAuthorizationRequest,
+  GOOGLE_CALENDAR_EVENTS_SCOPE,
   GOOGLE_CALENDAR_FREEBUSY_SCOPE,
   hasCalendarFreebusyScope,
 } from './calendar-authorization';
@@ -51,5 +53,17 @@ describe('hasCalendarFreebusyScope', () => {
         { providerId: 'microsoft', scopes: [GOOGLE_CALENDAR_FREEBUSY_SCOPE] },
       ]),
     ).toBe(false);
+  });
+});
+
+describe('Agenda global — consentement événements incrémental', () => {
+  it('demande calendar.events seul et conserve le login par défaut intact', () => {
+    expect(buildCalendarEventsAuthorizationRequest('https://app.test/mail/inbox')).toEqual({
+      provider: 'google',
+      scopes: ['https://www.googleapis.com/auth/calendar.events'],
+      callbackURL: 'https://app.test/mail/inbox',
+    });
+    expect(GOOGLE_CALENDAR_EVENTS_SCOPE).not.toContain('gmail');
+    expect(GOOGLE_CALENDAR_EVENTS_SCOPE).not.toBe('https://www.googleapis.com/auth/calendar');
   });
 });

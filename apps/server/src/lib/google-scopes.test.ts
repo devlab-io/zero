@@ -1,5 +1,6 @@
 import {
   GOOGLE_CALENDAR_FREEBUSY_SCOPE,
+  GOOGLE_CALENDAR_EVENTS_SCOPE,
   GOOGLE_OAUTH_SCOPES,
   GOOGLE_OAUTH_SCOPE_STRING,
 } from './google-scopes';
@@ -61,5 +62,13 @@ describe('P11 — scope calendrier INCRÉMENTAL, jamais par défaut', () => {
     expect(
       (GOOGLE_OAUTH_SCOPES as readonly string[]).includes(GOOGLE_CALENDAR_FREEBUSY_SCOPE),
     ).toBe(false);
+  });
+
+  it('calendar.events reste incrémental et plus étroit que la gestion complète du calendrier', () => {
+    expect(GOOGLE_CALENDAR_EVENTS_SCOPE).toBe('https://www.googleapis.com/auth/calendar.events');
+    expect(GOOGLE_CALENDAR_EVENTS_SCOPE).not.toBe('https://www.googleapis.com/auth/calendar');
+    expect((GOOGLE_OAUTH_SCOPES as readonly string[]).includes(GOOGLE_CALENDAR_EVENTS_SCOPE)).toBe(
+      false,
+    );
   });
 });

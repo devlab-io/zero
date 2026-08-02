@@ -1,3 +1,4 @@
+import { DeferredGlobalWorkspaceDock } from '@/components/workspace/global-workspace-dock.deferred';
 import { HotkeyProviderWrapper } from '@/components/providers/hotkey-provider-wrapper';
 import { CommandPaletteProvider } from '@/components/context/command-palette-context';
 import { SidebarProvider } from '@/components/context/sidebar-context';
@@ -20,6 +21,7 @@ export default function Layout() {
               <HotkeyProviderWrapper>
                 <div className="relative flex max-h-screen w-full overflow-hidden">
                   <Outlet />
+                  <DeferredGlobalWorkspaceDock />
                 </div>
               </HotkeyProviderWrapper>
             </CommandPaletteProvider>

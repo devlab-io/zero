@@ -5,6 +5,7 @@ import { categoriesRouter } from './routes/categories';
 import { templatesRouter } from './routes/templates';
 import { shortcutRouter } from './routes/shortcut';
 import { settingsRouter } from './routes/settings';
+import { calendarRouter } from './routes/calendar';
 import { loggingRouter } from './routes/logging';
 import { copilotRouter } from './routes/copilot';
 import { outboxRouter } from './routes/outbox';
@@ -39,6 +40,7 @@ export const appRouter = router({
   teams: teamsRouter,
   templates: templatesRouter,
   meet: meetRouter,
+  calendar: calendarRouter,
   logging: loggingRouter,
 });
 

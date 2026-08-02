@@ -3187,6 +3187,100 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
             meta: object;
         }>;
     }>>;
+    calendar: import("@trpc/server").TRPCBuiltRouter<{
+        ctx: {
+            c: import("hono").Context<{
+                Bindings: Record<string, unknown>;
+                Variables: {
+                    auth: {
+                        api: {
+                            listUserAccounts: (input: {
+                                headers: Headers;
+                            }) => Promise<{
+                                accountId: string;
+                                providerId: string;
+                                scopes?: readonly string[] | null;
+                            }[]>;
+                            getAccessToken: (input: {
+                                body: {
+                                    providerId: string;
+                                    accountId?: string;
+                                };
+                                headers: Headers;
+                            }) => Promise<{
+                                accessToken?: string | null;
+                                scopes?: readonly string[] | null;
+                            }>;
+                            signOut: (input: {
+                                headers: Headers;
+                            }) => Promise<unknown>;
+                            deleteUser: (input: {
+                                body: {
+                                    callbackURL: string;
+                                };
+                                headers: Headers;
+                                request: Request;
+                            }) => Promise<{
+                                success: boolean;
+                                message: string;
+                            }>;
+                        };
+                    };
+                    sessionUser?: {
+                        id: string;
+                        name: string;
+                        email: string;
+                    };
+                    traceId?: string;
+                    requestId?: string;
+                };
+            }>;
+            sessionUser?: {
+                id: string;
+                name: string;
+                email: string;
+            };
+        };
+        meta: object;
+        errorShape: import("@trpc/server").TRPCDefaultErrorShape;
+        transformer: true;
+    }, import("@trpc/server").TRPCDecorateCreateRouterOptions<{
+        listDay: import("@trpc/server").TRPCQueryProcedure<{
+            input: {
+                timeZone: string;
+                timeMin: string;
+                timeMax: string;
+            };
+            output: {
+                supported: false;
+                authorizationRequired: boolean;
+                events: never[];
+            } | {
+                authorizationRequired: boolean;
+                events: import("../lib/calendar/events").CalendarEvent[];
+                supported: true;
+            };
+            meta: object;
+        }>;
+        createEvent: import("@trpc/server").TRPCMutationProcedure<{
+            input: {
+                title: string;
+                end: string;
+                timeZone: string;
+                start: string;
+                description?: string | undefined;
+                location?: string | undefined;
+                attendees?: string[] | undefined;
+                allDay?: boolean | undefined;
+                createMeetLink?: boolean | undefined;
+            };
+            output: {
+                authorizationRequired: boolean;
+                event: import("../lib/calendar/events").CalendarEvent | null;
+            };
+            meta: object;
+        }>;
+    }>>;
     logging: import("@trpc/server").TRPCBuiltRouter<{
         ctx: {
             c: import("hono").Context<{

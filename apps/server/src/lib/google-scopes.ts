@@ -28,3 +28,13 @@ export const GOOGLE_OAUTH_SCOPE_STRING = GOOGLE_OAUTH_SCOPES.join(' ');
  */
 export const GOOGLE_CALENDAR_FREEBUSY_SCOPE =
   'https://www.googleapis.com/auth/calendar.freebusy' as const;
+
+/**
+ * Agenda global Reta — consentement incrémental lecture/écriture des événements.
+ *
+ * `calendar.events` est plus étroit que `calendar` : il permet de lire et de
+ * créer les événements nécessaires au panneau Agenda, sans donner accès aux
+ * réglages ni à la gestion des calendriers. Il reste hors du login par défaut.
+ */
+export const GOOGLE_CALENDAR_EVENTS_SCOPE =
+  'https://www.googleapis.com/auth/calendar.events' as const;

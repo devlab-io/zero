@@ -1,4 +1,7 @@
-import { GOOGLE_CALENDAR_FREEBUSY_SCOPE } from '@zero/server/auth-providers';
+import {
+  GOOGLE_CALENDAR_EVENTS_SCOPE,
+  GOOGLE_CALENDAR_FREEBUSY_SCOPE,
+} from '@zero/server/auth-providers';
 import { $fetch } from '@/lib/auth-client';
 
 /**
@@ -14,7 +17,7 @@ import { $fetch } from '@/lib/auth-client';
  * n'est jamais créé par Reta (deeplink fournisseur, Save humain).
  */
 
-export { GOOGLE_CALENDAR_FREEBUSY_SCOPE };
+export { GOOGLE_CALENDAR_EVENTS_SCOPE, GOOGLE_CALENDAR_FREEBUSY_SCOPE };
 
 export type LinkedAccountScopes = {
   providerId?: string | null;
@@ -67,5 +70,37 @@ export async function requestCalendarFreebusyAuthorization(
   if (error) {
     throw new Error(error.message ?? 'Calendar authorization request failed');
   }
+  return data ?? {};
+}
+
+export type CalendarEventsAuthorizationRequest = {
+  provider: 'google';
+  scopes: [typeof GOOGLE_CALENDAR_EVENTS_SCOPE];
+  callbackURL: string;
+};
+
+/**
+ * Consentement dédié au panneau Agenda. Le provider Google Better Auth est
+ * configuré avec accessType=offline, donc le refresh token reste géré dans la
+ * frontière d'authentification — jamais dans le client.
+ */
+export function buildCalendarEventsAuthorizationRequest(
+  callbackURL: string,
+): CalendarEventsAuthorizationRequest {
+  return {
+    provider: 'google',
+    scopes: [GOOGLE_CALENDAR_EVENTS_SCOPE],
+    callbackURL,
+  };
+}
+
+export async function requestCalendarEventsAuthorization(
+  callbackURL: string,
+): Promise<{ url?: string; redirect?: boolean }> {
+  const { data, error } = await $fetch<{ url?: string; redirect?: boolean }>('/link-social', {
+    method: 'POST',
+    body: buildCalendarEventsAuthorizationRequest(callbackURL),
+  });
+  if (error) throw new Error(error.message ?? 'Calendar authorization request failed');
   return data ?? {};
 }

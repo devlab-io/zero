@@ -4,7 +4,7 @@ import { logger } from './logger';
 // P11 — ré-export du scope disponibilités INCRÉMENTAL pour le client mail
 // (google-scopes n'est pas un subpath public du package). Jamais dans
 // GOOGLE_OAUTH_SCOPES — voir google-scopes.ts et son test d'invariants.
-export { GOOGLE_CALENDAR_FREEBUSY_SCOPE } from './google-scopes';
+export { GOOGLE_CALENDAR_EVENTS_SCOPE, GOOGLE_CALENDAR_FREEBUSY_SCOPE } from './google-scopes';
 
 export interface EnvVarInfo {
   name: string;
