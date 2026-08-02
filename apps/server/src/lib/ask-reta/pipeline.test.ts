@@ -352,6 +352,66 @@ describe('runAskReta — strict citations: message-kind + verified quote ONLY', 
     expect(deps.readThread).toHaveBeenCalledTimes(askRetaLimits.threadsRead);
   });
 
+  it('treats an uploaded text document as bounded, quote-verified evidence', async () => {
+    const quote = 'Le comité valide le lancement mardi à neuf heures.';
+    const model = scriptedModel([
+      JSON.stringify({ actions: [{ type: 'overview' }] }),
+      JSON.stringify({ answer: 'discarded prose', cites: [{ ref: 's1', quote }] }),
+    ]);
+    const result = await runAskReta(
+      makeDeps(model),
+      input({
+        question: 'Que décide ce document ?',
+        context: {
+          attachments: [
+            {
+              name: 'decision.md',
+              type: 'text/markdown',
+              size: 80,
+              text: `Compte-rendu. ${quote} Prochaine étape : prévenir l'équipe.`,
+            },
+          ],
+        },
+      }),
+    );
+
+    expect(result.answer).toContain('decision.md (document joint)');
+    expect(result.answer).toContain(quote);
+    expect(result.citations).toEqual([
+      expect.objectContaining({ kind: 'upload', subject: 'decision.md', quote }),
+    ]);
+    expect(result.steps.map((step) => step.kind)).toEqual(['upload', 'overview']);
+  });
+
+  it('rejects an altered quote attributed to an uploaded document', async () => {
+    const model = scriptedModel([
+      JSON.stringify({ actions: [{ type: 'overview' }] }),
+      JSON.stringify({
+        answer: 'discarded prose',
+        cites: [{ ref: 's1', quote: 'Le comité autorise un virement de cent millions.' }],
+      }),
+    ]);
+    const result = await runAskReta(
+      makeDeps(model, { overview: vi.fn(async () => ({})) }),
+      input({
+        question: 'Que décide ce document ?',
+        context: {
+          attachments: [
+            {
+              name: 'decision.md',
+              type: 'text/markdown',
+              size: 40,
+              text: 'Le comité reporte la décision à la semaine prochaine.',
+            },
+          ],
+        },
+      }),
+    );
+
+    expect(result.citations).toEqual([]);
+    expect(result.answer).toBe(INSUFFICIENT_EVIDENCE_ANSWER);
+  });
+
   it('uses the deterministic single-term fallback plan when the planner returns garbage', async () => {
     const model = scriptedModel(['not json at all', synthesisJson]);
     const deps = makeDeps(model);

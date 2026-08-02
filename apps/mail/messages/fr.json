@@ -121,7 +121,22 @@
       "keySaveError": "Impossible d'enregistrer la clé. Réessayez.",
       "keyRemoveError": "Impossible de supprimer la clé. Réessayez.",
       "currentThreadIncluded": "Fil actuel inclus",
-      "metadataCitation": "Métadonnées du fil"
+      "metadataCitation": "Métadonnées du fil",
+      "collapse": "Replier Ask Reta",
+      "reopen": "Rouvrir Ask Reta",
+      "savedPrompts": "Prompts sauvegardés",
+      "savedPromptsHint": "Prompts sauvegardés — flèche haut dans un champ vide",
+      "addSavedPrompt": "Ajouter un prompt sauvegardé",
+      "deleteSavedPrompt": "Supprimer le prompt {title}",
+      "searchSavedPrompts": "Rechercher dans les prompts…",
+      "promptTitle": "Nom du prompt",
+      "promptContent": "Instructions du prompt",
+      "attachments": "Documents joints à la question",
+      "addAttachment": "Joindre un document",
+      "addAttachmentHint": "Documents texte, CSV, JSON ou Markdown — 2 Mo maximum",
+      "removeAttachment": "Retirer {name}",
+      "attachmentsRejected": "{count} document(s) non ajouté(s) — format texte uniquement, 2 Mo maximum.",
+      "composerHint": "Entrée pour envoyer · ⇧ Entrée pour une ligne"
     },
     "commandPalette": {
       "title": "Palette de commandes",

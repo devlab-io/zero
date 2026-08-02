@@ -11,7 +11,17 @@ import {
   type AskRetaResult,
   type AskRetaSource,
   type AskRetaStep,
+  type AskRetaUploadCitation,
 } from './schema';
+import {
+  DEFAULT_DEADLINE_MS,
+  checkAskRetaBudget as checkBudget,
+  fallbackPlan,
+  isStrictRecentMetadataQuestion,
+  normalizePlan,
+  withAskRetaBudget as withBudget,
+  type AskRetaBudget as Budget,
+} from './planning';
 import {
   askRetaPlanSystemPrompt,
   askRetaPlanUserPrompt,
@@ -30,6 +40,15 @@ import { AskRetaAbortedError } from './errors';
 import sanitizeHtml from 'sanitize-html';
 import { logger } from '../logger';
 import { z } from 'zod';
+
+export {
+  ASK_RETA_DEADLINE_MS,
+  fallbackPlan,
+  fallbackSearchQuery,
+  fallbackSearchTerms,
+  isStrictRecentMetadataQuestion,
+  normalizePlan,
+} from './planning';
 
 /**
  * Typed failure classification (tour 06): every terminal pipeline failure is
@@ -81,299 +100,6 @@ export interface AskRetaDeps {
 // Re-exported for existing consumers; the class (and the honest cancellation
 // contract) lives in ./errors.
 export { AskRetaAbortedError } from './errors';
-
-/** Canonical Ask Reta wall-clock budget — shared by the pipeline race AND the
- * transport-level AbortController (review 02-2: a race rejection alone left
- * the underlying operation running until an unrelated 60s belt). */
-export const ASK_RETA_DEADLINE_MS = 45_000;
-const DEFAULT_DEADLINE_MS = ASK_RETA_DEADLINE_MS;
-
-/** Re-checked after EVERY await (model, overview, search, thread read). */
-type Budget = { signal?: AbortSignal; deadline: number };
-
-const checkBudget = (budget: Budget) => {
-  if (budget.signal?.aborted) throw new AskRetaAbortedError('aborted');
-  if (Date.now() > budget.deadline) throw new AskRetaAbortedError('deadline');
-};
-
-/**
- * Budget race — honest contract (review 02-cancel-contract): on deadline or
- * abort, THE PIPELINE'S WAIT is interrupted immediately (no further step, no
- * further dependency call, late results discarded). The dependency ALREADY
- * DISPATCHED is not killed when its API has no abort contract (Workers AI,
- * DO RPC): it may run to completion on the Cloudflare side — abandoned here.
- */
-const withBudget = async <T>(budget: Budget, run: () => Promise<T>): Promise<T> => {
-  checkBudget(budget);
-  const remaining = Math.max(0, budget.deadline - Date.now());
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  let removeAbortListener: (() => void) | undefined;
-  const expiry = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new AskRetaAbortedError('deadline')), remaining);
-  });
-  // The abort signal joins the race via a once-listener: the WAIT ends
-  // immediately on cancel instead of sitting out the dependency.
-  const aborted = new Promise<never>((_, reject) => {
-    const signal = budget.signal;
-    if (!signal) return; // never settles — the race ignores it
-    const onAbort = () => reject(new AskRetaAbortedError('aborted'));
-    signal.addEventListener('abort', onAbort, { once: true });
-    removeAbortListener = () => signal.removeEventListener('abort', onAbort);
-  });
-  try {
-    const running = run();
-    // The abandoned dependency may settle (or FAIL) long after the race is
-    // lost — its late rejection must never surface as unhandled.
-    running.catch(() => {});
-    const result = await Promise.race([running, expiry, aborted]);
-    if (budget.signal?.aborted) throw new AskRetaAbortedError('aborted');
-    return result;
-  } finally {
-    if (timer !== undefined) clearTimeout(timer);
-    removeAbortListener?.();
-  }
-};
-
-const STOPWORDS = new Set([
-  'the',
-  'a',
-  'an',
-  'and',
-  'or',
-  'of',
-  'to',
-  'in',
-  'on',
-  'for',
-  'with',
-  'about',
-  'what',
-  'when',
-  'who',
-  'how',
-  'did',
-  'does',
-  'is',
-  'are',
-  'was',
-  'were',
-  'my',
-  'me',
-  'i',
-  'le',
-  'la',
-  'les',
-  'un',
-  'une',
-  'des',
-  'de',
-  'du',
-  'et',
-  'ou',
-  'que',
-  'qui',
-  'quoi',
-  'quand',
-  'comment',
-  'est',
-  'sont',
-  'dans',
-  'sur',
-  'pour',
-  'avec',
-  'mon',
-  'ma',
-  'mes',
-  'quel',
-  'quelle',
-  'quels',
-  'quelles',
-  'dernier',
-  'derniere',
-  // Mailbox-generic noise: never discriminating inside a mail client.
-  'from',
-  'many',
-  'email',
-  'emails',
-  'mail',
-  'mails',
-  'courriel',
-  'courriels',
-  'message',
-  'messages',
-  // Recency/inbox vocabulary (tour 09): these words describe the RETRIEVAL
-  // intent, not content — searching them literally matches nothing.
-  'expediteur',
-  'expediteurs',
-  'reception',
-  'boite',
-  'inbox',
-  'sender',
-  'senders',
-  'recent',
-  'recents',
-  'recente',
-  'recentes',
-  'derniers',
-  'dernieres',
-  'latest',
-  'last',
-  'visible',
-  'visibles',
-]);
-
-const stripDiacritics = (word: string) => word.normalize('NFD').replace(/[̀-ͯ]/g, '');
-
-/**
- * The DO search is ONE literal (folded) LIKE over subject/sender — a joined
- * multi-word phrase matches nothing. The fallback therefore picks single
- * discriminating TERMS: emails/numbers first, then longest, stable order.
- */
-export const fallbackSearchTerms = (question: string, count: number): string[] => {
-  const tokens = question
-    .toLowerCase()
-    .replace(/[^\p{L}\p{N}@.\-\s]/gu, ' ')
-    .split(/\s+/)
-    .filter((word) => word.length > 2 && !STOPWORDS.has(stripDiacritics(word)));
-  const unique = [...new Set(tokens)];
-  const score = (word: string) =>
-    (word.includes('@') ? 1_000 : 0) + (/\d/.test(word) ? 500 : 0) + word.length;
-  return unique
-    .map((word, index) => ({ word, index, score: score(word) }))
-    .sort((a, b) => b.score - a.score || a.index - b.index)
-    .slice(0, count)
-    .map((entry) => entry.word);
-};
-
-/**
- * Deterministic fallback query: the single most discriminating term, or ''
- * when the question has none. NEVER the raw phrase (re-review P2): a joined
- * sentence matches nothing in the literal LIKE and leaks the question.
- */
-export const fallbackSearchQuery = (question: string): string =>
-  fallbackSearchTerms(question, 1)[0] ?? '';
-
-const COUNT_QUESTION = /\bcombien\b|\bhow many\b|\bcount\b|\bnombre\b|\bunread\b|\bnon lus?\b/i;
-
-/** Recency intent (tour 09): latest/most-recent questions, FR and EN. */
-const RECENCY_QUESTION =
-  /\b(r[ée]cents?|r[ée]centes?|derni[eè]rs?|derni[eè]res?|latest|most recent|newest)\b|\blast\s+(email|emails|mail|mails|message|messages|sender|senders)\b/i;
-
-/**
- * The recency LISTING only fires when the question is about the mailbox
- * stream itself (inbox/senders/messages) — « la dernière facture Balguerie »
- * stays a literal search (already ordered latest-first by the projection).
- */
-const RECENT_LISTING_HINT =
-  /\b(bo[îi]te|r[ée]ception|inbox|exp[ée]diteurs?|senders?|messages?|emails?|mails?|courriels?)\b/i;
-
-/**
- * Negative guard (revue Codex, tour 11) : toute demande de CONTENU — résumé,
- * corps, « que dit », rédaction/réponse — exige des preuves MESSAGE. NB :
- * « cite » seul n'y figure pas (citer ses sources est compatible metadata).
- */
-const CONTENT_DEMAND =
-  /\b(r[ée]sum[ée]?s?|r[ée]sumer|contenus?|corps|dit|disent|parlent?|say|says|said|talk(s|ing)? about|content|body|bodies|summar(y|ies|ize|ise|izing)|extraits?|excerpts?|r[ée]pond(re|s|ez)?|r[ée]ponses?|reply|draft|r[ée]dige[rz]?|write)\b/i;
-
-/**
- * Prédicat DÉTERMINISTE du court-circuit metadata (tour 11) : dérivé de la
- * QUESTION uniquement — jamais du plan choisi par le modèle. Vrai seulement
- * pour une question de récence STRICTEMENT metadata (qui/quand : expéditeurs,
- * flux de la boîte) SANS demande de contenu/résumé/corps/action.
- */
-export const isStrictRecentMetadataQuestion = (question: string): boolean =>
-  RECENCY_QUESTION.test(question) &&
-  RECENT_LISTING_HINT.test(question) &&
-  !CONTENT_DEMAND.test(question);
-
-export const fallbackPlan = (input: AskRetaInput): AskRetaPlan => {
-  const terms = fallbackSearchTerms(input.question, askRetaLimits.searchesPerAsk);
-  const actions: AskRetaPlan['actions'] = [];
-  // Recency questions ("les 3 expéditeurs les plus récents", "latest
-  // senders") are a RETRIEVAL intent, not a literal needle: list the most
-  // recent inbox threads then READ the top results so the answer can cite
-  // real messages. A remaining discriminating term still gets its search.
-  if (RECENCY_QUESTION.test(input.question) && RECENT_LISTING_HINT.test(input.question)) {
-    if (isStrictRecentMetadataQuestion(input.question)) {
-      // Tour 10 : la réponse de récence est METADATA et déterministe — le
-      // listing seul suffit (zéro corps lu, zéro appel de synthèse, plus vite).
-      actions.push({
-        type: 'list_recent',
-        folder: input.context.folder ?? 'inbox',
-        limit: askRetaLimits.threadsRead,
-      });
-      return { actions: actions.slice(0, askRetaLimits.planActions) };
-    }
-    // Tour 11 : demande de CONTENU récent (« résume mes derniers emails ») —
-    // le listing fournit les fils, la LECTURE fournit les preuves message,
-    // la synthèse tourne normalement.
-    actions.push({
-      type: 'list_recent',
-      folder: input.context.folder ?? 'inbox',
-      limit: askRetaLimits.threadsRead,
-    });
-    actions.push({ type: 'read_thread', target: 'top_results' });
-    if (terms[0])
-      actions.push({
-        type: 'search',
-        query: terms[0],
-        ...(input.context.folder ? { folder: input.context.folder } : {}),
-      });
-    return { actions: actions.slice(0, askRetaLimits.planActions) };
-  }
-  if (input.context.selectedThreadIds.length) {
-    actions.push({ type: 'read_thread', target: 'selected' });
-  }
-  if (COUNT_QUESTION.test(input.question)) actions.push({ type: 'overview' });
-  // No discriminating token → the search is OMITTED (an empty plan yields the
-  // insufficient-evidence answer); the full phrase is never reused as a query.
-  if (terms[0])
-    actions.push({
-      type: 'search',
-      query: terms[0],
-      ...(input.context.folder ? { folder: input.context.folder } : {}),
-    });
-  if (input.context.threadId) actions.push({ type: 'read_thread', target: 'open' });
-  if (terms[1]) actions.push({ type: 'search', query: terms[1] });
-  return { actions: actions.slice(0, askRetaLimits.planActions) };
-};
-
-/** Enforce every plan cap; an ill-formed plan degrades, it never throws. */
-export const normalizePlan = (plan: AskRetaPlan, input: AskRetaInput): AskRetaPlan => {
-  const actions: AskRetaPlan['actions'] = [];
-  let searches = 0;
-  let hasOverview = false;
-  for (const action of plan.actions) {
-    if (actions.length >= askRetaLimits.planActions) break;
-    if (action.type === 'overview') {
-      if (hasOverview) continue;
-      hasOverview = true;
-      actions.push(action);
-    } else if (action.type === 'search') {
-      if (searches >= askRetaLimits.searchesPerAsk) continue;
-      searches += 1;
-      actions.push(action);
-    } else if (action.type === 'list_recent') {
-      // Shares the search budget (it IS a listing retrieval) and produces
-      // top results a read_thread can consume. Limit hard-clamped 1..10.
-      if (searches >= askRetaLimits.searchesPerAsk) continue;
-      searches += 1;
-      actions.push({
-        type: 'list_recent',
-        ...(action.folder ? { folder: action.folder } : {}),
-        limit: Math.min(Math.max(action.limit ?? askRetaLimits.threadsRead, 1), 10),
-      });
-    } else if (action.type === 'read_thread') {
-      if (action.target === 'open' && !input.context.threadId) continue;
-      if (action.target === 'selected' && input.context.selectedThreadIds.length === 0) continue;
-      if (action.target === 'top_results' && searches === 0) continue;
-      if (actions.some((a) => a.type === 'read_thread' && a.target === action.target)) continue;
-      actions.push(action);
-    }
-  }
-  if (actions.length === 0) return fallbackPlan(input);
-  return { actions };
-};
 
 const sha256Hex = async (value: string): Promise<string> => {
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value));
@@ -478,6 +204,26 @@ const executePlan = async (
       logger.warn('[ask-reta] onStep listener failed');
     }
   };
+
+  if (input.context.attachments.length > 0) {
+    const refs: string[] = [];
+    for (const [index, attachment] of input.context.attachments.entries()) {
+      const source = await addSource(gathered, {
+        kind: 'upload',
+        threadId: `upload:${index + 1}`,
+        subject: attachment.name,
+        sender: 'User upload',
+        date: 'current request',
+        excerpt: attachment.text,
+      });
+      refs.push(source.ref);
+    }
+    pushStep({
+      kind: 'upload',
+      detail: `${refs.length} uploaded document${refs.length === 1 ? '' : 's'} read`,
+      sourceRefs: refs,
+    });
+  }
 
   const phaseOfAction = (action: AskRetaPlan['actions'][number]): AskRetaPhase =>
     action.type === 'overview' ? 'overview' : action.type === 'read_thread' ? 'read' : 'search';
@@ -781,7 +527,7 @@ const normalizeForQuoteMatch = (value: string) => value.replace(/\s+/g, ' ').tri
  * valid citations: the assistant must say so instead of sounding grounded.
  */
 export const INSUFFICIENT_EVIDENCE_ANSWER =
-  "Preuve insuffisante dans la boîte pour fonder cette réponse — précisez l'expéditeur, le sujet ou la période. (Insufficient mailbox evidence to ground this answer.)";
+  "Preuve insuffisante dans la boîte ou les documents joints pour fonder cette réponse — précisez l'expéditeur, le sujet, la période ou ajoutez un document texte. (Insufficient mailbox or attachment evidence to ground this answer.)";
 
 /** Served when only a draft proposal exists — a proposal is reviewable, not proof. */
 export const PROPOSAL_ONLY_ANSWER =
@@ -796,14 +542,18 @@ const EXTRACTIVE_ANSWER_MAX_CITATIONS = 6;
  * server-side from validated citations only (sender/date + verbatim quote,
  * bounded). The model's free text is never displayed.
  */
-export const formatExtractiveAnswer = (citations: AskRetaMessageCitation[]): string => {
+type AskRetaContentCitation = AskRetaMessageCitation | AskRetaUploadCitation;
+
+export const formatExtractiveAnswer = (citations: AskRetaContentCitation[]): string => {
   const shown = citations.slice(0, EXTRACTIVE_ANSWER_MAX_CITATIONS);
-  const lines = shown.map(
-    (citation) => `— ${citation.sender} (${citation.date}) : « ${citation.quote} »`,
+  const lines = shown.map((citation) =>
+    citation.kind === 'upload'
+      ? `— ${citation.subject} (document joint) : « ${citation.quote} »`
+      : `— ${citation.sender} (${citation.date}) : « ${citation.quote} »`,
   );
   const hidden = citations.length - shown.length;
   const suffix = hidden > 0 ? `\n(+ ${hidden} autre(s) extrait(s) cité(s))` : '';
-  return `Extraits vérifiés de votre boîte :\n${lines.join('\n')}${suffix}`;
+  return `Extraits vérifiés de votre boîte et de vos documents :\n${lines.join('\n')}${suffix}`;
 };
 
 // Whitelisted numeric overview fields — the ONLY values a citation-free answer
@@ -862,18 +612,18 @@ export const formatOverviewAnswer = (overview: unknown): string | null => {
  * are NEVER promoted to evidence (unchanged contract).
  */
 const buildDeterministicFallbackResult = (gathered: Gathered): Omit<AskRetaResult, 'model'> => {
-  const citations: AskRetaMessageCitation[] = [];
+  const citations: AskRetaContentCitation[] = [];
   const citedThreads = new Set<string>();
   const tryCite = (source: AskRetaSource, requireNewThread: boolean): void => {
     if (citations.length >= EXTRACTIVE_ANSWER_MAX_CITATIONS) return;
-    if (source.kind !== 'message') return;
+    if (source.kind !== 'message' && source.kind !== 'upload') return;
     if (requireNewThread && citedThreads.has(source.threadId)) return;
     if (citations.some((citation) => citation.ref === source.ref)) return;
     const quote = source.excerpt.replace(/\s+/g, ' ').trim().slice(0, 240).trim();
     // Same evidence floor as model citations; a sanitizer marker is never citable.
     if (quote.length < 24 || containsSanitizerMarker(quote)) return;
     const { excerpt: _excerpt, kind: _kind, ...rest } = source;
-    citations.push({ ...rest, kind: 'message', quote });
+    citations.push({ ...rest, kind: source.kind, quote });
     citedThreads.add(source.threadId);
   };
   // THREAD-DIVERSE first (tour 09): one citation per distinct thread — a
@@ -967,11 +717,11 @@ export async function runAskReta(
   // quote is a substring of that source's excerpt. Everything else — unknown
   // refs, metadata refs, missing/altered quotes — yields ZERO citations.
   // Metadata sources still power sources/steps (thread discovery), never proof.
-  const citations: AskRetaMessageCitation[] = [];
+  const citations: AskRetaContentCitation[] = [];
   for (const cite of synthesis.cites) {
     const source = byRef.get(cite.ref);
     if (!source) continue;
-    if (source.kind !== 'message') continue;
+    if (source.kind !== 'message' && source.kind !== 'upload') continue;
     if (citations.some((c) => c.ref === cite.ref)) continue;
     // A quote carrying a sanitizer marker is a forgery attempt, never evidence.
     if (containsSanitizerMarker(cite.quote)) continue;
@@ -979,7 +729,7 @@ export async function runAskReta(
       continue;
     }
     const { excerpt: _excerpt, kind: _kind, ...citation } = source;
-    citations.push({ ...citation, kind: 'message', quote: cite.quote });
+    citations.push({ ...citation, kind: source.kind, quote: cite.quote });
   }
 
   // Reply proposals require the open thread to have been read successfully

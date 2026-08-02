@@ -32,6 +32,16 @@ export type AskRetaCitationView =
       sender: string;
       date: string;
       excerptHash: string;
+    }
+  | {
+      ref: string;
+      kind: 'upload';
+      threadId: string;
+      subject: string;
+      sender: string;
+      date: string;
+      excerptHash: string;
+      quote: string;
     };
 
 export type AskRetaProposalView = {
@@ -52,7 +62,7 @@ export type AskRetaStepThreadView = {
 export type AskRetaStepView = {
   /** Client-assigned render identity (the server step carries none). */
   id: string;
-  kind: 'overview' | 'search' | 'read_thread';
+  kind: 'overview' | 'search' | 'read_thread' | 'upload';
   detail: string;
   sourceRefs: string[];
   /** Search steps: exact metadata thread set + visible/replayable query (slice 2). */
@@ -74,6 +84,7 @@ export type AskRetaTurn = {
   id: string;
   role: 'user' | 'assistant';
   content: string;
+  attachments?: { name: string; type: string; size: number }[];
   payload?: AskRetaAssistantPayload;
 };
 

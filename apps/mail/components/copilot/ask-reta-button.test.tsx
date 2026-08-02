@@ -47,6 +47,7 @@ vi.mock('@/paraglide/messages', () => ({
   m: new Proxy({}, { get: (_target, key) => () => String(key) }),
 }));
 
+import { AskRetaWorkspace } from './ask-reta-workspace';
 import { AskRetaButton } from './ask-reta-button';
 
 let container: HTMLDivElement;
@@ -69,7 +70,12 @@ afterEach(() => {
 describe('AskRetaButton — the sanctioned sidebar entry', () => {
   it('is a native button; a real click opens the panel param and mounts the lazy surface', async () => {
     act(() => {
-      root.render(<AskRetaButton />);
+      root.render(
+        <>
+          <AskRetaButton />
+          <AskRetaWorkspace />
+        </>,
+      );
     });
     const trigger = [...container.querySelectorAll('button')].find((b) =>
       b.textContent?.includes('common.askReta.open'),
@@ -86,6 +92,7 @@ describe('AskRetaButton — the sanctioned sidebar entry', () => {
     expect(queryStore.isAskRetaOpen).toBe('true');
     expect(h.surfaceFactory).toBeGreaterThanOrEqual(factoryBefore);
     expect(document.querySelector('[data-testid="ask-reta-surface"]')).toBeTruthy();
+    expect(document.documentElement.dataset.askRetaOpen).toBe('true');
 
     // A11y: the dialog carries a NON-EMPTY title and description (sr-only).
     expect(document.body.textContent).toContain('common.askReta.title');
@@ -96,7 +103,12 @@ describe('AskRetaButton — the sanctioned sidebar entry', () => {
 describe('AskRetaButton — P8 : panneau latéral non-modal persistant', () => {
   const openPanel = async () => {
     act(() => {
-      root.render(<AskRetaButton />);
+      root.render(
+        <>
+          <AskRetaButton />
+          <AskRetaWorkspace />
+        </>,
+      );
     });
     const trigger = [...container.querySelectorAll('button')].find((b) =>
       b.textContent?.includes('common.askReta.open'),
@@ -119,13 +131,19 @@ describe('AskRetaButton — P8 : panneau latéral non-modal persistant', () => {
   it('le bouton de fermeture remet le param à null et démonte le panneau', async () => {
     await openPanel();
     const close = [...document.querySelectorAll('aside button')].find((b) =>
-      b.getAttribute('aria-label')?.includes('common.actions.close'),
+      b.getAttribute('aria-label')?.includes('common.askReta.collapse'),
     )!;
     await act(async () => {
       close.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
     });
     expect(queryStore.isAskRetaOpen).toBeNull();
     expect(document.querySelector('aside[role="complementary"]')).toBeNull();
+    expect(document.documentElement.dataset.askRetaOpen).toBeUndefined();
+    expect(
+      [...document.querySelectorAll('button')].some((button) =>
+        button.getAttribute('aria-label')?.includes('common.askReta.reopen'),
+      ),
+    ).toBe(true);
   });
 
   it('Escape DANS le panneau ferme ; le trigger re-clique = toggle', async () => {

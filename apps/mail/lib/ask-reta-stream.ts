@@ -22,6 +22,7 @@ export type AskRetaStreamInput = {
     folder?: 'inbox' | 'sent' | 'archive' | 'spam' | 'trash' | 'bin' | 'draft' | 'snoozed';
     selectedThreadIds?: string[];
     draft?: { subject?: string; to?: string; body?: string };
+    attachments?: { name: string; type: string; size: number; text: string }[];
   };
 };
 

@@ -18,19 +18,21 @@ import {
   loadAskRetaConversation,
   saveAskRetaConversation,
 } from '@/lib/ask-reta-conversation-storage';
+import { AskRetaConversation, askRetaProposalBodyToText } from './ask-reta-conversation';
 import { insertIntoComposer, type ComposerInsertPayload } from '@/lib/composer-insert';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { hasLiveComposer, readLiveDraft } from '@/lib/live-draft-registry';
 import { AskRetaStreamError, streamAskReta } from '@/lib/ask-reta-stream';
-import { LoaderCircle, Mail, Sparkles, Trash2 } from 'lucide-react';
+import type { AskRetaAttachment } from '@/lib/ask-reta-attachments';
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { useReplyStatePurge } from '@/hooks/use-reply-state-purge';
 import { useActiveConnection } from '@/hooks/use-connections';
+import { AskRetaComposer } from './ask-reta-composer';
+import { Mail, Sparkles, Trash2 } from 'lucide-react';
 import { useTRPC } from '@/providers/query-provider';
 import { useMail } from '@/components/mail/use-mail';
 import { Button } from '@/components/ui/button';
 import { useSession } from '@/lib/auth-client';
-import { Input } from '@/components/ui/input';
 import { m } from '@/paraglide/messages';
 import { useParams } from 'react-router';
 import { useQueryState } from 'nuqs';
@@ -63,6 +65,10 @@ const MODEL_PROVIDER_GROUPS: { provider: string; label: string }[] = [
 const HISTORY_TURNS = 6;
 const HISTORY_TURN_CHARS = 2_000;
 const DRAFT_CONTEXT_CHARS = 8_000;
+type ConversationScope = { userId: string; connectionId: string };
+const sameScope = (a: ConversationScope | null, b: ConversationScope | null) =>
+  !!a && !!b && a.userId === b.userId && a.connectionId === b.connectionId;
+const scopeKeyOf = (scope: ConversationScope) => `${scope.userId}::${scope.connectionId}`;
 
 const boundDraftContext = (draft: { subject: string; to: string; body: string }) => {
   const bounded = {
@@ -109,6 +115,7 @@ export function AskRetaSurface() {
   const queryClient = useQueryClient();
   const [conversation, setConversation] = useAtom(askRetaConversationAtom);
   const [question, setQuestion] = useState('');
+  const [attachments, setAttachments] = useState<AskRetaAttachment[]>([]);
   const [threadId] = useQueryState('threadId');
   const { folder: routeFolder } = useParams<{ folder: string }>();
   const [mail] = useMail();
@@ -169,11 +176,6 @@ export function AskRetaSurface() {
   const userId = session?.user?.id;
   const { data: activeConnectionData } = useActiveConnection();
   const connectionId = activeConnectionData?.id;
-
-  type ConversationScope = { userId: string; connectionId: string };
-  const sameScope = (a: ConversationScope | null, b: ConversationScope | null) =>
-    !!a && !!b && a.userId === b.userId && a.connectionId === b.connectionId;
-  const scopeKeyOf = (scope: ConversationScope) => `${scope.userId}::${scope.connectionId}`;
 
   // Re-renderable hydration flag: submitting is DISABLED until the atom holds
   // the current scope's hydrated turns — a fast click at mount/switch can
@@ -259,6 +261,7 @@ export function AskRetaSurface() {
     setIsAsking(false);
     setLiveSteps([]);
     setQuestion('');
+    setAttachments([]);
     setAnnouncement('');
     // Slice 3B: the model manager dies with the scope too — its cards hold
     // ephemeral secret state that must never survive an account switch (the
@@ -276,7 +279,7 @@ export function AskRetaSurface() {
     const turns = loadAskRetaConversation(userId, connectionId);
     pendingHydrationRef.current = { scope: nextScope, turns };
     setConversation(turns);
-  }, [userId, connectionId, setConversation]);
+  }, [userId, connectionId, setConversation, setThreadCapture]);
 
   useEffect(() => {
     const pending = pendingHydrationRef.current;
@@ -300,6 +303,7 @@ export function AskRetaSurface() {
   const submit = async () => {
     const trimmed = question.trim();
     if (!trimmed || isAsking || !isHydrated) return;
+    const attachmentsAtSubmit = attachments;
 
     const history = conversation
       .slice(-HISTORY_TURNS)
@@ -307,9 +311,23 @@ export function AskRetaSurface() {
 
     setConversation((prev) => [
       ...prev,
-      { id: crypto.randomUUID(), role: 'user', content: trimmed },
+      {
+        id: crypto.randomUUID(),
+        role: 'user',
+        content: trimmed,
+        ...(attachmentsAtSubmit.length
+          ? {
+              attachments: attachmentsAtSubmit.map(({ name, type, size }) => ({
+                name,
+                type,
+                size,
+              })),
+            }
+          : {}),
+      },
     ]);
     setQuestion('');
+    setAttachments([]);
 
     // Single read per submit, on the composer's exact OWNED scope key —
     // isHydrated guarantees userId/connectionId are resolved here.
@@ -344,6 +362,16 @@ export function AskRetaSurface() {
             ...(canonicalFolder ? { folder: canonicalFolder } : {}),
             ...(selectedThreadIds.length ? { selectedThreadIds } : {}),
             ...(draftContext ? { draft: draftContext } : {}),
+            ...(attachmentsAtSubmit.length
+              ? {
+                  attachments: attachmentsAtSubmit.map(({ name, type, size, text }) => ({
+                    name,
+                    type,
+                    size,
+                    text,
+                  })),
+                }
+              : {}),
           },
         },
         signal: controller.signal,
@@ -567,18 +595,11 @@ export function AskRetaSurface() {
     }
   };
 
-  const proposalText = (bodyHtml: string) =>
-    bodyHtml
-      .replace(/<br\s*\/?>/gi, '\n')
-      .replace(/<\/p>/gi, '\n\n')
-      .replace(/<[^>]*>/g, '')
-      .trim();
-
   const copyProposal = async (payload: AskRetaAssistantPayload) => {
     const proposal = payload.proposal;
     if (!proposal) return;
     try {
-      await navigator.clipboard.writeText(proposalText(proposal.bodyHtml));
+      await navigator.clipboard.writeText(askRetaProposalBodyToText(proposal.bodyHtml));
       toast.success(m['common.askReta.copied']());
     } catch (error) {
       log.error('Ask Reta clipboard copy failed', error);
@@ -695,150 +716,19 @@ export function AskRetaSurface() {
         {isHydrated ? announcement : ''}
       </p>
 
-      <div ref={scrollRef} className="flex-1 space-y-4 overflow-y-auto p-4">
-        {visibleConversation.length === 0 && (
-          <p className="text-muted-foreground pt-8 text-center text-sm">
-            {m['common.askReta.empty']()}
-          </p>
-        )}
-        {visibleConversation.map((turn) => (
-          <div key={turn.id} className={turn.role === 'user' ? 'flex justify-end' : ''}>
-            <div
-              className={
-                turn.role === 'user'
-                  ? 'max-w-[85%] rounded-lg bg-[#006FFE] px-3 py-2 text-sm text-white'
-                  : 'bg-muted/60 max-w-[95%] rounded-lg px-3 py-2 text-sm'
-              }
-            >
-              <p className="whitespace-pre-wrap">{turn.content}</p>
-
-              {turn.payload?.steps && turn.payload.steps.length > 0 && (
-                <ul className="text-muted-foreground mt-2 space-y-1 text-[11px]">
-                  {turn.payload.steps.map((step) =>
-                    step.search ? (
-                      <AskRetaSearchStep
-                        key={step.id}
-                        step={step}
-                        onOpenThread={openCitation}
-                        onReplay={(query) =>
-                          replaySearch(turn.id, step.id, query, step.search?.folder)
-                        }
-                      />
-                    ) : (
-                      <li key={step.id}>· {step.detail}</li>
-                    ),
-                  )}
-                </ul>
-              )}
-
-              {turn.payload?.citations && turn.payload.citations.length > 0 && (
-                <div className="mt-2">
-                  <p className="text-muted-foreground text-[11px] font-medium">
-                    {/* Tour 12 : un tour DONT TOUTES les citations sont
-                        metadata est titré « Métadonnées du fil » — la nature
-                        de la preuve se lit au premier coup d'œil. */}
-                    {turn.payload.citations.every((citation) => citation.kind === 'metadata')
-                      ? m['common.askReta.metadataCitation']()
-                      : m['common.askReta.sources']()}
-                  </p>
-                  <div className="mt-1 flex flex-wrap gap-1.5">
-                    {turn.payload.citations.map((citation) => (
-                      <button
-                        key={citation.ref}
-                        type="button"
-                        onClick={() => openCitation(citation.threadId)}
-                        title={
-                          citation.kind === 'metadata'
-                            ? // Métadonnées présentées comme CHAMPS — jamais
-                              // comme un extrait du corps (tour 10).
-                              `${m['common.askReta.metadataCitation']()} — ${citation.sender} — ${citation.date}`
-                            : `${citation.sender} — ${citation.date}${citation.quote ? ` — « ${citation.quote} »` : ''}`
-                        }
-                        className="bg-background hover:bg-accent max-w-[240px] truncate rounded-full border px-2 py-0.5 text-[11px] transition-colors"
-                      >
-                        {citation.kind === 'metadata' ? (
-                          <>
-                            <span className="text-muted-foreground">
-                              {m['common.askReta.metadataCitation']()} ·{' '}
-                            </span>
-                            {citation.sender} — {citation.subject}
-                          </>
-                        ) : (
-                          citation.subject
-                        )}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {turn.payload?.proposal && (
-                <div className="bg-background mt-2 rounded-lg border p-2">
-                  <p className="text-[11px] font-medium">{m['common.askReta.proposal']()}</p>
-                  {turn.payload.proposal.subject && (
-                    <p className="text-muted-foreground mt-0.5 text-xs">
-                      {turn.payload.proposal.subject}
-                    </p>
-                  )}
-                  {/* Text-only preview: the sanitized HTML is used solely when
-                      inserting into the composer or saving a Gmail draft. */}
-                  <p className="text-muted-foreground mt-1 max-h-40 overflow-y-auto whitespace-pre-wrap text-xs">
-                    {proposalText(turn.payload.proposal.bodyHtml)}
-                  </p>
-                  <div className="mt-2 flex flex-wrap gap-1.5">
-                    {canInsertProposal(turn.payload) && (
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        className="h-7 text-xs"
-                        onClick={() => openProposalInComposer(turn.payload!)}
-                      >
-                        {m['common.askReta.openInComposer']()}
-                      </Button>
-                    )}
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      className="h-7 text-xs"
-                      disabled={createDraft.isPending}
-                      onClick={() => void saveProposalAsDraft(turn.payload!)}
-                    >
-                      {m['common.askReta.createDraft']()}
-                    </Button>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="ghost"
-                      className="h-7 text-xs"
-                      onClick={() => void copyProposal(turn.payload!)}
-                    >
-                      {m['common.askReta.copy']()}
-                    </Button>
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        ))}
-        {visibleAsking && (
-          <div className="text-muted-foreground space-y-1 text-xs">
-            <div className="flex items-center gap-2">
-              <LoaderCircle className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
-              {m['common.askReta.thinking']()}
-            </div>
-            {/* Steps stream in as the pipeline completes them (slice 2). */}
-            {liveSteps.length > 0 && (
-              <ul className="space-y-0.5 pl-5 text-[11px]">
-                {liveSteps.map((step) => (
-                  <li key={step.id}>· {step.detail}</li>
-                ))}
-              </ul>
-            )}
-          </div>
-        )}
-      </div>
+      <AskRetaConversation
+        turns={visibleConversation}
+        asking={visibleAsking}
+        liveSteps={liveSteps}
+        scrollRef={scrollRef}
+        savingDraft={createDraft.isPending}
+        onOpenThread={openCitation}
+        onReplaySearch={replaySearch}
+        canInsertProposal={canInsertProposal}
+        onOpenProposal={openProposalInComposer}
+        onSaveProposal={saveProposalAsDraft}
+        onCopyProposal={copyProposal}
+      />
 
       {/* Visual context (prod CUA fix 2026-08-01): the open thread rides along
           with the ask — say so. Subject ONLY if already cached (getQueryData,
@@ -883,114 +773,19 @@ export function AskRetaSurface() {
             {m['common.askReta.draftIncluded']()}
           </p>
         )}
-      <form
-        className="flex flex-wrap gap-2 border-t p-3 sm:flex-nowrap"
-        onSubmit={(event) => {
-          event.preventDefault();
-          void submit();
-        }}
-      >
-        <Input
-          // Render-time gate on top of the effect purge: the unsent question of
-          // a stale scope is never painted, not even the pre-effect frame.
-          value={isHydrated ? question : ''}
-          disabled={!isHydrated}
-          onChange={(event) => setQuestion(event.target.value)}
-          placeholder={m['common.askReta.placeholder']()}
-          aria-label={m['common.askReta.placeholder']()}
-          className="h-9"
-          autoFocus
-        />
-        {visibleAsking ? (
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            className="h-9"
-            onClick={() => abortRef.current?.abort()}
-          >
-            {m['common.askReta.stop']()}
-          </Button>
-        ) : (
-          <Button
-            type="submit"
-            size="sm"
-            className="h-9"
-            disabled={!question.trim() || !isHydrated}
-          >
-            {m['common.askReta.send']()}
-          </Button>
-        )}
-      </form>
+      <AskRetaComposer
+        question={isHydrated ? question : ''}
+        onQuestionChange={setQuestion}
+        attachments={isHydrated ? attachments : []}
+        onAttachmentsChange={setAttachments}
+        userId={userId}
+        connectionId={connectionId}
+        disabled={!isHydrated}
+        asking={visibleAsking}
+        onSubmit={() => void submit()}
+        onStop={() => abortRef.current?.abort()}
+      />
     </div>
-  );
-}
-
-/**
- * A search step: the exact metadata thread set the search returned, each
- * thread clickable, with the query visible, editable and replayable (same
- * caps, same read-only path — copilot.searchPreview).
- */
-function AskRetaSearchStep({
-  step,
-  onOpenThread,
-  onReplay,
-}: {
-  step: AskRetaStepView;
-  onOpenThread: (threadId: string) => void;
-  onReplay: (query: string) => Promise<void>;
-}) {
-  const [query, setQuery] = useState(step.search?.query ?? '');
-  const [replaying, setReplaying] = useState(false);
-  if (!step.search) return <li>· {step.detail}</li>;
-
-  return (
-    <li className="space-y-1">
-      <div className="flex items-center gap-1.5">
-        <span aria-hidden="true">·</span>
-        <Input
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-          aria-label={m['common.askReta.searchQueryLabel']()}
-          className="h-6 max-w-[240px] px-1.5 text-[11px]"
-        />
-        <Button
-          type="button"
-          size="sm"
-          variant="ghost"
-          className="h-6 px-1.5 text-[11px]"
-          disabled={replaying || !query.trim()}
-          onClick={() => {
-            setReplaying(true);
-            void onReplay(query.trim()).finally(() => setReplaying(false));
-          }}
-        >
-          {replaying ? (
-            <LoaderCircle className="h-3 w-3 animate-spin" aria-hidden="true" />
-          ) : (
-            m['common.askReta.replay']()
-          )}
-        </Button>
-        <span className="text-muted-foreground">
-          {step.search.threads.length} {m['common.askReta.threadsFound']()}
-        </span>
-      </div>
-      {step.search.threads.length > 0 && (
-        <div className="flex flex-wrap gap-1 pl-3">
-          {step.search.threads.map((thread) => (
-            <button
-              key={thread.threadId}
-              type="button"
-              onClick={() => onOpenThread(thread.threadId)}
-              title={`${thread.sender} — ${thread.date}`}
-              className="bg-background hover:bg-accent max-w-[220px] truncate rounded-full border px-2 py-0.5 text-[11px] transition-colors"
-            >
-              {thread.subject}
-            </button>
-          ))}
-        </div>
-      )}
-    </li>
   );
 }
 

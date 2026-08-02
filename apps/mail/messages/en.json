@@ -121,7 +121,22 @@
       "keySaveError": "Could not save the key. Try again.",
       "keyRemoveError": "Could not remove the key. Try again.",
       "currentThreadIncluded": "Current thread included",
-      "metadataCitation": "Thread metadata"
+      "metadataCitation": "Thread metadata",
+      "collapse": "Collapse Ask Reta",
+      "reopen": "Reopen Ask Reta",
+      "savedPrompts": "Saved prompts",
+      "savedPromptsHint": "Saved prompts — press Arrow Up in an empty composer",
+      "addSavedPrompt": "Add saved prompt",
+      "deleteSavedPrompt": "Delete prompt {title}",
+      "searchSavedPrompts": "Search saved prompts…",
+      "promptTitle": "Prompt name",
+      "promptContent": "Prompt instructions",
+      "attachments": "Documents attached to this question",
+      "addAttachment": "Attach a document",
+      "addAttachmentHint": "Text, CSV, JSON or Markdown documents — 2 MB maximum",
+      "removeAttachment": "Remove {name}",
+      "attachmentsRejected": "{count} document(s) not added — text formats only, 2 MB maximum.",
+      "composerHint": "Enter to send · Shift Enter for a new line"
     },
     "commandPalette": {
       "title": "Command Palette",

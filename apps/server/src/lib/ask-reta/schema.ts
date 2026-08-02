@@ -34,6 +34,8 @@ export const askRetaLimits = {
   messagesPerThread: 12,
   excerptChars: 1_200,
   citations: 12,
+  uploadedFiles: 5,
+  uploadedFileChars: 16_000,
 } as const;
 
 /** Canonical folders accepted from the current route and planner. */
@@ -78,6 +80,22 @@ export const askRetaInputSchema = z.object({
           body: z.string().max(askRetaLimits.draftChars).optional(),
         })
         .optional(),
+      /** User-selected text documents, extracted client-side and never persisted server-side. */
+      attachments: z
+        .array(
+          z.object({
+            name: z.string().trim().min(1).max(200),
+            type: z.string().trim().min(1).max(100),
+            size: z
+              .number()
+              .int()
+              .nonnegative()
+              .max(2 * 1024 * 1024),
+            text: z.string().trim().min(1).max(askRetaLimits.uploadedFileChars),
+          }),
+        )
+        .max(askRetaLimits.uploadedFiles)
+        .default([]),
     })
     .default({}),
 });
@@ -244,8 +262,8 @@ export type AskRetaSynthesis = z.infer<typeof askRetaSynthesisSchema>;
 /** A retrieved element; `ref` is the only handle the model ever sees. */
 export type AskRetaSource = {
   ref: string;
-  /** 'metadata' = list row (subject/sender only); 'message' = real body text. */
-  kind: 'metadata' | 'message';
+  /** metadata=list row; message=mail body; upload=user-selected text document. */
+  kind: 'metadata' | 'message' | 'upload';
   threadId: string;
   /** Present on message-kind sources only. */
   messageId?: string;
@@ -265,6 +283,12 @@ export type AskRetaMessageCitation = Omit<AskRetaSource, 'excerpt' | 'kind' | 'm
   quote: string;
 };
 
+/** User upload citation: quote verified against the bounded extracted text. */
+export type AskRetaUploadCitation = Omit<AskRetaSource, 'excerpt' | 'kind' | 'messageId'> & {
+  kind: 'upload';
+  quote: string;
+};
+
 /**
  * Metadata citation (tour 10): produced EXCLUSIVELY by deterministic
  * server-side answers to strictly-metadata questions (recency listing,
@@ -277,7 +301,10 @@ export type AskRetaMetadataCitation = Omit<AskRetaSource, 'excerpt' | 'kind' | '
   kind: 'metadata';
 };
 
-export type AskRetaCitation = AskRetaMessageCitation | AskRetaMetadataCitation;
+export type AskRetaCitation =
+  | AskRetaMessageCitation
+  | AskRetaMetadataCitation
+  | AskRetaUploadCitation;
 
 /** Metadata row of a search step — the exact thread set the search returned. */
 export type AskRetaStepThread = {
@@ -288,7 +315,7 @@ export type AskRetaStepThread = {
 };
 
 export type AskRetaStep = {
-  kind: 'overview' | 'search' | 'read_thread';
+  kind: 'overview' | 'search' | 'read_thread' | 'upload';
   detail: string;
   sourceRefs: string[];
   /** Search steps only: visible/replayable query + the exact metadata set. */

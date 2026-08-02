@@ -82,7 +82,7 @@ const boundStep = (step: AskRetaStep): AskRetaStep => ({
 // Runtime contract of every wire event — bounded, terminal events included.
 // Nothing off-schema is EVER enqueued, whatever the pipeline produced.
 const streamStepSchema = z.object({
-  kind: z.enum(['overview', 'search', 'read_thread']),
+  kind: z.enum(['overview', 'search', 'read_thread', 'upload']),
   detail: z.string().max(300),
   sourceRefs: z.array(z.string().max(16)).max(48),
   search: z
@@ -115,6 +115,16 @@ const streamResultSchema = z.object({
           kind: z.literal('message'),
           threadId: z.string().max(200),
           messageId: z.string().max(200).optional(),
+          subject: z.string().max(300),
+          sender: z.string().max(300),
+          date: z.string().max(64),
+          excerptHash: z.string().regex(/^[0-9a-f]{64}$/),
+          quote: z.string().max(300),
+        }),
+        z.object({
+          ref: z.string().max(16),
+          kind: z.literal('upload'),
+          threadId: z.string().max(200),
           subject: z.string().max(300),
           sender: z.string().max(300),
           date: z.string().max(64),
@@ -172,11 +182,13 @@ const boundResult = (
       date: truncate(citation.date, 64),
       excerptHash: citation.excerptHash,
     };
-    return citation.kind === 'message'
+    return citation.kind === 'message' || citation.kind === 'upload'
       ? {
           ...base,
-          kind: 'message' as const,
-          ...(citation.messageId ? { messageId: truncate(citation.messageId, 200) } : {}),
+          kind: citation.kind,
+          ...(citation.kind === 'message' && citation.messageId
+            ? { messageId: truncate(citation.messageId, 200) }
+            : {}),
           quote: truncate(citation.quote, 300),
         }
       : // kind préservé TEL QUEL : un kind hors contrat n'est jamais blanchi

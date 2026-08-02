@@ -188,15 +188,29 @@ const baseResult = (answer: string) => ({
 });
 
 const askQuestion = async (text: string) => {
-  const input = container.querySelector('input')! as HTMLInputElement;
+  const input = container.querySelector(
+    'textarea[aria-label="common.askReta.placeholder"]',
+  )! as HTMLTextAreaElement;
   const form = container.querySelector('form')!;
-  const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
+  const setValue = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
   act(() => {
     setValue.call(input, text);
     input.dispatchEvent(new Event('input', { bubbles: true }));
   });
   await act(async () => {
     form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+  });
+};
+
+const attachTextFile = async (name: string, text: string, type = 'text/markdown') => {
+  const fileInput = container.querySelector('input[type="file"]')! as HTMLInputElement;
+  const file = new File([text], name, { type });
+  Object.defineProperty(fileInput, 'files', {
+    configurable: true,
+    value: [file],
+  });
+  await act(async () => {
+    fileInput.dispatchEvent(new Event('change', { bubbles: true }));
   });
 };
 
@@ -539,14 +553,16 @@ describe('AskRetaSurface — hydration gate', () => {
   it('Ask stays DISABLED until the scope is hydrated, enabled after', async () => {
     harness.connectionId = undefined; // no scope → hydration cannot complete
     render();
-    const input = container.querySelector('input')! as HTMLInputElement;
-    const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
+    const input = container.querySelector(
+      'textarea[aria-label="common.askReta.placeholder"]',
+    )! as HTMLTextAreaElement;
+    const setValue = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
     act(() => {
       setValue.call(input, 'question trop rapide');
       input.dispatchEvent(new Event('input', { bubbles: true }));
     });
     const sendButton = [...container.querySelectorAll('button')].find((b) =>
-      b.textContent?.includes('askReta.send'),
+      b.getAttribute('aria-label')?.includes('askReta.send'),
     )!;
     expect(sendButton.hasAttribute('disabled')).toBe(true);
 
@@ -565,7 +581,9 @@ describe('AskRetaSurface — hydration gate', () => {
       harness.connectionId = 'conn-a';
     });
     render();
-    const unlockedInput = container.querySelector('input')! as HTMLInputElement;
+    const unlockedInput = container.querySelector(
+      'textarea[aria-label="common.askReta.placeholder"]',
+    )! as HTMLTextAreaElement;
     expect(unlockedInput.hasAttribute('disabled')).toBe(false);
     expect(unlockedInput.value).toBe('');
     act(() => {
@@ -573,7 +591,7 @@ describe('AskRetaSurface — hydration gate', () => {
       unlockedInput.dispatchEvent(new Event('input', { bubbles: true }));
     });
     const enabledButton = [...container.querySelectorAll('button')].find((b) =>
-      b.textContent?.includes('askReta.send'),
+      b.getAttribute('aria-label')?.includes('askReta.send'),
     )!;
     expect(enabledButton.hasAttribute('disabled')).toBe(false);
   });
@@ -631,22 +649,34 @@ describe('AskRetaSurface — review hardening', () => {
 describe('AskRetaSurface — scope switch purges EVERYTHING (review 02-2)', () => {
   it('an UNSENT confidential question typed under A never exists under B', async () => {
     render();
-    const input = container.querySelector('input')! as HTMLInputElement;
-    const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
+    const input = container.querySelector(
+      'textarea[aria-label="common.askReta.placeholder"]',
+    )! as HTMLTextAreaElement;
+    const setValue = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
     act(() => {
       setValue.call(input, 'question confidentielle jamais envoyée');
       input.dispatchEvent(new Event('input', { bubbles: true }));
     });
-    expect((container.querySelector('input') as HTMLInputElement).value).toBe(
-      'question confidentielle jamais envoyée',
-    );
+    expect(
+      (
+        container.querySelector(
+          'textarea[aria-label="common.askReta.placeholder"]',
+        ) as HTMLTextAreaElement
+      ).value,
+    ).toBe('question confidentielle jamais envoyée');
 
     act(() => {
       harness.connectionId = 'conn-b';
     });
     render();
 
-    expect((container.querySelector('input') as HTMLInputElement).value).toBe('');
+    expect(
+      (
+        container.querySelector(
+          'textarea[aria-label="common.askReta.placeholder"]',
+        ) as HTMLTextAreaElement
+      ).value,
+    ).toBe('');
     expect(container.textContent).not.toContain('question confidentielle');
   });
 
@@ -712,7 +742,9 @@ describe('AskRetaSurface — PRE-EFFECT frame of a scope switch (review 02-3)', 
       // the form must show Send, not A's Stop, and no progression block.
       const buttons = [...container.querySelectorAll('button')];
       expect(buttons.some((b) => b.textContent?.includes('askReta.stop'))).toBe(false);
-      expect(buttons.some((b) => b.textContent?.includes('askReta.send'))).toBe(true);
+      expect(buttons.some((b) => b.getAttribute('aria-label')?.includes('askReta.send'))).toBe(
+        true,
+      );
       expect(container.textContent).not.toContain('askReta.thinking');
     } finally {
       actEnv.IS_REACT_ACT_ENVIRONMENT = true;
@@ -1183,6 +1215,46 @@ describe('AskRetaSurface — P8 folder and bulk-selection context', () => {
       input: { context: { folder?: string } };
     };
     expect(sent.input.context.folder).toBeUndefined();
+  });
+});
+
+describe('AskRetaSurface — uploaded document context', () => {
+  it('sends bounded extracted text while persisting only attachment metadata in the turn', async () => {
+    render();
+    await attachTextFile('decision.md', 'Décision vérifiée : lancer le projet lundi.');
+
+    expect(container.textContent).toContain('decision.md');
+    await askQuestion('Que dit ce document ?');
+
+    const sent = harness.streamAskReta.mock.calls[0]![0] as {
+      input: {
+        context: {
+          attachments?: Array<{ name: string; type: string; size: number; text: string }>;
+        };
+      };
+    };
+    expect(sent.input.context.attachments).toEqual([
+      {
+        name: 'decision.md',
+        type: 'text/markdown',
+        size: new Blob(['Décision vérifiée : lancer le projet lundi.']).size,
+        text: 'Décision vérifiée : lancer le projet lundi.',
+      },
+    ]);
+
+    const userTurn = getDefaultStore().get(askRetaConversationAtom)[0];
+    expect(userTurn).toMatchObject({
+      role: 'user',
+      content: 'Que dit ce document ?',
+      attachments: [
+        {
+          name: 'decision.md',
+          type: 'text/markdown',
+          size: new Blob(['Décision vérifiée : lancer le projet lundi.']).size,
+        },
+      ],
+    });
+    expect(JSON.stringify(userTurn)).not.toContain('Décision vérifiée');
   });
 });
 

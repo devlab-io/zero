@@ -53,6 +53,16 @@ const persistedCitationSchema = z.discriminatedUnion('kind', [
     date: bounded(64),
     excerptHash: z.string().regex(/^[0-9a-f]{64}$/),
   }),
+  z.object({
+    ref: bounded(16),
+    kind: z.literal('upload'),
+    threadId: bounded(200),
+    subject: bounded(300),
+    sender: bounded(300),
+    date: bounded(64),
+    excerptHash: z.string().regex(/^[0-9a-f]{64}$/),
+    quote: bounded(300),
+  }),
 ]);
 
 const persistedStepThreadSchema = z.object({
@@ -64,7 +74,7 @@ const persistedStepThreadSchema = z.object({
 
 const persistedStepSchema = z.object({
   id: bounded(64),
-  kind: z.enum(['overview', 'search', 'read_thread']),
+  kind: z.enum(['overview', 'search', 'read_thread', 'upload']),
   detail: bounded(300),
   sourceRefs: z.array(bounded(16)).max(48),
   search: z
@@ -88,6 +98,12 @@ const persistedTurnSchema = z.object({
   id: bounded(64),
   role: z.enum(['user', 'assistant']),
   content: bounded(MAX_CONTENT_CHARS),
+  attachments: z
+    .array(
+      z.object({ name: bounded(200), type: bounded(100), size: z.number().int().nonnegative() }),
+    )
+    .max(5)
+    .optional(),
   payload: persistedPayloadSchema.optional(),
 });
 
@@ -113,6 +129,15 @@ const toPersistedTurn = (turn: AskRetaTurn): PersistedTurn => ({
   id: turn.id.slice(0, 64),
   role: turn.role,
   content: turn.content.slice(0, MAX_CONTENT_CHARS),
+  ...(turn.attachments?.length
+    ? {
+        attachments: turn.attachments.slice(0, 5).map((attachment) => ({
+          name: attachment.name.slice(0, 200),
+          type: attachment.type.slice(0, 100),
+          size: attachment.size,
+        })),
+      }
+    : {}),
   ...(turn.payload
     ? {
         payload: {
