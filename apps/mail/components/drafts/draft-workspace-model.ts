@@ -196,3 +196,53 @@ export const moveDraftSelection = (
   if (index === -1) return direction === 1 ? (ids[0] ?? null) : (ids.at(-1) ?? null);
   return ids[Math.max(0, Math.min(ids.length - 1, index + direction))] ?? currentId;
 };
+
+export const toggleDraftSelection = (
+  selectedIds: ReadonlySet<string>,
+  draftId: string,
+): Set<string> => {
+  const next = new Set(selectedIds);
+  if (next.has(draftId)) next.delete(draftId);
+  else next.add(draftId);
+  return next;
+};
+
+export const selectDraftRange = (
+  orderedIds: readonly string[],
+  selectedIds: ReadonlySet<string>,
+  anchorId: string | null,
+  targetId: string,
+): Set<string> => {
+  const anchorIndex = anchorId ? orderedIds.indexOf(anchorId) : -1;
+  const targetIndex = orderedIds.indexOf(targetId);
+  if (targetIndex === -1) return new Set(selectedIds);
+  if (anchorIndex === -1) return toggleDraftSelection(selectedIds, targetId);
+
+  const start = Math.min(anchorIndex, targetIndex);
+  const end = Math.max(anchorIndex, targetIndex);
+  const next = new Set(selectedIds);
+  orderedIds.slice(start, end + 1).forEach((id) => next.add(id));
+  return next;
+};
+
+export const nextDraftAfterDeletion = (
+  orderedIds: readonly string[],
+  currentId: string | null,
+  deletedIds: ReadonlySet<string>,
+): string | null => {
+  const remaining = orderedIds.filter((id) => !deletedIds.has(id));
+  if (!remaining.length) return null;
+  if (!currentId || !deletedIds.has(currentId)) {
+    return currentId && remaining.includes(currentId) ? currentId : (remaining[0] ?? null);
+  }
+
+  const currentIndex = orderedIds.indexOf(currentId);
+  const next = orderedIds.slice(currentIndex + 1).find((id) => !deletedIds.has(id));
+  if (next) return next;
+  return (
+    orderedIds
+      .slice(0, currentIndex)
+      .reverse()
+      .find((id) => !deletedIds.has(id)) ?? null
+  );
+};

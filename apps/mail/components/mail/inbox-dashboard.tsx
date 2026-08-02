@@ -1,4 +1,11 @@
 import {
+  dashboardMetricDestination,
+  formatFloorCount,
+  formatSavedTime,
+  metricState,
+  type DashboardMetricKey,
+} from './inbox-dashboard-model';
+import {
   ArrowRight,
   AtSign,
   Bot,
@@ -11,7 +18,6 @@ import {
   UserCheck,
   Users,
 } from 'lucide-react';
-import { formatFloorCount, formatSavedTime, metricState } from './inbox-dashboard-model';
 import { useMailboxOverview } from '@/hooks/use-mailbox-overview';
 import { useTRPC } from '@/providers/query-provider';
 import { useQuery } from '@tanstack/react-query';
@@ -57,7 +63,8 @@ export function InboxDashboard({ onCompose }: InboxDashboardProps) {
 
   const metrics = [
     {
-      key: 'inbox',
+      key: 'inbox' as DashboardMetricKey,
+      to: dashboardMetricDestination('inbox'),
       label: m['common.dashboard.inboxRemaining'](),
       detail: m['common.dashboard.inboxRemainingDetail'](),
       icon: Inbox,
@@ -66,7 +73,8 @@ export function InboxDashboard({ onCompose }: InboxDashboardProps) {
       retry: overview.refetch,
     },
     {
-      key: 'today',
+      key: 'today' as DashboardMetricKey,
+      to: dashboardMetricDestination('today'),
       label: m['common.dashboard.handledToday'](),
       detail: m['common.dashboard.completedSends'](),
       icon: Send,
@@ -75,7 +83,8 @@ export function InboxDashboard({ onCompose }: InboxDashboardProps) {
       retry: overview.refetch,
     },
     {
-      key: 'week',
+      key: 'week' as DashboardMetricKey,
+      to: dashboardMetricDestination('week'),
       label: m['common.dashboard.handledWeek'](),
       detail: m['common.dashboard.completedSends'](),
       icon: Gauge,
@@ -84,7 +93,8 @@ export function InboxDashboard({ onCompose }: InboxDashboardProps) {
       retry: overview.refetch,
     },
     {
-      key: 'drafts',
+      key: 'drafts' as DashboardMetricKey,
+      to: dashboardMetricDestination('drafts'),
       label: m['common.dashboard.draftsWaiting'](),
       detail: m['common.dashboard.readyToFinish'](),
       icon: FilePenLine,
@@ -93,7 +103,8 @@ export function InboxDashboard({ onCompose }: InboxDashboardProps) {
       retry: overview.refetch,
     },
     {
-      key: 'timeSaved',
+      key: 'timeSaved' as DashboardMetricKey,
+      to: dashboardMetricDestination('timeSaved'),
       label: m['common.dashboard.timeSaved'](),
       detail: m['common.dashboard.timeSavedDetail'](),
       icon: Clock3,
@@ -104,7 +115,8 @@ export function InboxDashboard({ onCompose }: InboxDashboardProps) {
       retry: overview.refetch,
     },
     {
-      key: 'assigned',
+      key: 'assigned' as DashboardMetricKey,
+      to: dashboardMetricDestination('assigned'),
       label: m['common.dashboard.assignedToYou'](),
       detail: m['common.dashboard.openSharedThreads'](),
       icon: UserCheck,
@@ -113,7 +125,8 @@ export function InboxDashboard({ onCompose }: InboxDashboardProps) {
       retry: assignedQuery.refetch,
     },
     {
-      key: 'mentions',
+      key: 'mentions' as DashboardMetricKey,
+      to: dashboardMetricDestination('mentions'),
       label: m['common.dashboard.unreadMentions'](),
       detail: m['common.dashboard.teamNotifications'](),
       icon: AtSign,
@@ -122,7 +135,8 @@ export function InboxDashboard({ onCompose }: InboxDashboardProps) {
       retry: notifQuery.refetch,
     },
     {
-      key: 'snoozes',
+      key: 'snoozes' as DashboardMetricKey,
+      to: dashboardMetricDestination('snoozes'),
       label: m['common.dashboard.upcomingSnoozes'](),
       detail:
         snoozeQuery.data?.nextWakeAt != null
@@ -190,10 +204,14 @@ export function InboxDashboard({ onCompose }: InboxDashboardProps) {
 
         <section className="grid grid-cols-2 gap-3 xl:grid-cols-4">
           {metrics.map((metric) => (
-            <article
+            <Link
               key={metric.key}
-              className="rounded-2xl border border-black/[0.06] bg-white p-4 md:p-5 dark:border-white/[0.08] dark:bg-white/[0.035]"
+              to={metric.to}
+              data-testid={`dashboard-metric-${metric.key}`}
+              aria-label={`${metric.label} — ${metric.detail}`}
+              className="group relative rounded-2xl border border-black/[0.06] bg-white p-4 transition-[transform,border-color,background-color] duration-150 hover:-translate-y-0.5 hover:border-blue-500/25 hover:bg-blue-500/[0.025] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 motion-reduce:transform-none motion-reduce:transition-none md:p-5 dark:border-white/[0.08] dark:bg-white/[0.035] dark:hover:bg-blue-500/[0.07]"
             >
+              <ArrowRight className="absolute right-4 top-4 h-4 w-4 text-zinc-400 opacity-0 transition-[opacity,transform] duration-150 group-hover:translate-x-0.5 group-hover:opacity-100 group-focus-visible:opacity-100 motion-reduce:transition-none" />
               <div
                 className={cn(
                   'mb-4 flex h-9 w-9 items-center justify-center rounded-xl',
@@ -220,7 +238,7 @@ export function InboxDashboard({ onCompose }: InboxDashboardProps) {
                 {metric.label}
               </p>
               <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-500">{metric.detail}</p>
-            </article>
+            </Link>
           ))}
         </section>
 

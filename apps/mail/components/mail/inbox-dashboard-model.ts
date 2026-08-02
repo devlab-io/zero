@@ -31,3 +31,28 @@ export function formatSavedTime(minutes: number) {
 export function formatFloorCount(count: number, truncated: boolean): string {
   return truncated ? `${count}+` : `${count}`;
 }
+
+export type DashboardMetricKey =
+  | 'inbox'
+  | 'today'
+  | 'week'
+  | 'drafts'
+  | 'timeSaved'
+  | 'assigned'
+  | 'mentions'
+  | 'snoozes';
+
+const DASHBOARD_METRIC_DESTINATIONS: Record<DashboardMetricKey, string> = {
+  inbox: '/mail/inbox',
+  today: '/mail/sent',
+  week: '/mail/sent',
+  drafts: '/mail/draft',
+  timeSaved: '/mail/sent',
+  assigned: '/team?view=assigned',
+  mentions: '/team?view=mentions',
+  snoozes: '/mail/snoozed',
+};
+
+export function dashboardMetricDestination(metric: DashboardMetricKey): string {
+  return DASHBOARD_METRIC_DESTINATIONS[metric];
+}

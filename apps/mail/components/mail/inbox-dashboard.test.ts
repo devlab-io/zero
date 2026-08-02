@@ -1,4 +1,9 @@
-import { formatFloorCount, formatSavedTime, metricState } from './inbox-dashboard-model';
+import {
+  dashboardMetricDestination,
+  formatFloorCount,
+  formatSavedTime,
+  metricState,
+} from './inbox-dashboard-model';
 import { describe, expect, it } from 'vitest';
 
 describe('formatSavedTime', () => {
@@ -42,5 +47,16 @@ describe('formatFloorCount — troncature honnête', () => {
     expect(formatFloorCount(12, false)).toBe('12');
     expect(formatFloorCount(100, true)).toBe('100+');
     expect(formatFloorCount(0, false)).toBe('0');
+  });
+});
+
+describe('dashboard metric navigation', () => {
+  it('routes every insight to the corresponding real workspace', () => {
+    expect(dashboardMetricDestination('inbox')).toBe('/mail/inbox');
+    expect(dashboardMetricDestination('drafts')).toBe('/mail/draft');
+    expect(dashboardMetricDestination('today')).toBe('/mail/sent');
+    expect(dashboardMetricDestination('assigned')).toBe('/team?view=assigned');
+    expect(dashboardMetricDestination('mentions')).toBe('/team?view=mentions');
+    expect(dashboardMetricDestination('snoozes')).toBe('/mail/snoozed');
   });
 });

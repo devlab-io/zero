@@ -2,7 +2,10 @@ import {
   draftListRow,
   matchesDraftSearch,
   moveDraftSelection,
+  nextDraftAfterDeletion,
+  selectDraftRange,
   stripDraftHtml,
+  toggleDraftSelection,
   buildConfirmedDirectSend,
   canDirectSend,
   directSendClientId,
@@ -56,6 +59,23 @@ describe('draft workspace model', () => {
     expect(moveDraftSelection(ids, 'b', 1)).toBe('c');
     expect(moveDraftSelection(ids, 'c', 1)).toBe('c');
     expect(moveDraftSelection(ids, 'a', -1)).toBe('a');
+  });
+
+  it('toggles individual drafts and extends a range without losing earlier choices', () => {
+    const first = toggleDraftSelection(new Set<string>(), 'b');
+    expect([...first]).toEqual(['b']);
+    expect([...toggleDraftSelection(first, 'b')]).toEqual([]);
+
+    const ranged = selectDraftRange(['a', 'b', 'c', 'd'], new Set(['a']), 'b', 'd');
+    expect([...ranged]).toEqual(['a', 'b', 'c', 'd']);
+  });
+
+  it('keeps preview focus on the nearest surviving draft after a bulk deletion', () => {
+    const ids = ['a', 'b', 'c', 'd'];
+    expect(nextDraftAfterDeletion(ids, 'b', new Set(['b', 'c']))).toBe('d');
+    expect(nextDraftAfterDeletion(ids, 'd', new Set(['c', 'd']))).toBe('b');
+    expect(nextDraftAfterDeletion(ids, 'a', new Set(['b', 'c']))).toBe('a');
+    expect(nextDraftAfterDeletion(ids, 'a', new Set(ids))).toBeNull();
   });
 });
 

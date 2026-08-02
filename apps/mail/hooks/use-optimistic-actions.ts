@@ -72,7 +72,7 @@ export function useOptimisticActions() {
   const { mutateAsync: unsnoozeThreads } = useMutation(trpc.mail.unsnoozeThreads.mutationOptions());
   const { mutateAsync: modifyLabels } = useMutation(trpc.mail.modifyLabels.mutationOptions());
 
-  const { mutateAsync: deleteDraft } = useMutation(trpc.drafts.delete.mutationOptions());
+  const { mutateAsync: deleteDrafts } = useMutation(trpc.drafts.deleteMany.mutationOptions());
 
   const generatePendingActionId = () =>
     `pending_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
@@ -104,7 +104,7 @@ export function useOptimisticActions() {
     execute: () => Promise<void>;
     undo: () => void;
     retry: () => void;
-    toastMessage: string;
+    toastMessage: string | ((itemCount: number) => string);
     folders?: string[];
   }) {
     const pendingActionId = generatePendingActionId();
@@ -128,7 +128,12 @@ export function useOptimisticActions() {
     optimisticActionsManager.pendingActions.set(pendingActionId, pendingAction as PendingAction);
 
     const itemCount = threadIds.length;
-    const bulkActionMessage = itemCount > 1 ? `${toastMessage} (${itemCount} items)` : toastMessage;
+    const bulkActionMessage =
+      typeof toastMessage === 'function'
+        ? toastMessage(itemCount)
+        : itemCount > 1
+          ? `${toastMessage} (${itemCount} items)`
+          : toastMessage;
 
     async function doAction() {
       try {
@@ -175,7 +180,7 @@ export function useOptimisticActions() {
       }
     }
 
-    if (toastMessage.trim().length) {
+    if (bulkActionMessage.trim().length) {
       toast(bulkActionMessage, {
         onAutoClose: () => {
           doAction();
@@ -531,21 +536,24 @@ export function useOptimisticActions() {
     });
   }
 
-  function optimisticDeleteDraft(draftId: string) {
-    if (!draftId) return;
+  function optimisticDeleteDrafts(draftIds: string[]) {
+    const ids = [...new Set(draftIds.filter(Boolean))];
+    if (!ids.length) return;
 
     const optimisticId = addOptimisticAction({
       type: 'DELETE_DRAFT',
-      threadIds: [draftId],
+      threadIds: ids,
     });
 
     createPendingAction({
       type: 'DELETE_DRAFT',
-      threadIds: [draftId],
+      threadIds: ids,
       params: {},
       optimisticId,
       execute: async () => {
-        await deleteDraft({ id: draftId });
+        for (let index = 0; index < ids.length; index += 100) {
+          await deleteDrafts({ ids: ids.slice(index, index + 100) });
+        }
         // CUA round 6 : invalider mail.listThreads refetchait la vérité Gmail
         // encore retardée (le brouillon supprimé y figure quelques secondes) —
         // la ligne réapparaissait au retrait de l'action optimiste. On PURGE
@@ -558,16 +566,22 @@ export function useOptimisticActions() {
         queryClient.setQueriesData(
           { queryKey: trpc.mail.listThreads.infiniteQueryKey({ folder: FOLDERS.DRAFT }) },
           (data: Parameters<typeof pruneThreadFromListPages>[0]) =>
-            pruneThreadFromListPages(data, draftId),
+            ids.reduce((current, id) => pruneThreadFromListPages(current, id), data),
         );
         await queryClient.invalidateQueries({ queryKey: trpc.drafts.list.queryKey() });
+        await queryClient.invalidateQueries({ queryKey: trpc.mail.mailboxOverview.queryKey() });
       },
       undo: () => {
         removeOptimisticAction(optimisticId);
       },
-      retry: () => optimisticDeleteDraft(draftId),
-      toastMessage: 'Draft deleted',
+      retry: () => optimisticDeleteDrafts(ids),
+      toastMessage: (count) =>
+        count === 1 ? m['draftWorkspace.deleted']() : m['draftWorkspace.deletedMany']({ count }),
     });
+  }
+
+  function optimisticDeleteDraft(draftId: string) {
+    optimisticDeleteDrafts([draftId]);
   }
 
   function undoLastAction() {
@@ -603,6 +617,7 @@ export function useOptimisticActions() {
     optimisticSnooze,
     optimisticUnsnooze,
     optimisticDeleteDraft,
+    optimisticDeleteDrafts,
     undoLastAction,
   };
 }

@@ -889,6 +889,15 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
             output: boolean;
             meta: object;
         }>;
+        deleteMany: import("@trpc/server").TRPCMutationProcedure<{
+            input: {
+                ids: string[];
+            };
+            output: {
+                deleted: number;
+            };
+            meta: object;
+        }>;
     }>>;
     labels: import("@trpc/server").TRPCBuiltRouter<{
         ctx: {

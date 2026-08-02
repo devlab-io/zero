@@ -4,7 +4,10 @@ import {
   draftListRow,
   matchesDraftSearch,
   moveDraftSelection,
+  nextDraftAfterDeletion,
+  selectDraftRange,
   stripDraftHtml,
+  toggleDraftSelection,
   type DraftListRow,
 } from './draft-workspace-model';
 import {
@@ -27,9 +30,11 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { DraftBulkActionBar, DraftDeleteDialog } from './draft-bulk-actions';
 import { preloadComposeSurface } from '@/components/create/compose-surface';
 import { useOptimisticActions } from '@/hooks/use-optimistic-actions';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { optimisticActionsAtom } from '@/store/optimistic-updates';
 import { useHotkeys, useHotkeysContext } from 'react-hotkeys-hook';
 import { useMailboxOverview } from '@/hooks/use-mailbox-overview';
 import { QueueReview } from '@/components/queue/queue-review';
@@ -37,6 +42,7 @@ import { interpretSendOutcome } from '@/lib/send-outcome';
 import { useTRPC } from '@/providers/query-provider';
 import { useEffect, useMemo, useState } from 'react';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Checkbox } from '@/components/ui/checkbox';
 import { useSettings } from '@/hooks/use-settings';
 import { useThreads } from '@/hooks/use-threads';
 import { Button } from '@/components/ui/button';
@@ -44,6 +50,7 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { useDraft } from '@/hooks/use-drafts';
 import { m } from '@/paraglide/messages';
+import { useAtomValue } from 'jotai';
 import { useQueryState } from 'nuqs';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
@@ -68,7 +75,20 @@ export function DraftWorkspace() {
   const view: DraftView = viewParam === 'agent' ? 'agent' : 'drafts';
   const [threadsQuery, items, , loadMore] = useThreads();
   const mailboxOverview = useMailboxOverview();
-  const rows = useMemo(() => items.map(draftListRow), [items]);
+  const optimisticActions = useAtomValue(optimisticActionsAtom);
+  const optimisticallyDeletedIds = useMemo(
+    () =>
+      new Set(
+        Object.values(optimisticActions)
+          .filter((action) => action.type === 'DELETE_DRAFT')
+          .flatMap((action) => action.threadIds),
+      ),
+    [optimisticActions],
+  );
+  const rows = useMemo(
+    () => items.map(draftListRow).filter((row) => !optimisticallyDeletedIds.has(row.id)),
+    [items, optimisticallyDeletedIds],
+  );
   const draftCount = mailboxOverview.data?.folders.drafts ?? rows.length;
   const [search, setSearch] = useState('');
   const filteredRows = useMemo(
@@ -76,13 +96,19 @@ export function DraftWorkspace() {
     [rows, search],
   );
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [deleteCandidate, setDeleteCandidate] = useState<DraftListRow | null>(null);
+  const [selectedDraftIds, setSelectedDraftIds] = useState<Set<string>>(() => new Set());
+  const [selectionAnchorId, setSelectionAnchorId] = useState<string | null>(null);
+  const [deleteCandidates, setDeleteCandidates] = useState<DraftListRow[]>([]);
   const [, setComposeOpen] = useQueryState('isComposeOpen');
   const [, setDraftId] = useQueryState('draftId');
-  const { optimisticDeleteDraft } = useOptimisticActions();
+  const { optimisticDeleteDrafts } = useOptimisticActions();
   const { enableScope, disableScope } = useHotkeysContext();
 
   const selectedRow = filteredRows.find((row) => row.id === selectedId) ?? null;
+  const selectedDraftRows = rows.filter((row) => selectedDraftIds.has(row.id));
+  const allVisibleSelected =
+    filteredRows.length > 0 && filteredRows.every((row) => selectedDraftIds.has(row.id));
+  const someVisibleSelected = filteredRows.some((row) => selectedDraftIds.has(row.id));
   const selectedDraft = useDraft(selectedRow?.id ?? null, { enabled: view === 'drafts' });
 
   useEffect(() => {
@@ -111,6 +137,15 @@ export function DraftWorkspace() {
     });
   }, [selectedId]);
 
+  useEffect(() => {
+    const availableIds = new Set(rows.map((row) => row.id));
+    setSelectedDraftIds((current) => {
+      const next = new Set([...current].filter((id) => availableIds.has(id)));
+      return next.size === current.size ? current : next;
+    });
+    if (selectionAnchorId && !availableIds.has(selectionAnchorId)) setSelectionAnchorId(null);
+  }, [rows, selectionAnchorId]);
+
   const openDraft = (id = selectedId) => {
     if (!id) return;
     preloadComposeSurface();
@@ -134,8 +169,50 @@ export function DraftWorkspace() {
     );
   };
 
-  const requestDelete = () => {
-    if (selectedRow) setDeleteCandidate(selectedRow);
+  const toggleSelection = (draftId: string) => {
+    setSelectedDraftIds((current) => toggleDraftSelection(current, draftId));
+    setSelectionAnchorId(draftId);
+  };
+
+  const handleRowSelect = (row: DraftListRow, event: React.MouseEvent<HTMLButtonElement>) => {
+    setSelectedId(row.id);
+    if (event.shiftKey) {
+      const orderedIds = filteredRows.map((item) => item.id);
+      setSelectedDraftIds((current) =>
+        selectDraftRange(orderedIds, current, selectionAnchorId ?? selectedId, row.id),
+      );
+      setSelectionAnchorId((current) => current ?? selectedId ?? row.id);
+    } else if (event.metaKey || event.ctrlKey) {
+      toggleSelection(row.id);
+    }
+  };
+
+  const toggleAllVisible = () => {
+    setSelectedDraftIds((current) => {
+      const next = new Set(current);
+      if (allVisibleSelected) filteredRows.forEach((row) => next.delete(row.id));
+      else filteredRows.forEach((row) => next.add(row.id));
+      return next;
+    });
+    setSelectionAnchorId(filteredRows[0]?.id ?? null);
+  };
+
+  const clearSelection = () => {
+    setSelectedDraftIds(new Set());
+    setSelectionAnchorId(null);
+  };
+
+  const requestDeleteCurrent = () => {
+    if (selectedRow) setDeleteCandidates([selectedRow]);
+  };
+
+  const requestDeleteSelection = () => {
+    const candidates = selectedDraftRows.length
+      ? selectedDraftRows
+      : selectedRow
+        ? [selectedRow]
+        : [];
+    if (candidates.length) setDeleteCandidates(candidates);
   };
 
   // --- Envoi direct (Mod+Enter) : brouillon COMPLET chargé, confirmation
@@ -221,12 +298,18 @@ export function DraftWorkspace() {
   };
 
   const confirmDelete = () => {
-    if (!deleteCandidate) return;
-    const ids = filteredRows.map((row) => row.id).filter((id) => id !== deleteCandidate.id);
-    const currentIndex = filteredRows.findIndex((row) => row.id === deleteCandidate.id);
-    optimisticDeleteDraft(deleteCandidate.id);
-    setSelectedId(ids[Math.min(currentIndex, ids.length - 1)] ?? null);
-    setDeleteCandidate(null);
+    if (!deleteCandidates.length) return;
+    const deletedIds = new Set(deleteCandidates.map((row) => row.id));
+    setSelectedId((current) =>
+      nextDraftAfterDeletion(
+        filteredRows.map((row) => row.id),
+        current,
+        deletedIds,
+      ),
+    );
+    optimisticDeleteDrafts([...deletedIds]);
+    clearSelection();
+    setDeleteCandidates([]);
   };
 
   useHotkeys(['j', 'arrowdown'], () => moveSelection(1), {
@@ -244,9 +327,19 @@ export function DraftWorkspace() {
     preventDefault: true,
     enableOnFormTags: false,
   });
-  useHotkeys(['shift+3', 'delete', 'meta+backspace', 'ctrl+backspace'], requestDelete, {
+  useHotkeys(['shift+3', 'delete', 'meta+backspace', 'ctrl+backspace'], requestDeleteSelection, {
     scopes: ['draft-workspace'],
     preventDefault: true,
+    enableOnFormTags: false,
+  });
+  useHotkeys(['meta+a', 'ctrl+a'], toggleAllVisible, {
+    scopes: ['draft-workspace'],
+    preventDefault: true,
+    enableOnFormTags: false,
+  });
+  useHotkeys('escape', clearSelection, {
+    scopes: ['draft-workspace'],
+    preventDefault: selectedDraftIds.size > 0,
     enableOnFormTags: false,
   });
   useHotkeys(['meta+enter', 'ctrl+enter'], requestDirectSend, {
@@ -308,6 +401,12 @@ export function DraftWorkspace() {
         <div className="grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[minmax(300px,38%)_minmax(0,1fr)] xl:grid-cols-[420px_minmax(0,1fr)]">
           <div className="border-border/60 flex min-h-0 flex-col border-r">
             <div className="border-border/60 flex items-center gap-2 border-b p-3">
+              <Checkbox
+                checked={allVisibleSelected ? true : someVisibleSelected ? 'indeterminate' : false}
+                onCheckedChange={toggleAllVisible}
+                aria-label={m['draftWorkspace.selectAllVisible']()}
+                className="ml-1"
+              />
               <div className="relative min-w-0 flex-1">
                 <Search className="text-muted-foreground pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2" />
                 <Input
@@ -330,7 +429,13 @@ export function DraftWorkspace() {
               </Button>
             </div>
 
-            <div className="min-h-0 flex-1 overflow-y-auto p-2" role="listbox">
+            <DraftBulkActionBar
+              count={selectedDraftIds.size}
+              onClear={clearSelection}
+              onDelete={requestDeleteSelection}
+            />
+
+            <div className="min-h-0 flex-1 overflow-y-auto p-2" role="list">
               {threadsQuery.isLoading ? (
                 <DraftListSkeleton />
               ) : filteredRows.length ? (
@@ -340,7 +445,9 @@ export function DraftWorkspace() {
                       key={row.id}
                       row={row}
                       selected={row.id === selectedId}
-                      onSelect={() => setSelectedId(row.id)}
+                      bulkSelected={selectedDraftIds.has(row.id)}
+                      onToggle={() => toggleSelection(row.id)}
+                      onSelect={(event) => handleRowSelect(row, event)}
                       onOpen={() => openDraft(row.id)}
                     />
                   ))}
@@ -370,7 +477,7 @@ export function DraftWorkspace() {
             draft={selectedDraft.data}
             loading={selectedDraft.isLoading}
             onEdit={() => openDraft()}
-            onDelete={requestDelete}
+            onDelete={requestDeleteCurrent}
           />
         </div>
       )}
@@ -409,33 +516,11 @@ export function DraftWorkspace() {
         </DialogContent>
       </Dialog>
 
-      <Dialog
-        open={Boolean(deleteCandidate)}
-        onOpenChange={(open) => !open && setDeleteCandidate(null)}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{m['draftWorkspace.deleteTitle']()}</DialogTitle>
-            <DialogDescription>
-              {m['draftWorkspace.deleteDescription']({
-                subject: deleteCandidate?.subject ?? m['draftWorkspace.untitled'](),
-              })}
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => setDeleteCandidate(null)}>
-              {m['draftWorkspace.cancel']()}
-            </Button>
-            <Button
-              type="button"
-              onClick={confirmDelete}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-            >
-              {m['draftWorkspace.delete']()}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <DraftDeleteDialog
+        candidates={deleteCandidates}
+        onOpenChange={(open) => !open && setDeleteCandidates([])}
+        onConfirm={confirmDelete}
+      />
     </section>
   );
 }
@@ -496,34 +581,51 @@ function Shortcut({ keys, label }: { keys: string; label: string }) {
 function DraftRow({
   row,
   selected,
+  bulkSelected,
+  onToggle,
   onSelect,
   onOpen,
 }: {
   row: DraftListRow;
   selected: boolean;
-  onSelect: () => void;
+  bulkSelected: boolean;
+  onToggle: () => void;
+  onSelect: (event: React.MouseEvent<HTMLButtonElement>) => void;
   onOpen: () => void;
 }) {
   return (
-    <button
-      type="button"
-      role="option"
-      aria-selected={selected}
+    <div
+      role="listitem"
       data-draft-row={row.id}
-      onClick={onSelect}
-      onDoubleClick={onOpen}
       className={cn(
-        'group w-full rounded-lg border px-3 py-3 text-left transition-colors',
-        selected
-          ? 'border-primary/25 bg-primary/[0.06]'
-          : 'hover:border-border/60 hover:bg-muted/55 border-transparent',
+        'group flex w-full items-stretch rounded-lg border text-left transition-colors',
+        bulkSelected
+          ? 'border-primary/35 bg-primary/[0.09]'
+          : selected
+            ? 'border-primary/25 bg-primary/[0.06]'
+            : 'hover:border-border/60 hover:bg-muted/55 border-transparent',
       )}
     >
-      <div className="flex items-start gap-3">
+      <div className="flex shrink-0 items-start pl-3 pt-4">
+        <Checkbox
+          checked={bulkSelected}
+          onCheckedChange={onToggle}
+          aria-label={m['draftWorkspace.selectDraft']({ subject: row.subject })}
+        />
+      </div>
+      <button
+        type="button"
+        aria-current={selected ? 'true' : undefined}
+        onClick={onSelect}
+        onDoubleClick={onOpen}
+        className="focus-visible:ring-primary/40 flex min-w-0 flex-1 items-start gap-3 rounded-r-lg px-3 py-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset"
+      >
         <div
           className={cn(
             'mt-0.5 rounded-md p-2',
-            selected ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground',
+            selected || bulkSelected
+              ? 'bg-primary/10 text-primary'
+              : 'bg-muted text-muted-foreground',
           )}
         >
           <FileText className="size-4" />
@@ -546,8 +648,8 @@ function DraftRow({
             selected && 'opacity-100',
           )}
         />
-      </div>
-    </button>
+      </button>
+    </div>
   );
 }
 

@@ -294,11 +294,13 @@ describe('useOptimisticActions — variantes d’actions', () => {
     expect(h.capture).toHaveBeenCalledWith('email_unsnoozed');
   });
 
-  it('deleteDraft → drafts.delete + prune du cache listThreads + invalidation', async () => {
-    hook().optimisticDeleteDraft('draft-1');
+  it('deleteDrafts → une mutation groupée + prune de tous les ids + invalidation', async () => {
+    hook().optimisticDeleteDrafts(['draft-1', 'draft-2', 'draft-1']);
     await lastToastOpts().onAutoClose();
     await flush();
-    expect(h.mutationSpies['drafts.delete']).toHaveBeenCalledWith({ id: 'draft-1' });
+    expect(h.mutationSpies['drafts.deleteMany']).toHaveBeenCalledWith({
+      ids: ['draft-1', 'draft-2'],
+    });
     // CUA round 6 : la ligne est PURGÉE des pages en cache (identifiant exact) —
     // pas de refetch immédiat de la vérité Gmail retardée. Portée (round 6b) :
     // uniquement les infinite queries du dossier draft — jamais inbox/sent.
@@ -309,11 +311,28 @@ describe('useOptimisticActions — variantes d’actions', () => {
     const updater = h.setQueriesData.mock.calls[0][1] as (
       data: { pages: { threads: { id: string }[] }[] } | undefined,
     ) => unknown;
-    expect(updater({ pages: [{ threads: [{ id: 'draft-1' }, { id: 'autre' }] }] })).toEqual({
+    expect(
+      updater({
+        pages: [{ threads: [{ id: 'draft-1' }, { id: 'draft-2' }, { id: 'autre' }] }],
+      }),
+    ).toEqual({
       pages: [{ threads: [{ id: 'autre' }] }],
     });
     expect(h.invalidateQueries).toHaveBeenCalled();
     expect(h.capture).toHaveBeenCalledWith('draft_deleted');
+  });
+
+  it('découpe plus de 100 brouillons sans perdre la sélection globale', async () => {
+    const ids = Array.from({ length: 205 }, (_, index) => `draft-${index + 1}`);
+    hook().optimisticDeleteDrafts(ids);
+    await lastToastOpts().onAutoClose();
+    await flush();
+
+    const calls = h.mutationSpies['drafts.deleteMany'].mock.calls;
+    expect(calls).toHaveLength(3);
+    expect(calls[0]?.[0].ids).toHaveLength(100);
+    expect(calls[1]?.[0].ids).toHaveLength(100);
+    expect(calls[2]?.[0].ids).toEqual(ids.slice(200));
   });
 });
 

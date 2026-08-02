@@ -1,3 +1,4 @@
+import { deleteDraftsBatched } from '../../lib/delete-drafts-batched';
 import type { MailManager } from '../../lib/driver/types';
 import { activeDriverProcedure, router } from '../trpc';
 import { getZeroAgent } from '../../lib/server-utils';
@@ -43,5 +44,17 @@ export const draftsRouter = router({
       const { stub: agent } = await getZeroAgent(activeConnection.id);
       await agent.deleteDraft(input.id);
       return true;
+    }),
+  deleteMany: activeDriverProcedure
+    .input(
+      z.object({
+        ids: z.array(z.string().min(1, 'id is required')).min(1).max(100),
+      }),
+    )
+    .mutation(async ({ input, ctx }) => {
+      const { activeConnection } = ctx;
+      const { stub: agent } = await getZeroAgent(activeConnection.id);
+      const deleted = await deleteDraftsBatched(input.ids, (id) => agent.deleteDraft(id));
+      return { deleted };
     }),
 });
