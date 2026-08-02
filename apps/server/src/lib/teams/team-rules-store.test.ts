@@ -258,14 +258,14 @@ const teamStoreSource = readFileSync(
 
 describe('team store contract — optional rule provenance on thread mutations', () => {
   it('setThreadStatus/Assignee/Labels accept an optional RuleActionContext merged into audit metadata', () => {
-    expect(teamStoreSource).toContain('metadata: { status, ...(context ?? {}) }');
-    expect(teamStoreSource).toContain('metadata: { assigneeUserId, ...(context ?? {}) }');
-    expect(teamStoreSource).toContain('metadata: { labelIds: unique, ...(context ?? {}) }');
+    expect(teamStoreSource).toMatch(/metadata:\s*\{\s*status,\s*\.\.\.context\s*\}/);
+    expect(teamStoreSource).toMatch(/metadata:\s*\{\s*assigneeUserId,\s*\.\.\.context\s*\}/);
+    expect(teamStoreSource).toMatch(/metadata:\s*\{\s*labelIds:\s*unique,\s*\.\.\.context\s*\}/);
   });
 
   it('without a context, the manual audit contract is byte-identical (empty spread)', () => {
     // Le paramètre est OPTIONNEL sur les trois setters : les appels manuels
-    // existants ne changent pas, et `...(undefined ?? {})` n'ajoute rien.
+    // existants ne changent pas, et l'object spread de `undefined` n'ajoute rien.
     for (const name of ['setThreadStatus', 'setThreadAssignee', 'setThreadLabels']) {
       const start = teamStoreSource.indexOf(`export async function ${name}`);
       expect(start, name).toBeGreaterThan(-1);
@@ -279,7 +279,7 @@ describe('team store contract — optional rule provenance on thread mutations',
       "export type RuleActionContext = { source: 'rule'; ruleId: string; runId: string }",
     );
     // shareThread fusionne le contexte entier ({source, ruleId, runId}).
-    expect(teamStoreSource).toContain('...(options.context ?? {})');
+    expect(teamStoreSource).toMatch(/\.\.\.options\.context/);
   });
 });
 
