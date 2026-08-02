@@ -94,8 +94,8 @@ async function calendarApiError(
     };
     const status = payload.error?.status;
     const legacyReason = payload.error?.errors?.[0]?.reason;
-    if (typeof status === 'string' && status.length <= 80) reason = status;
-    else if (typeof legacyReason === 'string' && legacyReason.length <= 80) reason = legacyReason;
+    if (typeof legacyReason === 'string' && legacyReason.length <= 80) reason = legacyReason;
+    else if (typeof status === 'string' && status.length <= 80) reason = status;
   } catch {
     // Fixed fallback only: provider bodies are never copied into logs or client errors.
   }

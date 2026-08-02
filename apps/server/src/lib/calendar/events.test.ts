@@ -83,6 +83,7 @@ describe('Google calendar events boundary', () => {
             error: {
               status: 'PERMISSION_DENIED',
               message: 'sensitive provider detail',
+              errors: [{ reason: 'accessNotConfigured' }],
             },
           }),
           { status: 403 },
@@ -100,7 +101,7 @@ describe('Google calendar events boundary', () => {
       name: 'GoogleCalendarApiError',
       operation: 'list',
       status: 403,
-      reason: 'PERMISSION_DENIED',
+      reason: 'accessNotConfigured',
     });
   });
 
