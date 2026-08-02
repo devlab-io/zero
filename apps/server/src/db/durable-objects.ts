@@ -28,7 +28,12 @@ import {
   type EmailMatrix,
   type WritingStyleMatrix,
 } from '../services/writing-style-service';
+import * as teamIntegrationsStore from '../lib/teams/team-integrations-store';
+import * as teamDraftsStore from '../lib/teams/team-drafts-store';
+import * as teamRulesStore from '../lib/teams/team-rules-store';
+import * as teamOnboarding from '../lib/teams/team-onboarding';
 import { DurableObject, RpcTarget } from 'cloudflare:workers';
+import * as teamOpsStore from '../lib/teams/team-ops-store';
 import { eq, and, desc, asc, inArray } from 'drizzle-orm';
 import { consumeSlidingWindow } from '../lib/rate-limit';
 import * as teamStore from '../lib/teams/team-store';
@@ -352,6 +357,523 @@ export class DbRpcDO extends RpcTarget {
     );
   }
 
+  async getTeamOnboarding(teamId: string) {
+    return await this.mainDo.teamOp((db) =>
+      teamOnboarding.getTeamOnboarding(db, this.userId, teamId),
+    );
+  }
+
+  // --- règles d'équipe (P14) — mutations owner, lecture membre -------------
+  async listTeamRules(teamId: string) {
+    return await this.mainDo.teamOp((db) => teamRulesStore.listRules(db, this.userId, teamId));
+  }
+
+  async createTeamRule(
+    teamId: string,
+    watchedConnection: { id: string; email: string },
+    input: Parameters<typeof teamRulesStore.createRule>[4],
+  ) {
+    return await this.mainDo.teamOp((db) =>
+      teamRulesStore.createRule(db, this.userId, teamId, watchedConnection, input),
+    );
+  }
+
+  async updateTeamRule(ruleId: string, patch: Parameters<typeof teamRulesStore.updateRule>[3]) {
+    return await this.mainDo.teamOp((db) =>
+      teamRulesStore.updateRule(db, this.userId, ruleId, patch),
+    );
+  }
+
+  async setTeamRuleEnabled(ruleId: string, enabled: boolean, confirmAclExpansion?: boolean) {
+    return await this.mainDo.teamOp((db) =>
+      teamRulesStore.setRuleEnabled(db, this.userId, ruleId, enabled, confirmAclExpansion),
+    );
+  }
+
+  async deleteTeamRule(ruleId: string) {
+    return await this.mainDo.teamOp((db) => teamRulesStore.deleteRule(db, this.userId, ruleId));
+  }
+
+  async listTeamRuleRuns(
+    teamId: string,
+    options: { ruleId?: string; teamThreadId?: string; limit?: number },
+  ) {
+    return await this.mainDo.teamOp((db) =>
+      teamRulesStore.listRuleRuns(db, this.userId, teamId, options),
+    );
+  }
+
+  async previewTeamRule(
+    teamId: string,
+    input: Parameters<typeof teamRulesStore.previewRule>[3],
+    candidates: Parameters<typeof teamRulesStore.previewRule>[4],
+  ) {
+    return await this.mainDo.teamOp((db) =>
+      teamRulesStore.previewRule(db, this.userId, teamId, input, candidates),
+    );
+  }
+
+  // --- SLA + opérations (P14 SLA / P16) ------------------------------------
+  async getTeamSlaPolicy(teamId: string) {
+    return await this.mainDo.teamOp((db) => teamOpsStore.getSlaPolicy(db, this.userId, teamId));
+  }
+
+  async setTeamSlaPolicy(teamId: string, input: teamOpsStore.SlaPolicyInput) {
+    return await this.mainDo.teamOp((db) =>
+      teamOpsStore.setSlaPolicy(db, this.userId, teamId, input),
+    );
+  }
+
+  async listTeamAbsences(teamId: string) {
+    return await this.mainDo.teamOp((db) => teamOpsStore.listAbsences(db, this.userId, teamId));
+  }
+
+  async declareTeamAbsence(
+    teamId: string,
+    input: Parameters<typeof teamOpsStore.declareAbsence>[3],
+  ) {
+    return await this.mainDo.teamOp((db) =>
+      teamOpsStore.declareAbsence(db, this.userId, teamId, input),
+    );
+  }
+
+  async removeTeamAbsence(absenceId: string) {
+    return await this.mainDo.teamOp((db) => teamOpsStore.removeAbsence(db, this.userId, absenceId));
+  }
+
+  // --- brouillons collaboratifs (P15) --------------------------------------
+  private async draftEffects() {
+    // server-utils hors du graphe statique de la façade DO — import dynamique
+    // comme pour les effets de règles.
+    const { draftReadEffects } = await import('../lib/teams/team-drafts-runner');
+    return draftReadEffects();
+  }
+
+  async requestTeamDraftReview(input: {
+    teamThreadId: string;
+    draftId: string;
+    reviewerUserId: string;
+  }) {
+    const effects = await this.draftEffects();
+    return await this.mainDo.teamOp((db) =>
+      teamDraftsStore.requestReview(db, effects, this.userId, input),
+    );
+  }
+
+  async getTeamThreadDraftReview(teamThreadId: string) {
+    return await this.mainDo.teamOp((db) =>
+      teamDraftsStore.getReviewForThread(db, this.userId, teamThreadId),
+    );
+  }
+
+  async readTeamReviewDraft(reviewId: string) {
+    const effects = await this.draftEffects();
+    return await this.mainDo.teamOp((db) =>
+      teamDraftsStore.readReviewDraft(db, effects, this.userId, reviewId),
+    );
+  }
+
+  async suggestTeamDraftEdit(
+    reviewId: string,
+    input: { bodyText: string; note?: string; baseDigest: string },
+  ) {
+    const effects = await this.draftEffects();
+    return await this.mainDo.teamOp((db) =>
+      teamDraftsStore.suggestEdit(db, effects, this.userId, reviewId, input),
+    );
+  }
+
+  async setTeamDraftReviewDecision(
+    reviewId: string,
+    input: { decision: 'approved' | 'changes_requested'; baseDigest: string },
+  ) {
+    const effects = await this.draftEffects();
+    return await this.mainDo.teamOp((db) =>
+      teamDraftsStore.setReviewDecision(db, effects, this.userId, reviewId, input),
+    );
+  }
+
+  async rebaseTeamDraftReview(reviewId: string) {
+    const effects = await this.draftEffects();
+    return await this.mainDo.teamOp((db) =>
+      teamDraftsStore.rebaseReview(db, effects, this.userId, reviewId),
+    );
+  }
+
+  async markTeamDraftSuggestionApplied(suggestionId: string) {
+    return await this.mainDo.teamOp((db) =>
+      teamDraftsStore.markSuggestionApplied(db, this.userId, suggestionId),
+    );
+  }
+
+  async cancelTeamDraftReview(reviewId: string) {
+    return await this.mainDo.teamOp((db) =>
+      teamDraftsStore.cancelReview(db, this.userId, reviewId),
+    );
+  }
+
+  async markTeamThreadReviewsCompleted(teamThreadId: string) {
+    return await this.mainDo.teamOp((db) =>
+      teamDraftsStore.markThreadReviewsCompleted(db, this.userId, teamThreadId),
+    );
+  }
+
+  async claimTeamReply(input: {
+    teamThreadId: string;
+    clientSubmissionKey: string;
+    reviewId?: string | null;
+  }) {
+    return await this.mainDo.teamOp((db) => teamDraftsStore.claimTeamReply(db, this.userId, input));
+  }
+
+  async resolveTeamReplyClaim(claimId: string, outcome: 'accepted' | 'released') {
+    return await this.mainDo.teamOp((db) =>
+      teamDraftsStore.resolveTeamReplyClaim(db, claimId, outcome),
+    );
+  }
+
+  async createTeamReplyIntent(teamThreadId: string) {
+    return await this.mainDo.teamOp((db) =>
+      teamDraftsStore.createReplyIntent(db, this.userId, teamThreadId),
+    );
+  }
+
+  async getValidTeamReplyIntent(input: {
+    intentId: string;
+    teamThreadId: string;
+    providerThreadId: string;
+  }) {
+    return await this.mainDo.teamOp((db) =>
+      teamDraftsStore.getValidReplyIntent(db, this.userId, input),
+    );
+  }
+
+  async markTeamReplyIntentCollision(intentId: string) {
+    return await this.mainDo.teamOp((db) => teamDraftsStore.markIntentCollision(db, intentId));
+  }
+
+  async consumeTeamReplyIntentOverride(intentId: string) {
+    return await this.mainDo.teamOp((db) => teamDraftsStore.consumeIntentOverride(db, intentId));
+  }
+
+  async findOwnTeamReplyClaim(teamThreadId: string, clientSubmissionKey: string) {
+    return await this.mainDo.teamOp((db) =>
+      teamDraftsStore.findOwnReplyClaim(db, this.userId, teamThreadId, clientSubmissionKey),
+    );
+  }
+
+  async teamSendCollisionPreflight(input: {
+    teamThreadId: string;
+    baselineMs: number;
+    threadMessages: Array<{ senderEmail: string; receivedOnMs: number | null }>;
+    myEmails: string[];
+  }) {
+    return await this.mainDo.teamOp((db) =>
+      teamDraftsStore.sendCollisionPreflight(db, this.userId, input),
+    );
+  }
+
+  async getTeamOpsOverview(teamId: string, options: { windowDays: number }) {
+    return await this.mainDo.teamOp((db) =>
+      teamOpsStore.getOpsOverview(db, this.userId, teamId, options),
+    );
+  }
+
+  // --- P18 : intégrations (Linear, email-first) ------------------------------
+  // La configuration (env + ring KEK) est lue ICI, jamais côté client ; les
+  // secrets scellés ne quittent jamais le serveur. Absente → fail closed avec
+  // des drapeaux explicites pour l'UI owner.
+
+  private async integrationRuntime() {
+    const { env } = await import('../env');
+    const { isIntegrationVaultConfigured } = await import('../lib/integrations/vault');
+    const kekRing = {
+      RETA_BYOK_KEK_V1: env.RETA_BYOK_KEK_V1,
+      RETA_BYOK_KEK_V2: env.RETA_BYOK_KEK_V2,
+      RETA_BYOK_KEK_ACTIVE: env.RETA_BYOK_KEK_ACTIVE,
+    };
+    return {
+      kekRing,
+      clientId: env.LINEAR_CLIENT_ID,
+      clientSecret: env.LINEAR_CLIENT_SECRET,
+      redirectUri: `${env.VITE_PUBLIC_APP_URL}/integrations/linear/callback`,
+      flags: {
+        vaultConfigured: isIntegrationVaultConfigured(kekRing),
+        oauthConfigured: !!(env.LINEAR_CLIENT_ID && env.LINEAR_CLIENT_SECRET),
+      },
+    };
+  }
+
+  async getTeamIntegrationOverview(teamId: string) {
+    const runtime = await this.integrationRuntime();
+    return await this.mainDo.teamOp((db) =>
+      teamIntegrationsStore.getIntegrationOverview(db, this.userId, teamId, runtime.flags),
+    );
+  }
+
+  async beginTeamLinearInstall(teamId: string, reconnectConfirm?: boolean) {
+    const runtime = await this.integrationRuntime();
+    if (!runtime.flags.oauthConfigured) {
+      throw new teamStore.TeamStoreError('integration_not_configured');
+    }
+    const { sealIntegrationSecret } = await import('../lib/integrations/vault');
+    const { buildAuthorizeUrl, generatePkcePair, hashOauthState } = await import(
+      '../lib/integrations/linear-oauth'
+    );
+    const { OAUTH_STATE_TTL_MS } = await import('../lib/teams/team-integrations-shared');
+    const { verifier, challenge } = await generatePkcePair();
+    // Seul le HASH du state est persisté ; le state brut ne vit que dans
+    // l'URL d'autorisation renvoyée à l'owner.
+    const state = crypto.randomUUID();
+    const stateHash = await hashOauthState(state);
+    const pkceVerifierEnvelope = await sealIntegrationSecret(
+      runtime.kekRing,
+      { teamId, purpose: 'linear:pkce', recordId: `pkce:${teamId}` },
+      verifier,
+    );
+    await this.mainDo.teamOp((db) =>
+      teamIntegrationsStore.beginLinearInstall(db, this.userId, teamId, {
+        stateHash,
+        stateExpiresAt: new Date(Date.now() + OAUTH_STATE_TTL_MS),
+        pkceVerifierEnvelope,
+        reconnectConfirm,
+      }),
+    );
+    return {
+      authorizeUrl: buildAuthorizeUrl({
+        clientId: runtime.clientId!,
+        redirectUri: runtime.redirectUri,
+        state,
+        codeChallenge: challenge,
+      }),
+    };
+  }
+
+  async completeTeamLinearInstall(input: { state: string; code: string }) {
+    const runtime = await this.integrationRuntime();
+    const { completeLinearOAuth } = await import('../lib/integrations/linear-runtime');
+    return await this.mainDo.teamOp((db) =>
+      completeLinearOAuth(
+        db,
+        {
+          kekRing: runtime.kekRing,
+          clientId: runtime.clientId,
+          clientSecret: runtime.clientSecret,
+          redirectUri: runtime.redirectUri,
+        },
+        { userId: this.userId, state: input.state, code: input.code },
+      ),
+    );
+  }
+
+  async revokeTeamLinearInstall(teamId: string) {
+    const runtime = await this.integrationRuntime();
+    const { revokeLinearInstallFully } = await import('../lib/integrations/linear-runtime');
+    const { revokeLinearToken } = await import('../lib/integrations/linear-oauth');
+    return await this.mainDo.teamOp((db) =>
+      revokeLinearInstallFully(db, runtime, this.userId, teamId, (accessToken) =>
+        revokeLinearToken({ fetchImpl: fetch, accessToken }),
+      ),
+    );
+  }
+
+  async setTeamIntegrationMapping(
+    teamId: string,
+    input: {
+      kind: 'team' | 'status' | 'assignee';
+      retaValue: string;
+      externalId: string;
+      externalLabel?: string;
+    },
+  ) {
+    return await this.mainDo.teamOp((db) =>
+      teamIntegrationsStore.setMapping(db, this.userId, teamId, input),
+    );
+  }
+
+  /** Listes de configuration (owner) — lues via l'API Linear, jamais en QA. */
+  async listTeamLinearTargets(teamId: string, linearTeamId?: string) {
+    const runtime = await this.integrationRuntime();
+    const { getLinearClientForInstall } = await import('../lib/integrations/linear-runtime');
+    return await this.mainDo.teamOp(async (db) => {
+      const overview = await teamIntegrationsStore.getIntegrationOverview(
+        db,
+        this.userId,
+        teamId,
+        runtime.flags,
+      );
+      if (!overview.isOwner) throw new teamStore.TeamStoreError('forbidden');
+      if (!overview.install || overview.install.status !== 'active') {
+        throw new teamStore.TeamStoreError('integration_not_installed');
+      }
+      const client = await getLinearClientForInstall(db, runtime, {
+        id: overview.install.id,
+        teamId,
+      });
+      const [teams, users] = await Promise.all([client.listTeams(), client.listUsers()]);
+      const states = linearTeamId ? await client.listWorkflowStates(linearTeamId) : null;
+      return { teams, users, states };
+    });
+  }
+
+  async listTeamThreadIntegration(teamThreadId: string) {
+    return await this.mainDo.teamOp((db) =>
+      teamIntegrationsStore.listThreadIntegration(db, this.userId, teamThreadId),
+    );
+  }
+
+  async addTeamExternalLink(
+    teamThreadId: string,
+    input: { kind: 'crm' | 'customer' | 'other'; label: string; url: string },
+  ) {
+    return await this.mainDo.teamOp((db) =>
+      teamIntegrationsStore.addExternalLink(db, this.userId, teamThreadId, input),
+    );
+  }
+
+  async removeTeamExternalLink(linkId: string) {
+    return await this.mainDo.teamOp((db) =>
+      teamIntegrationsStore.removeExternalLink(db, this.userId, linkId),
+    );
+  }
+
+  async unlinkTeamIssue(linkId: string) {
+    return await this.mainDo.teamOp((db) =>
+      teamIntegrationsStore.unlinkIssue(db, this.userId, linkId),
+    );
+  }
+
+  async previewTeamLinearIssue(input: {
+    teamThreadId: string;
+    clientRequestKey: string;
+    linearTeamId: string;
+    stateId?: string | null;
+    assigneeUserId?: string | null;
+    title?: string | null;
+    note?: string | null;
+  }) {
+    const { env } = await import('../env');
+    return await this.mainDo.teamOp((db) =>
+      teamIntegrationsStore.previewIssue(db, this.userId, input, {
+        appOrigin: env.VITE_PUBLIC_APP_URL,
+      }),
+    );
+  }
+
+  async confirmTeamLinearIssue(input: {
+    previewId: string;
+    clientRequestKey: string;
+    digest: string;
+  }) {
+    const runtime = await this.integrationRuntime();
+    const { getLinearClientForInstall } = await import('../lib/integrations/linear-runtime');
+    return await this.mainDo.teamOp((db) =>
+      teamIntegrationsStore.confirmIssue(
+        db,
+        (install) => getLinearClientForInstall(db, runtime, install),
+        this.userId,
+        input,
+      ),
+    );
+  }
+
+  async acceptTeamIssueLink(input: { teamThreadId: string; identifier: string }) {
+    const runtime = await this.integrationRuntime();
+    const { getLinearClientForInstall } = await import('../lib/integrations/linear-runtime');
+    return await this.mainDo.teamOp((db) =>
+      teamIntegrationsStore.acceptIssueLink(
+        db,
+        (install) => getLinearClientForInstall(db, runtime, install),
+        this.userId,
+        input,
+      ),
+    );
+  }
+
+  async listTeamOutboundWebhooks(teamId: string) {
+    return await this.mainDo.teamOp((db) =>
+      teamIntegrationsStore.listOutboundWebhooks(db, this.userId, teamId),
+    );
+  }
+
+  async createTeamOutboundWebhook(
+    teamId: string,
+    input: {
+      url: string;
+      events: Array<'thread.assigned' | 'thread.comment' | 'thread.status'>;
+      secret: string;
+    },
+  ) {
+    const runtime = await this.integrationRuntime();
+    const { sealIntegrationSecret } = await import('../lib/integrations/vault');
+    const { dohResolver } = await import('../lib/integrations/outbound-security');
+    const id = crypto.randomUUID();
+    // Scellé sur l'id du webhook (AAD) — le secret en clair meurt ici.
+    const secretEnvelope = await sealIntegrationSecret(
+      runtime.kekRing,
+      { teamId, purpose: 'outbound:secret', recordId: id },
+      input.secret,
+    );
+    return await this.mainDo.teamOp((db) =>
+      teamIntegrationsStore.createOutboundWebhook(
+        db,
+        this.userId,
+        teamId,
+        {
+          id,
+          url: input.url,
+          events: input.events,
+          secretEnvelope,
+        },
+        // Garde SSRF COMPLÈTE dès l'enregistrement (DoH).
+        dohResolver(fetch),
+      ),
+    );
+  }
+
+  async setTeamOutboundWebhookActive(teamId: string, webhookId: string, active: boolean) {
+    return await this.mainDo.teamOp((db) =>
+      teamIntegrationsStore.setOutboundWebhookActive(db, this.userId, teamId, webhookId, active),
+    );
+  }
+
+  async listTeamOutboundDeliveries(
+    teamId: string,
+    webhookId: string,
+    options?: { status?: 'pending' | 'sending' | 'delivered' | 'dead' },
+  ) {
+    return await this.mainDo.teamOp((db) =>
+      teamIntegrationsStore.listOutboundDeliveries(db, this.userId, teamId, webhookId, options),
+    );
+  }
+
+  async retryTeamDeadOutbound(teamId: string, webhookId: string) {
+    return await this.mainDo.teamOp((db) =>
+      teamIntegrationsStore.retryDeadOutbound(db, this.userId, teamId, webhookId),
+    );
+  }
+
+  async exportTeamActivity(teamId: string, input: { cursor?: string | null; limit?: number }) {
+    return await this.mainDo.teamOp((db) =>
+      teamIntegrationsStore.exportTeamActivity(db, this.userId, teamId, input),
+    );
+  }
+
+  async undoTeamRuleRun(runId: string) {
+    return await this.mainDo.teamOp(async (db) => {
+      // Effets boîte (KV snooze, labels) chargés dynamiquement — server-utils
+      // reste hors du graphe d'import statique de la façade DO.
+      const { ruleMailboxEffects } = await import('../lib/teams/team-rules-runner');
+      return teamRulesStore.undoRuleRun(db, ruleMailboxEffects(), this.userId, runId);
+    });
+  }
+
+  async setTeamOnboardingDismissed(teamId: string, dismissed: boolean) {
+    return await this.mainDo.teamOp((db) =>
+      teamOnboarding.setOnboardingDismissed(db, this.userId, teamId, dismissed),
+    );
+  }
+
   async createTeamLabel(teamId: string, name: string, color: string) {
     return await this.mainDo.teamOp((db) =>
       teamStore.createLabel(db, this.userId, teamId, name, color),
@@ -398,9 +920,9 @@ export class DbRpcDO extends RpcTarget {
     );
   }
 
-  async heartbeatTeamThreadPresence(teamThreadId: string, typing: boolean) {
+  async heartbeatTeamThreadPresence(teamThreadId: string, typing: boolean, replying = false) {
     return await this.mainDo.teamOp((db) =>
-      teamStore.heartbeatPresence(db, this.userId, teamThreadId, typing),
+      teamStore.heartbeatPresence(db, this.userId, teamThreadId, typing, replying),
     );
   }
 

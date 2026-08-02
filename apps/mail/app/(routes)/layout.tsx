@@ -6,6 +6,7 @@ import { SidebarProvider } from '@/components/context/sidebar-context';
 import { LoadingProvider } from '@/components/context/loading-context';
 import { QueryProvider } from '@/providers/query-provider';
 import { Provider as JotaiProvider } from 'jotai';
+import { m } from '@/paraglide/messages';
 import { Outlet } from 'react-router';
 
 // w2cd (client weight): app-only providers (React Query/tRPC, jotai, sidebar,
@@ -20,11 +21,26 @@ export default function Layout() {
           <LoadingProvider>
             <CommandPaletteProvider>
               <HotkeyProviderWrapper>
+                {/* CUA P1 (focus initial) : premier focusable du shell — sans lui,
+                    le premier Tab atterrit sur le mini contrôle de compte de la
+                    sidebar. Visible uniquement au focus clavier. */}
+                <a
+                  href="#main-content"
+                  className="sr-only rounded-md focus:not-sr-only focus:absolute focus:left-3 focus:top-3 focus:z-[100] focus:bg-white focus:px-3 focus:py-2 focus:text-sm focus:shadow-md focus:outline-none focus:ring-2 focus:ring-blue-400 dark:focus:bg-[#1E1E1E]"
+                >
+                  {m['common.actions.skipToContent']()}
+                </a>
                 <div
                   id="reta-app-shell"
                   className="relative flex max-h-screen w-full overflow-hidden"
                 >
-                  <Outlet />
+                  <div
+                    id="main-content"
+                    tabIndex={-1}
+                    className="relative flex min-w-0 flex-1 overflow-hidden focus:outline-none"
+                  >
+                    <Outlet />
+                  </div>
                   <DeferredGlobalWorkspaceDock />
                 </div>
                 <AskRetaWorkspace />

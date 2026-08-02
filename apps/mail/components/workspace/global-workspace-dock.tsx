@@ -76,14 +76,18 @@ export function GlobalWorkspaceDock() {
         </aside>
       )}
 
+      {/* CUA P1 (largeur intermédiaire) : ouvert, le panneau RÉSERVE sa place
+          dans le shell à partir de xl (le mail se replie au lieu d'être
+          recouvert/tronqué) ; en dessous il reste un overlay, un peu plus
+          étroit en md pour laisser respirer la liste. */}
       <aside
         aria-label={m['globalWorkspace.title']()}
         aria-hidden={!open}
         className={cn(
-          'border-border/70 bg-background fixed inset-y-2 right-2 z-40 flex w-[min(390px,calc(100vw-16px))] flex-col overflow-hidden rounded-2xl border shadow-2xl transition-[transform,opacity] duration-200 ease-out motion-reduce:transition-none',
+          'border-border/70 bg-background z-40 flex flex-col overflow-hidden rounded-2xl border transition-[transform,opacity] duration-200 ease-out motion-reduce:transition-none',
           open
-            ? 'translate-x-0 opacity-100'
-            : 'pointer-events-none translate-x-[calc(100%+16px)] opacity-0',
+            ? 'fixed inset-y-2 right-2 w-[min(390px,calc(100vw-16px))] translate-x-0 opacity-100 shadow-2xl md:w-[340px] xl:static xl:inset-auto xl:mb-1 xl:mr-0.5 xl:mt-1 xl:h-[calc(100dvh-8px)] xl:w-[360px] xl:shrink-0 xl:shadow-sm'
+            : 'pointer-events-none fixed inset-y-2 right-2 w-[min(390px,calc(100vw-16px))] translate-x-[calc(100%+16px)] opacity-0 shadow-2xl',
         )}
       >
         <header className="border-border/60 flex h-14 items-center justify-between border-b px-2">

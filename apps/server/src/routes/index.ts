@@ -9,6 +9,7 @@ import {
   mcpUnauthorizedResponse,
 } from '../lib/mcp-auth-discovery';
 import { handleMcpAuthorize, handleMcpToken, mcpOAuthConsentRouter } from './mcp-oauth-consent';
+import { integrationsLinearRouter } from './integrations-linear';
 import { handleGetSessionFast } from '../lib/auth-fast-path';
 import { oAuthDiscoveryMetadata } from 'better-auth/plugins';
 import { getZeroDB, verifyToken } from '../lib/server-utils';
@@ -338,6 +339,10 @@ export const app = new Hono<HonoContext>()
     { replaceRequest: false },
   )
   .route('/api', api)
+  // P18 — webhooks Linear entrants : montés HORS du middleware de session
+  // (authentification par HMAC sur octets bruts, pas par cookie), AVANT tout
+  // parsing JSON.
+  .route('/integrations', integrationsLinearRouter)
   // The `agentsMiddleware` websocket mount (legacy AI-chat transport) is intentionally
   // GONE: its only check was Cookie-header *existence* while the agent name in the URL
   // was trusted as a connectionId — any logged-in user could attach to any mailbox DO.

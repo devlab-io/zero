@@ -5,17 +5,23 @@ import {
   useTeamThreads,
 } from '@/hooks/use-teams';
 import { resolveTeamWorkspaceView, selectMentionNotifications } from '@/lib/team-workspace-view';
+import { ArrowLeft, AtSign, Gauge, Loader2, Plug, UserCheck, Users } from 'lucide-react';
 import { SharedThreadViewer } from '@/components/team/shared-thread-viewer';
-import { ArrowLeft, AtSign, Loader2, UserCheck, Users } from 'lucide-react';
+import { CollabOnboardingCard } from '@/components/team/collab-onboarding';
 import { Link, useNavigate, useSearchParams } from 'react-router';
+import { lazy, Suspense, useMemo, useState } from 'react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useConnections } from '@/hooks/use-connections';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { useMemo, useState } from 'react';
 import { m } from '@/paraglide/messages';
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
+
+// P16 : la vue Ops (agrégats + SLA + disponibilité) reste hors du bundle de
+// la page tant que l'onglet n'est pas ouvert.
+const TeamOpsView = lazy(() => import('@/components/team/team-ops-view'));
+const IntegrationSettings = lazy(() => import('@/components/team/integration-settings'));
 
 /**
  * Espace « Fils d'équipe » : tous les fils partagés des équipes de
@@ -34,11 +40,20 @@ export default function TeamWorkspacePage() {
   const view = resolveTeamWorkspaceView(searchParams.get('view'));
   const { data: teamsData, isLoading: teamsLoading } = useMyTeams();
   const teams = teamsData?.teams ?? [];
-  const [teamId, setTeamId] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('open');
   const [assigneeFilter, setAssigneeFilter] = useState<AssigneeFilter>('all');
-  const [viewerThreadId, setViewerThreadId] = useState<string | null>(null);
-  const selectedTeamId = teamId ?? teams[0]?.id ?? null;
+  // P18 : ?thread=<teamThreadId> — backlink ACL depuis une issue Linear ; le
+  // lecteur partagé revérifie l'accès côté serveur à l'ouverture.
+  const [viewerThreadId, setViewerThreadId] = useState<string | null>(
+    () => searchParams.get('thread') || null,
+  );
+  const requestedTeamId = searchParams.get('team');
+  const selectedTeamId =
+    (requestedTeamId && teams.some((team) => team.id === requestedTeamId)
+      ? requestedTeamId
+      : null) ??
+    teams[0]?.id ??
+    null;
 
   const { data: threadsData, isLoading: threadsLoading } = useTeamThreads(selectedTeamId, {
     status: statusFilter === 'all' ? undefined : statusFilter,
@@ -76,7 +91,11 @@ export default function TeamWorkspacePage() {
         {teams.length > 1 && (
           <select
             value={selectedTeamId ?? ''}
-            onChange={(event) => setTeamId(event.target.value)}
+            onChange={(event) => {
+              const next = new URLSearchParams(searchParams);
+              next.set('team', event.target.value);
+              setSearchParams(next, { replace: true });
+            }}
             aria-label={m['common.teams.selectTeam']()}
             className="h-8 rounded-md border border-[#E7E7E7] bg-white px-2 text-sm dark:border-[#252525] dark:bg-[#1E1E1E]"
           >
@@ -98,6 +117,8 @@ export default function TeamWorkspacePage() {
             ['shared', m['common.teams.workspaceViewShared'](), Users],
             ['assigned', m['common.teams.workspaceViewAssigned'](), UserCheck],
             ['mentions', m['common.teams.workspaceViewMentions'](), AtSign],
+            ['ops', m['common.teamOps.tab'](), Gauge],
+            ['integrations', m['common.teamIntegrations.tab'](), Plug],
           ] as const
         ).map(([value, label, Icon]) => (
           <button
@@ -122,7 +143,7 @@ export default function TeamWorkspacePage() {
         ))}
       </nav>
 
-      {view !== 'mentions' && (
+      {view !== 'mentions' && view !== 'ops' && view !== 'integrations' && (
         <div className="flex flex-wrap items-center gap-1.5 border-b border-[#E7E7E7] px-4 py-2 dark:border-[#252525]">
           {(
             [
@@ -160,7 +181,38 @@ export default function TeamWorkspacePage() {
       )}
 
       <ScrollArea className="min-h-0 flex-1">
-        {teamsLoading || (view === 'mentions' ? notificationsQuery.isLoading : threadsLoading) ? (
+        {teams.length > 0 && view !== 'ops' && view !== 'integrations' && (
+          <div className="px-4 pt-3">
+            <CollabOnboardingCard context="team" />
+          </div>
+        )}
+        {view === 'integrations' && selectedTeamId ? (
+          <Suspense
+            fallback={
+              <div className="space-y-3 p-4" aria-hidden>
+                <div className="h-24 rounded-2xl bg-black/[0.04] motion-safe:animate-pulse dark:bg-white/[0.06]" />
+              </div>
+            }
+          >
+            <IntegrationSettings key={selectedTeamId} teamId={selectedTeamId} />
+          </Suspense>
+        ) : view === 'ops' && selectedTeamId ? (
+          <Suspense
+            fallback={
+              <div className="space-y-3 p-4" aria-hidden>
+                <div className="h-24 rounded-2xl bg-black/[0.04] motion-safe:animate-pulse dark:bg-white/[0.06]" />
+                <div className="h-40 rounded-2xl bg-black/[0.04] motion-safe:animate-pulse dark:bg-white/[0.06]" />
+              </div>
+            }
+          >
+            <TeamOpsView
+              key={selectedTeamId}
+              teamId={selectedTeamId}
+              isOwner={teams.find((team) => team.id === selectedTeamId)?.role === 'owner'}
+            />
+          </Suspense>
+        ) : teamsLoading ||
+          (view === 'mentions' ? notificationsQuery.isLoading : threadsLoading) ? (
           <div className="text-muted-foreground flex items-center justify-center gap-2 py-16 text-sm">
             <Loader2 className="h-4 w-4 animate-spin" />
           </div>

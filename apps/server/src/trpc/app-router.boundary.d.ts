@@ -247,6 +247,12 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
                 }[] | undefined;
                 context?: {
                     threadId?: string | undefined;
+                    attachments?: {
+                        name: string;
+                        type: string;
+                        size: number;
+                        text: string;
+                    }[] | undefined;
                     draft?: {
                         subject?: string | undefined;
                         to?: string | undefined;
@@ -1501,12 +1507,16 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
                     lastModified: number;
                 }[] | undefined;
                 fromEmail?: string | undefined;
+                teamThreadId?: string | undefined;
+                draftId?: string | undefined;
+                reviewId?: string | undefined;
                 isForward?: boolean | undefined;
                 originalMessage?: string | undefined;
-                draftId?: string | undefined;
                 sendAsStored?: boolean | undefined;
                 scheduleAt?: string | undefined;
                 clientSendId?: string | undefined;
+                replyIntentId?: string | undefined;
+                overrideCollision?: boolean | undefined;
             };
             output: {
                 readonly success: false;
@@ -1548,6 +1558,78 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
                 error?: undefined;
                 readonly duplicate?: undefined;
                 readonly scheduled?: undefined;
+            } | {
+                readonly success: false;
+                readonly error: "collision";
+                readonly collision: {
+                    readonly reasons: ({
+                        type: "inbound_member_reply";
+                        senderEmail: string;
+                        receivedOn: string;
+                    } | {
+                        type: "reta_reply_accepted";
+                        userId: string;
+                        acceptedAt: string;
+                    } | {
+                        type: "active_claim";
+                        userId: string;
+                        since: string;
+                    })[];
+                };
+            } | {
+                readonly success: false;
+                readonly error: "collision";
+                readonly collision: {
+                    readonly reasons: readonly [{
+                        readonly type: "active_claim";
+                        readonly userId: "unknown";
+                        readonly since: "";
+                    }];
+                };
+            } | {
+                readonly teamClaimResolution: "failed" | "accepted";
+                readonly teamReviewClosure: "failed" | "closed" | "none";
+                readonly success: true;
+                readonly queued: true;
+                readonly messageId: string;
+                readonly sendAt: number | undefined;
+                readonly duplicate: true;
+                readonly error?: undefined;
+                readonly scheduled?: undefined;
+                readonly collision?: undefined;
+            } | {
+                readonly teamClaimResolution: "failed" | "accepted";
+                readonly teamReviewClosure: "failed" | "closed" | "none";
+                readonly success: true;
+                readonly scheduled: true;
+                readonly messageId: string;
+                readonly sendAt: number;
+                readonly duplicate: true;
+                readonly error?: undefined;
+                readonly queued?: undefined;
+                readonly collision?: undefined;
+            } | {
+                readonly teamClaimResolution: "failed" | "accepted";
+                readonly teamReviewClosure: "failed" | "closed" | "none";
+                readonly success: true;
+                readonly scheduled: true;
+                readonly messageId: string;
+                readonly sendAt: number;
+                readonly error?: undefined;
+                readonly queued?: undefined;
+                readonly duplicate?: undefined;
+                readonly collision?: undefined;
+            } | {
+                readonly teamClaimResolution: "failed" | "accepted";
+                readonly teamReviewClosure: "failed" | "closed" | "none";
+                readonly success: true;
+                readonly queued: true;
+                readonly messageId: string;
+                readonly sendAt: number;
+                readonly error?: undefined;
+                readonly duplicate?: undefined;
+                readonly scheduled?: undefined;
+                readonly collision?: undefined;
             };
             meta: object;
         }>;
@@ -1560,7 +1642,7 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
                 error: null;
                 sendAt: null;
             } | {
-                status: "sent" | "queued" | "sending" | "cancelled" | "failed";
+                status: "sent" | "failed" | "sending" | "queued" | "cancelled";
                 error: string | null;
                 sendAt: number | null;
             };
@@ -1568,11 +1650,11 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
         }>;
         listSendJobs: import("@trpc/server").TRPCQueryProcedure<{
             input: {
-                statuses?: ("sent" | "queued" | "sending" | "cancelled" | "failed")[] | undefined;
+                statuses?: ("sent" | "failed" | "sending" | "queued" | "cancelled")[] | undefined;
             } | undefined;
             output: {
                 id: string;
-                status: "sent" | "queued" | "sending" | "cancelled" | "failed";
+                status: "sent" | "failed" | "sending" | "queued" | "cancelled";
                 error: string | null;
                 subject: string | null;
                 to: string[];
@@ -1617,7 +1699,7 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
                 error?: undefined;
             } | {
                 readonly success: false;
-                readonly error: "Too late to cancel (status: sent)" | "Too late to cancel (status: queued)" | "Too late to cancel (status: sending)" | "Too late to cancel (status: cancelled)" | "Too late to cancel (status: failed)";
+                readonly error: "Too late to cancel (status: sent)" | "Too late to cancel (status: failed)" | "Too late to cancel (status: sending)" | "Too late to cancel (status: queued)" | "Too late to cancel (status: cancelled)";
             } | {
                 readonly success: false;
                 readonly error: "Unauthorized: Cannot cancel another user's scheduled email";
@@ -1680,8 +1762,8 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
         }>;
         snoozeThreads: import("@trpc/server").TRPCMutationProcedure<{
             input: {
-                ids: string[];
                 wakeAt: string;
+                ids: string[];
             };
             output: {
                 success: boolean;
@@ -1961,7 +2043,7 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
     }, import("@trpc/server").TRPCDecorateCreateRouterOptions<{
         list: import("@trpc/server").TRPCQueryProcedure<{
             input: {
-                status?: "sent" | "queued" | "generating" | "draft_ready" | "approved" | "sending" | "cancelled" | "failed" | undefined;
+                status?: "sent" | "failed" | "sending" | "queued" | "generating" | "draft_ready" | "approved" | "cancelled" | undefined;
             } | undefined;
             output: import("../lib/draft-outbox").DraftOutboxItem[];
             meta: object;
@@ -2357,6 +2439,7 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
                         onComment: boolean;
                         onMention: boolean;
                         onAssignment: boolean;
+                        onboardingDismissedAt?: string | null | undefined;
                     };
                     createdAt: Date;
                     memberCount: number;
@@ -2432,6 +2515,575 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
             };
             meta: object;
         }>;
+        onboardingStatus: import("@trpc/server").TRPCQueryProcedure<{
+            input: {
+                teamId: string;
+            };
+            output: {
+                teamId: string;
+                teamCreatedAt: string;
+                steps: {
+                    team_created: {
+                        done: boolean;
+                        at: string | null;
+                    };
+                    invite_accepted: {
+                        done: boolean;
+                        at: string | null;
+                    };
+                    first_share: {
+                        done: boolean;
+                        at: string | null;
+                    };
+                    first_comment: {
+                        done: boolean;
+                        at: string | null;
+                    };
+                    first_assignment_done: {
+                        done: boolean;
+                        at: string | null;
+                    };
+                };
+                inviteSent: boolean;
+                loopCompletedAt: string | null;
+                loopElapsedMs: number | null;
+                dismissedAt: string | null;
+            } & Disposable;
+            meta: object;
+        }>;
+        setOnboardingDismissed: import("@trpc/server").TRPCMutationProcedure<{
+            input: {
+                teamId: string;
+                dismissed: boolean;
+            };
+            output: {
+                success: boolean;
+            };
+            meta: object;
+        }>;
+        listRules: import("@trpc/server").TRPCQueryProcedure<{
+            input: {
+                teamId: string;
+            };
+            output: {
+                rules: {
+                    id: string;
+                    teamId: string;
+                    name: string;
+                    enabled: boolean;
+                    createdBy: string;
+                    createdByName: string;
+                    watchesEmail: string;
+                    triggers: {
+                        senders?: string[] | undefined;
+                        domains?: string[] | undefined;
+                        recipients?: string[] | undefined;
+                        keywords?: string[] | undefined;
+                        gmailLabels?: string[] | undefined;
+                        hours?: {
+                            days?: number[] | undefined;
+                            from: string;
+                            to: string;
+                            timeZone: string;
+                        } | undefined;
+                    };
+                    actions: ({
+                        kind: "share";
+                        visibility: "team";
+                    } | {
+                        kind: "assign";
+                        userId: string;
+                    } | {
+                        kind: "label";
+                        labelIds: string[];
+                    } | {
+                        kind: "todo";
+                        assigneeUserId?: string | undefined;
+                    } | {
+                        kind: "snooze";
+                        hours: number;
+                    } | {
+                        kind: "notify";
+                        userIds: string[];
+                    })[];
+                    createdAt: Date;
+                    updatedAt: Date;
+                }[] & Disposable;
+            };
+            meta: object;
+        }>;
+        createRule: import("@trpc/server").TRPCMutationProcedure<{
+            input: {
+                name: string;
+                actions: ({
+                    kind: "share";
+                    visibility: "team";
+                } | {
+                    kind: "assign";
+                    userId: string;
+                } | {
+                    kind: "label";
+                    labelIds: string[];
+                } | {
+                    kind: "todo";
+                    assigneeUserId?: string | undefined;
+                } | {
+                    kind: "snooze";
+                    hours: number;
+                } | {
+                    kind: "notify";
+                    userIds: string[];
+                })[];
+                teamId: string;
+                triggers: {
+                    senders?: string[] | undefined;
+                    domains?: string[] | undefined;
+                    recipients?: string[] | undefined;
+                    keywords?: string[] | undefined;
+                    gmailLabels?: string[] | undefined;
+                    hours?: {
+                        to: string;
+                        timeZone: string;
+                        from: string;
+                        days?: number[] | undefined;
+                    } | undefined;
+                };
+                confirmAclExpansion?: boolean | undefined;
+            };
+            output: {
+                id: string;
+            } & Disposable;
+            meta: object;
+        }>;
+        updateRule: import("@trpc/server").TRPCMutationProcedure<{
+            input: {
+                ruleId: string;
+                name?: string | undefined;
+                actions?: ({
+                    kind: "share";
+                    visibility: "team";
+                } | {
+                    kind: "assign";
+                    userId: string;
+                } | {
+                    kind: "label";
+                    labelIds: string[];
+                } | {
+                    kind: "todo";
+                    assigneeUserId?: string | undefined;
+                } | {
+                    kind: "snooze";
+                    hours: number;
+                } | {
+                    kind: "notify";
+                    userIds: string[];
+                })[] | undefined;
+                triggers?: {
+                    senders?: string[] | undefined;
+                    domains?: string[] | undefined;
+                    recipients?: string[] | undefined;
+                    keywords?: string[] | undefined;
+                    gmailLabels?: string[] | undefined;
+                    hours?: {
+                        to: string;
+                        timeZone: string;
+                        from: string;
+                        days?: number[] | undefined;
+                    } | undefined;
+                } | undefined;
+                confirmAclExpansion?: boolean | undefined;
+            };
+            output: {
+                success: boolean;
+            };
+            meta: object;
+        }>;
+        setRuleEnabled: import("@trpc/server").TRPCMutationProcedure<{
+            input: {
+                enabled: boolean;
+                ruleId: string;
+                confirmAclExpansion?: boolean | undefined;
+            };
+            output: {
+                success: boolean;
+            };
+            meta: object;
+        }>;
+        deleteRule: import("@trpc/server").TRPCMutationProcedure<{
+            input: {
+                ruleId: string;
+            };
+            output: {
+                success: boolean;
+            };
+            meta: object;
+        }>;
+        listRuleRuns: import("@trpc/server").TRPCQueryProcedure<{
+            input: {
+                teamId: string;
+                limit?: number | undefined;
+                teamThreadId?: string | undefined;
+                ruleId?: string | undefined;
+            };
+            output: {
+                runs: {
+                    ruleDeletedAt: string | null;
+                    actionsApplied: {
+                        kind: import("../lib/teams/team-rules-shared").RuleActionKind;
+                        ok: boolean;
+                        reason?: string | undefined;
+                    }[];
+                    id: string;
+                    ruleId: string;
+                    ruleName: string;
+                    threadId: string;
+                    teamThreadId: string | null;
+                    subject: string | null;
+                    outcome: "error" | "undone" | "processing" | "applied" | "skipped";
+                    reason: string;
+                    createdAt: Date;
+                    undoneAt: Date | null;
+                }[] & Disposable;
+            };
+            meta: object;
+        }>;
+        previewRule: import("@trpc/server").TRPCQueryProcedure<{
+            input: {
+                teamId: string;
+                triggers: {
+                    senders?: string[] | undefined;
+                    domains?: string[] | undefined;
+                    recipients?: string[] | undefined;
+                    keywords?: string[] | undefined;
+                    gmailLabels?: string[] | undefined;
+                    hours?: {
+                        to: string;
+                        timeZone: string;
+                        from: string;
+                        days?: number[] | undefined;
+                    } | undefined;
+                };
+                limit?: number | undefined;
+            };
+            output: {
+                rows: {
+                    threadId: string;
+                    subject: string;
+                    senderEmail: string;
+                    verdict: {
+                        matched: boolean;
+                        partial: boolean;
+                        reasons: {
+                            trigger: import("../lib/teams/team-rules-shared").TriggerFamily;
+                            matched: boolean;
+                            detail: string;
+                            unavailable?: boolean | undefined;
+                        }[];
+                    } | null;
+                }[] & Disposable;
+            };
+            meta: object;
+        }>;
+        undoRuleRun: import("@trpc/server").TRPCMutationProcedure<{
+            input: {
+                runId: string;
+            };
+            output: {
+                status: "undone" | "conflicted" | "failed";
+                conflicts: string[];
+                undone: {
+                    kind: import("../lib/teams/team-rules-shared").RuleActionKind;
+                    ok: boolean;
+                    reason?: string | undefined;
+                }[];
+            } & Disposable;
+            meta: object;
+        }>;
+        requestDraftReview: import("@trpc/server").TRPCMutationProcedure<{
+            input: {
+                teamThreadId: string;
+                draftId: string;
+                reviewerUserId: string;
+            };
+            output: {
+                id: string;
+            } & Disposable;
+            meta: object;
+        }>;
+        threadDraftReview: import("@trpc/server").TRPCQueryProcedure<{
+            input: {
+                teamThreadId: string;
+            };
+            output: {
+                review: ({
+                    reviewerName: string;
+                    isParty: boolean;
+                    suggestions: {
+                        authorName: string;
+                        id: string;
+                        authorUserId: string;
+                        bodyText: string;
+                        note: string;
+                        baseDigest: string;
+                        appliedAt: Date | null;
+                        createdAt: Date;
+                    }[];
+                    id: string;
+                    teamThreadId: string;
+                    ownerUserId: string;
+                    reviewerUserId: string;
+                    state: "approved" | "cancelled" | "requested" | "changes_requested" | "completed";
+                    revision: number;
+                    draftDigest: string;
+                    createdAt: Date;
+                    updatedAt: Date;
+                    ownerName: string | null;
+                } & Disposable) | null;
+            };
+            meta: object;
+        }>;
+        readReviewDraft: import("@trpc/server").TRPCQueryProcedure<{
+            input: {
+                reviewId: string;
+            };
+            output: {
+                snapshot: {
+                    subject: string;
+                    bodyText: string;
+                    to: string[];
+                    cc: string[];
+                    bcc: string[];
+                };
+                currentDigest: string;
+                reviewDigest: string;
+                stale: boolean;
+                state: "approved" | "cancelled" | "requested" | "changes_requested" | "completed";
+                revision: number;
+            } & Disposable;
+            meta: object;
+        }>;
+        suggestDraftEdit: import("@trpc/server").TRPCMutationProcedure<{
+            input: {
+                reviewId: string;
+                bodyText: string;
+                baseDigest: string;
+                note?: string | undefined;
+            };
+            output: {
+                id: string;
+            } & Disposable;
+            meta: object;
+        }>;
+        draftReviewDecision: import("@trpc/server").TRPCMutationProcedure<{
+            input: {
+                reviewId: string;
+                baseDigest: string;
+                decision: "approved" | "changes_requested";
+            };
+            output: {
+                state: "approved" | "changes_requested";
+                revision: number;
+            } & Disposable;
+            meta: object;
+        }>;
+        rebaseDraftReview: import("@trpc/server").TRPCMutationProcedure<{
+            input: {
+                reviewId: string;
+            };
+            output: {
+                revision: number;
+            } & Disposable;
+            meta: object;
+        }>;
+        applyDraftSuggestion: import("@trpc/server").TRPCMutationProcedure<{
+            input: {
+                suggestionId: string;
+            };
+            output: {
+                success: boolean;
+            };
+            meta: object;
+        }>;
+        createReplyIntent: import("@trpc/server").TRPCMutationProcedure<{
+            input: {
+                teamThreadId: string;
+            };
+            output: {
+                id: string;
+                baselineAt: string;
+                expiresAt: string;
+            } & Disposable;
+            meta: object;
+        }>;
+        cancelDraftReview: import("@trpc/server").TRPCMutationProcedure<{
+            input: {
+                reviewId: string;
+            };
+            output: {
+                success: boolean;
+            };
+            meta: object;
+        }>;
+        getSlaPolicy: import("@trpc/server").TRPCQueryProcedure<{
+            input: {
+                teamId: string;
+            };
+            output: {
+                policy: {
+                    teamId: string;
+                    firstResponseMinutes: number | null;
+                    resolutionMinutes: number | null;
+                    timeZone: string;
+                    businessHours: {
+                        days: number[];
+                        start: string;
+                        end: string;
+                    };
+                    updatedAt: Date;
+                } & Disposable;
+            };
+            meta: object;
+        }>;
+        setSlaPolicy: import("@trpc/server").TRPCMutationProcedure<{
+            input: {
+                teamId: string;
+                firstResponseMinutes: number | null;
+                resolutionMinutes: number | null;
+                timeZone: string;
+                businessHours: {
+                    start: string;
+                    end: string;
+                    days: number[];
+                };
+            };
+            output: {
+                success: boolean;
+            };
+            meta: object;
+        }>;
+        listAbsences: import("@trpc/server").TRPCQueryProcedure<{
+            input: {
+                teamId: string;
+            };
+            output: {
+                absences: {
+                    userName: string;
+                    id: string;
+                    userId: string;
+                    startsAt: Date;
+                    endsAt: Date;
+                    note: string;
+                    createdBy: string;
+                }[] & Disposable;
+            };
+            meta: object;
+        }>;
+        declareAbsence: import("@trpc/server").TRPCMutationProcedure<{
+            input: {
+                teamId: string;
+                startsAt: string;
+                endsAt: string;
+                targetUserId: string;
+                note?: string | undefined;
+            };
+            output: {
+                id: string;
+            } & Disposable;
+            meta: object;
+        }>;
+        removeAbsence: import("@trpc/server").TRPCMutationProcedure<{
+            input: {
+                absenceId: string;
+            };
+            output: {
+                success: boolean;
+            };
+            meta: object;
+        }>;
+        opsOverview: import("@trpc/server").TRPCQueryProcedure<{
+            input: {
+                teamId: string;
+                windowDays?: number | undefined;
+            };
+            output: {
+                labelVolumes: {
+                    labelId: string;
+                    name: string;
+                    shared: number;
+                    resolved: number;
+                }[];
+                workload: {
+                    userId: string;
+                    name: string;
+                    openAssigned: number;
+                }[];
+                coverage: {
+                    availableCount: number;
+                    totalCount: number;
+                    rows: {
+                        userId: string;
+                        name: string;
+                        absentUntil: string | null;
+                    }[];
+                };
+                stuckProcessing: {
+                    id: string;
+                    ruleName: string;
+                    ageMinutes: number;
+                }[];
+                limits: {
+                    threadsTruncated: boolean;
+                    eventsTruncated: boolean;
+                    labelsTruncated: boolean;
+                    maxThreads: number;
+                    maxEvents: number;
+                    maxLabelLinks: number;
+                };
+                reopenings: number;
+                transfers: number;
+                window: {
+                    days: number;
+                    from: string;
+                    to: string;
+                };
+                sla: {
+                    firstResponseMinutes: number | null;
+                    resolutionMinutes: number | null;
+                    timeZone: string;
+                    businessHours: {
+                        days: number[];
+                        start: string;
+                        end: string;
+                    };
+                } | null;
+                counts: {
+                    open: number;
+                    unassigned: number;
+                    sharedInWindow: number;
+                    resolvedInWindow: number;
+                };
+                overdue: {
+                    firstResponse: number | null;
+                    resolution: number | null;
+                };
+                oldestOpenWithoutReply: {
+                    teamThreadId: string;
+                    subject: string;
+                    sharedAt: string;
+                } | null;
+                firstResponse: {
+                    medianMinutes: number | null;
+                    p90Minutes: number | null;
+                    sampleSize: number;
+                };
+                resolution: {
+                    medianMinutes: number | null;
+                    p90Minutes: number | null;
+                    sampleSize: number;
+                };
+            } & Disposable;
+            meta: object;
+        }>;
         invite: import("@trpc/server").TRPCMutationProcedure<{
             input: {
                 email: string;
@@ -2454,7 +3106,7 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
                     id: string;
                     email: string;
                     role: "owner" | "member";
-                    status: "pending" | "accepted" | "declined" | "revoked";
+                    status: "pending" | "revoked" | "accepted" | "declined";
                     createdAt: Date;
                     invitedByName: string;
                 }[] & Disposable;
@@ -2548,14 +3200,14 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
                 teamId: string;
                 status?: "open" | "closed" | undefined;
                 limit?: number | undefined;
+                assignee?: "me" | "unassigned" | {
+                    userId: string;
+                } | undefined;
                 labelId?: string | undefined;
                 cursor?: {
                     id: string;
                     lastActivityAt: string;
                 } | null | undefined;
-                assignee?: "me" | "unassigned" | {
-                    userId: string;
-                } | undefined;
             };
             output: {
                 threads: {
@@ -2907,7 +3559,7 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
                     teamThreadId: string | null;
                     threadSubject: string | null;
                     commentId: string | null;
-                    kind: "comment" | "mention" | "assignment" | "access_granted" | "access_revoked" | "status_changed";
+                    kind: "comment" | "mention" | "assignment" | "access_granted" | "access_revoked" | "status_changed" | "rule" | "draft_review";
                     actorUserId: string;
                     actorName: string;
                     createdAt: Date;
@@ -2947,6 +3599,7 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
             input: {
                 teamThreadId: string;
                 typing?: boolean | undefined;
+                replying?: boolean | undefined;
             };
             output: {
                 success: boolean;
@@ -2964,6 +3617,7 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
                     email: string;
                     lastSeenAt: Date;
                     typingUntil: Date | null;
+                    replyingUntil: Date | null;
                 }[] & Disposable;
             };
             meta: object;
@@ -2983,6 +3637,363 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
             output: {
                 count: number;
             };
+            meta: object;
+        }>;
+    }>>;
+    integrations: import("@trpc/server").TRPCBuiltRouter<{
+        ctx: {
+            c: import("hono").Context<{
+                Bindings: Record<string, unknown>;
+                Variables: {
+                    auth: {
+                        api: {
+                            listUserAccounts: (input: {
+                                headers: Headers;
+                            }) => Promise<{
+                                accountId: string;
+                                providerId: string;
+                                scopes?: readonly string[] | null;
+                            }[]>;
+                            getAccessToken: (input: {
+                                body: {
+                                    providerId: string;
+                                    accountId?: string;
+                                };
+                                headers: Headers;
+                            }) => Promise<{
+                                accessToken?: string | null;
+                                scopes?: readonly string[] | null;
+                            }>;
+                            signOut: (input: {
+                                headers: Headers;
+                            }) => Promise<unknown>;
+                            deleteUser: (input: {
+                                body: {
+                                    callbackURL: string;
+                                };
+                                headers: Headers;
+                                request: Request;
+                            }) => Promise<{
+                                success: boolean;
+                                message: string;
+                            }>;
+                        };
+                    };
+                    sessionUser?: {
+                        id: string;
+                        name: string;
+                        email: string;
+                    };
+                    traceId?: string;
+                    requestId?: string;
+                };
+            }>;
+            sessionUser?: {
+                id: string;
+                name: string;
+                email: string;
+            };
+        };
+        meta: object;
+        errorShape: import("@trpc/server").TRPCDefaultErrorShape;
+        transformer: true;
+    }, import("@trpc/server").TRPCDecorateCreateRouterOptions<{
+        overview: import("@trpc/server").TRPCQueryProcedure<{
+            input: {
+                teamId: string;
+            };
+            output: {
+                isOwner: boolean;
+                vaultConfigured: boolean;
+                oauthConfigured: boolean;
+                install: {
+                    id: string;
+                    status: import("../lib/teams/team-integrations-shared").IntegrationInstallStatus;
+                    workspaceId: string | null;
+                    workspaceName: string | null;
+                    scopes: string[];
+                    hasAccessToken: boolean;
+                    createdAt: Date;
+                    revokedAt: Date | null;
+                } | null;
+                mappings: {
+                    id: string;
+                    kind: import("../lib/teams/team-integrations-shared").IntegrationMappingKind;
+                    retaValue: string;
+                    externalId: string;
+                    externalLabel: string;
+                }[];
+            } & Disposable;
+            meta: object;
+        }>;
+        beginInstall: import("@trpc/server").TRPCMutationProcedure<{
+            input: {
+                teamId: string;
+                reconnectConfirm?: boolean | undefined;
+            };
+            output: {
+                authorizeUrl: string;
+            } & Disposable;
+            meta: object;
+        }>;
+        completeInstall: import("@trpc/server").TRPCMutationProcedure<{
+            input: {
+                code: string;
+                state: string;
+            };
+            output: {
+                workspaceName: string;
+            } & Disposable;
+            meta: object;
+        }>;
+        revokeInstall: import("@trpc/server").TRPCMutationProcedure<{
+            input: {
+                teamId: string;
+            };
+            output: {
+                revoked: true;
+                remote: "ok" | "failed" | "skipped";
+            } & Disposable;
+            meta: object;
+        }>;
+        setMapping: import("@trpc/server").TRPCMutationProcedure<{
+            input: {
+                kind: "status" | "team" | "assignee";
+                teamId: string;
+                retaValue: string;
+                externalId: string;
+                externalLabel?: string | undefined;
+            };
+            output: {
+                ok: boolean;
+            } & Disposable;
+            meta: object;
+        }>;
+        listLinearTargets: import("@trpc/server").TRPCQueryProcedure<{
+            input: {
+                teamId: string;
+                linearTeamId?: string | undefined;
+            };
+            output: {
+                teams: {
+                    id: string;
+                    name: string;
+                }[];
+                users: {
+                    id: string;
+                    name: string;
+                    email: string;
+                }[];
+                states: {
+                    id: string;
+                    name: string;
+                    type: string;
+                }[] | null;
+            } & Disposable;
+            meta: object;
+        }>;
+        threadIntegration: import("@trpc/server").TRPCQueryProcedure<{
+            input: {
+                teamThreadId: string;
+            };
+            output: {
+                installStatus: import("../lib/teams/team-integrations-shared").IntegrationInstallStatus;
+                subject: string;
+                issueLinks: {
+                    id: string;
+                    issueId: string;
+                    issueIdentifier: string;
+                    issueUrl: string;
+                    createdAt: Date;
+                }[];
+                externalLinks: {
+                    id: string;
+                    kind: import("../lib/teams/team-integrations-shared").ExternalLinkKind;
+                    label: string;
+                    url: string;
+                    createdBy: string | null;
+                    createdAt: Date;
+                }[];
+                allowedTeams: {
+                    id: string;
+                    label: string;
+                }[];
+                statusMappings: {
+                    retaStatus: string;
+                    externalId: string;
+                    label: string;
+                }[];
+                assigneeMappings: {
+                    userId: string;
+                    externalId: string;
+                    label: string;
+                }[];
+            } & Disposable;
+            meta: object;
+        }>;
+        previewIssue: import("@trpc/server").TRPCMutationProcedure<{
+            input: {
+                teamThreadId: string;
+                clientRequestKey: string;
+                linearTeamId: string;
+                title?: string | null | undefined;
+                note?: string | null | undefined;
+                assigneeUserId?: string | null | undefined;
+                stateId?: string | null | undefined;
+            };
+            output: ({
+                title: string;
+                description: string;
+                backlinkUrl: string;
+                digest: string;
+                expiresAt: string;
+                status: "previewed";
+                previewId: string;
+                issueId?: undefined;
+                issueIdentifier?: undefined;
+                issueUrl?: undefined;
+            } & Disposable) | ({
+                previewId: string;
+                status: "created";
+                issueId: string;
+                issueIdentifier: string;
+                issueUrl: string;
+            } & Disposable);
+            meta: object;
+        }>;
+        confirmIssue: import("@trpc/server").TRPCMutationProcedure<{
+            input: {
+                clientRequestKey: string;
+                digest: string;
+                previewId: string;
+            };
+            output: ({
+                issueId: string;
+                issueIdentifier: string;
+                issueUrl: string;
+                duplicate: true;
+            } & Disposable) | ({
+                issueId: string;
+                issueIdentifier: string;
+                issueUrl: string;
+                duplicate: false;
+            } & Disposable);
+            meta: object;
+        }>;
+        acceptIssueLink: import("@trpc/server").TRPCMutationProcedure<{
+            input: {
+                identifier: string;
+                teamThreadId: string;
+            };
+            output: {
+                issueId: string;
+                issueIdentifier: string;
+                issueUrl: string;
+            } & Disposable;
+            meta: object;
+        }>;
+        unlinkIssue: import("@trpc/server").TRPCMutationProcedure<{
+            input: {
+                linkId: string;
+            };
+            output: {
+                ok: boolean;
+            } & Disposable;
+            meta: object;
+        }>;
+        addExternalLink: import("@trpc/server").TRPCMutationProcedure<{
+            input: {
+                kind: "crm" | "customer" | "other";
+                label: string;
+                teamThreadId: string;
+                url: string;
+            };
+            output: {
+                id: string;
+            } & Disposable;
+            meta: object;
+        }>;
+        removeExternalLink: import("@trpc/server").TRPCMutationProcedure<{
+            input: {
+                linkId: string;
+            };
+            output: {
+                ok: boolean;
+            } & Disposable;
+            meta: object;
+        }>;
+        listOutboundWebhooks: import("@trpc/server").TRPCQueryProcedure<{
+            input: {
+                teamId: string;
+            };
+            output: {
+                hasSecret: boolean;
+                id: string;
+                url: string;
+                events: import("../lib/teams/team-integrations-shared").OutboundEventType[];
+                active: boolean;
+                consecutiveFailures: number;
+                createdAt: Date;
+            }[] & Disposable;
+            meta: object;
+        }>;
+        createOutboundWebhook: import("@trpc/server").TRPCMutationProcedure<{
+            input: {
+                teamId: string;
+                url: string;
+                events: string[];
+                secret: string;
+            };
+            output: {
+                id: string;
+            } & Disposable;
+            meta: object;
+        }>;
+        setOutboundWebhookActive: import("@trpc/server").TRPCMutationProcedure<{
+            input: {
+                active: boolean;
+                teamId: string;
+                webhookId: string;
+            };
+            output: {
+                ok: boolean;
+            } & Disposable;
+            meta: object;
+        }>;
+        listOutboundDeliveries: import("@trpc/server").TRPCQueryProcedure<{
+            input: {
+                teamId: string;
+                webhookId: string;
+                status?: "pending" | "sending" | "delivered" | "dead" | undefined;
+            };
+            output: {
+                id: string;
+                eventType: import("../lib/teams/team-integrations-shared").OutboundEventType;
+                status: import("../lib/teams/team-integrations-shared").OutboundDeliveryStatus;
+                attempts: number;
+                lastError: string | null;
+                createdAt: Date;
+                deliveredAt: Date | null;
+            }[] & Disposable;
+            meta: object;
+        }>;
+        retryDeadOutbound: import("@trpc/server").TRPCMutationProcedure<{
+            input: {
+                teamId: string;
+                webhookId: string;
+            };
+            output: {
+                revived: number;
+            } & Disposable;
+            meta: object;
+        }>;
+        exportActivity: import("@trpc/server").TRPCQueryProcedure<{
+            input: {
+                teamId: string;
+                limit?: number | undefined;
+                cursor?: string | null | undefined;
+            };
+            output: never;
             meta: object;
         }>;
     }>>;
@@ -3265,9 +4276,9 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
         createEvent: import("@trpc/server").TRPCMutationProcedure<{
             input: {
                 title: string;
-                end: string;
                 timeZone: string;
                 start: string;
+                end: string;
                 description?: string | undefined;
                 location?: string | undefined;
                 attendees?: string[] | undefined;

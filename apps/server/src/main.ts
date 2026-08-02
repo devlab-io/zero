@@ -133,9 +133,26 @@ export default class Entry extends WorkerEntrypoint<ZeroEnv> {
     bootEnv(this.env as unknown as Record<string, unknown>);
     logger.info('Running scheduled tasks...');
 
-    await this.processScheduledEmails();
-
-    await this.processExpiredSubscriptions();
+    // Tâches ISOLÉES (adversarial-11) : l'échec de l'une ne prive jamais les
+    // suivantes — le sweep outbound P18 tourne même si les emails planifiés
+    // ou les souscriptions échouent.
+    const { runScheduledTasksIsolated } = await import('./lib/run-scheduled-tasks');
+    await runScheduledTasksIsolated(
+      [
+        ['scheduled-emails', () => this.processScheduledEmails()],
+        ['expired-subscriptions', () => this.processExpiredSubscriptions()],
+        [
+          'team-outbound-sweep',
+          async () => {
+            // P18 : outbox des webhooks sortants — claim CAS + bail, garde
+            // SSRF/DoH à chaque tentative, signature HMAC.
+            const { runOutboundDeliverySweep } = await import('./lib/teams/team-outbound-runner');
+            await runOutboundDeliverySweep(this.env as unknown as import('./env').ZeroEnv);
+          },
+        ],
+      ],
+      (name, error) => logger.error(`scheduled task ${name} failed`, error),
+    );
   }
 
   private async processScheduledEmails() {

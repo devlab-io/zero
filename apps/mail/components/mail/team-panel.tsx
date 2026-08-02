@@ -21,8 +21,11 @@ import {
 } from '@/lib/thread-quote';
 import { Check, CircleDot, Loader2, Quote, Trash2, UserPlus, Users, X } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { assignmentExplanation } from '@/lib/rule-assignment-explanation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { LinearIssuePanel } from '@/components/team/linear-issue-panel';
+import { DraftReviewPanel } from '@/components/team/draft-review-panel';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useTRPC } from '@/providers/query-provider';
 import { Textarea } from '@/components/ui/textarea';
@@ -226,7 +229,10 @@ function SharedThreadSection({
   const realtime = useTeamRealtime(share.id);
   useTeamPresenceFallback(share.id, true, realtime.connected);
   const { data: membersData } = useTeamMembers(share.teamId);
-  const members = (membersData?.members ?? []) as (MentionMember & { role: string })[];
+  const members = useMemo(
+    () => (membersData?.members ?? []) as (MentionMember & { role: string })[],
+    [membersData?.members],
+  );
   const memberById = useMemo(
     () => new Map(members.map((member) => [member.userId, member])),
     [members],
@@ -242,6 +248,17 @@ function SharedThreadSection({
     trpc.teams.setAssignee.mutationOptions({ onSuccess: invalidateShares }),
   );
   const unshare = useMutation(trpc.teams.unshare.mutationOptions({ onSuccess: invalidateShares }));
+  // P14 : « pourquoi assigné » — dernier run appliqué (assign/todo) de CE fil,
+  // ACL-filtré serveur. Chargement silencieux, erreur non bloquante.
+  const ruleRunsQuery = useQuery(
+    trpc.teams.listRuleRuns.queryOptions(
+      { teamId: share.teamId, teamThreadId: share.id, limit: 20 },
+      { enabled: !!share.assigneeUserId, staleTime: 60_000, retry: false },
+    ),
+  );
+  const ruleAssignment = share.assigneeUserId
+    ? assignmentExplanation(ruleRunsQuery.data?.runs ?? [])
+    : null;
 
   if (realtime.revoked) {
     return (
@@ -322,6 +339,38 @@ function SharedThreadSection({
           memberById={memberById}
         />
       </div>
+      {ruleAssignment && (
+        <p
+          className="text-muted-foreground mt-1 line-clamp-2 pl-5 text-[11px] leading-snug"
+          title={ruleAssignment.reason}
+        >
+          {m['common.teams.assignedByRule']({ rule: ruleAssignment.ruleName })} ·{' '}
+          {ruleAssignment.reason}
+        </p>
+      )}
+
+      {/* P15 : soft lock JAMAIS bloquant — signal seul, aucun contenu. */}
+      {realtime.replyingUserIds.length > 0 && (
+        <p className="text-muted-foreground mt-1 pl-5 text-[11px]" role="status">
+          {m['common.teams.alsoReplying']({
+            names: realtime.replyingUserIds
+              .map((userId) => memberById.get(userId)?.name ?? '')
+              .filter(Boolean)
+              .join(', '),
+          })}
+        </p>
+      )}
+
+      <DraftReviewPanel
+        teamThreadId={share.id}
+        threadId={threadId}
+        sharerUserId={share.sharerUserId}
+        members={members.map((member) => ({ userId: member.userId, name: member.name }))}
+      />
+
+      {/* P18 : issue Linear depuis le fil — aperçu CANONIQUE serveur puis
+          confirmation par référence, lien persisté au succès seulement. */}
+      <LinearIssuePanel teamThreadId={share.id} />
 
       <CommentsBlock
         share={share}

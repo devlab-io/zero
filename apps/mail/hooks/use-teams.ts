@@ -128,7 +128,12 @@ export const useCollabThreadSets = (enabled: boolean) => {
   );
 };
 
-export type TeamPresenceUser = { userId: string; typingUntil: number | null };
+export type TeamPresenceUser = {
+  userId: string;
+  typingUntil: number | null;
+  /** P15 : « rédige une réponse » — horodatage seul, jamais de contenu. */
+  replyingUntil?: number | null;
+};
 
 type RealtimeState = {
   connected: boolean;
@@ -157,7 +162,7 @@ export const useTeamRealtime = (teamThreadId: string | null) => {
   useEffect(() => {
     const now = Date.now();
     const deadlines = state.presence
-      .map((user) => user.typingUntil)
+      .flatMap((user) => [user.typingUntil, user.replyingUntil ?? null])
       .filter((until): until is number => until !== null && until > now);
     if (deadlines.length === 0) return;
     const next = Math.min(...deadlines);
@@ -283,6 +288,17 @@ export const useTeamRealtime = (teamThreadId: string | null) => {
     }
   }, []);
 
+  /** P15 : signal « rédige une réponse » — un booléen, JAMAIS de contenu. */
+  const sendReplying = useCallback((active: boolean) => {
+    const socket = socketRef.current;
+    if (!socket || socket.readyState !== WebSocket.OPEN) return;
+    try {
+      socket.send(JSON.stringify({ type: 'replying', active }));
+    } catch {
+      // socket en cours de fermeture
+    }
+  }, []);
+
   const othersPresent = useMemo(
     () => state.presence.filter((user) => user.userId !== myUserId),
     [state.presence, myUserId],
@@ -297,12 +313,23 @@ export const useTeamRealtime = (teamThreadId: string | null) => {
     [othersPresent, clock],
   );
 
+  const replyingUserIds = useMemo(
+    () =>
+      othersPresent
+        .filter((user) => (user.replyingUntil ?? null) !== null && user.replyingUntil! > Date.now())
+        .map((user) => user.userId),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [othersPresent, clock],
+  );
+
   return {
     connected: state.connected,
     revoked: state.revoked,
     othersPresent,
     typingUserIds,
+    replyingUserIds,
     sendTyping,
+    sendReplying,
   };
 };
 

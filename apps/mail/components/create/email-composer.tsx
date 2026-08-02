@@ -2,6 +2,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/
 import { createDraftSaveLifecycle } from '@/lib/draft-save-lifecycle';
 import { registerComposerInsertHandler } from '@/lib/composer-insert';
 import { resolveComposerChord } from '@/lib/hotkeys/composer-chords';
+import { applyProseSuggestion } from '@/lib/composer-prose-patch';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { registerLiveDraft } from '@/lib/live-draft-registry';
 import { resolveComposerEscape } from '@/lib/composer-escape';
@@ -245,7 +246,7 @@ export function EmailComposer({
       draftId,
       replyId: activeReplyId,
     });
-    return registerComposerInsertHandler(scopeKey, (payload, { force }) => {
+    const handler: Parameters<typeof registerComposerInsertHandler>[1] = (payload, { force }) => {
       if (!force && editor.getText().trim().length > 0) return 'occupied';
       editor.commands.setContent(payload.message);
       if (payload.subject && !getValues('subject')) {
@@ -263,7 +264,23 @@ export function EmailComposer({
       setHasUnsavedChanges(true);
       editor.commands.focus('end');
       return 'inserted';
-    });
+    };
+    const unregisterScoped = registerComposerInsertHandler(scopeKey, handler);
+    // P15 (durci) : la couture PAR FIL du panneau de relecture n'utilise PAS
+    // setContent — elle applique un patch BORNÉ à la prose éditable
+    // (applyProseSuggestion) qui préserve citation, signature, liens et
+    // position de curseur. L'autosave existant persiste ensuite.
+    const unregisterTeamScope = threadId
+      ? registerComposerInsertHandler(`team-review:${threadId}`, (payload) => {
+          applyProseSuggestion(editor, payload.message);
+          setHasUnsavedChanges(true);
+          return 'inserted';
+        })
+      : null;
+    return () => {
+      unregisterScoped();
+      unregisterTeamScope?.();
+    };
   }, [
     editor,
     draftOwner.userId,

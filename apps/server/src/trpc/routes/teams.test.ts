@@ -18,9 +18,23 @@ const harness = vi.hoisted(() => ({
     listMyCollabThreadSets: vi.fn(),
     setTeamThreadAssignee: vi.fn(),
     revokeTeamThreadAccess: vi.fn(),
+    createTeamRule: vi.fn(),
+    updateTeamRule: vi.fn(),
+    getTeamOpsOverview: vi.fn(),
+    setTeamSlaPolicy: vi.fn(),
+    declareTeamAbsence: vi.fn(),
+    requestTeamDraftReview: vi.fn(),
+    suggestTeamDraftEdit: vi.fn(),
+    setTeamDraftReviewDecision: vi.fn(),
+    createTeamReplyIntent: vi.fn(),
+    listTeamRules: vi.fn(),
+    previewTeamRule: vi.fn(),
+    undoTeamRuleRun: vi.fn(),
+    setTeamRuleEnabled: vi.fn(),
   } as Record<string, ReturnType<typeof vi.fn>>,
   getThread: vi.fn(),
   getZeroAgent: vi.fn(),
+  getThreadsFromDB: vi.fn(),
 }));
 
 const procBuild = vi.hoisted(() => {
@@ -43,6 +57,7 @@ vi.mock('../../lib/server-utils', () => ({
   getZeroDB: vi.fn(async () => harness.db),
   getThread: harness.getThread,
   getZeroAgent: harness.getZeroAgent,
+  getThreadsFromDB: harness.getThreadsFromDB,
 }));
 
 vi.mock('hono/context-storage', () => ({
@@ -351,5 +366,271 @@ describe('teams.assignSharedBatch — assignation batch ACL-safe (P5)', () => {
       threadIds: ['t1'],
     });
     expect(out.assigned).toBe(1);
+  });
+});
+
+describe('teams — règles d’équipe (P14)', () => {
+  it('createRule capture la connexion ACTIVE comme boîte surveillée (jamais fournie par le client)', async () => {
+    harness.db.createTeamRule.mockResolvedValue({ id: 'rule-1' });
+    await call('createRule', {
+      teamId: 'team-1',
+      name: 'Partage clients',
+      triggers: { domains: ['Pacific-Freight.PF'] },
+      actions: [{ kind: 'share', visibility: 'team' }],
+      confirmAclExpansion: true,
+    });
+    expect(harness.db.createTeamRule).toHaveBeenCalledWith(
+      'team-1',
+      { id: 'conn-active', email: 'Contact@Devlab.io' },
+      expect.objectContaining({ name: 'Partage clients', confirmAclExpansion: true }),
+    );
+  });
+
+  it('le schéma refuse une action share restricted (élargissement ACL par moteur interdit)', () => {
+    // Le parse zod refuse SYNCHRONEMENT — avant tout resolver.
+    expect(() =>
+      call('createRule', {
+        teamId: 'team-1',
+        name: 'x',
+        triggers: { domains: ['a.pf'] },
+        actions: [{ kind: 'share', visibility: 'restricted' }],
+      }),
+    ).toThrow(/team/);
+    expect(harness.db.createTeamRule).not.toHaveBeenCalled();
+  });
+
+  it('mapping des codes de validation des règles → BAD_REQUEST', async () => {
+    for (const code of ['no_trigger', 'no_action', 'invalid_hours', 'run_not_undoable']) {
+      harness.db.setTeamRuleEnabled.mockRejectedValueOnce(new Error(code));
+      await expect(
+        call('setRuleEnabled', { ruleId: 'rule-1', enabled: true }),
+      ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    }
+  });
+
+  it('refuse create/update d’une règle share sans confirmAclExpansion frais (garde SERVEUR)', async () => {
+    await expect(
+      call('createRule', {
+        teamId: 'team-1',
+        name: 'Partage clients',
+        triggers: { domains: ['a.pf'] },
+        actions: [{ kind: 'share', visibility: 'team' }],
+      }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST', message: 'acl_confirmation_required' });
+    await expect(
+      call('createRule', {
+        teamId: 'team-1',
+        name: 'x',
+        triggers: { domains: ['a.pf'] },
+        actions: [{ kind: 'share', visibility: 'team' }],
+        confirmAclExpansion: false,
+      }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    expect(harness.db.createTeamRule).not.toHaveBeenCalled();
+
+    await expect(
+      call('updateRule', {
+        ruleId: 'rule-1',
+        actions: [{ kind: 'share', visibility: 'team' }],
+      }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST', message: 'acl_confirmation_required' });
+    expect(harness.db.updateTeamRule).not.toHaveBeenCalled();
+  });
+
+  it('une règle sans share ne demande aucune confirmation', async () => {
+    harness.db.createTeamRule.mockResolvedValue({ id: 'rule-2' });
+    await call('createRule', {
+      teamId: 'team-1',
+      name: 'Assignation seule',
+      triggers: { domains: ['a.pf'] },
+      actions: [{ kind: 'assign', userId: 'user-2' }],
+    });
+    expect(harness.db.createTeamRule).toHaveBeenCalled();
+  });
+
+  it('ré-enable d’une règle share sans confirmation → BAD_REQUEST (garde STORE via DO)', async () => {
+    harness.db.setTeamRuleEnabled.mockRejectedValueOnce(new Error('acl_confirmation_required'));
+    await expect(
+      call('setRuleEnabled', { ruleId: 'rule-share', enabled: true }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST', message: 'acl_confirmation_required' });
+    // La confirmation traverse la façade DO jusqu'au store.
+    harness.db.setTeamRuleEnabled.mockResolvedValueOnce(undefined);
+    await call('setRuleEnabled', {
+      ruleId: 'rule-share',
+      enabled: true,
+      confirmAclExpansion: true,
+    });
+    expect(harness.db.setTeamRuleEnabled).toHaveBeenLastCalledWith('rule-share', true, true);
+  });
+
+  it('previewRule lit les fils COMPLETS via getThread (connexion active) et n’exécute AUCUNE action', async () => {
+    harness.getThreadsFromDB.mockResolvedValue({
+      threads: [
+        { id: 'th-1', subject: 'Sujet', sender: { email: 'client@ext.pf' } },
+        { id: 'th-broken', subject: 'Cassé', sender: { email: 'x@y.z' } },
+      ],
+      nextPageToken: '',
+    });
+    harness.getThread.mockImplementation(async (_connectionId: string, threadId: string) => {
+      if (threadId === 'th-broken') throw new Error('read failed');
+      return {
+        result: {
+          messages: [fakeMessage('m1')],
+          latest: {
+            ...fakeMessage('m1'),
+            to: [{ email: 'Omar@Devlab.io' }],
+            cc: [{ email: 'sales@devlab.io' }],
+            decodedBody: '<p>please confirm the freight surcharge</p>',
+            tags: [{ id: 'Label_1', name: 'Clients' }],
+          },
+          totalReplies: 1,
+          hasUnread: false,
+          labels: [],
+        },
+        shardId: 's1',
+      };
+    });
+    harness.db.previewTeamRule.mockResolvedValue([]);
+    await call('previewRule', {
+      teamId: 'team-1',
+      triggers: { recipients: ['omar@devlab.io'], keywords: ['surcharge'] },
+    });
+    expect(harness.getThreadsFromDB).toHaveBeenCalledWith('conn-active', {
+      folder: 'inbox',
+      maxResults: 10,
+    });
+    expect(harness.getThread).toHaveBeenCalledWith('conn-active', 'th-1');
+    const candidates = harness.db.previewTeamRule.mock.calls[0]?.[2];
+    // Fil lisible : métadonnées COMPLÈTES — destinataires réels de To/Cc et
+    // corps (le keyword n'existe QUE dans le body, pas le sujet).
+    expect(candidates[0]).toMatchObject({
+      threadId: 'th-1',
+      meta: expect.objectContaining({
+        recipients: ['omar@devlab.io', 'sales@devlab.io'],
+        bodyText: expect.stringContaining('surcharge'),
+      }),
+    });
+    expect(candidates[0].meta.subject).toBe('Sujet serveur');
+    // Fil illisible : meta null → « non évalué », jamais un non-match.
+    expect(candidates[1]).toMatchObject({ threadId: 'th-broken', meta: null });
+    // Dry-run strict : aucune écriture (partage, assignation…) n'est touchée.
+    expect(harness.db.shareTeamThread).not.toHaveBeenCalled();
+    expect(harness.db.setTeamThreadAssignee).not.toHaveBeenCalled();
+  });
+
+  it('undoRuleRun délègue au store (owner vérifié en SQL) et mappe not_found', async () => {
+    harness.db.undoTeamRuleRun.mockRejectedValueOnce(new Error('not_found'));
+    await expect(call('undoRuleRun', { runId: 'run-404' })).rejects.toMatchObject({
+      code: 'NOT_FOUND',
+    });
+  });
+});
+
+describe('teams — relecture de brouillon (P15)', () => {
+  it('requestDraftReview délègue SANS connectionId client (résolu serveur)', async () => {
+    harness.db.requestTeamDraftReview.mockResolvedValue({ id: 'rev-1' });
+    await call('requestDraftReview', {
+      teamThreadId: 'tt-1',
+      draftId: 'draft-9',
+      reviewerUserId: 'user-2',
+    });
+    expect(harness.db.requestTeamDraftReview).toHaveBeenCalledWith({
+      teamThreadId: 'tt-1',
+      draftId: 'draft-9',
+      reviewerUserId: 'user-2',
+    });
+  });
+
+  it('un digest périmé (draft_stale) → BAD_REQUEST ; non-reviewer → FORBIDDEN ; non-owner → FORBIDDEN', async () => {
+    harness.db.suggestTeamDraftEdit.mockRejectedValueOnce(new Error('draft_stale'));
+    await expect(
+      call('suggestDraftEdit', {
+        reviewId: 'rev-1',
+        bodyText: 'texte',
+        baseDigest: 'a'.repeat(64),
+      }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST', message: 'draft_stale' });
+    harness.db.setTeamDraftReviewDecision.mockRejectedValueOnce(new Error('not_reviewer'));
+    await expect(
+      call('draftReviewDecision', {
+        reviewId: 'rev-1',
+        decision: 'approved',
+        baseDigest: 'a'.repeat(64),
+      }),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    harness.db.requestTeamDraftReview.mockRejectedValueOnce(new Error('not_draft_owner'));
+    await expect(
+      call('requestDraftReview', {
+        teamThreadId: 'tt-1',
+        draftId: 'd',
+        reviewerUserId: 'u2',
+      }),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+  });
+
+  it('createReplyIntent délègue sous ACL et renvoie la baseline SERVEUR ; refus ACL mappé', async () => {
+    harness.db.createTeamReplyIntent.mockResolvedValue({
+      id: 'intent-1',
+      baselineAt: '2026-08-02T10:00:00.000Z',
+      expiresAt: '2026-08-03T10:00:00.000Z',
+    });
+    const created = await call('createReplyIntent', { teamThreadId: 'tt-1' });
+    expect(harness.db.createTeamReplyIntent).toHaveBeenCalledWith('tt-1');
+    expect(created).toEqual({
+      id: 'intent-1',
+      baselineAt: '2026-08-02T10:00:00.000Z',
+      expiresAt: '2026-08-03T10:00:00.000Z',
+    });
+    harness.db.createTeamReplyIntent.mockRejectedValueOnce(new Error('not_a_member'));
+    await expect(call('createReplyIntent', { teamThreadId: 'tt-1' })).rejects.toMatchObject({
+      code: 'FORBIDDEN',
+    });
+  });
+});
+
+describe('teams — SLA + opérations (P16)', () => {
+  it('opsOverview défaut 30 jours, refuse au-delà de 90 (schéma)', async () => {
+    harness.db.getTeamOpsOverview.mockResolvedValue({ counts: {} });
+    await call('opsOverview', { teamId: 'team-1' });
+    expect(harness.db.getTeamOpsOverview).toHaveBeenCalledWith('team-1', { windowDays: 30 });
+    expect(() => call('opsOverview', { teamId: 'team-1', windowDays: 91 })).toThrow();
+  });
+
+  it('setSlaPolicy valide les heures au schéma et mappe forbidden (owner-write)', async () => {
+    expect(() =>
+      call('setSlaPolicy', {
+        teamId: 'team-1',
+        firstResponseMinutes: 60,
+        resolutionMinutes: null,
+        timeZone: 'Pacific/Tahiti',
+        businessHours: { days: [], start: '08:00', end: '17:00' },
+      }),
+    ).toThrow(); // days vide refusé au schéma
+    harness.db.setTeamSlaPolicy.mockRejectedValueOnce(new Error('forbidden'));
+    await expect(
+      call('setSlaPolicy', {
+        teamId: 'team-1',
+        firstResponseMinutes: 60,
+        resolutionMinutes: null,
+        timeZone: 'Pacific/Tahiti',
+        businessHours: { days: [1, 2], start: '08:00', end: '17:00' },
+      }),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+  });
+
+  it('declareAbsence parse les dates ISO et délègue (self-or-owner vérifié store)', async () => {
+    harness.db.declareTeamAbsence.mockResolvedValue({ id: 'abs-1' });
+    await call('declareAbsence', {
+      teamId: 'team-1',
+      targetUserId: 'user-1',
+      startsAt: '2026-08-10T00:00:00.000Z',
+      endsAt: '2026-08-12T00:00:00.000Z',
+    });
+    expect(harness.db.declareTeamAbsence).toHaveBeenCalledWith('team-1', {
+      targetUserId: 'user-1',
+      startsAt: new Date('2026-08-10T00:00:00.000Z'),
+      endsAt: new Date('2026-08-12T00:00:00.000Z'),
+      note: undefined,
+    });
   });
 });

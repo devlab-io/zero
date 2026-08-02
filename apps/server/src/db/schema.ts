@@ -8,8 +8,35 @@ import {
   primaryKey,
   unique,
   index,
+  uniqueIndex,
 } from 'drizzle-orm/pg-core';
+// Types des règles d'équipe (P14) : module feuille SANS import — la frontière
+// tRPC les référence directement, le schema ne fait que typer ses colonnes.
+import type {
+  TeamBusinessHours,
+  TeamRuleAction,
+  TeamRuleTriggers,
+} from '../lib/teams/team-rules-shared';
 import { defaultUserSettings } from '../lib/schemas';
+import { sql } from 'drizzle-orm';
+
+export type {
+  TeamBusinessHours,
+  TeamRuleAction,
+  TeamRuleTriggers,
+} from '../lib/teams/team-rules-shared';
+// Types des intégrations (P18) : module feuille SANS import, même contrainte.
+import type {
+  ExternalLinkKind,
+  IntegrationInstallStatus,
+  IntegrationMappingKind,
+  IntegrationProvider,
+  IssueCreateRequestStatus,
+  OutboundDeliveryStatus,
+  OutboundEventType,
+  SealedSecret,
+  TeamAuditActorKind,
+} from '../lib/teams/team-integrations-shared';
 
 export const createTable = pgTableCreator((name) => `mail0_${name}`);
 
@@ -424,6 +451,19 @@ export type TeamNotificationPrefs = {
   onAssignment: boolean;
 };
 
+/**
+ * Prefs jsonb du membre : préférences de notification + état d'onboarding
+ * PAR (équipe, utilisateur). Élargir le type ne demande aucune migration —
+ * la colonne reste le même jsonb, les lignes existantes n'ont simplement pas
+ * la clé. Toute écriture des prefs doit FUSIONNER (jamais remplacer) pour ne
+ * pas effacer l'état d'onboarding en réglant les notifications, et vice
+ * versa.
+ */
+export type TeamMemberPrefs = TeamNotificationPrefs & {
+  /** ISO — checklist d'onboarding masquée par ce membre pour cette équipe. */
+  onboardingDismissedAt?: string | null;
+};
+
 export const defaultTeamNotificationPrefs: TeamNotificationPrefs = {
   onComment: true,
   onMention: true,
@@ -440,10 +480,7 @@ export const teamMember = createTable(
       .notNull()
       .references(() => user.id, { onDelete: 'cascade' }),
     role: text('role').$type<'owner' | 'member'>().notNull().default('member'),
-    prefs: jsonb('prefs')
-      .$type<TeamNotificationPrefs>()
-      .notNull()
-      .default(defaultTeamNotificationPrefs),
+    prefs: jsonb('prefs').$type<TeamMemberPrefs>().notNull().default(defaultTeamNotificationPrefs),
     createdAt: timestamp('created_at').notNull().defaultNow(),
   },
   (t) => [
@@ -668,6 +705,8 @@ export const teamNotification = createTable(
         | 'access_granted'
         | 'access_revoked'
         | 'status_changed'
+        | 'rule'
+        | 'draft_review'
       >()
       .notNull(),
     actorUserId: text('actor_user_id')
@@ -691,9 +730,14 @@ export const teamAuditLog = createTable(
     teamId: text('team_id')
       .notNull()
       .references(() => team.id, { onDelete: 'cascade' }),
-    actorUserId: text('actor_user_id')
-      .notNull()
-      .references(() => user.id, { onDelete: 'cascade' }),
+    // P18 durci : NULLABLE + ON DELETE SET NULL — un audit système/intégration
+    // n'a AUCUN acteur humain, et supprimer un compte n'efface JAMAIS l'audit
+    // (append-only). Deux CHECKs SQL (0046) verrouillent actor_kind ∈
+    // {user,system,integration} et system/integration ⇒ actor_user_id NULL ;
+    // user ⇒ non-null est garanti à l'INSERT par audit() (un CHECK bilatéral
+    // bloquerait le SET NULL de la suppression de compte).
+    actorUserId: text('actor_user_id').references(() => user.id, { onDelete: 'set null' }),
+    actorKind: text('actor_kind').$type<TeamAuditActorKind>().notNull().default('user'),
     action: text('action').notNull(),
     subjectType: text('subject_type').notNull(),
     subjectId: text('subject_id').notNull(),
@@ -717,8 +761,289 @@ export const teamThreadPresence = createTable(
       .references(() => user.id, { onDelete: 'cascade' }),
     lastSeenAt: timestamp('last_seen_at').notNull().defaultNow(),
     typingUntil: timestamp('typing_until'),
+    /** P15 : « rédige une réponse » — fallback polling du signal temps réel. */
+    replyingUntil: timestamp('replying_until'),
   },
   (t) => [primaryKey({ columns: [t.teamThreadId, t.userId] })],
+);
+
+/**
+ * Relecture de brouillon (P15). Le brouillon Gmail APPARTIENT au partageur :
+ * `draftId` est scoped à teamThread.sharerConnectionId, résolu côté serveur —
+ * jamais fourni avec un connectionId client, jamais exposé au-delà de
+ * owner/reviewer. UNE review ACTIVE par (fil, brouillon) — index unique
+ * partiel. `revision` est monotone ; `draftDigest` est le condensé serveur du
+ * contenu au moment de la dernière transition : toute décision/suggestion
+ * dont le digest de base ne correspond plus au brouillon réel est refusée
+ * (stale). Le reviewer ne mute JAMAIS le Gmail du propriétaire.
+ */
+export const teamDraftReview = createTable(
+  'team_draft_review',
+  {
+    id: text('id').primaryKey(),
+    teamThreadId: text('team_thread_id')
+      .notNull()
+      .references(() => teamThread.id, { onDelete: 'cascade' }),
+    draftId: text('draft_id').notNull(),
+    ownerUserId: text('owner_user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    reviewerUserId: text('reviewer_user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    state: text('state')
+      .$type<'requested' | 'changes_requested' | 'approved' | 'cancelled' | 'completed'>()
+      .notNull()
+      .default('requested'),
+    revision: integer('revision').notNull().default(1),
+    draftDigest: text('draft_digest').notNull(),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('team_draft_review_active_unique')
+      .on(t.teamThreadId, t.draftId)
+      .where(sql`${t.state} in ('requested', 'changes_requested', 'approved')`),
+    index('team_draft_review_thread_idx').on(t.teamThreadId),
+  ],
+);
+
+/**
+ * Suggestion de relecture (P15) — TEXTE de corps proposé + note, bornés.
+ * Pièces jointes, destinataires, threading et signature sont HORS du patch :
+ * seule la prose voyage. L'owner seul « applique » (dans SON composeur, via
+ * l'autosave existant) — le serveur ne fait que tracer appliedAt/appliedBy.
+ */
+export const teamDraftSuggestion = createTable(
+  'team_draft_suggestion',
+  {
+    id: text('id').primaryKey(),
+    reviewId: text('review_id')
+      .notNull()
+      .references(() => teamDraftReview.id, { onDelete: 'cascade' }),
+    authorUserId: text('author_user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    bodyText: text('body_text').notNull(),
+    note: text('note').notNull().default(''),
+    /** Digest du brouillon sur lequel la suggestion a été écrite. */
+    baseDigest: text('base_digest').notNull(),
+    appliedAt: timestamp('applied_at'),
+    appliedBy: text('applied_by').references(() => user.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (t) => [index('team_draft_suggestion_review_idx').on(t.reviewId, t.createdAt)],
+);
+
+/**
+ * Intent de réponse (P15, durci) — la BASELINE de collision est un fait
+ * SERVEUR, jamais un timestamp client : émise à l'ouverture du composeur par
+ * une mutation ACL-vérifiée, elle ne peut être ni forgée ni repoussée. Le
+ * cycle d'override est armé serveur : une collision détectée est marquée
+ * (collision_detected_at) et l'override humain est consommé UNE fois
+ * (override_consumed_at) — pour CET intent uniquement.
+ */
+export const teamReplyIntent = createTable(
+  'team_reply_intent',
+  {
+    id: text('id').primaryKey(),
+    teamThreadId: text('team_thread_id')
+      .notNull()
+      .references(() => teamThread.id, { onDelete: 'cascade' }),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    providerThreadId: text('provider_thread_id').notNull(),
+    baselineAt: timestamp('baseline_at').notNull().defaultNow(),
+    expiresAt: timestamp('expires_at').notNull(),
+    collisionDetectedAt: timestamp('collision_detected_at'),
+    overrideConsumedAt: timestamp('override_consumed_at'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (t) => [index('team_reply_intent_thread_user_idx').on(t.teamThreadId, t.userId)],
+);
+
+/**
+ * Claim de RÉPONSE d'équipe (P15, anti double-réponse) : UN claim actif par
+ * fil partagé — deux acteurs (ou deux clés d'idempotence) ne peuvent pas
+ * créer deux send jobs concurrents pour le même fil d'équipe. Le claim est
+ * résolu 'accepted' (la ligne send_job DURABLE est acceptée — que l'envoi
+ * parte immédiatement par la Queue ou plus tard par le sweep long-terme ;
+ * JAMAIS une remise Gmail prouvée, l'échec ultérieur reste visible dans la
+ * Queue) ou 'released'. L'historique 'accepted' alimente le preflight de
+ * collision (un envoi postérieur exige un override humain frais).
+ */
+export const teamReplyClaim = createTable(
+  'team_reply_claim',
+  {
+    id: text('id').primaryKey(),
+    teamThreadId: text('team_thread_id')
+      .notNull()
+      .references(() => teamThread.id, { onDelete: 'cascade' }),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    reviewId: text('review_id'),
+    clientSubmissionKey: text('client_submission_key').notNull(),
+    outcome: text('outcome')
+      .$type<'active' | 'accepted' | 'released'>()
+      .notNull()
+      .default('active'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    resolvedAt: timestamp('resolved_at'),
+  },
+  (t) => [
+    uniqueIndex('team_reply_claim_active_unique')
+      .on(t.teamThreadId)
+      .where(sql`${t.outcome} = 'active'`),
+    index('team_reply_claim_thread_created_idx').on(t.teamThreadId, t.createdAt),
+  ],
+);
+
+/**
+ * Règles d'équipe (P14) — automatisations ACL-safe déclenchées à l'arrivée
+ * d'un message. Une règle appartient à une équipe mais SURVEILLE une boîte
+ * précise : la connexion active de son créateur (owner) au moment de la
+ * création, capturée comme `connectionId` (même principe que
+ * sharerConnectionId). À l'exécution, chaque action passe par les chemins
+ * store existants AVEC userId = createdBy : une règle ne peut jamais faire
+ * plus que ce que son créateur pourrait faire à la main, et un partage par
+ * règle reste un élargissement d'ACL explicite (visibility 'team' uniquement,
+ * audit source='rule', notifications identiques à un partage manuel).
+ */
+export const teamRule = createTable(
+  'team_rule',
+  {
+    id: text('id').primaryKey(),
+    teamId: text('team_id')
+      .notNull()
+      .references(() => team.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    enabled: boolean('enabled').notNull().default(true),
+    /** Boîte surveillée — connexion du créateur, jamais exposée au client. */
+    connectionId: text('connection_id')
+      .notNull()
+      .references(() => connection.id, { onDelete: 'cascade' }),
+    createdBy: text('created_by')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    triggers: jsonb('triggers').$type<TeamRuleTriggers>().notNull(),
+    actions: jsonb('actions').$type<TeamRuleAction[]>().notNull(),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+    /**
+     * Soft-delete : l'historique (team_rule_run, audit) survit à la
+     * suppression — une règle supprimée ne s'exécute plus, ne se liste plus,
+     * mais ses runs restent attribuables par nom. Jamais de hard delete
+     * (le cascade FK n'est atteint que par la suppression de l'équipe).
+     */
+    deletedAt: timestamp('deleted_at'),
+  },
+  (t) => [
+    index('team_rule_team_idx').on(t.teamId),
+    index('team_rule_connection_enabled_idx').on(t.connectionId, t.enabled),
+  ],
+);
+
+/**
+ * Journal d'exécution des règles : chaque application porte la RAISON du
+ * match (explication par trigger), le détail par action (dont l'état inverse
+ * pour l'undo) et l'issue. Un run 'applied' ou 'undone' pour (règle, fil)
+ * empêche toute ré-application automatique — après un undo humain, la règle
+ * ne rejoue jamais le même fil.
+ */
+export const teamRuleRun = createTable(
+  'team_rule_run',
+  {
+    id: text('id').primaryKey(),
+    ruleId: text('rule_id')
+      .notNull()
+      .references(() => teamRule.id, { onDelete: 'cascade' }),
+    teamId: text('team_id')
+      .notNull()
+      .references(() => team.id, { onDelete: 'cascade' }),
+    threadId: text('thread_id').notNull(),
+    teamThreadId: text('team_thread_id'),
+    /**
+     * 'processing' est le CLAIM d'exécution : inséré atomiquement (ON
+     * CONFLICT DO NOTHING sur l'unique rule+thread) AVANT tout effet, puis mis
+     * à jour vers l'issue finale. Un crash laisse 'processing' — visible et
+     * bloquant, jamais un rejeu silencieux.
+     */
+    outcome: text('outcome')
+      .$type<'processing' | 'applied' | 'skipped' | 'error' | 'undone'>()
+      .notNull(),
+    reason: text('reason').notNull().default(''),
+    /** Détail par action : {kind, ok, reason?, inverse?} — l'inverse alimente l'undo. */
+    actionsApplied: jsonb('actions_applied')
+      .$type<import('../lib/teams/team-rules-shared').RuleActionRecord[]>()
+      .notNull()
+      .default([]),
+    actorUserId: text('actor_user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    undoneAt: timestamp('undone_at'),
+    undoneBy: text('undone_by').references(() => user.id, { onDelete: 'set null' }),
+  },
+  (t) => [
+    // VERROU d'idempotence : une seule exécution par (règle, fil), quel que
+    // soit le nombre de workers concurrents — le claim s'appuie dessus.
+    uniqueIndex('team_rule_run_rule_thread_idx').on(t.ruleId, t.threadId),
+    index('team_rule_run_team_created_idx').on(t.teamId, t.createdAt),
+  ],
+);
+
+/**
+ * Politique SLA d'une équipe (P14/P16) — UNE ligne par équipe (PK team_id).
+ * Les objectifs sont en minutes OUVRÉES : la fenêtre ouvrée est définie par
+ * une zone IANA + heures et jours ouvrés locaux (DST géré par le calcul, pas
+ * par le stockage). Un objectif null = pas d'engagement sur cette métrique.
+ * Écriture : owners uniquement, auditée ; lecture : tout membre.
+ */
+export const teamSlaPolicy = createTable('team_sla_policy', {
+  teamId: text('team_id')
+    .primaryKey()
+    .references(() => team.id, { onDelete: 'cascade' }),
+  firstResponseMinutes: integer('first_response_minutes'),
+  resolutionMinutes: integer('resolution_minutes'),
+  timeZone: text('time_zone').notNull().default('UTC'),
+  businessHours: jsonb('business_hours')
+    .$type<TeamBusinessHours>()
+    .notNull()
+    .default({ days: [1, 2, 3, 4, 5], start: '08:00', end: '17:00' }),
+  updatedBy: text('updated_by').references(() => user.id, { onDelete: 'set null' }),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
+/**
+ * Absence DÉCLARÉE d'un membre (P16 couverture) : période plate, sans motif
+ * santé ni catégorie RH — une simple fenêtre d'indisponibilité. Écriture :
+ * le membre pour LUI-MÊME ou un owner ; lecture : tout membre. Auditée.
+ */
+export const teamMemberAbsence = createTable(
+  'team_member_absence',
+  {
+    id: text('id').primaryKey(),
+    teamId: text('team_id')
+      .notNull()
+      .references(() => team.id, { onDelete: 'cascade' }),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    startsAt: timestamp('starts_at').notNull(),
+    endsAt: timestamp('ends_at').notNull(),
+    note: text('note').notNull().default(''),
+    createdBy: text('created_by')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (t) => [
+    index('team_member_absence_team_ends_idx').on(t.teamId, t.endsAt),
+    index('team_member_absence_user_idx').on(t.userId),
+  ],
 );
 
 // Outbox d'envoi autoritatif : chaque mail.send devient une ligne send_job avant
@@ -751,4 +1076,238 @@ export const sendJob = createTable(
     index('send_job_connection_status_idx').on(t.connectionId, t.status),
     index('send_job_status_scheduled_idx').on(t.status, t.scheduledSendAt),
   ],
+);
+
+// =============================================================================
+// P18 — Intégrations d'équipe (Linear seul, email-first). Migration 0046.
+// Tokens/secrets : enveloppes scellées (ring KEK du déploiement) — jamais
+// renvoyés par une route, jamais loggés. Une installation par (équipe,
+// provider). Toute configuration est owner-only ; l'usage suit l'ACL du fil.
+// =============================================================================
+
+export const teamIntegrationInstall = createTable(
+  'team_integration_install',
+  {
+    id: text('id').primaryKey(),
+    teamId: text('team_id')
+      .notNull()
+      .references(() => team.id, { onDelete: 'cascade' }),
+    provider: text('provider').$type<IntegrationProvider>().notNull().default('linear'),
+    status: text('status').$type<IntegrationInstallStatus>().notNull().default('pending'),
+    /** Organisation Linear (workspace) — corrélation EXACTE des webhooks. */
+    workspaceId: text('workspace_id'),
+    workspaceName: text('workspace_name'),
+    scopes: jsonb('scopes').$type<string[]>().notNull().default([]),
+    /**
+     * OAuth PKCE en cours : HASH SHA-256 du state (jamais le state brut),
+     * borné par state_expires_at, consommé ONE-SHOT atomiquement au callback ;
+     * verifier SCELLÉ (jamais en clair).
+     */
+    oauthState: text('oauth_state'),
+    stateExpiresAt: timestamp('state_expires_at'),
+    pkceVerifierEnvelope: jsonb('pkce_verifier_envelope').$type<SealedSecret | null>(),
+    accessTokenEnvelope: jsonb('access_token_envelope').$type<SealedSecret | null>(),
+    refreshTokenEnvelope: jsonb('refresh_token_envelope').$type<SealedSecret | null>(),
+    /** Les access tokens Linear expirent (~24 h) — refresh rotatif. */
+    accessTokenExpiresAt: timestamp('access_token_expires_at'),
+    /** SET NULL : la suppression du compte installateur ne détruit PAS l'installation. */
+    installedBy: text('installed_by').references(() => user.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+    revokedAt: timestamp('revoked_at'),
+  },
+  (t) => [
+    uniqueIndex('team_integration_install_team_provider_unique').on(t.teamId, t.provider),
+    index('team_integration_install_workspace_idx').on(t.provider, t.workspaceId),
+  ],
+);
+
+/**
+ * Mappings EXPLICITES (owner-only) — aucune inférence : `team` énumère les
+ * équipes Linear autorisées à la création (retaValue = externalId, slot),
+ * `status` lie un statut Reta (open/closed) à un workflow state Linear,
+ * `assignee` lie un membre Reta (userId) à un utilisateur Linear.
+ */
+export const teamIntegrationMapping = createTable(
+  'team_integration_mapping',
+  {
+    id: text('id').primaryKey(),
+    installId: text('install_id')
+      .notNull()
+      .references(() => teamIntegrationInstall.id, { onDelete: 'cascade' }),
+    kind: text('kind').$type<IntegrationMappingKind>().notNull(),
+    retaValue: text('reta_value').notNull(),
+    externalId: text('external_id').notNull(),
+    externalLabel: text('external_label').notNull().default(''),
+    createdBy: text('created_by')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('team_integration_mapping_slot_unique').on(t.installId, t.kind, t.retaValue),
+    index('team_integration_mapping_install_idx').on(t.installId),
+  ],
+);
+
+/**
+ * Lien fil partagé ↔ issue Linear — persisté UNIQUEMENT après un issueCreate
+ * réussi ou un Accept humain explicite (jamais d'association silencieuse).
+ * Unlink = soft (audit conservé) ; un seul lien ACTIF par (fil, issue).
+ */
+export const teamThreadIssueLink = createTable(
+  'team_thread_issue_link',
+  {
+    id: text('id').primaryKey(),
+    teamThreadId: text('team_thread_id')
+      .notNull()
+      .references(() => teamThread.id, { onDelete: 'cascade' }),
+    installId: text('install_id')
+      .notNull()
+      .references(() => teamIntegrationInstall.id, { onDelete: 'cascade' }),
+    issueId: text('issue_id').notNull(),
+    issueIdentifier: text('issue_identifier').notNull().default(''),
+    issueUrl: text('issue_url').notNull().default(''),
+    createdBy: text('created_by').references(() => user.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    unlinkedAt: timestamp('unlinked_at'),
+    unlinkedBy: text('unlinked_by').references(() => user.id, { onDelete: 'set null' }),
+  },
+  (t) => [
+    uniqueIndex('team_thread_issue_link_active_unique')
+      .on(t.teamThreadId, t.issueId)
+      .where(sql`${t.unlinkedAt} is null`),
+    index('team_thread_issue_link_issue_idx').on(t.installId, t.issueId),
+    index('team_thread_issue_link_thread_idx').on(t.teamThreadId),
+  ],
+);
+
+/** Lien externe MANUEL (CRM/client) — URL https, aucune donnée mailbox. */
+export const teamExternalLink = createTable(
+  'team_external_link',
+  {
+    id: text('id').primaryKey(),
+    teamThreadId: text('team_thread_id')
+      .notNull()
+      .references(() => teamThread.id, { onDelete: 'cascade' }),
+    kind: text('kind').$type<ExternalLinkKind>().notNull().default('other'),
+    label: text('label').notNull(),
+    url: text('url').notNull(),
+    createdBy: text('created_by').references(() => user.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    removedAt: timestamp('removed_at'),
+    removedBy: text('removed_by').references(() => user.id, { onDelete: 'set null' }),
+  },
+  (t) => [index('team_external_link_thread_idx').on(t.teamThreadId)],
+);
+
+/**
+ * Demande de création d'issue : preview → confirmation humaine FRAÎCHE →
+ * issueCreate. Idempotence par (install, clientRequestKey) — le retry rejoue
+ * la MÊME demande, jamais deux issues. Le lien n'est persisté qu'au succès.
+ */
+export const teamIssueCreateRequest = createTable(
+  'team_issue_create_request',
+  {
+    id: text('id').primaryKey(),
+    installId: text('install_id')
+      .notNull()
+      .references(() => teamIntegrationInstall.id, { onDelete: 'cascade' }),
+    teamThreadId: text('team_thread_id')
+      .notNull()
+      .references(() => teamThread.id, { onDelete: 'cascade' }),
+    requestedBy: text('requested_by')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    clientRequestKey: text('client_request_key').notNull(),
+    title: text('title').notNull(),
+    description: text('description').notNull().default(''),
+    linearTeamId: text('linear_team_id').notNull(),
+    stateId: text('state_id'),
+    assigneeExternalId: text('assignee_external_id'),
+    status: text('status').$type<IssueCreateRequestStatus>().notNull().default('pending'),
+    /** Digest SHA-256 de l'aperçu CANONIQUE serveur — la confirmation le référence. */
+    previewDigest: text('preview_digest'),
+    previewExpiresAt: timestamp('preview_expires_at'),
+    /** Bail du claim 'pending' : expiré sans issue prouvée ⇒ needs_reconciliation. */
+    leaseExpiresAt: timestamp('lease_expires_at'),
+    issueId: text('issue_id'),
+    issueIdentifier: text('issue_identifier'),
+    issueUrl: text('issue_url'),
+    error: text('error'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    resolvedAt: timestamp('resolved_at'),
+  },
+  (t) => [
+    uniqueIndex('team_issue_create_request_key_unique').on(t.installId, t.clientRequestKey),
+    index('team_issue_create_request_thread_idx').on(t.teamThreadId),
+  ],
+);
+
+/**
+ * Claim de livraison webhook ENTRANT : Linear-Delivery unique atomique —
+ * l'insert ON CONFLICT DO NOTHING est la barrière anti-replay (200 idempotent).
+ */
+export const integrationWebhookDelivery = createTable(
+  'integration_webhook_delivery',
+  {
+    id: text('id').primaryKey(),
+    provider: text('provider').$type<IntegrationProvider>().notNull().default('linear'),
+    deliveryId: text('delivery_id').notNull(),
+    eventType: text('event_type').notNull().default(''),
+    receivedAt: timestamp('received_at').notNull().defaultNow(),
+    processedAt: timestamp('processed_at'),
+    outcome: text('outcome').notNull().default('received'),
+  },
+  (t) => [uniqueIndex('integration_webhook_delivery_unique').on(t.provider, t.deliveryId)],
+);
+
+/**
+ * Abonnement webhook SORTANT Reta (owner-only) : HTTPS public exigé (défense
+ * SSRF à l'envoi), secret SCELLÉ, événements bornés assign/comment/status —
+ * métadonnées seules, jamais de corps email/PJ.
+ */
+export const teamOutboundWebhook = createTable(
+  'team_outbound_webhook',
+  {
+    id: text('id').primaryKey(),
+    teamId: text('team_id')
+      .notNull()
+      .references(() => team.id, { onDelete: 'cascade' }),
+    url: text('url').notNull(),
+    events: jsonb('events').$type<OutboundEventType[]>().notNull().default([]),
+    secretEnvelope: jsonb('secret_envelope').$type<SealedSecret | null>(),
+    active: boolean('active').notNull().default(true),
+    createdBy: text('created_by')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+    disabledAt: timestamp('disabled_at'),
+    consecutiveFailures: integer('consecutive_failures').notNull().default(0),
+  },
+  (t) => [index('team_outbound_webhook_team_idx').on(t.teamId)],
+);
+
+/** Outbox sortante : retry borné avec backoff, 'dead' visible et rejouable. */
+export const teamOutboundDelivery = createTable(
+  'team_outbound_delivery',
+  {
+    id: text('id').primaryKey(),
+    webhookId: text('webhook_id')
+      .notNull()
+      .references(() => teamOutboundWebhook.id, { onDelete: 'cascade' }),
+    eventType: text('event_type').$type<OutboundEventType>().notNull(),
+    payload: jsonb('payload').$type<Record<string, unknown>>().notNull().default({}),
+    status: text('status').$type<OutboundDeliveryStatus>().notNull().default('pending'),
+    attempts: integer('attempts').notNull().default(0),
+    nextAttemptAt: timestamp('next_attempt_at').notNull().defaultNow(),
+    /** Bail du claim 'sending' (CAS) — deux crons ne livrent jamais en double. */
+    claimedAt: timestamp('claimed_at'),
+    lastError: text('last_error'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    deliveredAt: timestamp('delivered_at'),
+  },
+  (t) => [index('team_outbound_delivery_due_idx').on(t.status, t.nextAttemptAt)],
 );

@@ -163,7 +163,30 @@ const forceReSync = vi.fn(async (): Promise<any> => ({ resynced: true }));
 const findUserSettings = vi.fn(
   async (): Promise<any> => ({ settings: { undoSendEnabled: false } }),
 );
-const getZeroDB = vi.fn(async (): Promise<any> => ({ findUserSettings }));
+// P15 : façade DO côté équipe — configurée par test dans le describe collision.
+const resolveTeamThreadAccess = vi.fn<any>();
+const teamSendCollisionPreflight = vi.fn<any>(async () => ({ reasons: [] }));
+const claimTeamReply = vi.fn<any>(async () => ({ id: 'claim-1', reused: false }));
+const resolveTeamReplyClaim = vi.fn<any>(async () => {});
+const markTeamThreadReviewsCompleted = vi.fn<any>(async () => ({ closed: 0 }));
+const findOwnTeamReplyClaim = vi.fn<any>(async () => null);
+const getValidTeamReplyIntent = vi.fn<any>();
+const markTeamReplyIntentCollision = vi.fn<any>(async () => {});
+const consumeTeamReplyIntentOverride = vi.fn<any>();
+const getZeroDB = vi.fn(
+  async (): Promise<any> => ({
+    findUserSettings,
+    resolveTeamThreadAccess,
+    teamSendCollisionPreflight,
+    claimTeamReply,
+    resolveTeamReplyClaim,
+    markTeamThreadReviewsCompleted,
+    findOwnTeamReplyClaim,
+    getValidTeamReplyIntent,
+    markTeamReplyIntentCollision,
+    consumeTeamReplyIntentOverride,
+  }),
+);
 
 vi.mock('../../lib/server-utils', () => ({
   getZeroAgent,
@@ -843,5 +866,208 @@ describe('mail router — traitement de contenu', () => {
     stub.getRawEmail.mockRejectedValueOnce(new Error('nope'));
     const r = await call('verifyEmail', { id: 'th-1' });
     expect(r).toEqual({ isVerified: false });
+  });
+});
+
+describe('mail.send — collision d’équipe P15 (final : intent serveur)', () => {
+  const base = { to: [{ email: 'x@y.co' }], subject: 'S', message: 'M' };
+  const teamInput = {
+    ...base,
+    threadId: 'th-share',
+    teamThreadId: 'tt-1',
+    clientSendId: 'submit-77777777',
+    replyIntentId: 'intent-1',
+  };
+  const share = { threadId: 'th-share', sharerConnectionId: 'conn-SHARER' };
+  const INTENT_BASELINE_MS = Date.parse('2026-08-01T10:00:00Z');
+
+  beforeEach(() => {
+    resolveTeamThreadAccess.mockResolvedValue(share);
+    teamSendCollisionPreflight.mockResolvedValue({ reasons: [] });
+    claimTeamReply.mockResolvedValue({ id: 'claim-1', reused: false });
+    resolveTeamReplyClaim.mockResolvedValue(undefined);
+    markTeamThreadReviewsCompleted.mockResolvedValue({ closed: 1 });
+    findOwnTeamReplyClaim.mockResolvedValue(null);
+    getValidTeamReplyIntent.mockResolvedValue({
+      baselineAtMs: INTENT_BASELINE_MS,
+      collisionDetectedAtMs: null,
+      overrideConsumedAtMs: null,
+    });
+    markTeamReplyIntentCollision.mockResolvedValue(undefined);
+    // Par défaut l'override n'est PAS armé (fidèle au store : consommation
+    // conditionnelle) — les tests qui l'arment le disent explicitement.
+    consumeTeamReplyIntentOverride.mockRejectedValue(new Error('override_not_armed'));
+    getThread.mockResolvedValue({
+      result: {
+        messages: [{ sender: { email: 'client@ext.pf' }, receivedOn: '2026-08-01T00:00:00Z' }],
+      },
+    });
+  });
+
+  it('relit le fil via la connexion du PARTAGEUR et résout le claim en accepted (jamais « sent »)', async () => {
+    const r = await call('send', teamInput);
+    expect(r).toMatchObject({
+      success: true,
+      teamClaimResolution: 'accepted',
+      teamReviewClosure: 'closed',
+    });
+    expect(getThread).toHaveBeenCalledWith('conn-SHARER', 'th-share');
+    expect(resolveTeamReplyClaim).toHaveBeenCalledWith('claim-1', 'accepted');
+    expect(markTeamThreadReviewsCompleted).toHaveBeenCalledWith('tt-1');
+    // Aucune fuite de connexion dans la réponse.
+    expect(JSON.stringify(r)).not.toContain('conn-SHARER');
+  });
+
+  it('clientSendId OBLIGATOIRE avec teamThreadId : deux requêtes sans clé → refus AU SCHÉMA, aucun job', async () => {
+    const { clientSendId: _omit, ...noKey } = teamInput;
+    await expect(call('send', noKey)).rejects.toThrow(/clientSendId/);
+    await expect(call('send', noKey)).rejects.toThrow(/clientSendId/);
+    expect(sendOutbox.createSendJob).not.toHaveBeenCalled();
+    expect(claimTeamReply).not.toHaveBeenCalled();
+    expect(sendJobs.size).toBe(0);
+    // Même clé stable → UN seul job malgré le retry.
+    await call('send', teamInput);
+    findOwnTeamReplyClaim.mockResolvedValue({ id: 'claim-1', outcome: 'accepted' });
+    await call('send', teamInput);
+    expect(sendJobs.size).toBe(1);
+  });
+
+  it('replyIntentId OBLIGATOIRE avec teamThreadId → refus au schéma, aucun job ni claim', async () => {
+    const { replyIntentId: _omit, ...noIntent } = teamInput;
+    await expect(call('send', noIntent)).rejects.toThrow(/replyIntentId/);
+    expect(sendOutbox.createSendJob).not.toHaveBeenCalled();
+    expect(claimTeamReply).not.toHaveBeenCalled();
+  });
+
+  it('forge de baseline IMPOSSIBLE : le champ collisionBaseline n’existe plus, la baseline vient de l’intent', async () => {
+    // Un client hostile pousse un collisionBaseline futur : le schéma le
+    // strippe (champ retiré du contrat) et le préflight reçoit la baseline
+    // SERVEUR de l'intent.
+    const forged = new Date(Date.now() + 7 * 24 * 3_600_000).toISOString();
+    const r = await call('send', { ...teamInput, collisionBaseline: forged } as any);
+    expect(r).toMatchObject({ success: true });
+    expect(teamSendCollisionPreflight).toHaveBeenCalledWith(
+      expect.objectContaining({ baselineMs: INTENT_BASELINE_MS }),
+    );
+  });
+
+  it('intent absent/expiré/mauvais user-fil → reply_intent_invalid, aucun job ni claim', async () => {
+    getValidTeamReplyIntent.mockRejectedValueOnce(new Error('reply_intent_invalid'));
+    const r = await call('send', teamInput);
+    expect(r).toEqual({ success: false, error: 'reply_intent_invalid' });
+    expect(sendOutbox.createSendJob).not.toHaveBeenCalled();
+    expect(claimTeamReply).not.toHaveBeenCalled();
+    expect(teamSendCollisionPreflight).not.toHaveBeenCalled();
+  });
+
+  it('ACL refusée ou threadId qui ne correspond pas au partage → FAIL CLOSED, aucun job ni claim', async () => {
+    resolveTeamThreadAccess.mockRejectedValueOnce(new Error('not_found'));
+    let r = await call('send', teamInput);
+    expect(r).toEqual({ success: false, error: 'collision_preflight_unavailable' });
+    r = await call('send', { ...teamInput, threadId: 'th-AUTRE' });
+    expect(r).toEqual({ success: false, error: 'collision_preflight_unavailable' });
+    expect(sendOutbox.createSendJob).not.toHaveBeenCalled();
+    expect(claimTeamReply).not.toHaveBeenCalled();
+  });
+
+  it('lecture du fil du partageur en échec → FAIL CLOSED (jamais un préflight partiel qui envoie)', async () => {
+    getThread.mockRejectedValueOnce(new Error('mailbox unavailable'));
+    const r = await call('send', teamInput);
+    expect(r).toEqual({ success: false, error: 'collision_preflight_unavailable' });
+    expect(sendOutbox.createSendJob).not.toHaveBeenCalled();
+  });
+
+  it('collision → marquée SERVEUR sur l’intent ; override refusé tant que non armé ; puis ONE-SHOT', async () => {
+    const reasons = [
+      { type: 'inbound_member_reply', senderEmail: 'omar@devlab.io', receivedOn: 'x' },
+    ];
+    // 1) Collision sans override : réponse structurée + collisionDetectedAt.
+    teamSendCollisionPreflight.mockResolvedValueOnce({ reasons });
+    const r = await call('send', teamInput);
+    expect(r).toMatchObject({ success: false, error: 'collision' });
+    expect(markTeamReplyIntentCollision).toHaveBeenCalledWith('intent-1');
+    expect(sendOutbox.createSendJob).not.toHaveBeenCalled();
+    expect(claimTeamReply).not.toHaveBeenCalled();
+    // 2) overrideCollision=true envoyé D'EMBLÉE (collision jamais montrée à
+    //    l'humain sur cet intent) : la consommation échoue → collision rendue,
+    //    jamais d'envoi automatique.
+    teamSendCollisionPreflight.mockResolvedValueOnce({ reasons });
+    const premature = await call('send', { ...teamInput, overrideCollision: true });
+    expect(premature).toMatchObject({ success: false, error: 'collision' });
+    expect(sendOutbox.createSendJob).not.toHaveBeenCalled();
+    // 3) Override ARMÉ par la collision serveur précédente : consommé, envoi passe.
+    teamSendCollisionPreflight.mockResolvedValueOnce({ reasons });
+    consumeTeamReplyIntentOverride.mockResolvedValueOnce(undefined);
+    const overridden = await call('send', { ...teamInput, overrideCollision: true });
+    expect(overridden).toMatchObject({ success: true });
+    expect(consumeTeamReplyIntentOverride).toHaveBeenCalledWith('intent-1');
+    expect(claimTeamReply).toHaveBeenCalled();
+    // 4) ONE-SHOT : un nouvel override sur le même intent (déjà consommé,
+    //    mock par défaut → override_not_armed) est refusé.
+    teamSendCollisionPreflight.mockResolvedValueOnce({ reasons });
+    const second = await call('send', {
+      ...teamInput,
+      clientSendId: 'submit-cccc9999',
+      overrideCollision: true,
+    });
+    expect(second).toMatchObject({ success: false, error: 'collision' });
+  });
+
+  it('retry MÊME intent + MÊME clientSendId → bypass idempotent, un seul job, préflight non rejoué', async () => {
+    const first = await call('send', teamInput);
+    expect(first).toMatchObject({ success: true });
+    // Le retry retrouve SON claim (accepted) : ni intent ni préflight rejoués.
+    findOwnTeamReplyClaim.mockResolvedValueOnce({ id: 'claim-1', outcome: 'accepted' });
+    getValidTeamReplyIntent.mockClear();
+    teamSendCollisionPreflight.mockClear();
+    const retry = await call('send', teamInput);
+    expect(retry).toMatchObject({ success: true, duplicate: true });
+    expect(getValidTeamReplyIntent).not.toHaveBeenCalled();
+    expect(teamSendCollisionPreflight).not.toHaveBeenCalled();
+    expect(sendJobs.size).toBe(1);
+  });
+
+  it('planifié LONG-TERME (>12 h, pas encore en Queue) → jalon honnête accepted, jamais un « sent »', async () => {
+    const far = new Date(Date.now() + 13 * 3600 * 1000).toISOString();
+    const r = await call('send', { ...teamInput, scheduleAt: far });
+    expect(send_email_queue.send).not.toHaveBeenCalled();
+    expect(r).toMatchObject({
+      success: true,
+      scheduled: true,
+      teamClaimResolution: 'accepted',
+    });
+    expect(resolveTeamReplyClaim).toHaveBeenCalledWith('claim-1', 'accepted');
+    expect(JSON.stringify(r)).not.toContain('sent');
+  });
+
+  it('claim détenu par un autre (deux acteurs / deux clés) → collision active_claim, aucun job', async () => {
+    claimTeamReply.mockRejectedValueOnce(new Error('reply_claimed'));
+    const r = await call('send', teamInput);
+    expect(r).toMatchObject({
+      success: false,
+      error: 'collision',
+      collision: { reasons: [expect.objectContaining({ type: 'active_claim' })] },
+    });
+    expect(sendOutbox.createSendJob).not.toHaveBeenCalled();
+  });
+
+  it('échec d’enqueue → claim RELÂCHÉ ; échec de résolution → état explicite, jamais avalé', async () => {
+    send_email_queue.send.mockRejectedValueOnce(new Error('queue down'));
+    const r = await call('send', teamInput);
+    expect(r).toMatchObject({ success: false });
+    expect(resolveTeamReplyClaim).toHaveBeenCalledWith('claim-1', 'released');
+
+    // Résolution en échec après acceptation durable : loggée + état explicite.
+    resolveTeamReplyClaim.mockRejectedValueOnce(new Error('do down'));
+    const partial = await call('send', { ...teamInput, clientSendId: 'submit-88888888' });
+    expect(partial).toMatchObject({ success: true, teamClaimResolution: 'failed' });
+  });
+
+  it('un envoi SANS teamThreadId ne touche à rien de l’équipe (chemins existants intacts)', async () => {
+    const r = await call('send', { ...base, threadId: 'th-9', clientSendId: 'submit-99999999' });
+    expect(r).toMatchObject({ success: true });
+    expect(resolveTeamThreadAccess).not.toHaveBeenCalled();
+    expect(claimTeamReply).not.toHaveBeenCalled();
+    expect(getValidTeamReplyIntent).not.toHaveBeenCalled();
   });
 });

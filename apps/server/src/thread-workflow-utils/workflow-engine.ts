@@ -392,10 +392,45 @@ export const createDefaultWorkflows = (): WorkflowEngine => {
     ],
   };
 
+  // P14 — règles d'équipe : évaluation UNIQUEMENT sur le pipeline automatique
+  // d'arrivée de message (jamais sur action utilisateur), fail-safe (une règle
+  // cassée n'affecte ni les autres steps ni le mail). Import dynamique pour ne
+  // pas charger le store des règles dans les chemins user-triggered.
+  const teamRulesWorkflow: WorkflowDefinition = {
+    name: 'team-rules',
+    description: 'Applies enabled ACL-safe team rules to freshly ingested threads',
+    steps: [
+      {
+        id: 'apply-team-rules',
+        name: 'Apply Team Rules',
+        description: 'Evaluates and executes enabled team rules for the mailbox of this connection',
+        enabled: true,
+        condition: (context) => !isUserTriggered(context),
+        errorHandling: 'continue',
+        action: async (context) => {
+          const { applyTeamRulesForContext } = await import('../lib/teams/team-rules-runner');
+          const runs = await applyTeamRulesForContext({
+            connectionId: context.connectionId,
+            threadId: context.threadId,
+            thread: context.thread,
+          });
+          if (runs.length > 0) {
+            logger.info('[WORKFLOW_ENGINE] Team rules evaluated', {
+              threadId: context.threadId,
+              runs: runs.map((run) => ({ ruleId: run.ruleId, outcome: run.outcome })),
+            });
+          }
+          return runs;
+        },
+      },
+    ],
+  };
+
   engine.registerWorkflow(autoDraftWorkflow);
   engine.registerWorkflow(vectorizationWorkflow);
   engine.registerWorkflow(threadSummaryWorkflow);
   engine.registerWorkflow(labelGenerationWorkflow);
+  engine.registerWorkflow(teamRulesWorkflow);
 
   return engine;
 };

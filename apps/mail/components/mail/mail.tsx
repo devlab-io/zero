@@ -4,6 +4,12 @@ import {
   DropdownMenuContent,
   DropdownMenuTrigger,
 } from '../ui/dropdown-menu';
+import {
+  folderCount,
+  folderSidebarKey,
+  freshness,
+  relativeMinutesLabel,
+} from '@/lib/mail-list-status';
 import { ThreadReaderSurface, PricingDialogSurface } from '@/components/mail/mail-lazy-surfaces';
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable';
 import { useCategorySettings, useDefaultCategoryId } from '@/hooks/use-categories';
@@ -12,6 +18,7 @@ import { getMailSplitLayout, mailSplitAutoSaveId } from '@/lib/mail-split-layout
 import { useCommandPalette } from '../context/command-palette-context';
 import { useWarmCoreMailFolders } from '@/hooks/use-folder-prefetch';
 import { useHotkeys, useHotkeysContext } from 'react-hotkeys-hook';
+import { useMailboxOverview } from '@/hooks/use-mailbox-overview';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useActiveConnection } from '@/hooks/use-connections';
 import { Check, ChevronDown, RefreshCcw } from 'lucide-react';
@@ -31,6 +38,7 @@ import { log } from '@/lib/log';
 import { useThreads } from '@/hooks/use-threads';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { Button } from '@/components/ui/button';
+import { getLocale } from '@/paraglide/runtime';
 import { useSession } from '@/lib/auth-client';
 import { m } from '@/paraglide/messages';
 import { isMac } from '@/lib/platform';
@@ -463,12 +471,14 @@ export function MailLayout() {
                         <span className="ml-3 hidden truncate pr-20 lg:inline-block">
                           {activeFilters.length > 0
                             ? activeFilters.map((f) => f.display).join(', ')
-                            : 'Search'}
+                            : m['common.searchBar.search']()}
                         </span>
                         <span className="ml-3 inline-block truncate pr-20 lg:hidden">
                           {activeFilters.length > 0
-                            ? `${activeFilters.length} filter${activeFilters.length > 1 ? 's' : ''}`
-                            : 'Search'}
+                            ? m['states.mailList.activeFilterCount']({
+                                count: activeFilters.length,
+                              })
+                            : m['common.searchBar.search']()}
                         </span>
 
                         <div className="absolute right-2 flex items-center gap-2">
@@ -484,7 +494,7 @@ export function MailLayout() {
                               className="h-6 rounded-md px-2 text-xs"
                               onClick={handleClearFilters}
                             >
-                              Clear
+                              {m['common.searchBar.clearSearch']()}
                             </Button>
                           )}
                           <kbd className="bg-muted border-border/40 dark:bg-muted/40 pointer-events-none hidden h-6 select-none items-center gap-1 rounded border px-2 text-xs font-medium opacity-80 sm:flex">
@@ -512,11 +522,15 @@ export function MailLayout() {
                     onClick={handleRefetchThreads}
                     variant="ghost"
                     size="icon"
+                    aria-label={m['common.actions.refresh']()}
                     className="hover:bg-accent/50 h-10 w-10 rounded-lg border-none bg-transparent backdrop-blur-sm"
                   >
-                    <RefreshCcw className="text-muted-foreground h-4 w-4" />
+                    <RefreshCcw className="text-muted-foreground h-4 w-4" aria-hidden />
                   </Button>
                 </div>
+                {mail.bulkSelected.length === 0 ? (
+                  <MailListStatus folder={folder} threadsQuery={threadsQuery} />
+                ) : null}
               </div>
 
               <div className="px-4 pt-2">
@@ -610,6 +624,63 @@ const mailCategoryLabels: Record<string, () => string> = {
   forums: m['common.mailCategories.forums'],
   work: m['common.mailCategories.work'],
 };
+
+// Literal lookups keep the paraglide catalog tree-shakable (no dynamic `m[...]` access).
+const folderLabels: Record<string, () => string> = {
+  inbox: m['navigation.sidebar.inbox'],
+  drafts: m['navigation.sidebar.drafts'],
+  sent: m['navigation.sidebar.sent'],
+  spam: m['navigation.sidebar.spam'],
+  archive: m['navigation.sidebar.archive'],
+  bin: m['navigation.sidebar.bin'],
+  snoozed: m['navigation.sidebar.snoozed'],
+};
+
+/**
+ * Ligne de statut de la liste (CUA P1) : dossier courant, compte réel du
+ * provider quand il existe, fraîcheur de synchronisation. aria-live pour que
+ * les lecteurs d'écran suivent la resynchronisation sans re-parcourir la
+ * liste.
+ */
+function MailListStatus({
+  folder,
+  threadsQuery,
+}: {
+  folder: string | undefined;
+  threadsQuery: { isFetching: boolean; dataUpdatedAt: number };
+}) {
+  const overview = useMailboxOverview();
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const interval = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const label = (folderLabels[folderSidebarKey(folder)] ?? folderLabels['inbox'])!();
+  const count = folderCount(folder, overview.data?.folders);
+  const state = freshness(threadsQuery.dataUpdatedAt, now, threadsQuery.isFetching);
+  const freshnessLabel =
+    state.kind === 'syncing'
+      ? m['states.mailList.syncing']()
+      : state.kind === 'just-now'
+        ? m['states.mailList.syncedJustNow']()
+        : state.kind === 'ago'
+          ? m['states.mailList.syncedAgo']({
+              time: relativeMinutesLabel(state.minutes, getLocale()),
+            })
+          : null;
+
+  return (
+    <p
+      aria-live="polite"
+      className="text-muted-foreground mt-1.5 flex items-baseline gap-1.5 px-1 text-xs"
+    >
+      <span className="text-foreground font-medium">{label}</span>
+      {count !== null ? <span className="tabular-nums">· {count}</span> : null}
+      {freshnessLabel ? <span>· {freshnessLabel}</span> : null}
+    </p>
+  );
+}
 
 export const Categories = () => {
   const defaultCategoryIdInner = useDefaultCategoryId();

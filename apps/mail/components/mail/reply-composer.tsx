@@ -1,8 +1,10 @@
+import { useSharesForThread, useTeamMembers, useTeamRealtime } from '@/hooks/use-teams';
 import { deriveReplyRecipients, deriveReplySubject } from './reply-recipients';
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { ComposerOwnerGate } from '@/components/create/composer-owner-gate';
 import { constructReplyBody, constructForwardBody } from '@/lib/utils';
 import { useReplyStatePurge } from '@/hooks/use-reply-state-purge';
-import { lazy, Suspense, useEffect, useMemo, useRef } from 'react';
+import { resolveReplyTeamContext } from '@/lib/reply-team-context';
 import { useActiveConnection } from '@/hooks/use-connections';
 import { useSendStatusWatch } from '@/hooks/use-send-status';
 import type { ThreadQuoteRequest } from '@/lib/thread-quote';
@@ -70,6 +72,89 @@ export default function ReplyCompose({
   // réutilisée sur retry après échec (dédup serveur), effacée à l'enqueue confirmé.
   const sendSubmissionKeyRef = useRef<string | null>(null);
 
+  // --- P15 : fil PARTAGÉ — signal « rédige », préflight collision -----------
+  const { data: sharesData } = useSharesForThread(threadId);
+  // Multi-partage (final) : la protection collision ne tombe JAMAIS. Contexte
+  // explicite — un partage : frictionless ; plusieurs : sélecteur compact
+  // accessible clavier, défaut déterministe = premier partage (ordre serveur).
+  const shares = useMemo(() => sharesData?.shares ?? [], [sharesData]);
+  const [selectedShareId, setSelectedShareId] = useState<string | null>(null);
+  const { share, requiresSelector } = useMemo(
+    () =>
+      resolveReplyTeamContext(
+        shares.map((row: { id: string; teamId: string; teamName: string }) => ({
+          id: row.id,
+          teamId: row.teamId,
+          teamName: row.teamName,
+        })),
+        selectedShareId,
+      ),
+    [shares, selectedShareId],
+  );
+  const teamRealtime = useTeamRealtime(share?.id ?? null);
+  const { data: teamMembersData } = useTeamMembers(share?.teamId ?? null);
+  const heartbeat = useMutation(trpc.teams.heartbeat.mutationOptions());
+  const heartbeatRef = useRef(heartbeat.mutate);
+  heartbeatRef.current = heartbeat.mutate;
+  // Baseline de collision : REPLY INTENT SERVEUR émis au montage du composeur
+  // pour le partage retenu (mutation teams.createReplyIntent) — aucun
+  // timestamp client n'existe dans le contrat d'envoi. Cache par partage :
+  // changer de contexte crée l'intent du nouveau partage.
+  const createReplyIntent = useMutation(trpc.teams.createReplyIntent.mutationOptions());
+  const createReplyIntentRef = useRef(createReplyIntent.mutateAsync);
+  createReplyIntentRef.current = createReplyIntent.mutateAsync;
+  const replyIntentsRef = useRef(new Map<string, string>());
+  const ensureReplyIntent = async (teamThreadId: string): Promise<string> => {
+    const cached = replyIntentsRef.current.get(teamThreadId);
+    if (cached) return cached;
+    const intent = await createReplyIntentRef.current({ teamThreadId });
+    replyIntentsRef.current.set(teamThreadId, intent.id);
+    return intent.id;
+  };
+  useEffect(() => {
+    if (!share?.id) return;
+    // Émission EAGER au montage/changement de contexte : la baseline couvre
+    // toute la fenêtre de rédaction. Échec silencieux toléré — l'envoi
+    // retentera et refusera de partir sans intent (fail closed serveur).
+    void ensureReplyIntent(share.id).catch(() => {});
+  }, [share?.id]);
+  const [collisionReasons, setCollisionReasons] = useState<
+    Array<{ type: string; senderEmail?: string; userId?: string }>
+  >([]);
+  const pendingOverrideRef = useRef(false);
+  const sendReplying = teamRealtime.sendReplying;
+  useEffect(() => {
+    if (!share?.id) return;
+    // Signal « rédige une réponse » : socket + fallback DB — un booléen,
+    // jamais de contenu ; coupé à la fermeture du composeur.
+    sendReplying(true);
+    heartbeatRef.current({ teamThreadId: share.id, typing: false, replying: true });
+    const interval = setInterval(() => {
+      sendReplying(true);
+      heartbeatRef.current({ teamThreadId: share.id, typing: false, replying: true });
+    }, 30_000);
+    return () => {
+      clearInterval(interval);
+      // Socket : précis PAR onglet (le DO gère replying par socket — fermer
+      // ce composeur ne coupe pas celui d'un autre onglet). Fallback DB : on
+      // n'écrit PAS replying:false (une ligne par utilisateur, un autre
+      // onglet peut composer encore) — le TTL de 60 s expire seul ; limite
+      // libellée : jusqu'à 60 s de signal résiduel en polling pur.
+      sendReplying(false);
+      heartbeatRef.current({ teamThreadId: share.id, typing: false });
+    };
+  }, [share?.id, sendReplying]);
+  const replyingMemberNames = useMemo(() => {
+    const members = teamMembersData?.members ?? [];
+    return teamRealtime.replyingUserIds
+      .map(
+        (userId) =>
+          members.find((member: { userId: string; name: string }) => member.userId === userId)
+            ?.name ?? null,
+      )
+      .filter((name): name is string => !!name);
+  }, [teamMembersData, teamRealtime.replyingUserIds]);
+
   // Find the specific message to reply to
   const replyToMessage =
     (messageId && emailData?.messages.find((msg) => msg.id === messageId)) || emailData?.latest;
@@ -92,6 +177,8 @@ export default function ReplyCompose({
     return { to, cc, subject };
   }, [activeConnection?.email, mode, replyToMessage]);
 
+  const lastSendDataRef = useRef<Parameters<typeof handleSendEmail>[0] | null>(null);
+
   const handleSendEmail = async (data: {
     to: string[];
     cc?: string[];
@@ -104,6 +191,7 @@ export default function ReplyCompose({
     if (!replyToMessage || !activeConnection?.email) {
       throw new Error('Cannot send a reply without an active message and account');
     }
+    lastSendDataRef.current = data;
 
     // Le clic Send confirme l'ENQUEUE DURABLE (ligne send_job Postgres +
     // Queue acceptée), jamais l'appel Gmail : fermeture quasi immédiate, issue
@@ -185,6 +273,12 @@ export default function ReplyCompose({
               //   replyToMessage.decodedBody,
             );
 
+      // P15 final : fil partagé — l'envoi exige l'INTENT SERVEUR du partage
+      // retenu (baseline côté base, jamais un timestamp client). S'il n'a pas
+      // pu être émis au montage, on le crée ici ; un échec jette et garde le
+      // composeur ouvert (fail closed, cohérent avec le refus serveur).
+      const replyIntentId = share ? await ensureReplyIntent(share.id) : undefined;
+
       const payload = {
         to: toRecipients,
         cc: ccRecipients,
@@ -209,12 +303,49 @@ export default function ReplyCompose({
         originalMessage: replyToMessage.decodedBody,
         scheduleAt: data.scheduleAt,
         clientSendId,
+        // L'override est un choix HUMAIN pris sur le bandeau de collision,
+        // consommé ONE-SHOT côté serveur pour CET intent uniquement.
+        teamThreadId: share?.id,
+        replyIntentId,
+        overrideCollision: pendingOverrideRef.current || undefined,
       };
+      pendingOverrideRef.current = false;
 
       // Jalon perf : send:dispatched → send:confirmed mesure la round-trip
       // jusqu'à l'enqueue durable (plus aucun aller-retour Gmail dedans).
       markStage('send:dispatched');
       const result = await sendEmail(payload);
+
+      // P15 : collision détectée — un coéquipier a répondu ou détient le
+      // claim. AUCUN envoi n'a eu lieu ; le composeur reste ouvert avec un
+      // bandeau et un bouton d'override explicite. Jamais d'auto-send.
+      if (
+        typeof result === 'object' &&
+        result !== null &&
+        'collision' in result &&
+        result.collision
+      ) {
+        setCollisionReasons((result.collision as { reasons: Array<{ type: string }> }).reasons);
+        toast.dismiss(sendingToast);
+        return;
+      }
+
+      // Intent expiré/invalide (24 h dépassées, contexte changé côté serveur) :
+      // purger le cache, en émettre un frais et demander un renvoi — jamais un
+      // échec générique muet.
+      if (
+        typeof result === 'object' &&
+        result !== null &&
+        'error' in result &&
+        result.error === 'reply_intent_invalid' &&
+        share
+      ) {
+        replyIntentsRef.current.delete(share.id);
+        void ensureReplyIntent(share.id).catch(() => {});
+        toast.dismiss(sendingToast);
+        toast.error(m['common.teams.collisionIntentInvalid']());
+        return;
+      }
 
       // `mail.send` répond `{ success: false, error }` sans throw quand
       // l'enqueue durable a échoué : le plier en erreur garde le contenu
@@ -299,6 +430,74 @@ export default function ReplyCompose({
 
   return (
     <div className="w-full overflow-visible rounded-2xl border">
+      {requiresSelector && share && (
+        <div className="flex items-center gap-2 border-b px-3 py-1.5 text-[11px]">
+          <label htmlFor="reply-team-context" className="text-muted-foreground shrink-0">
+            {m['common.teams.teamContextLabel']()}
+          </label>
+          {/* <select> natif : accessible clavier d'office (flèches + Entrée). */}
+          <select
+            id="reply-team-context"
+            data-testid="team-context-selector"
+            className="bg-background focus-visible:ring-ring min-w-0 rounded-md border px-1.5 py-0.5 text-[11px] focus-visible:outline-none focus-visible:ring-2"
+            value={share.id}
+            onChange={(event) => {
+              // Changement de contexte : la collision/override d'un autre
+              // partage ne se transporte jamais.
+              setSelectedShareId(event.target.value);
+              setCollisionReasons([]);
+              pendingOverrideRef.current = false;
+            }}
+          >
+            {shares.map((row: { id: string; teamName: string }) => (
+              <option key={row.id} value={row.id}>
+                {row.teamName}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+      {replyingMemberNames.length > 0 && (
+        <p
+          className="text-muted-foreground border-b px-3 py-1.5 text-[11px]"
+          role="status"
+          data-testid="team-replying-banner"
+        >
+          {m['common.teams.alsoReplying']({ names: replyingMemberNames.join(', ') })}
+        </p>
+      )}
+      {collisionReasons.length > 0 && (
+        <div
+          role="alert"
+          className="flex flex-wrap items-center gap-2 border-b border-amber-500/30 bg-amber-500/[0.06] px-3 py-2 text-xs text-amber-800 dark:text-amber-300"
+          data-testid="team-collision-banner"
+        >
+          <span className="min-w-0 flex-1">
+            {collisionReasons.some((reason) => reason.type === 'inbound_member_reply')
+              ? m['common.teams.collisionInbound']()
+              : m['common.teams.collisionClaim']()}
+          </span>
+          <button
+            type="button"
+            className="shrink-0 rounded-md border border-amber-500/40 px-2 py-1 font-medium hover:bg-amber-500/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500"
+            onClick={() => {
+              // Override HUMAIN frais : vaut pour cette soumission seulement.
+              pendingOverrideRef.current = true;
+              setCollisionReasons([]);
+              if (lastSendDataRef.current) void handleSendEmail(lastSendDataRef.current);
+            }}
+          >
+            {m['common.teams.collisionOverride']()}
+          </button>
+          <button
+            type="button"
+            className="shrink-0 rounded-md px-2 py-1 hover:bg-amber-500/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500"
+            onClick={() => setCollisionReasons([])}
+          >
+            {m['common.teamRules.cancel']()}
+          </button>
+        </div>
+      )}
       <Suspense
         fallback={
           <div className="flex h-[120px] w-full items-center justify-center">

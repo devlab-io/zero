@@ -1,8 +1,7 @@
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { useState, useEffect, type ReactNode } from 'react';
-import { m } from '@/paraglide/messages';
 import { Button } from '@/components/ui/button';
-import confetti from 'canvas-confetti';
+import { m } from '@/paraglide/messages';
 
 export function OnboardingDialog({
   open,
@@ -49,16 +48,6 @@ export function OnboardingDialog({
     },
   ];
   const [currentStep, setCurrentStep] = useState(0);
-
-  useEffect(() => {
-    if (currentStep === steps.length - 1) {
-      confetti({
-        particleCount: 100,
-        spread: 70,
-        origin: { y: 0.6 },
-      });
-    }
-  }, [currentStep, steps.length]);
 
   const handleNext = () => {
     if (currentStep < steps.length - 1) {

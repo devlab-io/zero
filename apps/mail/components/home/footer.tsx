@@ -1,9 +1,14 @@
 import { DevlabMark, DevlabWordmark, ProductLockup } from '@/components/brand/devlab-brand';
 import { GitHub, LinkedIn } from '@/components/icons/icons';
 import { productBrand } from '@/lib/brand';
-import { motion } from 'motion/react';
 import { Button } from '../ui/button';
-import { useRef } from 'react';
+
+/**
+ * Footer landing — CTA sur panneau plein (ni texte en dégradé, ni bannière
+ * décorative, ni motion), puis colonnes de liens et mentions. Le footer est
+ * volontairement sombre sur les deux thèmes : c'est la clôture de page, pas
+ * une surface de travail.
+ */
 
 const socialLinks = [
   {
@@ -19,66 +24,26 @@ const socialLinks = [
 ];
 
 export default function Footer() {
-  const ref = useRef(null);
-
   return (
-    <div className="bg-panelDark mx-1 mb-3 flex flex-col items-center justify-center overflow-hidden rounded-xl md:mx-4 md:mb-3">
-      <div className="w-full">
-        <div
-          className="h-28 w-full rounded-t-2xl md:h-52 lg:h-72"
-          style={{
-            background: 'linear-gradient(135deg, #ffa70b 0%, #eb1778 48%, #6f00ff 100%)',
-          }}
-          aria-hidden="true"
-        />
-        <div className="relative bottom-20 inline-flex w-full justify-center lg:bottom-60">
-          <div
-            ref={ref}
-            className="relative inline-flex w-full flex-col items-center justify-center gap-20 rounded-full"
-          >
-            <div className="flex flex-col items-center justify-center px-2">
-              <div className="flex flex-col items-center py-5">
-                <motion.div
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.5 }}
-                  className="lg:to-panelDark lg:bg-linear-to-b inline-block text-center text-2xl font-bold text-white sm:text-4xl md:text-5xl lg:from-white lg:via-white/70 lg:bg-clip-text lg:text-8xl lg:text-transparent"
-                >
-                  <span>Email without the wait.</span>
-                  <br />
-                  Built by Devlab.
-                </motion.div>
-              </div>
-              <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.5, delay: 0.2 }}
-                className="hidden flex-col items-center justify-start md:flex"
-              >
-                <div className="max-w-3xl text-center text-lg font-normal leading-7 text-white lg:text-2xl">
-                  {productBrand.name} keeps every reply, shortcut and next message immediately at
-                  hand.
-                </div>
-              </motion.div>
-              <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.5, delay: 0.4 }}
-                className="flex w-fit flex-col items-center justify-center md:pt-4"
-              >
-                <a href="/login">
-                  <Button className="h-8 cursor-pointer bg-white text-[#140151] hover:bg-[#f1e8ff]">
-                    Get Started
-                  </Button>
-                </a>
-              </motion.div>
-            </div>
-          </div>
-        </div>
+    <footer className="bg-panelDark mx-1 mb-3 flex w-full flex-col items-center justify-center overflow-hidden rounded-xl md:mx-4">
+      <div className="flex w-full flex-col items-center px-4 pb-6 pt-16 text-center md:pt-24">
+        <h2 className="max-w-3xl text-3xl font-bold text-white sm:text-4xl md:text-5xl">
+          Move your inbox to {productBrand.name}
+        </h2>
+        <p className="mt-4 max-w-2xl text-base font-normal leading-7 text-white/80 md:text-lg">
+          Sign in with Google, keep your address, and bring your team into the thread. Reta works
+          against the connected mailbox; your team sees only threads you explicitly share.
+        </p>
+        <Button
+          asChild
+          className="mt-6 h-9 cursor-pointer bg-white px-5 text-[#140151] hover:bg-[#f1e8ff]"
+        >
+          <a href="/login">Get Started</a>
+        </Button>
       </div>
 
-      <div className="relative z-50 mx-auto mb-12 mt-10 flex max-w-[2900px] flex-col items-start justify-start gap-10 self-stretch px-4 md:mt-52">
-        <div className="flex w-full flex-col items-start justify-between md:flex-row lg:w-[900px]">
+      <div className="relative mx-auto mb-12 mt-10 flex w-full max-w-[1100px] flex-col items-start justify-start gap-10 self-center px-4 md:mt-20">
+        <div className="flex w-full flex-col items-start justify-between md:flex-row">
           <div className="mb-10 inline-flex flex-col items-start justify-between gap-4 self-stretch md:mb-0">
             <a href="/" aria-label={`${productBrand.fullName} home`}>
               <ProductLockup inverted />
@@ -91,7 +56,7 @@ export default function Footer() {
                   target="_blank"
                   rel="noopener noreferrer"
                   aria-label={social.name}
-                  className="flex items-center justify-center gap-2.5 rounded-full bg-white/10 p-2 backdrop-blur-[20px] transition-colors hover:bg-white/20"
+                  className="flex items-center justify-center gap-2.5 rounded-full bg-white/10 p-2 transition-colors hover:bg-white/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
                 >
                   <social.icon className="size-3.5 fill-white" />
                 </a>
@@ -101,7 +66,7 @@ export default function Footer() {
               href={productBrand.companyUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="flex items-center justify-start gap-3 text-white/80 transition-opacity hover:opacity-100"
+              className="flex items-center justify-start gap-3 text-white/90 transition-opacity hover:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
             >
               <span className="flex size-7 items-center justify-center rounded-lg bg-[#6f00ff] text-white">
                 <DevlabMark className="size-4" />
@@ -152,7 +117,7 @@ export default function Footer() {
 
         <div className="h-px self-stretch bg-white/20" />
         <div className="inline-flex flex-col-reverse items-center justify-between gap-3 self-stretch md:flex-row">
-          <div className="text-xs font-medium leading-tight text-white/80 sm:text-sm">
+          <div className="text-xs font-medium leading-tight text-white/90 sm:text-sm">
             © 2026 Devlab. {productBrand.name} is built in Tahiti.
           </div>
           <div className="flex items-center gap-4">
@@ -160,32 +125,14 @@ export default function Footer() {
               href={productBrand.companyUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="text-nowrap text-sm font-normal leading-tight text-white/70 transition-opacity hover:opacity-100"
+              className="text-nowrap text-sm font-normal leading-tight text-white/90 transition-opacity hover:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
             >
               About Devlab
-            </a>
-            <div className="h-5 w-px bg-white/20" />
-            <a
-              href="https://devlab.io/en/legal-mentions"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-nowrap text-sm font-normal leading-tight text-white/70 transition-opacity hover:opacity-100"
-            >
-              Legal notice
-            </a>
-            <div className="h-5 w-px bg-white/20" />
-            <a
-              href="https://devlab.io/en/privacy-policy"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-nowrap text-sm font-normal leading-tight text-white/70 transition-opacity hover:opacity-100"
-            >
-              Privacy
             </a>
           </div>
         </div>
       </div>
-    </div>
+    </footer>
   );
 }
 
@@ -198,7 +145,7 @@ function FooterColumn({
 }) {
   return (
     <div className="inline-flex flex-col items-start justify-start gap-5">
-      <div className="self-stretch text-sm font-normal text-white/40">{title}</div>
+      <div className="self-stretch text-sm font-normal text-white/75">{title}</div>
       <div className="flex flex-col items-start justify-start gap-4 self-stretch">
         {links.map((link) => (
           <a
@@ -206,7 +153,7 @@ function FooterColumn({
             href={link.href}
             target={link.external ? '_blank' : undefined}
             rel={link.external ? 'noopener noreferrer' : undefined}
-            className="w-full text-sm font-normal leading-none text-white/80 transition-opacity hover:opacity-100 md:text-base"
+            className="w-full text-sm font-normal leading-none text-white/90 transition-opacity hover:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white md:text-base"
           >
             {link.label}
           </a>

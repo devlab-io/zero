@@ -2,9 +2,9 @@ import { DeferredAppSidebar } from '@/components/ui/app-sidebar.deferred';
 import { lazy, Suspense } from 'react';
 import { Outlet } from 'react-router';
 
-// w2cd (client weight): the onboarding dialog (canvas-confetti + videos) only
-// shows for first-run users. Lazy-load it so it stays out of the critical inbox
-// bundle; it mounts silently for everyone else.
+// w2cd (client weight): the onboarding dialog (step videos) only shows for
+// first-run users. Lazy-load it so it stays out of the critical inbox bundle;
+// it mounts silently for everyone else.
 const OnboardingWrapper = lazy(() =>
   import('@/components/onboarding').then((mod) => ({ default: mod.OnboardingWrapper })),
 );

@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { SettingsCard } from '@/components/settings/settings-card';
+import { TeamRulesBlock } from '@/components/team/team-rules';
 import { useMyInvites, useMyTeams } from '@/hooks/use-teams';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Check, Loader2, Trash2, X } from 'lucide-react';
@@ -354,6 +355,13 @@ function TeamBlock({
           </label>
         ))}
       </div>
+
+      <TeamRulesBlock
+        teamId={team.id}
+        teamName={team.name}
+        isOwner={team.role === 'owner'}
+        members={members}
+      />
     </section>
   );
 }

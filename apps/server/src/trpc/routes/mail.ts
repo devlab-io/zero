@@ -520,37 +520,82 @@ export const mailRouter = router({
   // porte l'appel fournisseur en at-least-once avec claim CAS.
   send: activeDriverProcedure
     .input(
-      z.object({
-        to: z.array(senderSchema),
-        subject: z.string(),
-        message: z.string(),
-        attachments: z.array(serializedFileSchema).optional().default([]),
-        headers: z.record(z.string()).optional().default({}),
-        cc: z.array(senderSchema).optional(),
-        bcc: z.array(senderSchema).optional(),
-        threadId: z.string().optional(),
-        fromEmail: z.string().optional(),
-        draftId: z.string().optional(),
-        // Envoi direct depuis la vue Drafts : le brouillon part TEL QUE
-        // STOCKÉ (drafts.send {id}) — exige draftId, sinon ignoré.
-        sendAsStored: z.boolean().optional(),
-        isForward: z.boolean().optional(),
-        originalMessage: z.string().optional(),
-        scheduleAt: z.string().optional(),
-        // Clé d'idempotence générée par le composer, stable à travers les
-        // doubles clics et retries réseau ; scopée par connexion via la
-        // contrainte unique (connection_id, client_submission_key).
-        clientSendId: z
-          .string()
-          .regex(/^[A-Za-z0-9-]{8,64}$/)
-          .optional(),
-      }),
+      z
+        .object({
+          to: z.array(senderSchema),
+          subject: z.string(),
+          message: z.string(),
+          attachments: z.array(serializedFileSchema).optional().default([]),
+          headers: z.record(z.string()).optional().default({}),
+          cc: z.array(senderSchema).optional(),
+          bcc: z.array(senderSchema).optional(),
+          threadId: z.string().optional(),
+          fromEmail: z.string().optional(),
+          draftId: z.string().optional(),
+          // Envoi direct depuis la vue Drafts : le brouillon part TEL QUE
+          // STOCKÉ (drafts.send {id}) — exige draftId, sinon ignoré.
+          sendAsStored: z.boolean().optional(),
+          isForward: z.boolean().optional(),
+          originalMessage: z.string().optional(),
+          scheduleAt: z.string().optional(),
+          // Clé d'idempotence générée par le composer, stable à travers les
+          // doubles clics et retries réseau ; scopée par connexion via la
+          // contrainte unique (connection_id, client_submission_key).
+          clientSendId: z
+            .string()
+            .regex(/^[A-Za-z0-9-]{8,64}$/)
+            .optional(),
+          // P15 (durci) — réponse sur un fil PARTAGÉ : la baseline de collision
+          // est un INTENT SERVEUR (teams.createReplyIntent, émis à l'ouverture
+          // du composeur) — AUCUN timestamp client n'existe dans ce contrat.
+          // L'override est humain, one-shot, armé par une collision serveur
+          // récente sur CET intent. clientSendId est OBLIGATOIRE avec
+          // teamThreadId (sans clé stable, deux retries feraient deux jobs).
+          teamThreadId: z.string().min(1).max(64).optional(),
+          replyIntentId: z.string().min(1).max(64).optional(),
+          overrideCollision: z.boolean().optional(),
+          reviewId: z.string().min(1).max(64).optional(),
+        })
+        .superRefine((data, refineCtx) => {
+          if (!data.teamThreadId) return;
+          // Refus AU SCHÉMA, avant tout claim/job : sans clé d'idempotence
+          // stable, deux retries créeraient deux jobs ; sans intent serveur,
+          // la baseline de collision n'existe pas.
+          if (!data.clientSendId) {
+            refineCtx.addIssue({
+              code: z.ZodIssueCode.custom,
+              path: ['clientSendId'],
+              message: 'clientSendId is required for team-linked sends',
+            });
+          }
+          if (!data.replyIntentId) {
+            refineCtx.addIssue({
+              code: z.ZodIssueCode.custom,
+              path: ['replyIntentId'],
+              message: 'replyIntentId is required for team-linked sends',
+            });
+          }
+        }),
     )
     .mutation(async ({ ctx, input }) => {
       const { activeConnection, sessionUser } = ctx;
-      const { draftId, scheduleAt, attachments, clientSendId, ...mail } = input as typeof input & {
+      const {
+        draftId,
+        scheduleAt,
+        attachments,
+        clientSendId,
+        teamThreadId,
+        replyIntentId,
+        overrideCollision,
+        reviewId,
+        ...mail
+      } = input as typeof input & {
         scheduleAt?: string;
       };
+
+      // P15 durci : le préflight/claim d'équipe est déplacé APRÈS toutes les
+      // validations à retour anticipé (voir plus bas) — un claim ne peut
+      // jamais rester actif à cause d'un `return` de validation.
 
       let scheduledTime: number | null = null;
       if (scheduleAt) {
@@ -583,108 +628,292 @@ export const mailRouter = router({
 
       const { send_email_queue } = env;
 
-      return withSendDb(async (db) => {
-        let job;
-        let deduped;
-        try {
-          ({ job, deduped } = await createSendJob(db, {
-            connectionId: activeConnection.id,
-            clientSubmissionKey: clientSendId ?? crypto.randomUUID(),
-            payload: mailPayload,
-            threadId: input.threadId ?? null,
-            scheduledSendAt: targetTime > Date.now() ? new Date(targetTime) : null,
-          }));
-        } catch (error) {
-          logger.error('Failed to persist send job', error);
-          return { success: false, error: 'Failed to queue email send' } as const;
+      // --- P15 durci : préflight de collision + claim d'équipe ---------------
+      // Toutes les validations à retour anticipé sont derrière nous : le claim
+      // pris ici est GARANTI résolu (accepted/released) dans tous les chemins,
+      // exceptions comprises. FAIL CLOSED : sans lecture fiable du fil du
+      // PARTAGEUR, aucun envoi lié équipe — jamais un préflight partiel qui
+      // laisse passer.
+      let teamClaimId: string | null = null;
+      if (teamThreadId) {
+        // superRefine garantit ces deux présences ; garde défensive typée.
+        if (!clientSendId || !replyIntentId) {
+          return { success: false, error: 'reply_intent_invalid' } as const;
         }
+        // 1) ACL de l'appelant + résolution SERVEUR du partage — la connexion
+        //    du partageur ne quitte jamais ce bloc.
+        let share: { threadId: string; sharerConnectionId: string };
+        try {
+          const resolved = await zeroDb.resolveTeamThreadAccess(teamThreadId);
+          share = {
+            threadId: resolved.threadId,
+            sharerConnectionId: resolved.sharerConnectionId,
+          };
+        } catch {
+          return { success: false, error: 'collision_preflight_unavailable' } as const;
+        }
+        // 2) Correspondance EXACTE : la réponse part sur LE fil du partage.
+        //    Un collaborateur cross-account a un threadId local différent —
+        //    son envoi ne peut pas porter ce teamThreadId.
+        if (!input.threadId || share.threadId !== input.threadId) {
+          return { success: false, error: 'collision_preflight_unavailable' } as const;
+        }
+        // 3) Retry idempotent : si CE user détient déjà un claim (actif ou
+        //    accepté) pour CE fil avec CETTE clé, la soumission d'origine a
+        //    déjà passé intent + préflight — on ne les rejoue pas, le job est
+        //    dédupliqué plus bas par la même clé.
+        let ownClaim: { id: string } | null = null;
+        try {
+          ownClaim = await zeroDb.findOwnTeamReplyClaim(teamThreadId, clientSendId);
+        } catch {
+          return { success: false, error: 'collision_preflight_unavailable' } as const;
+        }
+        if (ownClaim) {
+          teamClaimId = ownClaim.id;
+        } else {
+          // 4) Baseline = INTENT SERVEUR émis au montage du composeur —
+          //    propriétaire, fil d'équipe, fil provider et expiration vérifiés
+          //    en base. Aucun timestamp client n'entre dans ce calcul.
+          let baselineMs: number;
+          try {
+            const intent = await zeroDb.getValidTeamReplyIntent({
+              intentId: replyIntentId,
+              teamThreadId,
+              providerThreadId: input.threadId,
+            });
+            baselineMs = intent.baselineAtMs;
+          } catch {
+            return { success: false, error: 'reply_intent_invalid' } as const;
+          }
+          // 5) Relecture AUTORITATIVE du fil du PARTAGEUR (métadonnées seules).
+          let threadMessages: Array<{ senderEmail: string; receivedOnMs: number | null }>;
+          try {
+            const { result } = await getThread(share.sharerConnectionId, share.threadId);
+            threadMessages = (result.messages ?? []).map((message) => ({
+              senderEmail: message.sender?.email?.toLowerCase() ?? '',
+              receivedOnMs: message.receivedOn ? Date.parse(message.receivedOn) : null,
+            }));
+          } catch {
+            return { success: false, error: 'collision_preflight_unavailable' } as const;
+          }
+          try {
+            const preflight = await zeroDb.teamSendCollisionPreflight({
+              teamThreadId,
+              baselineMs,
+              threadMessages,
+              myEmails: [activeConnection.email],
+            });
+            if (preflight.reasons.length > 0) {
+              if (overrideCollision === true) {
+                // Override ONE-SHOT, armé serveur : consommé UNIQUEMENT contre
+                // une collision détectée par un préflight ANTÉRIEUR sur CET
+                // intent (récente, non consommée). Consommer avant de marquer —
+                // sinon la collision détectée à l'instant armerait son propre
+                // override et l'humain ne verrait jamais l'avertissement.
+                try {
+                  await zeroDb.consumeTeamReplyIntentOverride(replyIntentId);
+                } catch {
+                  await zeroDb.markTeamReplyIntentCollision(replyIntentId).catch(() => {});
+                  return {
+                    success: false,
+                    error: 'collision',
+                    collision: { reasons: preflight.reasons },
+                  } as const;
+                }
+              } else {
+                // Collision serveur détectée : elle ARME l'override pour une
+                // prochaine décision HUMAINE — jamais d'envoi automatique.
+                await zeroDb.markTeamReplyIntentCollision(replyIntentId).catch(() => {});
+                return {
+                  success: false,
+                  error: 'collision',
+                  collision: { reasons: preflight.reasons },
+                } as const;
+              }
+            }
+            const claim = await zeroDb.claimTeamReply({
+              teamThreadId,
+              clientSubmissionKey: clientSendId,
+              reviewId: reviewId ?? null,
+            });
+            teamClaimId = claim.id;
+          } catch (error) {
+            if (error instanceof Error && error.message === 'reply_claimed') {
+              return {
+                success: false,
+                error: 'collision',
+                collision: {
+                  reasons: [{ type: 'active_claim' as const, userId: 'unknown', since: '' }],
+                },
+              } as const;
+            }
+            // Toute autre erreur de préflight/claim : FAIL CLOSED.
+            return { success: false, error: 'collision_preflight_unavailable' } as const;
+          }
+        }
+      }
 
-        if (deduped) {
-          // Double clic / retry réseau : le job existe déjà. La réponse dépend
-          // de son état réel — jamais un succès aveugle.
-          if (job.status === 'cancelled') {
-            return { success: false, error: 'Send was cancelled' } as const;
+      let sendResult;
+      try {
+        sendResult = await withSendDb(async (db) => {
+          let job;
+          let deduped;
+          try {
+            ({ job, deduped } = await createSendJob(db, {
+              connectionId: activeConnection.id,
+              clientSubmissionKey: clientSendId ?? crypto.randomUUID(),
+              payload: mailPayload,
+              threadId: input.threadId ?? null,
+              scheduledSendAt: targetTime > Date.now() ? new Date(targetTime) : null,
+            }));
+          } catch (error) {
+            logger.error('Failed to persist send job', error);
+            return { success: false, error: 'Failed to queue email send' } as const;
           }
-          if (job.status === 'failed') {
-            // Le job reste failed + payload conservé : rejouable via retrySend
-            // ou la page Queue, mais la soumission dupliquée n'est PAS un succès.
-            return { success: false, error: job.error ?? 'Send failed' } as const;
-          }
-          if (job.status === 'sent' || job.status === 'sending' || job.enqueuedAt) {
-            // Déjà parti ou déjà dans la Queue : dédup normale.
+
+          if (deduped) {
+            // Double clic / retry réseau : le job existe déjà. La réponse dépend
+            // de son état réel — jamais un succès aveugle.
+            if (job.status === 'cancelled') {
+              return { success: false, error: 'Send was cancelled' } as const;
+            }
+            if (job.status === 'failed') {
+              // Le job reste failed + payload conservé : rejouable via retrySend
+              // ou la page Queue, mais la soumission dupliquée n'est PAS un succès.
+              return { success: false, error: job.error ?? 'Send failed' } as const;
+            }
+            if (job.status === 'sent' || job.status === 'sending' || job.enqueuedAt) {
+              // Déjà parti ou déjà dans la Queue : dédup normale.
+              return {
+                success: true,
+                queued: true,
+                messageId: job.id,
+                sendAt: job.scheduledSendAt?.getTime(),
+                duplicate: true,
+              } as const;
+            }
+            // queued sans marqueur d'enqueue : la remise à la Queue avait échoué
+            // (ou n'a pas encore eu lieu) — ce retry HTTP republie CE job.
+            const dueAt = job.scheduledSendAt?.getTime() ?? Date.now();
+            const dedupeDelaySeconds = Math.max(0, Math.floor((dueAt - Date.now()) / 1000));
+            if (dedupeDelaySeconds > maxQueueDelay) {
+              // Planifié long terme : c'est le territoire du sweep cron.
+              return {
+                success: true,
+                scheduled: true,
+                messageId: job.id,
+                sendAt: dueAt,
+                duplicate: true,
+              } as const;
+            }
+            try {
+              await send_email_queue.send(
+                { messageId: job.id, jobId: job.id, connectionId: activeConnection.id },
+                { delaySeconds: dedupeDelaySeconds },
+              );
+            } catch (error) {
+              logger.error(`Failed to re-enqueue deduped send job ${job.id}`, error);
+              // Job intact (queued, enqueuedAt null) : nouvelle tentative même
+              // clé possible, et le sweep cron le rattrape de toute façon.
+              return { success: false, error: 'Failed to enqueue email send' } as const;
+            }
+            await markSendJobEnqueued(db, job.id).catch(() => {});
             return {
               success: true,
               queued: true,
-              messageId: job.id,
-              sendAt: job.scheduledSendAt?.getTime(),
-              duplicate: true,
-            } as const;
-          }
-          // queued sans marqueur d'enqueue : la remise à la Queue avait échoué
-          // (ou n'a pas encore eu lieu) — ce retry HTTP republie CE job.
-          const dueAt = job.scheduledSendAt?.getTime() ?? Date.now();
-          const dedupeDelaySeconds = Math.max(0, Math.floor((dueAt - Date.now()) / 1000));
-          if (dedupeDelaySeconds > maxQueueDelay) {
-            // Planifié long terme : c'est le territoire du sweep cron.
-            return {
-              success: true,
-              scheduled: true,
               messageId: job.id,
               sendAt: dueAt,
               duplicate: true,
             } as const;
           }
+
+          if (isLongTerm) {
+            // Au-delà du délai Queue maximal : le sweep cron enqueue le job quand
+            // il entre dans l'horizon de 12 h. La ligne DB est l'autorité.
+            return {
+              success: true,
+              scheduled: true,
+              messageId: job.id,
+              sendAt: targetTime,
+            } as const;
+          }
+
           try {
             await send_email_queue.send(
               { messageId: job.id, jobId: job.id, connectionId: activeConnection.id },
-              { delaySeconds: dedupeDelaySeconds },
+              { delaySeconds: rawDelaySeconds },
             );
           } catch (error) {
-            logger.error(`Failed to re-enqueue deduped send job ${job.id}`, error);
-            // Job intact (queued, enqueuedAt null) : nouvelle tentative même
-            // clé possible, et le sweep cron le rattrape de toute façon.
+            logger.error(`Failed to enqueue send job ${job.id}`, error);
+            // Le job est CONSERVÉ (queued, enqueuedAt null) : le composer reste
+            // ouvert avec la même clé de soumission, dont le retry HTTP republie
+            // ce même job (chemin dedupe ci-dessus) ; le sweep cron couvre
+            // l'abandon. Aucune suppression — la ligne DB est l'autorité durable.
             return { success: false, error: 'Failed to enqueue email send' } as const;
           }
+
+          // Marqueur best-effort pour le sweep ; un échec ici est bénin.
           await markSendJobEnqueued(db, job.id).catch(() => {});
+
+          return { success: true, queued: true, messageId: job.id, sendAt: targetTime } as const;
+        });
+      } catch (error) {
+        // Libération GARANTIE : tant que l'enqueue durable n'est pas accepté,
+        // une exception ne laisse jamais le claim actif.
+        if (teamClaimId) {
+          await zeroDb.resolveTeamReplyClaim(teamClaimId, 'released').catch((releaseError) => {
+            logger.error('team reply claim release failed after send exception', {
+              teamClaimId,
+              releaseError,
+            });
+          });
+        }
+        throw error;
+      }
+
+      // --- P15 durci : résolution du claim d'équipe --------------------------
+      // Ligne send_job durable ACCEPTÉE → claim 'accepted' (jamais « sent » :
+      // la remise Gmail n'est pas prouvée ici — l'envoi immédiat part en Queue,
+      // le planifié long-terme attend le sweep cron ; un échec ultérieur reste
+      // visible dans la Queue) + reviews actives du fil passées 'completed'.
+      // Un échec de résolution n'est JAMAIS avalé : loggé + état explicite
+      // dans la réponse — le claim resté actif est visible au préflight des
+      // coéquipiers, pas de faux historique. Échec d'acceptation → claim
+      // relâché.
+      if (teamClaimId && teamThreadId) {
+        if (sendResult.success) {
+          let claimResolution: 'accepted' | 'failed' = 'accepted';
+          let reviewClosure: 'closed' | 'failed' | 'none' = 'none';
+          try {
+            await zeroDb.resolveTeamReplyClaim(teamClaimId, 'accepted');
+          } catch (error) {
+            claimResolution = 'failed';
+            logger.error('team reply claim resolution failed — claim left ACTIVE (visible)', {
+              teamClaimId,
+              error,
+            });
+          }
+          try {
+            const closed = await zeroDb.markTeamThreadReviewsCompleted(teamThreadId);
+            reviewClosure = closed.closed > 0 ? 'closed' : 'none';
+          } catch (error) {
+            reviewClosure = 'failed';
+            logger.error('team review closure failed after accepted send', { teamThreadId, error });
+          }
           return {
-            success: true,
-            queued: true,
-            messageId: job.id,
-            sendAt: dueAt,
-            duplicate: true,
+            ...sendResult,
+            teamClaimResolution: claimResolution,
+            teamReviewClosure: reviewClosure,
           } as const;
         }
-
-        if (isLongTerm) {
-          // Au-delà du délai Queue maximal : le sweep cron enqueue le job quand
-          // il entre dans l'horizon de 12 h. La ligne DB est l'autorité.
-          return {
-            success: true,
-            scheduled: true,
-            messageId: job.id,
-            sendAt: targetTime,
-          } as const;
-        }
-
-        try {
-          await send_email_queue.send(
-            { messageId: job.id, jobId: job.id, connectionId: activeConnection.id },
-            { delaySeconds: rawDelaySeconds },
-          );
-        } catch (error) {
-          logger.error(`Failed to enqueue send job ${job.id}`, error);
-          // Le job est CONSERVÉ (queued, enqueuedAt null) : le composer reste
-          // ouvert avec la même clé de soumission, dont le retry HTTP republie
-          // ce même job (chemin dedupe ci-dessus) ; le sweep cron couvre
-          // l'abandon. Aucune suppression — la ligne DB est l'autorité durable.
-          return { success: false, error: 'Failed to enqueue email send' } as const;
-        }
-
-        // Marqueur best-effort pour le sweep ; un échec ici est bénin.
-        await markSendJobEnqueued(db, job.id).catch(() => {});
-
-        return { success: true, queued: true, messageId: job.id, sendAt: targetTime } as const;
-      });
+        await zeroDb.resolveTeamReplyClaim(teamClaimId, 'released').catch((error) => {
+          logger.error('team reply claim release failed after enqueue failure', {
+            teamClaimId,
+            error,
+          });
+        });
+      }
+      return sendResult;
     }),
   // Suivi post-enqueue : le composer interroge l'état du job pour transformer
   // un échec asynchrone en toast actionnable au lieu d'un faux succès muet.

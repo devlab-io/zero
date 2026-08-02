@@ -27,20 +27,34 @@ import { Hono } from 'hono';
 
 export const TEAM_RT_USER_HEADER = 'x-zero-team-rt-user';
 export const TYPING_TTL_MS = 6_000;
+/** P15 : « rédige une réponse » — TTL long, rafraîchi par le composeur ouvert. */
+export const REPLYING_TTL_MS = 45_000;
 export const CLOSE_ACCESS_REVOKED = 4403;
 export const CLOSE_THREAD_UNSHARED = 4404;
 
 export type TeamRealtimeServerEvent =
-  | { type: 'presence'; users: { userId: string; typingUntil: number | null }[] }
+  | {
+      type: 'presence';
+      users: { userId: string; typingUntil: number | null; replyingUntil: number | null }[];
+    }
   | { type: 'comments.invalidate' }
   | { type: 'thread.invalidate' }
   | { type: 'access.revoked'; userId: string };
 
-type SocketAttachment = { userId: string };
+type SocketAttachment = { userId: string; socketId: string };
 
 export class TeamThreadRealtime extends DurableObject<ZeroEnv> {
   /** typingUntil par userId — éphémère : perdu à l'hibernation, sans gravité. */
   private typing = new Map<string, number>();
+  /**
+   * replyingUntil PAR SOCKET (P15, durci) : deux onglets du même utilisateur
+   * sont indépendants — fermer un composeur (replying:false ou close) ne
+   * coupe jamais le signal de l'autre onglet qui compose encore. L'agrégat
+   * par utilisateur (max des sockets) n'est calculé qu'au snapshot. Le
+   * payload ne transporte JAMAIS de corps ni de brouillon — uniquement des
+   * horodatages. Purgé à la révocation et à l'unshare.
+   */
+  private replyingBySocket = new Map<string, { userId: string; until: number }>();
 
   override async fetch(request: Request): Promise<Response> {
     const userId = request.headers.get(TEAM_RT_USER_HEADER);
@@ -53,7 +67,10 @@ export class TeamThreadRealtime extends DurableObject<ZeroEnv> {
     const server = pair[1];
     // Tag = userId : permet kickUser(userId) sans désérialiser chaque socket.
     this.ctx.acceptWebSocket(server, [userId]);
-    server.serializeAttachment({ userId } satisfies SocketAttachment);
+    server.serializeAttachment({
+      userId,
+      socketId: crypto.randomUUID(),
+    } satisfies SocketAttachment);
     this.ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair('ping', 'pong'));
     this.broadcastPresence();
     return new Response(null, { status: 101, webSocket: client });
@@ -67,20 +84,31 @@ export class TeamThreadRealtime extends DurableObject<ZeroEnv> {
     } catch {
       return;
     }
-    if (
-      typeof parsed === 'object' &&
-      parsed !== null &&
-      (parsed as { type?: unknown }).type === 'typing'
-    ) {
-      const attachment = ws.deserializeAttachment() as SocketAttachment | null;
-      if (!attachment?.userId) return;
+    if (typeof parsed !== 'object' || parsed === null) return;
+    const kind = (parsed as { type?: unknown }).type;
+    const attachment = ws.deserializeAttachment() as SocketAttachment | null;
+    if (!attachment?.userId) return;
+    if (kind === 'typing') {
       this.typing.set(attachment.userId, Date.now() + TYPING_TTL_MS);
+      this.broadcastPresence();
+    } else if (kind === 'replying') {
+      const active = (parsed as { active?: unknown }).active === true;
+      // Par SOCKET : l'onglet qui ferme son composeur ne parle que pour lui.
+      if (active) {
+        this.replyingBySocket.set(attachment.socketId, {
+          userId: attachment.userId,
+          until: Date.now() + REPLYING_TTL_MS,
+        });
+      } else {
+        this.replyingBySocket.delete(attachment.socketId);
+      }
       this.broadcastPresence();
     }
   }
 
   override async webSocketClose(ws: WebSocket) {
     const attachment = ws.deserializeAttachment() as SocketAttachment | null;
+    if (attachment?.socketId) this.replyingBySocket.delete(attachment.socketId);
     if (attachment?.userId && this.ctx.getWebSockets(attachment.userId).length <= 1) {
       this.typing.delete(attachment.userId);
     }
@@ -95,6 +123,9 @@ export class TeamThreadRealtime extends DurableObject<ZeroEnv> {
   /** Révocation : notifie puis COUPE les sockets de l'utilisateur visé. */
   async kickUser(userId: string) {
     this.typing.delete(userId);
+    for (const [socketId, entry] of this.replyingBySocket) {
+      if (entry.userId === userId) this.replyingBySocket.delete(socketId);
+    }
     for (const ws of this.ctx.getWebSockets(userId)) {
       try {
         ws.send(
@@ -111,6 +142,7 @@ export class TeamThreadRealtime extends DurableObject<ZeroEnv> {
   /** Unshare/suppression : coupe TOUT le monde. */
   async closeAll() {
     this.typing.clear();
+    this.replyingBySocket.clear();
     for (const ws of this.ctx.getWebSockets()) {
       try {
         ws.close(CLOSE_THREAD_UNSHARED, 'thread unshared');
@@ -120,18 +152,37 @@ export class TeamThreadRealtime extends DurableObject<ZeroEnv> {
     }
   }
 
-  presenceSnapshot(): { userId: string; typingUntil: number | null }[] {
+  presenceSnapshot(): {
+    userId: string;
+    typingUntil: number | null;
+    replyingUntil: number | null;
+  }[] {
     const now = Date.now();
     for (const [userId, until] of this.typing) {
       if (until <= now) this.typing.delete(userId);
     }
-    const users = new Map<string, number | null>();
+    for (const [socketId, entry] of this.replyingBySocket) {
+      if (entry.until <= now) this.replyingBySocket.delete(socketId);
+    }
+    // Agrégat par utilisateur : le MAX des sockets encore actifs.
+    const replyingByUser = new Map<string, number>();
+    for (const entry of this.replyingBySocket.values()) {
+      const current = replyingByUser.get(entry.userId);
+      if (current === undefined || entry.until > current) {
+        replyingByUser.set(entry.userId, entry.until);
+      }
+    }
+    const users = new Set<string>();
     for (const ws of this.ctx.getWebSockets()) {
       const attachment = ws.deserializeAttachment() as SocketAttachment | null;
       if (!attachment?.userId) continue;
-      users.set(attachment.userId, this.typing.get(attachment.userId) ?? null);
+      users.add(attachment.userId);
     }
-    return [...users.entries()].map(([userId, typingUntil]) => ({ userId, typingUntil }));
+    return [...users].map((userId) => ({
+      userId,
+      typingUntil: this.typing.get(userId) ?? null,
+      replyingUntil: replyingByUser.get(userId) ?? null,
+    }));
   }
 
   private broadcastPresence() {

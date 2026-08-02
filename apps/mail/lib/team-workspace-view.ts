@@ -1,7 +1,9 @@
-export type TeamWorkspaceView = 'shared' | 'assigned' | 'mentions';
+export type TeamWorkspaceView = 'shared' | 'assigned' | 'mentions' | 'ops' | 'integrations';
 
 export function resolveTeamWorkspaceView(value: string | null): TeamWorkspaceView {
-  return value === 'assigned' || value === 'mentions' ? value : 'shared';
+  return value === 'assigned' || value === 'mentions' || value === 'ops' || value === 'integrations'
+    ? value
+    : 'shared';
 }
 
 export function selectMentionNotifications<

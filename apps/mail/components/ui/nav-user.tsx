@@ -456,13 +456,15 @@ export function NavUser() {
           <div className="flex w-full items-center justify-between">
             <div className="flex items-center gap-2">
               {data && activeAccount ? (
-                <div
+                <button
+                  type="button"
                   key={activeAccount.id}
                   onClick={handleAccountSwitch(activeAccount.id)}
-                  className={`flex cursor-pointer items-center ${
+                  aria-label={activeAccount.email}
+                  className={`flex cursor-pointer items-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 ${
                     activeAccount.id === activeConnection?.id && data.connections.length > 1
                       ? 'outline-mainBlue rounded-[5px] outline outline-2'
-                      : ''
+                      : 'rounded-[5px]'
                   }`}
                 >
                   <div className="relative">
@@ -485,7 +487,7 @@ export function NavUser() {
                       <CircleCheck className="fill-mainBlue absolute -bottom-2 -right-2 size-4 rounded-full bg-white dark:bg-[#141414]" />
                     )}
                   </div>
-                </div>
+                </button>
               ) : (
                 <div className="flex cursor-pointer items-center">
                   <div className="relative">
@@ -496,12 +498,14 @@ export function NavUser() {
               {otherConnections.slice(0, 2).map((connection) => (
                 <Tooltip key={connection.id}>
                   <TooltipTrigger asChild>
-                    <div
+                    <button
+                      type="button"
                       onClick={handleAccountSwitch(connection.id)}
-                      className={`flex cursor-pointer items-center ${
+                      aria-label={connection.email}
+                      className={`flex cursor-pointer items-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 ${
                         connection.id === activeConnection?.id && otherConnections.length > 1
                           ? 'outline-mainBlue rounded-[5px] outline outline-2'
-                          : ''
+                          : 'rounded-[5px]'
                       }`}
                     >
                       <div className="relative">
@@ -524,7 +528,7 @@ export function NavUser() {
                           <CircleCheck className="fill-mainBlue absolute -bottom-2 -right-2 size-4 rounded-full bg-white dark:bg-black" />
                         )}
                       </div>
-                    </div>
+                    </button>
                   </TooltipTrigger>
                   <TooltipContent className="text-muted-foreground text-xs">
                     {connection.email}
@@ -535,8 +539,16 @@ export function NavUser() {
               {otherConnections.length > 3 && (
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
-                    <button className="hover:bg-muted flex h-7 w-7 cursor-pointer items-center justify-center rounded-[5px]">
-                      <span className="text-[10px]">+{otherConnections.length - 3}</span>
+                    <button
+                      type="button"
+                      aria-label={m['common.navUser.moreAccounts']({
+                        count: otherConnections.length - 3,
+                      })}
+                      className="hover:bg-muted flex h-7 w-7 cursor-pointer items-center justify-center rounded-[5px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+                    >
+                      <span className="text-[10px]" aria-hidden>
+                        +{otherConnections.length - 3}
+                      </span>
                     </button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent

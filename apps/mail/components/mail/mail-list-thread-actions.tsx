@@ -1,5 +1,5 @@
-import { Archive2, ExclamationCircle, Star2, Trash } from '../icons/icons';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { Archive2, ExclamationCircle, Star2, Trash } from '../icons/icons';
 import { type ThreadDestination } from '@/lib/thread-actions';
 import { m } from '@/paraglide/messages';
 import { Button } from '../ui/button';
@@ -32,7 +32,7 @@ export function ThreadHoverActions({
   return (
     <div
       className={cn(
-        'dark:bg-panelDark z-25 absolute right-2 flex -translate-y-1/2 items-center gap-1 rounded-xl border bg-white p-1 opacity-0 shadow-sm group-hover:opacity-100',
+        'dark:bg-panelDark z-25 pointer-events-none absolute right-2 flex -translate-y-1/2 items-center gap-1 rounded-xl border bg-white p-1 opacity-0 shadow-sm group-hover:pointer-events-auto group-hover:opacity-100',
         index === 0 ? 'top-4' : 'top-[-1px]',
       )}
     >
@@ -41,6 +41,9 @@ export function ThreadHoverActions({
           <Button
             variant="ghost"
             size="icon"
+            aria-label={
+              displayStarred ? m['common.threadDisplay.unstar']() : m['common.threadDisplay.star']()
+            }
             className="h-6 w-6 overflow-visible [&_svg]:size-3.5"
             onClick={onToggleStar}
           >
@@ -58,9 +61,7 @@ export function ThreadHoverActions({
           side={index === 0 ? 'bottom' : 'top'}
           className="mb-1 bg-white dark:bg-[#1A1A1A]"
         >
-          {displayStarred
-            ? m['common.threadDisplay.unstar']()
-            : m['common.threadDisplay.star']()}
+          {displayStarred ? m['common.threadDisplay.unstar']() : m['common.threadDisplay.star']()}
         </TooltipContent>
       </Tooltip>
       <Tooltip>
@@ -68,6 +69,7 @@ export function ThreadHoverActions({
           <Button
             variant="ghost"
             size="icon"
+            aria-label={m['common.mail.toggleImportant']()}
             className={cn(
               'h-6 w-6 [&_svg]:size-3.5',
               displayImportant ? 'hover:bg-orange-200/70 dark:hover:bg-orange-800/40' : '',
@@ -91,6 +93,7 @@ export function ThreadHoverActions({
           <Button
             variant="ghost"
             size="icon"
+            aria-label={m['common.threadDisplay.archive']()}
             className="h-6 w-6 [&_svg]:size-3.5"
             onClick={(e) => {
               e.stopPropagation();
@@ -113,6 +116,7 @@ export function ThreadHoverActions({
             <Button
               variant="ghost"
               size="icon"
+              aria-label={m['common.actions.Bin']()}
               className="h-6 w-6 hover:bg-[#FDE4E9] dark:hover:bg-[#411D23] [&_svg]:size-3.5"
               onClick={(e: React.MouseEvent) => {
                 e.stopPropagation();

@@ -2,10 +2,11 @@ import { resolveTeamWorkspaceView, selectMentionNotifications } from './team-wor
 import { describe, expect, it } from 'vitest';
 
 describe('team workspace dedicated views', () => {
-  it('exposes stable Shared, Assigned and Mentions URL modes', () => {
+  it('exposes stable Shared, Assigned, Mentions and Ops URL modes', () => {
     expect(resolveTeamWorkspaceView(null)).toBe('shared');
     expect(resolveTeamWorkspaceView('assigned')).toBe('assigned');
     expect(resolveTeamWorkspaceView('mentions')).toBe('mentions');
+    expect(resolveTeamWorkspaceView('ops')).toBe('ops');
     expect(resolveTeamWorkspaceView('unknown')).toBe('shared');
   });
 

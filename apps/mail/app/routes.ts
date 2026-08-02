@@ -25,6 +25,9 @@ export default [
     route('/developer', '(routes)/developer/page.tsx'),
     route('/queue', '(routes)/queue/page.tsx'),
     route('/team', '(routes)/team/page.tsx'),
+    // P18 : retour OAuth Linear — page authentifiée qui appelle
+    // integrations.completeInstall avec state+code sous session.
+    route('/integrations/linear/callback', '(routes)/integrations/linear-callback.tsx'),
     layout(
       '(routes)/mail/layout.tsx',
       prefix('/mail', [

@@ -10,8 +10,8 @@ import {
   kickTeamRealtimeUser,
   publishTeamRealtime,
 } from '../../routes/team-realtime';
+import { getThread, getThreadsFromDB, getZeroDB } from '../../lib/server-utils';
 import { activeDriverProcedure, privateProcedure, router } from '../trpc';
-import { getThread, getZeroDB } from '../../lib/server-utils';
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 
@@ -82,6 +82,22 @@ const TEAM_ERROR_CODES: Record<string, 'NOT_FOUND' | 'FORBIDDEN' | 'BAD_REQUEST'
   assignee_no_access: 'BAD_REQUEST',
   mention_not_member: 'BAD_REQUEST',
   label_conflict: 'BAD_REQUEST',
+  // P14 — règles d'équipe (TeamRuleValidationError transporte aussi son code
+  // en message à travers le DO, comme TeamStoreError).
+  run_not_undoable: 'BAD_REQUEST',
+  no_trigger: 'BAD_REQUEST',
+  no_action: 'BAD_REQUEST',
+  invalid_hours: 'BAD_REQUEST',
+  acl_confirmation_required: 'BAD_REQUEST',
+  // P15 — brouillons collaboratifs.
+  draft_stale: 'BAD_REQUEST',
+  review_exists: 'BAD_REQUEST',
+  review_not_actionable: 'BAD_REQUEST',
+  reply_claimed: 'BAD_REQUEST',
+  reply_intent_invalid: 'BAD_REQUEST',
+  override_not_armed: 'BAD_REQUEST',
+  not_draft_owner: 'FORBIDDEN',
+  not_reviewer: 'FORBIDDEN',
 };
 
 /** Store errors carry their fixed code as message — even across the DO RPC. */
@@ -107,6 +123,56 @@ const prefsSchema = z.object({
   onAssignment: z.boolean(),
 });
 const REACTION_EMOJIS = ['👍', '✅', '👀', '❤️', '🔥', '😂'] as const;
+
+// --- P14 : règles d'équipe ---------------------------------------------------
+const HOURS_RE = /^([01]\d|2[0-3]):([0-5]\d)$/;
+const ruleTriggersSchema = z.object({
+  senders: z.array(z.string().trim().toLowerCase().email().max(320)).max(30).optional(),
+  domains: z.array(z.string().trim().toLowerCase().min(1).max(255)).max(30).optional(),
+  recipients: z.array(z.string().trim().toLowerCase().email().max(320)).max(30).optional(),
+  keywords: z.array(z.string().trim().min(1).max(120)).max(30).optional(),
+  gmailLabels: z.array(z.string().trim().min(1).max(120)).max(30).optional(),
+  hours: z
+    .object({
+      days: z.array(z.number().int().min(0).max(6)).max(7).optional(),
+      from: z.string().regex(HOURS_RE),
+      to: z.string().regex(HOURS_RE),
+      timeZone: z.string().min(1).max(64),
+    })
+    .optional(),
+});
+const ruleActionSchema = z.discriminatedUnion('kind', [
+  // Un partage déclenché par règle est TOUJOURS team-wide : un restricted
+  // automatique rendrait l'étendue de l'ACL dépendante d'un moteur — refusé.
+  z.object({ kind: z.literal('share'), visibility: z.literal('team') }),
+  z.object({ kind: z.literal('assign'), userId: z.string().min(1).max(64) }),
+  z.object({
+    kind: z.literal('label'),
+    labelIds: z.array(z.string().min(1).max(64)).min(1).max(10),
+  }),
+  z.object({ kind: z.literal('todo'), assigneeUserId: z.string().min(1).max(64).optional() }),
+  z.object({ kind: z.literal('snooze'), hours: z.number().int().min(1).max(720) }),
+  z.object({
+    kind: z.literal('notify'),
+    userIds: z.array(z.string().min(1).max(64)).min(1).max(20),
+  }),
+]);
+const ruleNameSchema = z.string().trim().min(1).max(120);
+const ruleIdInput = z.object({ ruleId: z.string().min(1).max(64) });
+
+/**
+ * Garde ROUTE de l'élargissement d'ACL (doublée d'une garde STORE) : une
+ * action share = chaque fil qui matche devient lisible par TOUTE l'équipe —
+ * refusée sans confirmation explicite fraîche dans la même requête.
+ */
+function requireShareConfirmation(
+  actions: Array<{ kind: string }> | undefined,
+  confirmAclExpansion: boolean | undefined,
+) {
+  if (actions?.some((action) => action.kind === 'share') && confirmAclExpansion !== true) {
+    throw new TRPCError({ code: 'BAD_REQUEST', message: 'acl_confirmation_required' });
+  }
+}
 
 export const teamsRouter = router({
   // --- teams -----------------------------------------------------------------
@@ -171,6 +237,375 @@ export const teamsRouter = router({
         const db = await getZeroDB(ctx.sessionUser.id);
         await db.updateMyTeamPrefs(input.teamId, input.prefs);
         return { success: true };
+      }),
+    ),
+
+  // --- onboarding collaboration (P13) ----------------------------------------
+  // État DÉRIVÉ du store (audit log + état courant), jamais coché à la main ;
+  // seul le masquage est un état par (équipe, membre).
+  onboardingStatus: privateProcedure.input(teamIdInput).query(async ({ ctx, input }) =>
+    mapTeamErrors(async () => {
+      const db = await getZeroDB(ctx.sessionUser.id);
+      return await db.getTeamOnboarding(input.teamId);
+    }),
+  ),
+  setOnboardingDismissed: privateProcedure
+    .input(teamIdInput.extend({ dismissed: z.boolean() }))
+    .mutation(async ({ ctx, input }) =>
+      mapTeamErrors(async () => {
+        const db = await getZeroDB(ctx.sessionUser.id);
+        await db.setTeamOnboardingDismissed(input.teamId, input.dismissed);
+        return { success: true };
+      }),
+    ),
+
+  // --- règles d'équipe (P14) -------------------------------------------------
+  // Mutations : owners uniquement (rôles actuels) — vérifié en SQL dans le
+  // store. Une règle surveille la boîte ACTIVE de son créateur au moment de la
+  // création ; ses actions repassent par l'ACL du store à chaque exécution.
+  listRules: privateProcedure.input(teamIdInput).query(async ({ ctx, input }) =>
+    mapTeamErrors(async () => {
+      const db = await getZeroDB(ctx.sessionUser.id);
+      return { rules: await db.listTeamRules(input.teamId) };
+    }),
+  ),
+  createRule: activeDriverProcedure
+    .input(
+      teamIdInput.extend({
+        name: ruleNameSchema,
+        triggers: ruleTriggersSchema,
+        actions: z.array(ruleActionSchema).min(1).max(10),
+        confirmAclExpansion: z.boolean().optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) =>
+      mapTeamErrors(async () => {
+        requireShareConfirmation(input.actions, input.confirmAclExpansion);
+        const db = await getZeroDB(ctx.sessionUser.id);
+        return await db.createTeamRule(
+          input.teamId,
+          { id: ctx.activeConnection.id, email: ctx.activeConnection.email },
+          {
+            name: input.name,
+            triggers: input.triggers,
+            actions: input.actions,
+            confirmAclExpansion: input.confirmAclExpansion,
+          },
+        );
+      }),
+    ),
+  updateRule: privateProcedure
+    .input(
+      ruleIdInput.extend({
+        name: ruleNameSchema.optional(),
+        triggers: ruleTriggersSchema.optional(),
+        actions: z.array(ruleActionSchema).min(1).max(10).optional(),
+        confirmAclExpansion: z.boolean().optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) =>
+      mapTeamErrors(async () => {
+        // Garde route quand les actions sont fournies ; le store re-vérifie
+        // aussi la règle RÉSULTANTE (share conservé sans re-fournir actions).
+        requireShareConfirmation(input.actions, input.confirmAclExpansion);
+        const db = await getZeroDB(ctx.sessionUser.id);
+        await db.updateTeamRule(input.ruleId, {
+          name: input.name,
+          triggers: input.triggers,
+          actions: input.actions,
+          confirmAclExpansion: input.confirmAclExpansion,
+        });
+        return { success: true };
+      }),
+    ),
+  setRuleEnabled: privateProcedure
+    .input(
+      ruleIdInput.extend({ enabled: z.boolean(), confirmAclExpansion: z.boolean().optional() }),
+    )
+    .mutation(async ({ ctx, input }) =>
+      mapTeamErrors(async () => {
+        const db = await getZeroDB(ctx.sessionUser.id);
+        await db.setTeamRuleEnabled(input.ruleId, input.enabled, input.confirmAclExpansion);
+        return { success: true };
+      }),
+    ),
+  deleteRule: privateProcedure.input(ruleIdInput).mutation(async ({ ctx, input }) =>
+    mapTeamErrors(async () => {
+      const db = await getZeroDB(ctx.sessionUser.id);
+      await db.deleteTeamRule(input.ruleId);
+      return { success: true };
+    }),
+  ),
+  listRuleRuns: privateProcedure
+    .input(
+      teamIdInput.extend({
+        ruleId: z.string().min(1).max(64).optional(),
+        teamThreadId: z.string().min(1).max(64).optional(),
+        limit: z.number().int().min(1).max(100).default(50),
+      }),
+    )
+    .query(async ({ ctx, input }) =>
+      mapTeamErrors(async () => {
+        const db = await getZeroDB(ctx.sessionUser.id);
+        return {
+          runs: await db.listTeamRuleRuns(input.teamId, {
+            ruleId: input.ruleId,
+            teamThreadId: input.teamThreadId,
+            limit: input.limit,
+          }),
+        };
+      }),
+    ),
+  // Simulation EXACTE (dry-run strict, zéro écriture) : un échantillon borné
+  // des derniers fils inbox est lu EN ENTIER via getThread — même chemin
+  // ACL/scopé à la connexion active que le reader — puis évalué sur les
+  // vraies données (expéditeur, domaine, To/Cc, sujet + corps, labels,
+  // heure). Une lecture échouée ressort « non évalué » (verdict null), jamais
+  // comme un non-match.
+  previewRule: activeDriverProcedure
+    .input(
+      teamIdInput.extend({
+        triggers: ruleTriggersSchema,
+        limit: z.number().int().min(1).max(20).default(10),
+      }),
+    )
+    .query(async ({ ctx, input }) =>
+      mapTeamErrors(async () => {
+        const db = await getZeroDB(ctx.sessionUser.id);
+        const projection = await getThreadsFromDB(ctx.activeConnection.id, {
+          folder: 'inbox',
+          maxResults: input.limit,
+        });
+        type ProjectedThread = { id: string; subject?: string; sender?: { email?: string } };
+        const rows = (projection.threads as ProjectedThread[]).slice(0, input.limit);
+        const { threadMetaForRules } = await import('../../lib/teams/team-rules');
+        const candidates = await Promise.all(
+          rows.map(async (row) => {
+            const base = {
+              threadId: row.id,
+              subject: row.subject ?? '',
+              senderEmail: row.sender?.email ?? '',
+            };
+            try {
+              const { result } = await getThread(ctx.activeConnection.id, row.id);
+              const meta = threadMetaForRules(result);
+              return {
+                ...base,
+                subject: meta?.subject || base.subject,
+                senderEmail: meta?.senderEmail || base.senderEmail,
+                meta,
+              };
+            } catch {
+              return { ...base, meta: null };
+            }
+          }),
+        );
+        return {
+          rows: await db.previewTeamRule(input.teamId, { triggers: input.triggers }, candidates),
+        };
+      }),
+    ),
+  undoRuleRun: privateProcedure
+    .input(z.object({ runId: z.string().min(1).max(64) }))
+    .mutation(async ({ ctx, input }) =>
+      mapTeamErrors(async () => {
+        const db = await getZeroDB(ctx.sessionUser.id);
+        return await db.undoTeamRuleRun(input.runId);
+      }),
+    ),
+
+  // --- brouillons collaboratifs (P15) ----------------------------------------
+  // Le brouillon appartient au PARTAGEUR : draftId est scoped à sa connexion,
+  // résolue serveur depuis team_thread — jamais de connectionId client. Le
+  // reviewer suggère et décide, il ne mute jamais le Gmail du propriétaire.
+  requestDraftReview: privateProcedure
+    .input(
+      teamThreadIdInput.extend({
+        draftId: z.string().min(1).max(128),
+        reviewerUserId: z.string().min(1).max(64),
+      }),
+    )
+    .mutation(async ({ ctx, input }) =>
+      mapTeamErrors(async () => {
+        const db = await getZeroDB(ctx.sessionUser.id);
+        return await db.requestTeamDraftReview({
+          teamThreadId: input.teamThreadId,
+          draftId: input.draftId,
+          reviewerUserId: input.reviewerUserId,
+        });
+      }),
+    ),
+  threadDraftReview: privateProcedure.input(teamThreadIdInput).query(async ({ ctx, input }) =>
+    mapTeamErrors(async () => {
+      const db = await getZeroDB(ctx.sessionUser.id);
+      return { review: await db.getTeamThreadDraftReview(input.teamThreadId) };
+    }),
+  ),
+  readReviewDraft: privateProcedure
+    .input(z.object({ reviewId: z.string().min(1).max(64) }))
+    .query(async ({ ctx, input }) =>
+      mapTeamErrors(async () => {
+        const db = await getZeroDB(ctx.sessionUser.id);
+        return await db.readTeamReviewDraft(input.reviewId);
+      }),
+    ),
+  suggestDraftEdit: privateProcedure
+    .input(
+      z.object({
+        reviewId: z.string().min(1).max(64),
+        bodyText: z.string().min(1).max(100_000),
+        note: z.string().max(2_000).optional(),
+        baseDigest: z.string().min(16).max(128),
+      }),
+    )
+    .mutation(async ({ ctx, input }) =>
+      mapTeamErrors(async () => {
+        const db = await getZeroDB(ctx.sessionUser.id);
+        return await db.suggestTeamDraftEdit(input.reviewId, {
+          bodyText: input.bodyText,
+          note: input.note,
+          baseDigest: input.baseDigest,
+        });
+      }),
+    ),
+  draftReviewDecision: privateProcedure
+    .input(
+      z.object({
+        reviewId: z.string().min(1).max(64),
+        decision: z.enum(['approved', 'changes_requested']),
+        baseDigest: z.string().min(16).max(128),
+      }),
+    )
+    .mutation(async ({ ctx, input }) =>
+      mapTeamErrors(async () => {
+        const db = await getZeroDB(ctx.sessionUser.id);
+        return await db.setTeamDraftReviewDecision(input.reviewId, {
+          decision: input.decision,
+          baseDigest: input.baseDigest,
+        });
+      }),
+    ),
+  rebaseDraftReview: privateProcedure
+    .input(z.object({ reviewId: z.string().min(1).max(64) }))
+    .mutation(async ({ ctx, input }) =>
+      mapTeamErrors(async () => {
+        const db = await getZeroDB(ctx.sessionUser.id);
+        return await db.rebaseTeamDraftReview(input.reviewId);
+      }),
+    ),
+  applyDraftSuggestion: privateProcedure
+    .input(z.object({ suggestionId: z.string().min(1).max(64) }))
+    .mutation(async ({ ctx, input }) =>
+      mapTeamErrors(async () => {
+        const db = await getZeroDB(ctx.sessionUser.id);
+        await db.markTeamDraftSuggestionApplied(input.suggestionId);
+        return { success: true };
+      }),
+    ),
+  // Baseline de collision SERVEUR : émise à l'ouverture du composeur, jamais
+  // fournie par le client — mail.send exige cet intent pour tout envoi lié
+  // équipe.
+  createReplyIntent: privateProcedure.input(teamThreadIdInput).mutation(async ({ ctx, input }) =>
+    mapTeamErrors(async () => {
+      const db = await getZeroDB(ctx.sessionUser.id);
+      return await db.createTeamReplyIntent(input.teamThreadId);
+    }),
+  ),
+  cancelDraftReview: privateProcedure
+    .input(z.object({ reviewId: z.string().min(1).max(64) }))
+    .mutation(async ({ ctx, input }) =>
+      mapTeamErrors(async () => {
+        const db = await getZeroDB(ctx.sessionUser.id);
+        await db.cancelTeamDraftReview(input.reviewId);
+        return { success: true };
+      }),
+    ),
+
+  // --- SLA + opérations (P14 SLA / P16) --------------------------------------
+  // Politique : écriture OWNER (vérifiée en SQL), lecture membre. L'overview
+  // est filtrée par l'ACL de l'appelant AVANT agrégation dans le store.
+  getSlaPolicy: privateProcedure.input(teamIdInput).query(async ({ ctx, input }) =>
+    mapTeamErrors(async () => {
+      const db = await getZeroDB(ctx.sessionUser.id);
+      return { policy: await db.getTeamSlaPolicy(input.teamId) };
+    }),
+  ),
+  setSlaPolicy: privateProcedure
+    .input(
+      teamIdInput.extend({
+        firstResponseMinutes: z
+          .number()
+          .int()
+          .min(5)
+          .max(60 * 24 * 30)
+          .nullable(),
+        resolutionMinutes: z
+          .number()
+          .int()
+          .min(5)
+          .max(60 * 24 * 90)
+          .nullable(),
+        timeZone: z.string().min(1).max(64),
+        businessHours: z.object({
+          days: z.array(z.number().int().min(0).max(6)).min(1).max(7),
+          start: z.string().regex(HOURS_RE),
+          end: z.string().regex(HOURS_RE),
+        }),
+      }),
+    )
+    .mutation(async ({ ctx, input }) =>
+      mapTeamErrors(async () => {
+        const db = await getZeroDB(ctx.sessionUser.id);
+        await db.setTeamSlaPolicy(input.teamId, {
+          firstResponseMinutes: input.firstResponseMinutes,
+          resolutionMinutes: input.resolutionMinutes,
+          timeZone: input.timeZone,
+          businessHours: input.businessHours,
+        });
+        return { success: true };
+      }),
+    ),
+  listAbsences: privateProcedure.input(teamIdInput).query(async ({ ctx, input }) =>
+    mapTeamErrors(async () => {
+      const db = await getZeroDB(ctx.sessionUser.id);
+      return { absences: await db.listTeamAbsences(input.teamId) };
+    }),
+  ),
+  declareAbsence: privateProcedure
+    .input(
+      teamIdInput.extend({
+        targetUserId: z.string().min(1).max(64),
+        startsAt: z.string().datetime(),
+        endsAt: z.string().datetime(),
+        note: z.string().max(300).optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) =>
+      mapTeamErrors(async () => {
+        const db = await getZeroDB(ctx.sessionUser.id);
+        return await db.declareTeamAbsence(input.teamId, {
+          targetUserId: input.targetUserId,
+          startsAt: new Date(input.startsAt),
+          endsAt: new Date(input.endsAt),
+          note: input.note,
+        });
+      }),
+    ),
+  removeAbsence: privateProcedure
+    .input(z.object({ absenceId: z.string().min(1).max(64) }))
+    .mutation(async ({ ctx, input }) =>
+      mapTeamErrors(async () => {
+        const db = await getZeroDB(ctx.sessionUser.id);
+        await db.removeTeamAbsence(input.absenceId);
+        return { success: true };
+      }),
+    ),
+  opsOverview: privateProcedure
+    .input(teamIdInput.extend({ windowDays: z.number().int().min(1).max(90).default(30) }))
+    .query(async ({ ctx, input }) =>
+      mapTeamErrors(async () => {
+        const db = await getZeroDB(ctx.sessionUser.id);
+        return await db.getTeamOpsOverview(input.teamId, { windowDays: input.windowDays });
       }),
     ),
 
@@ -593,11 +1028,16 @@ export const teamsRouter = router({
 
   // --- presence --------------------------------------------------------------
   heartbeat: privateProcedure
-    .input(teamThreadIdInput.extend({ typing: z.boolean().default(false) }))
+    .input(
+      teamThreadIdInput.extend({
+        typing: z.boolean().default(false),
+        replying: z.boolean().default(false),
+      }),
+    )
     .mutation(async ({ ctx, input }) =>
       mapTeamErrors(async () => {
         const db = await getZeroDB(ctx.sessionUser.id);
-        await db.heartbeatTeamThreadPresence(input.teamThreadId, input.typing);
+        await db.heartbeatTeamThreadPresence(input.teamThreadId, input.typing, input.replying);
         return { success: true };
       }),
     ),

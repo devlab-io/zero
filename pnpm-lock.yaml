@@ -320,9 +320,6 @@ importers:
       better-auth:
         specifier: 'catalog:'
         version: 1.6.23(@cloudflare/workers-types@4.20250628.0)(@opentelemetry/api@1.9.0)(better-sqlite3@11.10.0)(drizzle-kit@0.31.4)(drizzle-orm@0.45.2(@cloudflare/workers-types@4.20250628.0)(@opentelemetry/api@1.9.0)(@types/pg@8.6.1)(@upstash/redis@1.35.0)(better-sqlite3@11.10.0)(kysely@0.29.3)(postgres@3.4.5))(react-dom@19.1.0(react@19.1.0))(react@19.1.0)(vitest@3.2.7)
-      canvas-confetti:
-        specifier: 1.9.3
-        version: 1.9.3
       class-variance-authority:
         specifier: 0.7.1
         version: 0.7.1
@@ -510,9 +507,6 @@ importers:
       '@types/accept-language-parser':
         specifier: ^1.5.8
         version: 1.5.8
-      '@types/canvas-confetti':
-        specifier: 1.9.0
-        version: 1.9.0
       '@types/node':
         specifier: 'catalog:'
         version: 22.15.29
@@ -6398,12 +6392,6 @@ packages:
         integrity: sha512-8PvcXf70gTDZBgt9ptxJ8elBeBjcLOAcOtoO/mPJjtji1+CdGbHgm77om1GrsPxsiE+uXIpNSK64UYaIwQXd4Q==,
       }
 
-  '@types/canvas-confetti@1.9.0':
-    resolution:
-      {
-        integrity: sha512-aBGj/dULrimR1XDZLtG9JwxX1b4HPRF6CX9Yfwh3NvstZEm1ZL7RBnel4keCPSqs1ANRu1u2Aoz9R+VmtjYuTg==,
-      }
-
   '@types/chai@5.2.2':
     resolution:
       {
@@ -7614,12 +7602,6 @@ packages:
     resolution:
       {
         integrity: sha512-VQAUIUzBiZ/UnlM28fSp2CRF3ivUn1BWEvxMcVTNwpw91Py1pGbPIyIKtd+tzct9C3ouceCVdGAXxZOpZAsgdw==,
-      }
-
-  canvas-confetti@1.9.3:
-    resolution:
-      {
-        integrity: sha512-rFfTURMvmVEX1gyXFgn5QMn81bYk70qa0HLzcIOSVEyl57n6o9ItHeBtUSWdvKAPY0xlvBHno4/v3QPrT83q9g==,
       }
 
   ccount@2.0.1:
@@ -18972,8 +18954,6 @@ snapshots:
     dependencies:
       '@babel/types': 7.28.2
 
-  '@types/canvas-confetti@1.9.0': {}
-
   '@types/chai@5.2.2':
     dependencies:
       '@types/deep-eql': 4.0.2
@@ -19769,8 +19749,6 @@ snapshots:
   camelize@1.0.1: {}
 
   caniuse-lite@1.0.30001726: {}
-
-  canvas-confetti@1.9.3: {}
 
   ccount@2.0.1: {}
 

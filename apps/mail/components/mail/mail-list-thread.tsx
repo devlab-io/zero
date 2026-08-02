@@ -213,16 +213,7 @@ export const Thread = memo(function Thread({
 
     return (
       <div
-        className={cn('select-none border-b md:my-1 md:border-none')}
-        role="button"
-        tabIndex={0}
-        aria-label={`Open email: ${latestMessage.subject || '(no subject)'}`}
-        onClick={(event) => onClick?.(latestMessage, event.nativeEvent)}
-        onKeyDown={(event) => {
-          if (event.currentTarget !== event.target || event.key !== 'Enter') return;
-          event.preventDefault();
-          onClick?.(latestMessage, event.nativeEvent);
-        }}
+        className={cn('group relative select-none border-b md:my-1 md:border-none')}
         // Devlab: hover targeting restored — required for Superhuman-style
         // single-key actions (d/r/a/f/h) on the thread under the cursor.
         onMouseEnter={() => {
@@ -237,11 +228,19 @@ export const Thread = memo(function Thread({
           window.dispatchEvent(new CustomEvent('emailHover', { detail: { id: null } }));
         }}
       >
+        <button
+          type="button"
+          aria-label={m['states.mailList.openThread']({
+            subject: latestMessage.subject || m['common.teams.untitledThread'](),
+          })}
+          className="absolute inset-0 z-0 w-full rounded-lg text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+          onClick={(event) => onClick?.(latestMessage, event.nativeEvent)}
+        />
         <div
           data-thread-id={idToUse}
           key={idToUse}
           className={cn(
-            'hover:bg-offsetLight dark:hover:bg-primary/5 group relative mx-1 flex cursor-pointer flex-col items-start rounded-lg py-2 text-left text-sm hover:opacity-100',
+            'group-hover:bg-offsetLight dark:group-hover:bg-primary/5 pointer-events-none relative z-10 mx-1 flex cursor-pointer flex-col items-start rounded-lg py-2 text-left text-sm group-hover:opacity-100',
             (isMailSelected || isMailBulkSelected || isKeyboardFocused) &&
               'border-border bg-primary/5 opacity-100',
             isKeyboardFocused && 'ring-primary/50',
@@ -259,11 +258,13 @@ export const Thread = memo(function Thread({
             moveThreadTo={moveThreadTo}
           />
 
+          {/* CUA P1 (contraste) : plus d'opacity-60 globale sur les lignes lues —
+              la différenciation lu/non-lu passe par la graisse, la pastille et
+              une couleur de texte atténuée mais AA sur les deux thèmes. */}
           <div
             className={cn(
               'relative flex w-full items-center justify-between',
               isReaderOpen ? 'gap-2 px-2.5' : 'gap-4 px-4',
-              displayUnread ? '' : 'opacity-60',
             )}
           >
             <div>
@@ -274,8 +275,10 @@ export const Thread = memo(function Thread({
                     displayUnread && !isMailSelected && !isFolderSent ? '' : 'border',
                   )}
                 >
-                  <div
-                    className="flex h-full w-full items-center justify-center rounded-full bg-[#006FFE] p-2 dark:bg-[#006FFE]"
+                  <button
+                    type="button"
+                    aria-label={m['states.mailList.deselect']()}
+                    className="pointer-events-auto flex h-full w-full items-center justify-center rounded-full bg-[#006FFE] p-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 dark:bg-[#006FFE]"
                     onClick={(e: React.MouseEvent) => {
                       e.stopPropagation();
                       setMail((prev: Config) => ({
@@ -284,8 +287,8 @@ export const Thread = memo(function Thread({
                       }));
                     }}
                   >
-                    <Check className="h-4 w-4 text-white" />
-                  </div>
+                    <Check className="h-4 w-4 text-white" aria-hidden />
+                  </button>
                 </Avatar>
               ) : isGroupThread ? (
                 <Avatar
@@ -336,7 +339,14 @@ export const Thread = memo(function Thread({
                         </span>
                       ) : (
                         <div className="flex items-center gap-1">
-                          <span className={cn('line-clamp-1 overflow-hidden text-sm')}>
+                          <span
+                            className={cn(
+                              'line-clamp-1 overflow-hidden text-sm',
+                              displayUnread || isMailSelected
+                                ? ''
+                                : 'text-zinc-600 dark:text-zinc-400',
+                            )}
+                          >
                             {highlightText(
                               cleanNameDisplay(latestMessage.sender.name) || '',
                               searchValue.highlight,
@@ -370,11 +380,16 @@ export const Thread = memo(function Thread({
                     {hasDraft ? (
                       <Tooltip>
                         <TooltipTrigger asChild>
-                          <span className="inline-flex items-center">
+                          <span
+                            className="inline-flex items-center"
+                            aria-label={m['states.mailList.hasDraft']()}
+                          >
                             <PencilCompose className="h-3 w-3 fill-blue-500 dark:fill-blue-400" />
                           </span>
                         </TooltipTrigger>
-                        <TooltipContent className="p-1 text-xs">Draft</TooltipContent>
+                        <TooltipContent className="p-1 text-xs">
+                          {m['states.mailList.hasDraft']()}
+                        </TooltipContent>
                       </Tooltip>
                     ) : null}
                     {/* {hasNotes ? (
@@ -400,17 +415,17 @@ export const Thread = memo(function Thread({
                   {isFolderSent ? (
                     <p
                       className={cn(
-                        'mt-1 line-clamp-1 max-w-[50ch] overflow-hidden text-sm text-[#8C8C8C] md:max-w-[25ch]',
+                        'mt-1 line-clamp-1 max-w-[50ch] overflow-hidden text-sm text-zinc-600 md:max-w-[25ch] dark:text-zinc-400',
                       )}
                     >
                       {latestMessage.to.length
                         ? latestMessage.to.map((recipient) => recipient.email).join(', ')
-                        : 'Sent'}
+                        : m['navigation.sidebar.sent']()}
                     </p>
                   ) : (
                     <p
                       className={cn(
-                        'mt-1 line-clamp-1 w-[95%] min-w-0 overflow-hidden text-sm text-[#8C8C8C]',
+                        'mt-1 line-clamp-1 w-[95%] min-w-0 overflow-hidden text-sm text-zinc-600 dark:text-zinc-400',
                       )}
                     >
                       {highlightText(latestMessage.subject, searchValue.highlight)}

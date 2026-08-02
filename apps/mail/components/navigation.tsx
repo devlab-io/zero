@@ -65,7 +65,7 @@ export function Navigation() {
     <>
       {/* Desktop Navigation - Hidden on mobile */}
       <header className="fixed left-[50%] z-50 hidden w-full max-w-4xl translate-x-[-50%] items-center justify-center px-4 pt-6 lg:flex">
-        <nav className="border-input/50 flex w-full max-w-4xl items-center justify-between gap-2 rounded-xl border bg-white/90 p-3 px-6 text-zinc-950 shadow-sm backdrop-blur-md transition-colors dark:border-t dark:bg-[#1E1E1E]/90 dark:text-white">
+        <nav className="border-input/50 flex w-full max-w-4xl items-center justify-between gap-2 rounded-xl border bg-white p-3 px-6 text-zinc-950 shadow-sm transition-colors duration-200 motion-reduce:transition-none dark:border-t dark:bg-[#1E1E1E] dark:text-white">
           <div className="flex items-center gap-6">
             <Link to="/" className="flex cursor-pointer items-center gap-1.5">
               <ProductLockup />
@@ -74,7 +74,7 @@ export function Navigation() {
             <NavigationMenu>
               <NavigationMenuList className="gap-1">
                 <NavigationMenuItem>
-                  <NavigationMenuTrigger className="cursor-pointer bg-transparent text-zinc-950 dark:text-white">
+                  <NavigationMenuTrigger className="cursor-pointer bg-transparent text-zinc-950 focus-visible:ring-2 focus-visible:ring-[#6f00ff] dark:text-white">
                     Company
                   </NavigationMenuTrigger>
                   <NavigationMenuContent>
@@ -88,7 +88,7 @@ export function Navigation() {
                   </NavigationMenuContent>
                 </NavigationMenuItem>
                 <NavigationMenuItem>
-                  <NavigationMenuTrigger className="cursor-pointer bg-transparent text-zinc-950 dark:text-white">
+                  <NavigationMenuTrigger className="cursor-pointer bg-transparent text-zinc-950 focus-visible:ring-2 focus-visible:ring-[#6f00ff] dark:text-white">
                     Resources
                   </NavigationMenuTrigger>
                   <NavigationMenuContent>

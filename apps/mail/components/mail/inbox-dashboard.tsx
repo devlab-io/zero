@@ -18,6 +18,7 @@ import {
   UserCheck,
   Users,
 } from 'lucide-react';
+import { CollabOnboardingCard } from '@/components/team/collab-onboarding';
 import { useMailboxOverview } from '@/hooks/use-mailbox-overview';
 import { useTRPC } from '@/providers/query-provider';
 import { useQuery } from '@tanstack/react-query';
@@ -183,6 +184,8 @@ export function InboxDashboard({ onCompose }: InboxDashboardProps) {
             <ArrowRight className="h-4 w-4" />
           </Button>
         </header>
+
+        <CollabOnboardingCard context="dashboard" />
 
         {failed.length > 0 && (
           <div

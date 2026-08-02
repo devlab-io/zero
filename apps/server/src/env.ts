@@ -90,6 +90,16 @@ export type ZeroEnv = {
   RETA_BYOK_KEK_V1?: string;
   RETA_BYOK_KEK_V2?: string;
   RETA_BYOK_KEK_ACTIVE?: string;
+  /**
+   * P18 — intégration Linear (email-first). TOUS OPTIONNELS : absents, la
+   * fonctionnalité intégration fail closed (l'UI owner explique la
+   * configuration manquante) sans bloquer le reste. Le ring KEK ci-dessus
+   * scelle les tokens ; LINEAR_WEBHOOK_SECRET est le signing secret de
+   * l'application (webhooks configurés côté app — jamais de scope admin).
+   */
+  LINEAR_CLIENT_ID?: string;
+  LINEAR_CLIENT_SECRET?: string;
+  LINEAR_WEBHOOK_SECRET?: string;
   AI_SYSTEM_PROMPT: string;
   PERPLEXITY_API_KEY: string;
   TWILIO_ACCOUNT_SID: string;

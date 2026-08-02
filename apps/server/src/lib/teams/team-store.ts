@@ -16,6 +16,7 @@ import {
   type TeamNotificationPrefs,
 } from '../../db/schema';
 import { and, asc, desc, eq, gt, inArray, isNull, lt, or, sql, type SQL } from 'drizzle-orm';
+import { enqueueOutboundEvent } from './team-outbound';
 import type { DB } from '../../db';
 
 /**
@@ -52,7 +53,32 @@ export class TeamStoreError extends Error {
       | 'assignee_no_access'
       | 'mention_not_member'
       | 'label_conflict'
-      | 'label_not_found',
+      | 'label_not_found'
+      | 'run_not_undoable'
+      | 'acl_confirmation_required'
+      | 'draft_stale'
+      | 'review_exists'
+      | 'review_not_actionable'
+      | 'not_draft_owner'
+      | 'not_reviewer'
+      | 'reply_claimed'
+      | 'reply_intent_invalid'
+      | 'override_not_armed'
+      // P18 — intégrations
+      | 'integration_vault_unavailable'
+      | 'integration_not_configured'
+      | 'integration_not_installed'
+      | 'integration_revoked'
+      | 'mapping_missing'
+      | 'confirmation_required'
+      | 'issue_create_failed'
+      | 'issue_create_in_flight'
+      | 'invalid_url'
+      | 'idempotency_conflict'
+      | 'preview_expired'
+      | 'preview_invalid'
+      | 'needs_reconciliation'
+      | 'oauth_scope_mismatch',
   ) {
     super(code);
     this.name = 'TeamStoreError';
@@ -62,6 +88,15 @@ export class TeamStoreError extends Error {
 const MAX_PARTICIPANTS = 20;
 const COMMENT_PAGE = 200;
 export const PRESENCE_STALE_MS = 45_000;
+
+/**
+ * Provenance d'une mutation déclenchée par une RÈGLE (P14) — fusionnée dans
+ * la metadata d'audit. Le runId permet au préflight d'undo de distinguer les
+ * écritures de CE run de toute autre activité (manuelle — même par le
+ * créateur — ou d'une autre règle). Sans contexte, l'audit reste strictement
+ * celui d'une action manuelle.
+ */
+export type RuleActionContext = { source: 'rule'; ruleId: string; runId: string };
 
 export type TeamThreadMetadata = {
   threadId: string;
@@ -115,23 +150,36 @@ async function audit(
   db: DbOrTx,
   entry: {
     teamId: string;
-    actorUserId: string;
+    /** null pour un acteur non humain — actorKind dit alors la vérité. */
+    actorUserId: string | null;
+    actorKind?: 'user' | 'system' | 'integration';
     action: string;
     subjectType: string;
     subjectId: string;
     metadata?: Record<string, unknown>;
   },
 ) {
+  const actorKind = entry.actorKind ?? 'user';
+  // Garde applicative du sens interdit au CHECK SQL (le SET NULL de la
+  // suppression de compte doit rester possible) : un audit 'user' s'ÉCRIT
+  // toujours avec un acteur ; system/integration jamais (CHECK SQL).
+  if (actorKind === 'user' && !entry.actorUserId) {
+    throw new TeamStoreError('forbidden');
+  }
   await db.insert(teamAuditLog).values({
     id: crypto.randomUUID(),
     teamId: entry.teamId,
     actorUserId: entry.actorUserId,
+    actorKind,
     action: entry.action,
     subjectType: entry.subjectType,
     subjectId: entry.subjectId,
     metadata: entry.metadata ?? {},
   });
 }
+
+/** Export P18 : les stores d'intégration auditent via le MÊME journal. */
+export const appendTeamAudit = audit;
 
 /**
  * Insert notifications for `recipients`, filtered by each recipient's
@@ -150,7 +198,9 @@ async function notify(
       | 'assignment'
       | 'access_granted'
       | 'access_revoked'
-      | 'status_changed';
+      | 'status_changed'
+      | 'rule'
+      | 'draft_review';
     actorUserId: string;
     recipients: string[];
     prefKey: keyof TeamNotificationPrefs | null;
@@ -179,6 +229,51 @@ async function notify(
       actorUserId: input.actorUserId,
     })),
   );
+}
+
+/**
+ * Notification déclenchée par une RÈGLE (P14). prefKey null : l'action
+ * `notify` d'une règle est une demande explicite de son créateur — elle est
+ * délivrée même si le destinataire a coupé commentaires/mentions/assignations
+ * (mêmes garanties qu'access_granted).
+ */
+export async function notifyRuleTargets(
+  db: DB,
+  input: {
+    teamId: string;
+    teamThreadId: string | null;
+    actorUserId: string;
+    recipients: string[];
+  },
+) {
+  await notify(db, {
+    teamId: input.teamId,
+    teamThreadId: input.teamThreadId,
+    kind: 'rule',
+    actorUserId: input.actorUserId,
+    recipients: input.recipients,
+    prefKey: null,
+  });
+}
+
+/** Notification de relecture de brouillon (P15) — toujours délivrée (interaction directe). */
+export async function notifyDraftReview(
+  db: DB,
+  input: {
+    teamId: string;
+    teamThreadId: string;
+    actorUserId: string;
+    recipients: string[];
+  },
+) {
+  await notify(db, {
+    teamId: input.teamId,
+    teamThreadId: input.teamThreadId,
+    kind: 'draft_review',
+    actorUserId: input.actorUserId,
+    recipients: input.recipients,
+    prefKey: null,
+  });
 }
 
 // --- teams -------------------------------------------------------------------
@@ -319,12 +414,14 @@ export async function updateMyPrefs(
   teamId: string,
   prefs: TeamNotificationPrefs,
 ) {
-  const updated = await db
+  // FUSION, jamais remplacement : le même jsonb porte aussi l'état
+  // d'onboarding (onboardingDismissedAt) — régler les notifications ne doit
+  // pas le réinitialiser.
+  await requireMembership(db, teamId, userId);
+  await db
     .update(teamMember)
-    .set({ prefs })
-    .where(and(eq(teamMember.teamId, teamId), eq(teamMember.userId, userId)))
-    .returning({ userId: teamMember.userId });
-  if (updated.length === 0) throw new TeamStoreError('not_a_member');
+    .set({ prefs: sql`${teamMember.prefs} || ${JSON.stringify(prefs)}::jsonb` })
+    .where(and(eq(teamMember.teamId, teamId), eq(teamMember.userId, userId)));
 }
 
 // --- invites -----------------------------------------------------------------
@@ -480,7 +577,12 @@ export async function declineInvite(db: DB, sessionEmail: string, inviteId: stri
  * sharer, a team owner, or holding an ACTIVE (non-revoked) access row.
  * (Membership itself is enforced separately.)
  */
-function accessPredicate(userId: string): SQL {
+/**
+ * Prédicat ACL ENSEMBLISTE d'un fil partagé pour `userId` — la même porte que
+ * resolveAccess, exprimée en SQL pour les requêtes de liste ET d'agrégation
+ * (P16 : tout agrégat ops filtre par ce prédicat AVANT de compter).
+ */
+export function accessPredicate(userId: string): SQL {
   return or(
     eq(teamThread.visibility, 'team'),
     eq(teamThread.sharerUserId, userId),
@@ -655,7 +757,12 @@ export async function shareThread(
   userId: string,
   teamId: string,
   meta: TeamThreadMetadata,
-  options: { visibility: TeamThreadVisibility; accessUserIds: string[] },
+  options: {
+    visibility: TeamThreadVisibility;
+    accessUserIds: string[];
+    /** Provenance non humaine (P14) : rendue VISIBLE dans l'audit du partage. */
+    context?: RuleActionContext;
+  },
 ) {
   await requireMembership(db, teamId, userId);
   const accessIds = [...new Set(options.accessUserIds)].filter((id) => id !== userId);
@@ -725,7 +832,11 @@ export async function shareThread(
       action: 'thread.shared',
       subjectType: 'team_thread',
       subjectId: row.id,
-      metadata: { visibility: options.visibility, accessUserIds: accessIds },
+      metadata: {
+        visibility: options.visibility,
+        accessUserIds: accessIds,
+        ...options.context,
+      },
     });
     return row;
   });
@@ -887,6 +998,7 @@ export async function setThreadStatus(
   userId: string,
   teamThreadId: string,
   status: TeamThreadStatus,
+  context?: RuleActionContext,
 ) {
   const row = await resolveAccess(db, userId, teamThreadId);
   const now = new Date();
@@ -901,7 +1013,7 @@ export async function setThreadStatus(
       action: 'thread.status_changed',
       subjectType: 'team_thread',
       subjectId: teamThreadId,
-      metadata: { status },
+      metadata: { status, ...context },
     });
     await notify(tx, {
       teamId: row.teamId,
@@ -911,6 +1023,12 @@ export async function setThreadStatus(
       recipients: [row.sharerUserId, row.assigneeUserId].filter((v): v is string => !!v),
       prefKey: 'onComment',
     });
+    // P18 : outbox sortante — métadonnées seules, jamais de corps email.
+    await enqueueOutboundEvent(tx, {
+      teamId: row.teamId,
+      eventType: 'thread.status',
+      payload: { teamThreadId, status, actorUserId: userId, occurredAt: now.toISOString() },
+    });
   });
 }
 
@@ -919,6 +1037,7 @@ export async function setThreadAssignee(
   userId: string,
   teamThreadId: string,
   assigneeUserId: string | null,
+  context?: RuleActionContext,
 ) {
   const row = await resolveAccess(db, userId, teamThreadId);
   if (assigneeUserId) {
@@ -939,7 +1058,7 @@ export async function setThreadAssignee(
       action: 'thread.assigned',
       subjectType: 'team_thread',
       subjectId: teamThreadId,
-      metadata: { assigneeUserId },
+      metadata: { assigneeUserId, ...context },
     });
     if (assigneeUserId) {
       await notify(tx, {
@@ -951,6 +1070,12 @@ export async function setThreadAssignee(
         prefKey: 'onAssignment',
       });
     }
+    // P18 : outbox sortante — métadonnées seules.
+    await enqueueOutboundEvent(tx, {
+      teamId: row.teamId,
+      eventType: 'thread.assigned',
+      payload: { teamThreadId, assigneeUserId, actorUserId: userId, occurredAt: now.toISOString() },
+    });
   });
 }
 
@@ -991,6 +1116,12 @@ export async function addComment(
       subjectType: 'comment',
       subjectId: id,
       metadata: { teamThreadId, mentionedUserIds: uniqueMentions },
+    });
+    // P18 : outbox sortante — l'id du commentaire, JAMAIS son corps.
+    await enqueueOutboundEvent(tx, {
+      teamId: row.teamId,
+      eventType: 'thread.comment',
+      payload: { teamThreadId, commentId: id, actorUserId: userId, occurredAt: now.toISOString() },
     });
     // Mention on a restricted thread WIDENS access — visibly: the access row
     // carries source='mention', the audit trail records it, the target is
@@ -1224,6 +1355,7 @@ export async function setThreadLabels(
   userId: string,
   teamThreadId: string,
   labelIds: string[],
+  context?: RuleActionContext,
 ) {
   const row = await resolveAccess(db, userId, teamThreadId);
   const unique = [...new Set(labelIds)];
@@ -1245,7 +1377,7 @@ export async function setThreadLabels(
       action: 'thread.labels_set',
       subjectType: 'team_thread',
       subjectId: teamThreadId,
-      metadata: { labelIds: unique },
+      metadata: { labelIds: unique, ...context },
     });
   });
 }
@@ -1420,6 +1552,8 @@ export async function markNotificationsRead(db: DB, userId: string, ids: string[
 
 export async function listTeamAudit(db: DB, userId: string, teamId: string, limit = 100) {
   await requireMembership(db, teamId, userId);
+  // P18 : leftJoin — un audit système/intégration (actorUserId NULL) doit
+  // apparaître dans l'historique, jamais être silencieusement filtré.
   return await db
     .select({
       id: teamAuditLog.id,
@@ -1429,10 +1563,11 @@ export async function listTeamAudit(db: DB, userId: string, teamId: string, limi
       metadata: teamAuditLog.metadata,
       createdAt: teamAuditLog.createdAt,
       actorUserId: teamAuditLog.actorUserId,
+      actorKind: teamAuditLog.actorKind,
       actorName: user.name,
     })
     .from(teamAuditLog)
-    .innerJoin(user, eq(user.id, teamAuditLog.actorUserId))
+    .leftJoin(user, eq(user.id, teamAuditLog.actorUserId))
     .where(eq(teamAuditLog.teamId, teamId))
     .orderBy(desc(teamAuditLog.createdAt))
     .limit(Math.min(Math.max(limit, 1), 200));
@@ -1445,16 +1580,20 @@ export async function heartbeatPresence(
   userId: string,
   teamThreadId: string,
   typing: boolean,
+  replying = false,
 ) {
   await resolveAccess(db, userId, teamThreadId);
   const now = new Date();
   const typingUntil = typing ? new Date(now.getTime() + 8_000) : null;
+  // P15 fallback polling du « rédige une réponse » — TTL long, rafraîchi par
+  // le heartbeat du composeur ouvert. Jamais de contenu, seulement des dates.
+  const replyingUntil = replying ? new Date(now.getTime() + 60_000) : null;
   await db
     .insert(teamThreadPresence)
-    .values({ teamThreadId, userId, lastSeenAt: now, typingUntil })
+    .values({ teamThreadId, userId, lastSeenAt: now, typingUntil, replyingUntil })
     .onConflictDoUpdate({
       target: [teamThreadPresence.teamThreadId, teamThreadPresence.userId],
-      set: { lastSeenAt: now, typingUntil },
+      set: { lastSeenAt: now, typingUntil, replyingUntil },
     });
 }
 
@@ -1468,6 +1607,7 @@ export async function listPresence(db: DB, userId: string, teamThreadId: string)
       email: user.email,
       lastSeenAt: teamThreadPresence.lastSeenAt,
       typingUntil: teamThreadPresence.typingUntil,
+      replyingUntil: teamThreadPresence.replyingUntil,
     })
     .from(teamThreadPresence)
     .innerJoin(user, eq(user.id, teamThreadPresence.userId))

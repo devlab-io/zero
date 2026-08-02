@@ -1,32 +1,30 @@
+import { HomeCollabSection } from '@/components/home/sections/home-collab-section';
 import { HomeFeatureCards } from '@/components/home/sections/home-feature-cards';
 import { HomeReplyMockup } from '@/components/home/sections/home-reply-mockup';
-import { HomeChatSection } from '@/components/home/sections/home-chat-section';
 import { HomeApiSection } from '@/components/home/sections/home-api-section';
-import { PixelatedBackground } from '@/components/home/pixelated-bg';
 import { HomeHero } from '@/components/home/sections/home-hero';
 import { ThemeToggle } from '@/components/theme/theme-toggle';
 import { Navigation } from '../navigation';
 import Footer from './footer';
 
+/**
+ * Landing Reta (P12) — récit produit réel : vitesse clavier, collaboration
+ * d'équipe dans le fil, IA au choix (BYOK/MCP). Sections statiques (le héros
+ * reste immédiatement visible), un seul h1, tokens clair/sombre partout.
+ */
 export default function HomeContent() {
   return (
-    <main className="brand-landing relative flex h-full flex-1 flex-col overflow-x-hidden bg-[#F7F7F8] px-2 text-zinc-950 transition-colors duration-300 dark:bg-[#0F0F0F] dark:text-white">
-      <PixelatedBackground
-        className="z-1 absolute left-1/2 top-[-40px] h-auto w-screen min-w-[1920px] -translate-x-1/2 object-cover opacity-35 dark:opacity-100"
-        style={{
-          mixBlendMode: 'screen',
-          maskImage: 'linear-gradient(to bottom, black, transparent)',
-        }}
-      />
-
+    <main className="brand-landing relative flex h-full flex-1 flex-col overflow-x-hidden bg-[#F7F7F8] px-2 text-zinc-950 transition-colors duration-200 motion-reduce:transition-none dark:bg-[#0F0F0F] dark:text-white">
       <Navigation />
 
       <ThemeToggle
         showLabel
-        className="fixed right-4 top-6 z-[60] border border-zinc-200 bg-white/90 px-3 shadow-lg backdrop-blur-md hover:bg-white dark:border-white/10 dark:bg-[#1E1E1E]/90 dark:hover:bg-[#272727]"
+        className="fixed right-4 top-6 z-[60] border border-zinc-200 bg-white px-3 shadow-sm hover:bg-zinc-50 dark:border-white/10 dark:bg-[#1E1E1E] dark:hover:bg-[#272727]"
       />
 
       <HomeHero />
+
+      <HomeCollabSection />
 
       <HomeReplyMockup />
 
@@ -34,9 +32,7 @@ export default function HomeContent() {
 
       <HomeApiSection />
 
-      <HomeChatSection />
-
-      <div className="relative mt-52 flex items-center justify-center">
+      <div className="relative mt-32 flex items-center justify-center md:mt-40">
         <Footer />
       </div>
     </main>
