@@ -1,8 +1,10 @@
 # Reta — carte de continuation P14 → P18
 
-État au 2026-08-02 (branche `codex/reta-team-collaboration`, après la vague
-P12/P12.1/P12.2/P13). Chaque phase ci-dessous liste l'ordre de dépendance, les
-points d'ancrage EXACTS dans le code actuel, et les invariants à ne pas casser.
+État au 2026-08-02, commit de release `8c405e31496f` sur la branche
+`codex/reta-team-collaboration`. Les migrations 0042 à 0046 sont appliquées en
+production et les Workers front/serveur sont publiés. Chaque phase ci-dessous
+liste l'ordre de dépendance, les points d'ancrage EXACTS dans le code actuel et
+les invariants à ne pas casser.
 
 Invariants transverses (toutes phases) :
 
@@ -24,13 +26,12 @@ Invariants transverses (toutes phases) :
 - Aucun envoi réel / archivage / suppression / invitation / événement
   calendrier / mutation Linear dans les tests.
 
-## P14 — Règles d'équipe ACL-safe — implémenté + durci, EN ATTENTE de
+## P14 — Règles d'équipe ACL-safe — déployé et vérifié PostgreSQL
 
-## validation staging (turns reta-p14-01 puis reta-p14-hardening-02, 2026-08-02)
-
-P14 n'est PAS considéré livré tant que la sémantique SQL (claim unique,
-soft-delete, préflights d'undo) n'a pas tourné sur un vrai Postgres en
-staging. État du code :
+Turns reta-p14-01 puis reta-p14-hardening-02, release du 2026-08-02. La
+sémantique SQL (claim unique, soft-delete, préflights d'undo) a tourné sur un
+vrai PostgreSQL en transactions de test, puis la migration 0043 a été appliquée
+en production avant le Worker. État du code :
 
 Architecture : migration `0043_left_madame_hydra.sql` (`team_rule` +
 `team_rule_run`, index UNIQUE (rule_id, thread_id)) ; types feuilles
@@ -102,9 +103,9 @@ SQL (0042+) — première vraie migration depuis 0041, à valider en staging.
 - UI : onglet « Rules » dans `/settings/teams` + entrée d'audit dans le panneau
   Team existant (`components/mail/team-panel.tsx`).
 
-## P15 — Brouillons collaboratifs — implémenté, EN ATTENTE de validation
+## P15 — Brouillons collaboratifs — déployé et vérifié PostgreSQL
 
-## staging (turns reta-p15-06 → final-hardening-08, 2026-08-02)
+Turns reta-p15-06 → final-hardening-08, release du 2026-08-02.
 
 État du code : migration `0045_lying_lilith.sql` (`team_draft_review` avec
 index unique PARTIEL — une review active par (fil, brouillon) —,
@@ -156,8 +157,8 @@ Durci (hardening-07, prouvé sur PG réel + TipTap réel + DO instancié) :
 
 Final (hardening-08, prouvé sur PG réel + routes mockées + couture UI pure) :
 
-- Baseline de collision = REPLY INTENT SERVEUR (`team_reply_intent` ajoutée
-  dans 0045 encore non publiée + snapshot/schema, `db:generate` = « No schema
+- Baseline de collision = REPLY INTENT SERVEUR (`team_reply_intent` publiée
+  dans la migration 0045 + snapshot/schema, `db:generate` = « No schema
   changes ») : émis par `teams.createReplyIntent` au montage du composeur
   sous ACL, `baseline_at` DEFAULT now() côté base, TTL 24 h. `mail.send`
   prend `replyIntentId` et refuse absent/expiré/mauvais user-fil-provider
@@ -222,9 +223,9 @@ plus tardive pour cette seule soumission — fail closed sinon).
   côté serveur si un AUTRE membre a envoyé une réponse sur le fil partagé
   depuis l'ouverture du composeur → avertissement bloquable, pas d'interdit.
 
-## P16 — Dashboard opérations — implémenté avec P14 SLA, EN ATTENTE de
+## P16 — Dashboard opérations — déployé avec P14 SLA
 
-## validation staging (turn reta-p14-sla-p16-04, 2026-08-02)
+Turn reta-p14-sla-p16-04, release du 2026-08-02.
 
 État du code : migration `0044_flashy_pete_wisdom.sql` (`team_sla_policy` une
 ligne par équipe : objectifs first-response/résolution en minutes OUVRÉES,
@@ -257,7 +258,10 @@ flat/tokens/reduced-motion. Limites : fils retirés du partage sortis des
 agrégats ; volumes au-delà des bornes lus comme minima ; les réponses
 envoyées par d'AUTRES membres depuis leurs propres boîtes ne sont pas
 rattachables (threadIds scopés par connexion) — seule la boîte du partageur
-compte, libellé en conséquence ; validation staging finale requise.
+compte, libellé en conséquence. La migration 0044 est appliquée en production ;
+la route `/team?view=ops` est vérifiée en navigation HTML et par Codex CUA dans
+Dia. Le compte de QA n'ayant aucune équipe, la validation visuelle s'arrête à
+l'état vide réel, sans créer de données artificielles.
 
 ### Spécification d'origine (conservée pour référence)
 
@@ -288,15 +292,16 @@ compte, libellé en conséquence ; validation staging finale requise.
 - NE PAS construire SAML/SCIM pour la parité sans prospect nommé — décision
   explicite de périmètre.
 
-## P18 — Intégration Linear — implémentée, EN ATTENTE de validation staging
+## P18 — Intégration Linear — déployée fail-closed, activation opératoire en attente
 
-## (turn reta-p18-09, 2026-08-02)
+Turn reta-p18-09 + hardening-10 + adversarial-11, release du 2026-08-02.
 
 État du code (email-first, aucun chat, AUCUN appel Linear réel en dev/QA) :
 
 - **Migration 0046** (`0046_messy_molly_hayes.sql`, générée par drizzle,
-  appliquée + prouvée psql ROLLBACK sur la base jetable, `db:generate` = « No
-  schema changes ») : `team_integration_install` (une par équipe+provider,
+  appliquée + prouvée psql ROLLBACK sur la base jetable puis appliquée en
+  production, `db:generate` = « No schema changes ») :
+  `team_integration_install` (une par équipe+provider,
   tokens/PKCE en ENVELOPPES SCELLÉES jsonb, workspace pour corrélation
   webhook), `team_integration_mapping` (slots explicites team/status/assignee,
   unique par (install,kind,retaValue)), `team_thread_issue_link` (un lien
@@ -443,16 +448,43 @@ d'APPLICATION (un seul, env — correct pour une app Linear) ; le CHECK
 le SET NULL de suppression de compte, documentée) ; l'export borne à 200/page
 et l'UI à 2000 entrées par téléchargement.
 
+## Preuves de release production — 2026-08-02
+
+- Base production : journal Drizzle vérifié jusqu'à 0046 ; hashes 0042–0046
+  présents, tables/index/FK/CHECK attendus vérifiés. L'état 0042 préexistant a
+  été constaté colonne par colonne avant journalisation chirurgicale sous
+  advisory lock ; aucune donnée métier n'a été modifiée.
+- Gates : serveur 1053/1053 (97 fichiers), mail 831/831 (131 fichiers), deux
+  typechecks verts, ESLint sans erreur, build production vert avec preload
+  89/90 KiB gzip, contrôle agent-surface vert et scan gitleaks staged sans
+  fuite. Les E2E historiques qui envoient ou mutent de vrais emails n'ont pas
+  été lancés conformément au garde-fou de QA.
+- Déploiement : Worker serveur version
+  `06c0ef19-7aa2-4c3b-9106-a0e6d6d5c511`; Worker mail version publiée
+  `8ab62c17-24d3-40a8-96ac-91c90810c1de`. `/health`, `/`, `/team`,
+  `/team?view=ops`, `/team?view=integrations` et
+  `/integrations/linear/callback` répondent 200 pour une navigation HTML.
+- Codex CUA dans Dia, lecture seule : `/team?view=ops` et
+  `/team?view=integrations` affichent la session Reta authentifiée, les cinq
+  onglets Shared/Assigned/Mentions/Ops/Integrations, un état vide d'équipe
+  explicite et aucune erreur. Aucun clic ni mutation n'a été effectué.
+- Activation Linear réelle : `LINEAR_CLIENT_ID`, `LINEAR_CLIENT_SECRET` et
+  `LINEAR_WEBHOOK_SECRET` sont absents de la production. Le code publié refuse
+  donc toute installation et l'explique à l'owner. L'OAuth, les mappings et les
+  webhooks réels restent non vérifiables tant que l'application Linear externe
+  et son secret de signature ne sont pas provisionnés.
+
 ## Dettes/restes connus hors phases
 
 - `/pricing` public = contenu Zero obsolète (promesses IA, $20/mo) — refonte
   marketing honnête à faire avec décision pricing Reta (hors r8 : page
   marketing publique). Non lié depuis la nav/footer actuels.
-- Vidéos d'onboarding legacy (`/onboarding/step*.mp4`) = captures Zero ; le
-  dialog subsiste sans confetti — à re-tourner ou remplacer par la checklist
-  P13 seule.
-- Sémantique SQL du store jamais exécutée sur vrai Postgres en test — valider
-  `teams.onboardingStatus` en staging (comme le reste du store).
+- Les assets vidéo d'onboarding legacy (`/onboarding/step*.mp4`) restent dans
+  `public/` mais leur ancien dialog n'est plus monté : l'Inbox utilise
+  exclusivement la checklist factuelle P13.
+- Le scénario visuel multi-utilisateur avec données d'équipe réelles n'a pas
+  été exécuté en production : les invariants ACL/isolation sont couverts par
+  les tests PostgreSQL, sans création de données QA artificielles.
 - Analytics P13 : émission côté client dédupliquée par navigateur
   (localStorage) — un double tir multi-appareils reste possible ; si un jour
   PostHog serveur existe, déplacer l'émission dans le store.
