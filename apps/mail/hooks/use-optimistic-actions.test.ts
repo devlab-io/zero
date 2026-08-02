@@ -301,14 +301,17 @@ describe('useOptimisticActions — variantes d’actions', () => {
     expect(h.mutationSpies['drafts.deleteMany']).toHaveBeenCalledWith({
       ids: ['draft-1', 'draft-2'],
     });
-    // CUA round 6 : la ligne est PURGÉE des pages en cache (identifiant exact) —
-    // pas de refetch immédiat de la vérité Gmail retardée. Portée (round 6b) :
-    // uniquement les infinite queries du dossier draft — jamais inbox/sent.
-    expect(h.setQueriesData).toHaveBeenCalledTimes(1);
+    // Le compteur partagé baisse immédiatement, puis la ligne est PURGÉE des
+    // pages en cache (identifiant exact). Portée de la purge : uniquement les
+    // infinite queries du dossier draft — jamais inbox/sent.
+    expect(h.setQueriesData).toHaveBeenCalledTimes(2);
     expect(h.setQueriesData.mock.calls[0][0]).toEqual({
+      queryKey: ['.mail.mailboxOverview'],
+    });
+    expect(h.setQueriesData.mock.calls[1][0]).toEqual({
       queryKey: ['.mail.listThreads', { input: { folder: 'draft' }, type: 'infinite' }],
     });
-    const updater = h.setQueriesData.mock.calls[0][1] as (
+    const updater = h.setQueriesData.mock.calls[1][1] as (
       data: { pages: { threads: { id: string }[] }[] } | undefined,
     ) => unknown;
     expect(

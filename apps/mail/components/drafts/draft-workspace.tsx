@@ -37,6 +37,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { optimisticActionsAtom } from '@/store/optimistic-updates';
 import { useHotkeys, useHotkeysContext } from 'react-hotkeys-hook';
 import { useMailboxOverview } from '@/hooks/use-mailbox-overview';
+import { useAutoLoadDraftPage } from './use-auto-load-draft-page';
 import { QueueReview } from '@/components/queue/queue-review';
 import { interpretSendOutcome } from '@/lib/send-outcome';
 import { useTRPC } from '@/providers/query-provider';
@@ -145,6 +146,15 @@ export function DraftWorkspace() {
     });
     if (selectionAnchorId && !availableIds.has(selectionAnchorId)) setSelectionAnchorId(null);
   }, [rows, selectionAnchorId]);
+
+  useAutoLoadDraftPage({
+    rowCount: rows.length,
+    search,
+    hasNextPage: Boolean(threadsQuery.hasNextPage),
+    isLoading: threadsQuery.isLoading,
+    isFetchingNextPage: threadsQuery.isFetchingNextPage,
+    loadMore,
+  });
 
   const openDraft = (id = selectedId) => {
     if (!id) return;
@@ -436,7 +446,7 @@ export function DraftWorkspace() {
             />
 
             <div className="min-h-0 flex-1 overflow-y-auto p-2" role="list">
-              {threadsQuery.isLoading ? (
+              {threadsQuery.isLoading || (rows.length === 0 && threadsQuery.isFetchingNextPage) ? (
                 <DraftListSkeleton />
               ) : filteredRows.length ? (
                 <div className="space-y-1">

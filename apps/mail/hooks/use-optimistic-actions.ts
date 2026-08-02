@@ -3,6 +3,7 @@ import { optimisticActionsManager, type PendingAction } from '@/lib/optimistic-a
 import { buildOptimisticFailureToast, isLastPendingOfType } from '@/lib/optimistic-recovery';
 import { pruneThreadFromListPages } from '@/lib/prune-thread-cache';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { adjustMailboxDraftCount } from '@/lib/mailbox-counts';
 import { FOLDERS } from '@/lib/utils';
 import { log } from '@/lib/log';
 
@@ -544,6 +545,11 @@ export function useOptimisticActions() {
       type: 'DELETE_DRAFT',
       threadIds: ids,
     });
+    const updateDraftCount = (delta: number) =>
+      queryClient.setQueriesData({ queryKey: trpc.mail.mailboxOverview.queryKey() }, (data) =>
+        adjustMailboxDraftCount(data, delta),
+      );
+    updateDraftCount(-ids.length);
 
     createPendingAction({
       type: 'DELETE_DRAFT',
@@ -572,6 +578,7 @@ export function useOptimisticActions() {
         await queryClient.invalidateQueries({ queryKey: trpc.mail.mailboxOverview.queryKey() });
       },
       undo: () => {
+        updateDraftCount(ids.length);
         removeOptimisticAction(optimisticId);
       },
       retry: () => optimisticDeleteDrafts(ids),

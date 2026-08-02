@@ -4,6 +4,7 @@ import {
   moveDraftSelection,
   nextDraftAfterDeletion,
   selectDraftRange,
+  shouldLoadNextDraftPage,
   stripDraftHtml,
   toggleDraftSelection,
   buildConfirmedDirectSend,
@@ -50,6 +51,36 @@ describe('draft workspace model', () => {
     };
     expect(matchesDraftSearch(row, 'review')).toBe(true);
     expect(matchesDraftSearch(row, 'bob')).toBe(false);
+  });
+
+  it('loads the next provider page when bulk deletion empties only the current page', () => {
+    expect(
+      shouldLoadNextDraftPage({
+        rowCount: 0,
+        search: '',
+        hasNextPage: true,
+        isLoading: false,
+        isFetchingNextPage: false,
+      }),
+    ).toBe(true);
+    expect(
+      shouldLoadNextDraftPage({
+        rowCount: 0,
+        search: '',
+        hasNextPage: false,
+        isLoading: false,
+        isFetchingNextPage: false,
+      }),
+    ).toBe(false);
+    expect(
+      shouldLoadNextDraftPage({
+        rowCount: 0,
+        search: 'facture',
+        hasNextPage: true,
+        isLoading: false,
+        isFetchingNextPage: false,
+      }),
+    ).toBe(false);
   });
 
   it('moves selection with clamped j/k semantics', () => {

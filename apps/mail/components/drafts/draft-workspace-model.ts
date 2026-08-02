@@ -78,6 +78,21 @@ export const matchesDraftSearch = (row: DraftListRow, search: string): boolean =
   return `${row.recipient}\n${row.subject}\n${row.preview}`.toLocaleLowerCase().includes(needle);
 };
 
+export const shouldLoadNextDraftPage = ({
+  rowCount,
+  search,
+  hasNextPage,
+  isLoading,
+  isFetchingNextPage,
+}: {
+  rowCount: number;
+  search: string;
+  hasNextPage: boolean;
+  isLoading: boolean;
+  isFetchingNextPage: boolean;
+}): boolean =>
+  rowCount === 0 && search.trim().length === 0 && hasNextPage && !isLoading && !isFetchingNextPage;
+
 /**
  * Envoi direct (Mod+Enter) : autorisé UNIQUEMENT depuis le brouillon COMPLET
  * (drafts.get) — jamais depuis une DraftListRow partielle. Le draft chargé
