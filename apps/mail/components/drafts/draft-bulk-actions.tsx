@@ -29,7 +29,7 @@ export function DraftBulkActionBar({
           {count}
         </Badge>
         <span className="text-muted-foreground truncate text-xs">
-          {m['draftWorkspace.selected']({ count })}
+          {count === 1 ? m['draftWorkspace.selectedOne']() : m['draftWorkspace.selectedMany']()}
         </span>
         <Button type="button" variant="ghost" size="sm" onClick={onClear}>
           {m['draftWorkspace.clearSelection']()}
