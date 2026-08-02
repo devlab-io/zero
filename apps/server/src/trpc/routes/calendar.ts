@@ -1,5 +1,6 @@
 import {
   createGoogleCalendarEvent,
+  GoogleCalendarApiError,
   listGoogleCalendarEvents,
   selectGoogleCalendarEventsAccount,
 } from '../../lib/calendar/events';
@@ -14,6 +15,18 @@ const dayInput = z.object({
   timeMax: z.string().datetime(),
   timeZone: z.string().min(1).max(100),
 });
+
+function calendarErrorContext(error: unknown) {
+  if (error instanceof GoogleCalendarApiError) {
+    return {
+      name: error.name,
+      operation: error.operation,
+      status: error.status,
+      reason: error.reason,
+    };
+  }
+  return { name: error instanceof Error ? error.name : 'UnknownError' };
+}
 
 async function getCalendarAccount(ctx: {
   activeConnection: { providerId: string; authAccountId?: string | null };
@@ -60,7 +73,7 @@ export const calendarRouter = router({
       });
       return { supported: true as const, ...result };
     } catch (error) {
-      logger.warn('[calendar] Day lookup failed', { error });
+      logger.warn('[calendar] Day lookup failed', calendarErrorContext(error));
       throw new TRPCError({
         code: 'SERVICE_UNAVAILABLE',
         message: 'Calendar is temporarily unavailable',
@@ -103,7 +116,7 @@ export const calendarRouter = router({
             }),
         });
       } catch (error) {
-        logger.warn('[calendar] Event creation failed', { error });
+        logger.warn('[calendar] Event creation failed', calendarErrorContext(error));
         throw new TRPCError({
           code: 'SERVICE_UNAVAILABLE',
           message: 'Calendar event could not be created',

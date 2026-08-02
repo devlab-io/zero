@@ -75,6 +75,35 @@ describe('Google calendar events boundary', () => {
     expect(result.events[0]).toMatchObject({ title: 'Client review', attendeeCount: 1 });
   });
 
+  it('keeps Google failures bounded to status + provider reason', async () => {
+    const fetchImpl = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            error: {
+              status: 'PERMISSION_DENIED',
+              message: 'sensitive provider detail',
+            },
+          }),
+          { status: 403 },
+        ),
+    );
+    const result = listGoogleCalendarEvents(
+      {
+        timeMin: '2026-08-01T12:00:00.000Z',
+        timeMax: '2026-08-02T12:00:00.000Z',
+        timeZone: 'Pacific/Auckland',
+      },
+      { getAccessToken: credential, fetchImpl: fetchImpl as typeof fetch },
+    );
+    await expect(result).rejects.toMatchObject({
+      name: 'GoogleCalendarApiError',
+      operation: 'list',
+      status: 403,
+      reason: 'PERMISSION_DENIED',
+    });
+  });
+
   it('creates explicitly and sends updates only when guests exist', async () => {
     const fetchImpl = vi.fn(async (url: URL | RequestInfo, init?: RequestInit) => {
       const parsed = new URL(String(url));

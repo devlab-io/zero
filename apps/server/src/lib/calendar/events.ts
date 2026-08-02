@@ -4,6 +4,17 @@ import { GOOGLE_CALENDAR_EVENTS_SCOPE } from '../google-scopes';
 const GOOGLE_EVENTS_ENDPOINT = 'https://www.googleapis.com/calendar/v3/calendars/primary/events';
 const MAX_WINDOW_MS = 32 * 24 * 60 * 60_000;
 
+export class GoogleCalendarApiError extends Error {
+  constructor(
+    readonly operation: 'list' | 'create',
+    readonly status: number,
+    readonly reason: string,
+  ) {
+    super(`Google Calendar ${operation} failed`);
+    this.name = 'GoogleCalendarApiError';
+  }
+}
+
 export type LinkedCalendarEventsAccount = {
   accountId: string;
   providerId: string;
@@ -72,6 +83,25 @@ async function credentialOrNull(deps: EventCredentialDeps) {
   return credential;
 }
 
+async function calendarApiError(
+  response: Response,
+  operation: 'list' | 'create',
+): Promise<GoogleCalendarApiError> {
+  let reason = 'unknown';
+  try {
+    const payload = (await response.clone().json()) as {
+      error?: { status?: unknown; errors?: Array<{ reason?: unknown }> };
+    };
+    const status = payload.error?.status;
+    const legacyReason = payload.error?.errors?.[0]?.reason;
+    if (typeof status === 'string' && status.length <= 80) reason = status;
+    else if (typeof legacyReason === 'string' && legacyReason.length <= 80) reason = legacyReason;
+  } catch {
+    // Fixed fallback only: provider bodies are never copied into logs or client errors.
+  }
+  return new GoogleCalendarApiError(operation, response.status, reason);
+}
+
 export async function listGoogleCalendarEvents(
   input: { timeMin: string; timeMax: string; timeZone: string },
   deps: EventCredentialDeps,
@@ -91,7 +121,7 @@ export async function listGoogleCalendarEvents(
   const response = await (deps.fetchImpl ?? fetch)(url, {
     headers: { Authorization: `Bearer ${credential.accessToken}` },
   });
-  if (!response.ok) throw new Error('Calendar events lookup failed');
+  if (!response.ok) throw await calendarApiError(response, 'list');
 
   const payload = (await response.json()) as {
     items?: Array<{
@@ -192,7 +222,7 @@ export async function createGoogleCalendarEvent(
     },
     body: JSON.stringify(body),
   });
-  if (!response.ok) throw new Error('Calendar event creation failed');
+  if (!response.ok) throw await calendarApiError(response, 'create');
 
   const created = (await response.json()) as {
     id?: string;
