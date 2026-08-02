@@ -438,6 +438,7 @@
       "imagesHidden": "Images are hidden for security reasons",
       "showImages": "Show Images",
       "noEmails": "No emails available",
+      "resizeReader": "Resize the mail list and reader",
       "noSearchResults": "No search results found",
       "clearSearch": "Clear search",
       "markAsImportant": "Mark as Important",

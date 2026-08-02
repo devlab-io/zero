@@ -40,6 +40,7 @@ export const Thread = memo(function Thread({
   const { folder } = useParams<{ folder: string }>();
   const [, threads] = useThreads();
   const [threadId] = useQueryState('threadId');
+  const isReaderOpen = Boolean(threadId);
   // #30: rich-projection rows render from `message` and DO NOT fetch the body
   // (enabled:false → no per-row mail.get, no processEmailContent). Thin rows (search,
   // via rawListThreads) fall back to the per-thread fetch so search keeps working.
@@ -259,7 +260,11 @@ export const Thread = memo(function Thread({
           />
 
           <div
-            className={`relative flex w-full items-center justify-between gap-4 px-4 ${displayUnread ? '' : 'opacity-60'}`}
+            className={cn(
+              'relative flex w-full items-center justify-between',
+              isReaderOpen ? 'gap-2 px-2.5' : 'gap-4 px-4',
+              displayUnread ? '' : 'opacity-60',
+            )}
           >
             <div>
               {isMailBulkSelected ? (
@@ -377,13 +382,14 @@ export const Thread = memo(function Thread({
                           <StickyNote className="h-3 w-3 fill-amber-500 stroke-amber-500 dark:fill-amber-400 dark:stroke-amber-400" />
                         </span>
                       ) : null} */}
-                    <MailLabels labels={optimisticLabels} />
+                    {!isReaderOpen && <MailLabels labels={optimisticLabels} />}
                   </div>
                   {latestMessage.receivedOn ? (
                     <p
                       className={cn(
                         'text-muted-foreground text-nowrap text-xs font-normal opacity-70 transition-opacity group-hover:opacity-100 dark:text-[#8C8C8C]',
                         isMailSelected && 'opacity-100',
+                        isReaderOpen && 'hidden 2xl:block',
                       )}
                     >
                       {formatDate(latestMessage.receivedOn.split('.')[0] || '')}
@@ -413,14 +419,14 @@ export const Thread = memo(function Thread({
                   {/* <div className="hidden md:flex">
                       {getThreadData.labels ? <MailLabels labels={getThreadData.labels} /> : null}
                     </div> */}
-                  {threadLabels && (
+                  {!isReaderOpen && threadLabels && (
                     <div className="mr-0 flex w-fit items-center justify-end gap-1">
                       {!isFolderSent ? <RenderLabels labels={threadLabels} /> : null}
                       {/* {getThreadData.labels ? <MailLabels labels={getThreadData.labels} /> : null} */}
                     </div>
                   )}
                 </div>
-                {emailContent && (
+                {emailContent && !isReaderOpen && (
                   <div className="text-muted-foreground mt-2 line-clamp-2 text-xs">
                     {highlightText(emailContent, searchValue.highlight)}
                   </div>
@@ -451,6 +457,7 @@ export const Thread = memo(function Thread({
     onClick,
     searchValue,
     displayUnread,
+    isReaderOpen,
     isMailSelected,
     isMailBulkSelected,
     threadLabels,

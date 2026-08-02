@@ -5,9 +5,10 @@ import {
   DropdownMenuTrigger,
 } from '../ui/dropdown-menu';
 import { ThreadReaderSurface, PricingDialogSurface } from '@/components/mail/mail-lazy-surfaces';
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable';
 import { useCategorySettings, useDefaultCategoryId } from '@/hooks/use-categories';
 import { Bell, Lightning, Mail, ScanEye, Tag, User, Search } from '../icons/icons';
-import { ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable';
+import { getMailSplitLayout, mailSplitAutoSaveId } from '@/lib/mail-split-layout';
 import { useCommandPalette } from '../context/command-palette-context';
 import { useWarmCoreMailFolders } from '@/hooks/use-folder-prefetch';
 import { useHotkeys, useHotkeysContext } from 'react-hotkeys-hook';
@@ -351,7 +352,10 @@ export function MailLayout() {
   const { isFetching, refetch: refetchThreads } = threadsQuery;
   useWarmCoreMailFolders(Boolean(session?.user), folder);
   const isDesktop = useMediaQuery('(min-width: 768px)');
+  const isCompactDesktop = useMediaQuery('(min-width: 768px) and (max-width: 1023px)');
   const [threadId] = useQueryState('threadId');
+  const readerOpen = isDesktop && Boolean(threadId);
+  const splitLayout = getMailSplitLayout(readerOpen, isCompactDesktop);
   const [pricingDialogOpen] = useQueryState('pricingDialog');
 
   useEffect(() => {
@@ -424,17 +428,18 @@ export function MailLayout() {
       <PricingDialogSurface open={!!pricingDialogOpen} />
       <div className="rounded-inherit z-5 relative flex p-0 md:mr-0.5 md:mt-1">
         <ResizablePanelGroup
+          key={readerOpen ? (isCompactDesktop ? 'reader-compact' : 'reader-wide') : 'list-only'}
           direction="horizontal"
-          autoSaveId="mail-panel-layout"
+          autoSaveId={readerOpen ? mailSplitAutoSaveId(isCompactDesktop) : undefined}
+          data-reader-open={readerOpen ? 'true' : 'false'}
           className="rounded-inherit overflow-hidden"
         >
           <ResizablePanel
-            defaultSize={35}
-            minSize={35}
-            maxSize={35}
+            defaultSize={splitLayout.listDefault}
+            minSize={splitLayout.listMin}
+            maxSize={splitLayout.listMax}
             className={cn(
-              `bg-panelLight dark:bg-panelDark mb-1 w-fit shadow-sm md:mr-[3px] md:rounded-2xl lg:flex lg:h-[calc(100dvh-8px)] lg:shadow-sm`,
-              isDesktop && threadId && 'hidden lg:block',
+              'bg-panelLight dark:bg-panelDark mb-1 w-fit shadow-sm md:mr-[3px] md:flex md:h-[calc(100dvh-8px)] md:rounded-2xl md:shadow-sm',
             )}
             // onMouseEnter={handleMailListMouseEnter}
             // onMouseLeave={handleMailListMouseLeave}
@@ -530,17 +535,19 @@ export function MailLayout() {
             </div>
           </ResizablePanel>
 
-          {/* <ResizableHandle className="mr-0.5 hidden opacity-0 md:block" /> */}
+          {readerOpen && (
+            <ResizableHandle
+              withHandle
+              aria-label={m['common.mail.resizeReader']()}
+              className="hover:bg-border/60 focus-visible:bg-border group mx-0.5 hidden w-1 bg-transparent transition-colors md:flex"
+            />
+          )}
 
-          {isDesktop && (
+          {readerOpen && (
             <ResizablePanel
-              className={cn(
-                'bg-panelLight dark:bg-panelDark mb-1 mr-0.5 w-fit rounded-2xl shadow-sm lg:h-[calc(100dvh-8px)]',
-                // Only show on md screens and larger when there is a threadId
-                !threadId && 'hidden lg:block',
-              )}
-              defaultSize={30}
-              minSize={30}
+              className="bg-panelLight dark:bg-panelDark mb-1 mr-0.5 w-fit rounded-2xl shadow-sm md:h-[calc(100dvh-8px)]"
+              defaultSize={splitLayout.readerDefault}
+              minSize={splitLayout.readerMin}
             >
               <div className="relative flex-1">
                 <ThreadReaderSurface threadId={threadId} emptyOnNull />
