@@ -24,7 +24,7 @@ import {
   teamThreadLabel,
   user,
 } from '../../db/schema';
-import { and, asc, eq, gte, inArray, lt, min, sql } from 'drizzle-orm';
+import { and, asc, eq, gte, inArray, lt, min, or, sql } from 'drizzle-orm';
 import { accessPredicate, TeamStoreError } from './team-store';
 import type { TeamBusinessHours } from './team-rules-shared';
 import { TeamRuleValidationError } from './team-rules';
@@ -57,6 +57,10 @@ const MAX_LABEL_LINKS = 5000;
 const MAX_ABSENCE_DAYS = 366;
 const MAX_STUCK_RUNS = 50;
 const MAX_ABSENCES = 200;
+
+export function opsThreadWindowPredicate(windowStart: Date) {
+  return or(eq(teamThread.status, 'open'), gte(teamThread.createdAt, windowStart))!;
+}
 
 async function requireMembership(db: DB, teamId: string, userId: string) {
   const rows = await db
@@ -337,7 +341,7 @@ export async function getOpsOverview(
       and(
         eq(teamThread.teamId, teamId),
         accessPredicate(userId),
-        sql`(${teamThread.status} = 'open' or ${teamThread.createdAt} >= ${windowStart})`,
+        opsThreadWindowPredicate(windowStart),
       ),
     )
     .orderBy(asc(teamThread.createdAt))

@@ -1,9 +1,16 @@
-import { declareAbsence, setSlaPolicy, type SlaPolicyInput } from './team-ops-store';
+import {
+  declareAbsence,
+  opsThreadWindowPredicate,
+  setSlaPolicy,
+  type SlaPolicyInput,
+} from './team-ops-store';
+import { PgDialect } from 'drizzle-orm/pg-core';
 import { describe, expect, it } from 'vitest';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readFileSync } from 'node:fs';
 import type { DB } from '../../db';
+import { sql } from 'drizzle-orm';
 
 const source = readFileSync(
   resolve(dirname(fileURLToPath(import.meta.url)), 'team-ops-store.ts'),
@@ -61,6 +68,18 @@ describe('team ops store contract — ACL-first aggregation', () => {
 
   it('the window is clamped 1..90 days server-side too', () => {
     expect(source).toContain('Math.min(Math.max(Math.floor(options.windowDays), 1), 90)');
+  });
+
+  it('encodes the window timestamp through the typed column mapper, never as a raw Date', () => {
+    const windowStart = new Date('2026-07-04T01:02:03.000Z');
+    const query = new PgDialect().sqlToQuery(
+      sql`select 1 where ${opsThreadWindowPredicate(windowStart)}`,
+    );
+
+    expect(query.params).not.toContain(windowStart);
+    expect(query.params.some((param) => param instanceof Date)).toBe(false);
+    expect(query.params).toContain('2026-07-04T01:02:03.000Z');
+    expect(source).toContain('opsThreadWindowPredicate(windowStart)');
   });
 });
 
