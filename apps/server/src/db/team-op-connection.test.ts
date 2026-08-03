@@ -1,4 +1,5 @@
 import { runTeamOpWithFreshDb } from './durable-objects';
+import { POSTGRES_CONNECTION_OPTIONS } from './index';
 import { describe, expect, it, vi } from 'vitest';
 import type { createDb } from './index';
 
@@ -18,6 +19,14 @@ const makeFactory = () => {
 };
 
 describe('runTeamOpWithFreshDb — isolation des invocations Workers', () => {
+  it('verrouille les options Postgres.js recommandées pour Hyperdrive', () => {
+    expect(POSTGRES_CONNECTION_OPTIONS).toEqual({
+      max: 5,
+      fetch_types: false,
+      prepare: true,
+    });
+  });
+
   it('crée puis ferme un client Hyperdrive distinct pour chaque opération', async () => {
     const { factory, resources } = makeFactory();
 
