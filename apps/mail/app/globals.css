@@ -21,23 +21,6 @@
 /* Custom variant for dark mode */
 @custom-variant dark (&:where(.dark, .dark *));
 
-/* Ask Reta is non-modal: reserve its width so mail stays visible beside it. */
-#reta-app-shell {
-  transition: padding-right 200ms ease-out;
-}
-
-@media (min-width: 900px) {
-  html[data-ask-reta-open='true'] #reta-app-shell {
-    padding-right: 430px;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  #reta-app-shell {
-    transition: none;
-  }
-}
-
 :root {
   /* Typography */
   --font-geist-sans:

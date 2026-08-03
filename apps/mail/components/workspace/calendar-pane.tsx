@@ -1,11 +1,4 @@
 import {
-  CALENDAR_END_HOUR,
-  CALENDAR_START_HOUR,
-  calendarDayWindow,
-  defaultEventWindow,
-  positionCalendarEvents,
-} from './global-workspace-model';
-import {
   CalendarDays,
   ChevronLeft,
   ChevronRight,
@@ -27,9 +20,10 @@ import {
 } from '@/components/ui/dialog';
 import { requestCalendarEventsAuthorization } from '@/lib/calendar-authorization';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { calendarDayWindow, defaultEventWindow } from './global-workspace-model';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { addDays, format, isToday, startOfDay, subDays } from 'date-fns';
 import { Calendar as CalendarPicker } from '@/components/ui/calendar';
+import { addDays, format, startOfDay, subDays } from 'date-fns';
 import { useTRPC } from '@/providers/query-provider';
 import { useEffect, useMemo, useState } from 'react';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -55,11 +49,11 @@ const eventSchema = z.object({
 type EventForm = z.infer<typeof eventSchema>;
 
 const eventTones = [
-  'border-l-blue-500 bg-blue-500/14 text-blue-950 dark:text-blue-100',
-  'border-l-rose-500 bg-rose-500/14 text-rose-950 dark:text-rose-100',
-  'border-l-emerald-500 bg-emerald-500/14 text-emerald-950 dark:text-emerald-100',
-  'border-l-amber-500 bg-amber-500/14 text-amber-950 dark:text-amber-100',
-  'border-l-violet-500 bg-violet-500/14 text-violet-950 dark:text-violet-100',
+  'border-blue-500/25 bg-blue-500/10 text-blue-950 dark:text-blue-100',
+  'border-rose-500/25 bg-rose-500/10 text-rose-950 dark:text-rose-100',
+  'border-emerald-500/25 bg-emerald-500/10 text-emerald-950 dark:text-emerald-100',
+  'border-amber-500/25 bg-amber-500/10 text-amber-950 dark:text-amber-100',
+  'border-violet-500/25 bg-violet-500/10 text-violet-950 dark:text-violet-100',
 ] as const;
 
 function colorIndex(id: string, colorId: string | null) {
@@ -168,7 +162,7 @@ export function CalendarPane() {
           onAction={() => void authorize()}
         />
       ) : (
-        <CalendarDay events={events} selectedDate={selectedDate} />
+        <CalendarDay events={events} />
       )}
 
       <CreateEventDialog
@@ -189,7 +183,6 @@ function windowLocation() {
 
 function CalendarDay({
   events,
-  selectedDate,
 }: {
   events: Array<{
     id: string;
@@ -203,24 +196,16 @@ function CalendarDay({
     allDay: boolean;
     attendeeCount: number;
   }>;
-  selectedDate: Date;
 }) {
   const allDay = events.filter((event) => event.allDay);
-  const positioned = positionCalendarEvents(events, selectedDate);
-  const hours = Array.from(
-    { length: CALENDAR_END_HOUR - CALENDAR_START_HOUR + 1 },
-    (_, index) => CALENDAR_START_HOUR + index,
-  );
-  const now = new Date();
-  const nowPercent =
-    ((now.getHours() * 60 + now.getMinutes() - CALENDAR_START_HOUR * 60) /
-      ((CALENDAR_END_HOUR - CALENDAR_START_HOUR) * 60)) *
-    100;
+  const timed = events
+    .filter((event) => !event.allDay)
+    .sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
 
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto">
+    <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
       {allDay.length > 0 && (
-        <div className="border-border/60 space-y-1 border-b px-3 py-2">
+        <div className="border-border/60 mb-3 space-y-1.5 border-b pb-3">
           <p className="text-muted-foreground text-[10px] font-medium uppercase tracking-[0.12em]">
             {m['globalWorkspace.calendar.allDay']()}
           </p>
@@ -228,7 +213,7 @@ function CalendarDay({
             <button
               key={event.id}
               type="button"
-              className="bg-muted hover:bg-accent block w-full truncate rounded-md px-2 py-1 text-left text-xs transition-colors"
+              className="bg-muted hover:bg-accent block min-h-9 w-full truncate rounded-md px-2.5 py-2 text-left text-xs transition-colors"
               onClick={() => event.htmlLink && window.open(event.htmlLink, '_blank', 'noopener')}
             >
               {event.title}
@@ -236,70 +221,43 @@ function CalendarDay({
           ))}
         </div>
       )}
-      <div className="relative min-h-[1120px] px-2 pb-4">
-        <div className="absolute inset-x-2 top-0 h-[1088px]">
-          {hours.map((hour, index) => (
-            <div
-              key={hour}
-              className="border-border/50 absolute left-0 right-0 border-t"
-              style={{ top: `${(index / (hours.length - 1)) * 100}%` }}
-            >
-              <span className="bg-background text-muted-foreground absolute -top-2.5 left-0 w-11 pr-2 text-right text-[10px] tabular-nums">
-                {format(new Date(2026, 0, 1, hour), 'ha')}
-              </span>
-            </div>
-          ))}
-          <div className="absolute bottom-0 left-12 right-0 top-0">
-            {positioned.map((event) => {
-              const source = events.find((item) => item.id === event.id)!;
-              return (
-                <button
-                  key={event.id}
-                  type="button"
-                  className={cn(
-                    'absolute min-h-7 overflow-hidden rounded-md border-l-[3px] px-1.5 py-1 text-left text-[11px] leading-tight shadow-sm transition-[filter,transform] hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 motion-reduce:transform-none',
-                    eventTones[colorIndex(event.id, source.colorId)],
-                  )}
-                  style={{
-                    top: `${event.topPercent}%`,
-                    height: `${event.heightPercent}%`,
-                    left: `calc(${event.leftPercent}% + 1px)`,
-                    width: `calc(${event.widthPercent}% - 3px)`,
-                  }}
-                  onClick={() =>
-                    source.htmlLink && window.open(source.htmlLink, '_blank', 'noopener')
-                  }
-                  aria-label={`${event.title}, ${format(new Date(event.start), 'p')}–${format(new Date(event.end), 'p')}`}
-                >
-                  <span className="block truncate font-medium">{event.title}</span>
-                  <span className="block truncate opacity-70">
-                    {format(new Date(event.start), 'p')}–{format(new Date(event.end), 'p')}
-                  </span>
-                  {source.location && (
-                    <span className="mt-0.5 flex items-center gap-1 truncate opacity-70">
-                      <MapPin className="size-2.5 shrink-0" /> {source.location}
-                    </span>
-                  )}
-                </button>
-              );
-            })}
-            {isToday(selectedDate) && nowPercent >= 0 && nowPercent <= 100 && (
-              <div
-                className="absolute left-0 right-0 z-20 border-t border-red-500"
-                style={{ top: `${nowPercent}%` }}
-                aria-label={m['globalWorkspace.calendar.currentTime']()}
+      {timed.length > 0 ? (
+        <ol className="space-y-2">
+          {timed.map((event) => (
+            <li key={event.id} className="grid grid-cols-[3.5rem_minmax(0,1fr)] gap-2">
+              <time
+                dateTime={event.start}
+                className="text-muted-foreground pt-2 text-right text-[11px] font-medium tabular-nums"
               >
-                <span className="absolute -left-1 -top-1 size-2 rounded-full bg-red-500" />
-              </div>
-            )}
-          </div>
+                {format(new Date(event.start), 'p')}
+              </time>
+              <button
+                type="button"
+                className={cn(
+                  'min-h-12 w-full overflow-hidden rounded-lg border px-3 py-2 text-left text-xs leading-snug transition-colors hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+                  eventTones[colorIndex(event.id, event.colorId)],
+                )}
+                onClick={() => event.htmlLink && window.open(event.htmlLink, '_blank', 'noopener')}
+                aria-label={`${event.title}, ${format(new Date(event.start), 'p')}–${format(new Date(event.end), 'p')}`}
+              >
+                <span className="block truncate font-medium">{event.title}</span>
+                <span className="block truncate opacity-70">
+                  {format(new Date(event.start), 'p')}–{format(new Date(event.end), 'p')}
+                </span>
+                {event.location && (
+                  <span className="mt-0.5 flex items-center gap-1 truncate opacity-70">
+                    <MapPin className="size-3 shrink-0" /> {event.location}
+                  </span>
+                )}
+              </button>
+            </li>
+          ))}
+        </ol>
+      ) : allDay.length === 0 ? (
+        <div className="flex min-h-48 items-center justify-center px-6 text-center">
+          <p className="text-muted-foreground text-sm">{m['globalWorkspace.calendar.empty']()}</p>
         </div>
-        {events.length === 0 && (
-          <p className="text-muted-foreground absolute left-12 right-3 top-24 text-center text-xs">
-            {m['globalWorkspace.calendar.empty']()}
-          </p>
-        )}
-      </div>
+      ) : null}
     </div>
   );
 }

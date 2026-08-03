@@ -1,8 +1,17 @@
-import { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import type { WorkspaceTab } from './global-workspace-model';
+import { useQueryState } from 'nuqs';
 
-const OPEN_KEY = 'reta-global-workspace-open';
 const TAB_KEY = 'reta-global-workspace-tab';
+const LEGACY_OPEN_KEY = 'reta-global-workspace-open';
 
 type GlobalWorkspaceContextValue = {
   open: boolean;
@@ -16,41 +25,71 @@ const GlobalWorkspaceContext = createContext<GlobalWorkspaceContextValue | null>
 export function GlobalWorkspaceProvider({ children }: { children: React.ReactNode }) {
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<WorkspaceTab>('calendar');
+  const [askRetaOpen, setAskRetaOpen] = useQueryState('isAskRetaOpen');
+  const previousAskRetaOpen = useRef(Boolean(askRetaOpen));
 
   useEffect(() => {
     try {
-      setOpen(localStorage.getItem(OPEN_KEY) === 'true');
+      // The last tool is useful context. Reopening a large workspace on every
+      // reload is not: it obscures the primary email task without fresh intent.
+      localStorage.removeItem(LEGACY_OPEN_KEY);
       const stored = localStorage.getItem(TAB_KEY);
-      if (stored === 'calendar' || stored === 'activity' || stored === 'contacts') setTab(stored);
+      if (
+        stored === 'calendar' ||
+        stored === 'activity' ||
+        stored === 'contacts' ||
+        stored === 'assistant'
+      ) {
+        setTab(stored);
+      }
     } catch {
       // Private mode/storage denial: the global panel still works in-memory.
     }
   }, []);
 
+  useEffect(() => {
+    const wasAskRetaOpen = previousAskRetaOpen.current;
+    if (askRetaOpen && (!open || tab !== 'assistant')) {
+      setTab('assistant');
+      setOpen(true);
+      try {
+        localStorage.setItem(TAB_KEY, 'assistant');
+      } catch {
+        // In-memory fallback.
+      }
+    } else if (!askRetaOpen && wasAskRetaOpen && open && tab === 'assistant') {
+      setOpen(false);
+    }
+    previousAskRetaOpen.current = Boolean(askRetaOpen);
+  }, [askRetaOpen, open, tab]);
+
+  const chooseWorkspaceTab = useCallback(
+    (next: WorkspaceTab) => {
+      setTab(next);
+      setOpen(true);
+      void setAskRetaOpen(next === 'assistant' ? 'true' : null);
+      try {
+        localStorage.setItem(TAB_KEY, next);
+      } catch {
+        // In-memory fallback.
+      }
+    },
+    [setAskRetaOpen],
+  );
+
+  const closeWorkspace = useCallback(() => {
+    setOpen(false);
+    void setAskRetaOpen(null);
+  }, [setAskRetaOpen]);
+
   const value = useMemo<GlobalWorkspaceContextValue>(
     () => ({
       open,
       tab,
-      chooseWorkspaceTab: (next) => {
-        setTab(next);
-        setOpen(true);
-        try {
-          localStorage.setItem(TAB_KEY, next);
-          localStorage.setItem(OPEN_KEY, 'true');
-        } catch {
-          // In-memory fallback.
-        }
-      },
-      closeWorkspace: () => {
-        setOpen(false);
-        try {
-          localStorage.setItem(OPEN_KEY, 'false');
-        } catch {
-          // In-memory fallback.
-        }
-      },
+      chooseWorkspaceTab,
+      closeWorkspace,
     }),
-    [open, tab],
+    [chooseWorkspaceTab, closeWorkspace, open, tab],
   );
 
   return (

@@ -470,7 +470,7 @@ export function MailLayout() {
               minSize={splitLayout.listMin}
               maxSize={splitLayout.listMax}
               className={cn(
-                'bg-panelLight dark:bg-panelDark mb-1 w-fit shadow-sm md:mr-[3px] md:flex md:h-[calc(100dvh-8px)] md:rounded-2xl md:shadow-sm',
+                'bg-panelLight dark:bg-panelDark mb-1 w-fit shadow-sm md:mr-1 md:flex md:h-[calc(100dvh-8px)] md:rounded-2xl md:shadow-sm',
               )}
               // onMouseEnter={handleMailListMouseEnter}
               // onMouseLeave={handleMailListMouseLeave}

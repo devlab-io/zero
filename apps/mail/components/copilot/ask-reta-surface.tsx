@@ -28,11 +28,11 @@ import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { useReplyStatePurge } from '@/hooks/use-reply-state-purge';
 import { useActiveConnection } from '@/hooks/use-connections';
 import { AskRetaComposer } from './ask-reta-composer';
-import { Mail, Sparkles, Trash2 } from 'lucide-react';
 import { useTRPC } from '@/providers/query-provider';
 import { useMail } from '@/components/mail/use-mail';
 import { Button } from '@/components/ui/button';
 import { useSession } from '@/lib/auth-client';
+import { Mail, Trash2 } from 'lucide-react';
 import { m } from '@/paraglide/messages';
 import { useParams } from 'react-router';
 import { useQueryState } from 'nuqs';
@@ -609,105 +609,95 @@ export function AskRetaSurface() {
 
   return (
     <div className="flex h-full flex-col">
-      {/* flex-wrap: the model select + clear stay reachable at small widths. */}
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b p-3 sm:p-4">
-        <div className="flex items-center gap-2">
-          <Sparkles className="h-4 w-4" aria-hidden="true" />
-          <div>
-            <p className="text-sm font-semibold">{m['common.askReta.title']()}</p>
-            <p className="text-muted-foreground text-xs">{m['common.askReta.subtitle']()}</p>
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <label htmlFor="ask-reta-model" className="text-muted-foreground text-xs">
-            {m['common.askReta.model']()}
-          </label>
-          <select
-            id="ask-reta-model"
-            value={selectedModelId}
-            disabled={!modelCatalog || selectModel.isPending}
-            onChange={(event) => {
-              // Server is the source of truth: mutate, then atomically
-              // refresh the catalogue (selection + configured flags).
-              void selectModel
-                .mutateAsync({ modelId: event.target.value })
-                .then(() =>
-                  queryClient.invalidateQueries({
-                    queryKey: trpc.copilot.modelCatalog.queryKey(),
-                  }),
-                )
-                .catch(() => {
-                  toast.error(m['common.actions.errorTryAgainLater']());
-                });
-            }}
-            className="bg-background h-7 max-w-[11rem] rounded border px-1 text-xs"
-          >
-            {MODEL_PROVIDER_GROUPS.map((group) => {
-              const models =
-                modelCatalog?.models.filter((model) => model.provider === group.provider) ?? [];
-              if (!models.length) return null;
-              return (
-                <optgroup key={group.provider} label={group.label}>
-                  {models.map((model) => {
-                    // Configured models are selectable; the rest stay VISIBLE
-                    // but disabled — the manage button is the configure path.
-                    const locked =
-                      model.requiresCredential &&
-                      (!model.configured || !modelCatalog?.vaultAvailable);
-                    return (
-                      <option key={model.id} value={model.id} disabled={locked}>
-                        {model.label}
-                        {locked ? ` — ${m['common.askReta.notConfigured']()}` : ''}
-                      </option>
-                    );
-                  })}
-                </optgroup>
-              );
-            })}
-          </select>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="h-7 px-2 text-xs"
-            onClick={() => setManageOpen(true)}
-          >
-            {m['common.askReta.manageModels']()}
-          </Button>
-          {manageOpen && userId && connectionId ? (
-            <Suspense fallback={null}>
-              <ModelManagerDialog
-                // Keyed on the owner: an account/connection switch can never
-                // carry a card's ephemeral secret state across.
-                key={`${userId}:${connectionId}`}
-                open={manageOpen}
-                onOpenChange={setManageOpen}
-              />
-            </Suspense>
-          ) : null}
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            aria-label={m['common.askReta.clear']()}
-            onClick={() => {
-              // Order matters (slice-2 review): kill the in-flight run FIRST —
-              // abort + invalidate the controller + reset streaming state — so
-              // a slow stream can never land a turn into the cleared state.
-              abortRef.current?.abort();
-              abortRef.current = null;
-              setIsAsking(false);
-              setLiveSteps([]);
-              setAnnouncement('');
-              setConversation([]);
-              // Effective clear: the device-local store is removed, not just the atom.
-              if (userId && connectionId) clearAskRetaConversation(userId, connectionId);
-            }}
-            className="h-7 w-7"
-          >
-            <Trash2 className="h-3.5 w-3.5" />
-          </Button>
-        </div>
+      <div className="flex items-center gap-2 border-b px-3 py-2">
+        <label htmlFor="ask-reta-model" className="sr-only">
+          {m['common.askReta.model']()}
+        </label>
+        <select
+          id="ask-reta-model"
+          value={selectedModelId}
+          disabled={!modelCatalog || selectModel.isPending}
+          onChange={(event) => {
+            // Server is the source of truth: mutate, then atomically
+            // refresh the catalogue (selection + configured flags).
+            void selectModel
+              .mutateAsync({ modelId: event.target.value })
+              .then(() =>
+                queryClient.invalidateQueries({
+                  queryKey: trpc.copilot.modelCatalog.queryKey(),
+                }),
+              )
+              .catch(() => {
+                toast.error(m['common.actions.errorTryAgainLater']());
+              });
+          }}
+          className="bg-background h-9 min-w-0 flex-1 rounded-md border px-2 text-xs"
+        >
+          {MODEL_PROVIDER_GROUPS.map((group) => {
+            const models =
+              modelCatalog?.models.filter((model) => model.provider === group.provider) ?? [];
+            if (!models.length) return null;
+            return (
+              <optgroup key={group.provider} label={group.label}>
+                {models.map((model) => {
+                  // Configured models are selectable; the rest stay VISIBLE
+                  // but disabled — the manage button is the configure path.
+                  const locked =
+                    model.requiresCredential &&
+                    (!model.configured || !modelCatalog?.vaultAvailable);
+                  return (
+                    <option key={model.id} value={model.id} disabled={locked}>
+                      {model.label}
+                      {locked ? ` — ${m['common.askReta.notConfigured']()}` : ''}
+                    </option>
+                  );
+                })}
+              </optgroup>
+            );
+          })}
+        </select>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="h-9 shrink-0 px-2 text-xs"
+          onClick={() => setManageOpen(true)}
+        >
+          {m['common.askReta.manageModels']()}
+        </Button>
+        {manageOpen && userId && connectionId ? (
+          <Suspense fallback={null}>
+            <ModelManagerDialog
+              // Keyed on the owner: an account/connection switch can never
+              // carry a card's ephemeral secret state across.
+              key={`${userId}:${connectionId}`}
+              open={manageOpen}
+              onOpenChange={setManageOpen}
+            />
+          </Suspense>
+        ) : null}
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          aria-label={m['common.askReta.clear']()}
+          onClick={() => {
+            // Order matters (slice-2 review): kill the in-flight run FIRST —
+            // abort + invalidate the controller + reset streaming state — so
+            // a slow stream can never land a turn into the cleared state.
+            abortRef.current?.abort();
+            abortRef.current = null;
+            setIsAsking(false);
+            setLiveSteps([]);
+            setAnnouncement('');
+            setConversation([]);
+            // Effective clear: the device-local store is removed, not just the atom.
+            if (userId && connectionId) clearAskRetaConversation(userId, connectionId);
+          }}
+          className="size-9 shrink-0"
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+        </Button>
       </div>
 
       {/* Compact live region: thinking → latest step → answer ready.

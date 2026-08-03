@@ -43,11 +43,21 @@ vi.mock('./ask-reta-surface', () => {
 
 vi.mock('@/components/ui/sidebar', () => ({ useSidebar: () => ({ state: 'expanded' }) }));
 vi.mock('@/hooks/use-mobile', () => ({ useIsMobile: () => false }));
+vi.mock('@/components/workspace/calendar-pane', () => ({
+  CalendarPane: () => <div data-testid="calendar-pane" />,
+}));
+vi.mock('@/components/workspace/activity-pane', () => ({
+  ActivityPane: () => <div data-testid="activity-pane" />,
+}));
+vi.mock('@/components/workspace/contacts-pane', () => ({
+  ContactsPane: () => <div data-testid="contacts-pane" />,
+}));
 vi.mock('@/paraglide/messages', () => ({
   m: new Proxy({}, { get: (_target, key) => () => String(key) }),
 }));
 
-import { AskRetaWorkspace } from './ask-reta-workspace';
+import { GlobalWorkspaceProvider } from '@/components/workspace/global-workspace-context';
+import { GlobalWorkspaceDock } from '@/components/workspace/global-workspace-dock';
 import { AskRetaButton } from './ask-reta-button';
 
 let container: HTMLDivElement;
@@ -58,6 +68,7 @@ beforeEach(() => {
   document.body.appendChild(container);
   root = createRoot(container);
   queryStore.isAskRetaOpen = null;
+  localStorage.clear();
 });
 
 afterEach(() => {
@@ -71,10 +82,10 @@ describe('AskRetaButton — the sanctioned sidebar entry', () => {
   it('is a native button; a real click opens the panel param and mounts the lazy surface', async () => {
     act(() => {
       root.render(
-        <>
+        <GlobalWorkspaceProvider>
           <AskRetaButton />
-          <AskRetaWorkspace />
-        </>,
+          <GlobalWorkspaceDock />
+        </GlobalWorkspaceProvider>,
       );
     });
     const trigger = [...container.querySelectorAll('button')].find((b) =>
@@ -92,7 +103,7 @@ describe('AskRetaButton — the sanctioned sidebar entry', () => {
     expect(queryStore.isAskRetaOpen).toBe('true');
     expect(h.surfaceFactory).toBeGreaterThanOrEqual(factoryBefore);
     expect(document.querySelector('[data-testid="ask-reta-surface"]')).toBeTruthy();
-    expect(document.documentElement.dataset.askRetaOpen).toBe('true');
+    expect(document.querySelector('[role="complementary"]')).toBeTruthy();
 
     // A11y: the dialog carries a NON-EMPTY title and description (sr-only).
     expect(document.body.textContent).toContain('common.askReta.title');
@@ -104,10 +115,10 @@ describe('AskRetaButton — P8 : panneau latéral non-modal persistant', () => {
   const openPanel = async () => {
     act(() => {
       root.render(
-        <>
+        <GlobalWorkspaceProvider>
           <AskRetaButton />
-          <AskRetaWorkspace />
-        </>,
+          <GlobalWorkspaceDock />
+        </GlobalWorkspaceProvider>,
       );
     });
     const trigger = [...container.querySelectorAll('button')].find((b) =>
@@ -119,38 +130,38 @@ describe('AskRetaButton — P8 : panneau latéral non-modal persistant', () => {
     return trigger;
   };
 
-  it('rend un <aside role=complementary> — PAS un dialog modal', async () => {
+  it('rend une région complementary dans l’unique aside workspace — PAS un second panneau', async () => {
     await openPanel();
-    const aside = document.querySelector('aside[role="complementary"]');
-    expect(aside).toBeTruthy();
+    const region = document.querySelector('[role="complementary"]');
+    expect(region).toBeTruthy();
     expect(document.querySelector('[role="dialog"]')).toBeNull();
-    // La surface vit DANS le panneau, montée en portal.
-    expect(aside!.querySelector('[data-testid="ask-reta-surface"]')).toBeTruthy();
+    expect(document.querySelectorAll('aside')).toHaveLength(1);
+    // La surface vit dans l'hôte de workspace unique, jamais dans un portal concurrent.
+    expect(region!.querySelector('[data-testid="ask-reta-surface"]')).toBeTruthy();
   });
 
   it('le bouton de fermeture remet le param à null et démonte le panneau', async () => {
     await openPanel();
     const close = [...document.querySelectorAll('aside button')].find((b) =>
-      b.getAttribute('aria-label')?.includes('common.askReta.collapse'),
+      b.getAttribute('aria-label')?.includes('globalWorkspace.close'),
     )!;
     await act(async () => {
       close.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
     });
     expect(queryStore.isAskRetaOpen).toBeNull();
-    expect(document.querySelector('aside[role="complementary"]')).toBeNull();
-    expect(document.documentElement.dataset.askRetaOpen).toBeUndefined();
+    expect(document.querySelector('[role="complementary"]')).toBeNull();
     expect(
       [...document.querySelectorAll('button')].some((button) =>
-        button.getAttribute('aria-label')?.includes('common.askReta.reopen'),
+        button.getAttribute('aria-label')?.includes('common.askReta.title'),
       ),
     ).toBe(true);
   });
 
   it('Escape DANS le panneau ferme ; le trigger re-clique = toggle', async () => {
     const trigger = await openPanel();
-    const aside = document.querySelector('aside[role="complementary"]')!;
+    const region = document.querySelector('[role="complementary"]')!;
     await act(async () => {
-      aside.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      region.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     });
     expect(queryStore.isAskRetaOpen).toBeNull();
 

@@ -1,6 +1,6 @@
 import { addDays, endOfDay, startOfDay } from 'date-fns';
 
-export type WorkspaceTab = 'calendar' | 'activity' | 'contacts';
+export type WorkspaceTab = 'calendar' | 'activity' | 'contacts' | 'assistant';
 
 export type CalendarPanelEvent = {
   id: string;
