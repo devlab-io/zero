@@ -1,4 +1,4 @@
-# Reta — carte de continuation P14 → P18
+# Reta — carte de continuation P12 → P18
 
 État au 2026-08-02, commit de release `8c405e31496f` sur la branche
 `codex/reta-team-collaboration`. Les migrations 0042 à 0046 sont appliquées en
@@ -25,6 +25,44 @@ Invariants transverses (toutes phases) :
   inventées).
 - Aucun envoi réel / archivage / suppression / invitation / événement
   calendrier / mutation Linear dans les tests.
+
+## Matrice de preuve source actuelle — 2026-08-03
+
+| Phase         | Exigence centrale                                          | Preuve ciblée actuelle                                                         | État                           |
+| ------------- | ---------------------------------------------------------- | ------------------------------------------------------------------------------ | ------------------------------ |
+| P12/P121/P122 | Landing complète, accessible, honnête, revue adversariale  | landing/roles UI 14/14, détecteur `[]`, score Impeccable 32/40, build 6/89 KiB | Prouvé source + Dia light/dark |
+| P13           | Activation par faits réels, sans faux tour                 | serveur 12/12, mail logique+wiring 7/7                                         | Prouvé                         |
+| P14           | Règles ACL-safe, claim/undo/simulation/confirmation        | serveur moteur+store 51/51, mail form+explication 9/9                          | Prouvé                         |
+| P15           | Reviews, soft-lock et collision fail-closed                | serveur shared+store+PG+DO 35/35, mail 38/38                                   | Prouvé sur PG UTC              |
+| P16           | SLA ouvré et pilotage ACL-first                            | serveur business-time+ops+store 39/39, mail dashboard 6/6                      | Prouvé                         |
+| P17           | Rôles, audit signé, rétention, sessions, portabilité       | ciblés 107/107 dont 16 PG                                                      | Prouvé source/local            |
+| P18           | Linear/email-first, webhooks signés, export/API, sans chat | ciblés 50/50 dont 13 PG                                                        | Prouvé source/local            |
+
+Les 38 tests du routeur `teams` complètent transversalement P13–P16 ; le lot
+dédié totalise donc serveur 175/175 et mail 60/60 sans compter deux fois ces
+routes. Les suites exhaustives restent serveur 1116/1116 et mail 840/840.
+
+## P13 — Activation collaboration factuelle — déployée et vérifiée
+
+L'activation est une checklist Inbox dérivée des faits durables du store,
+jamais une visite guidée ni une série de cases cochées côté client. Les cinq
+étapes sont : équipe créée, invitation acceptée, premier fil partagé, premier
+commentaire, puis premier fil assigné mené à Done. Le serveur reconstruit les
+premières occurrences depuis l'audit append-only, borne le scan à 500
+événements et n'utilise les fallbacks d'état courant (deuxième membre,
+fil clos+assigné) que lorsque cette borne a réellement été dépassée. La durée
+de boucle est calculée depuis la création de l'équipe jusqu'au dernier fait.
+
+La carte `CollabOnboardingCard` est montée dans le dashboard Inbox ; l'ancien
+tour Zero, ses vidéos et toute célébration artificielle ne sont plus montés.
+Seul le masquage est une préférence par membre/équipe, fusionnée atomiquement
+dans `team_member.prefs`. Les analytics utilisent un `$insert_id` déterministe
+par équipe, événement et horodatage, plus un snapshot navigateur ; aucune
+étape produit n'est déduite de ces analytics.
+
+Preuves actuelles (2026-08-03) : `team-onboarding.test.ts` 12/12, logique et
+wiring mail 7/7 ; ces tests font partie du lot P13–P16 serveur 175/175 et mail
+60/60. Aucune invitation ni donnée externe n'a été créée en QA.
 
 ## P14 — Règles d'équipe ACL-safe — déployé et vérifié PostgreSQL
 
@@ -199,10 +237,10 @@ membres n'entrant pas dans le fil du propriétaire restent indétectables
 signature hors patch) ; en polling pur (socket absent), le signal replying
 d'un onglet fermé peut persister jusqu'à 60 s (TTL) ; la base locale jetable
 a été alignée sur UTC comme la prod (les colonnes timestamp sans tz supposent
-un serveur PG en UTC) ; les intents expirés ne sont pas moissonnés (lignes
-inertes bornées par le TTL fonctionnel, purge cron possible plus tard) ; si
-l'émission d'intent échoue au montage, elle est retentée à l'envoi (baseline
-plus tardive pour cette seule soumission — fail closed sinon).
+un serveur PG en UTC) ; les intents expirés depuis plus de sept jours sont
+maintenant moissonnés par le sweep P17 ; si l'émission d'intent échoue au
+montage, elle est retentée à l'envoi (baseline plus tardive pour cette seule
+soumission — fail closed sinon).
 
 ### Spécification d'origine (conservée pour référence)
 
@@ -234,7 +272,8 @@ déclarées). Moteur ouvré `business-time.ts` (segments UTC par convergence
 d'offset, DST testé Paris printemps/automne). Agrégats purs `team-ops.ts`
 (nearest-rank médiane/p90 + sampleSize, overdue, reopen/transfer, workload
 alphabétique sans score, couverture, processing >15 min). Store
-`team-ops-store.ts` : policy owner-write auditée, absences self-or-owner
+`team-ops-store.ts` : policy `team.manage` (owner/admin) auditée, absences
+self-or-owner
 (un membre ne déclare JAMAIS pour autrui — testé), overview avec
 `accessPredicate` de l'appelant AVANT toute agrégation, événements restreints
 aux fils visibles, bornes 1000 fils / 5000 événements + flags truncated,
@@ -280,19 +319,49 @@ l'état vide réel, sans créer de données artificielles.
   composants du dashboard inbox (`inbox-dashboard.tsx`) réutilisés — cartes
   plates, états d'erreur « indisponible + retry », jamais de faux zéro.
 
-## P17 — DIFFÉRÉ EXPLICITEMENT (aucun prospect déclencheur, décision 2026-08-02)
+## P12 / P121 / P122 — landing Reta refondue, preuve visuelle post-fix PASS
 
-- Dans le périmètre si déclenché : rôles (étendre `TeamRole` owner/member →
-  +admin/viewer, migrations douces), export d'audit SIGNÉ (HMAC côté worker,
-  clé en secret wrangler — l'audit est déjà append-only), rétention
-  (purge planifiée par table, cron worker existant `test:cron`), révocation de
-  session/appareil (better-auth expose la liste de sessions — voir
-  `lib/auth.ts`), fondations restore/export (JSON par équipe via routes
-  lecture seule).
-- NE PAS construire SAML/SCIM pour la parité sans prospect nommé — décision
-  explicite de périmètre.
+La landing publique porte désormais une proposition unique et honnête :
+« Handle email together, without moving it to chat ». Les CTA `Get started`
+convergent tous vers `/login` (plus d'OAuth isolé dans le hero), les trois
+piliers sont email-first, le jargon MCP est relégué à une automatisation
+optionnelle, et chaque bloc narratif expose un seul heading sémantique.
+Navigation, thème, ressources et réseaux sociaux ont des noms accessibles,
+des cibles de 44 px et des focus natifs ; la grille de fonctions ne passe en
+trois colonnes qu'au breakpoint large, les shortcuts et le footer se replient.
 
-## P18 — Intégration Linear — déployée fail-closed, activation opératoire en attente
+Passe adversariale Impeccable : double assessment
+`/root/p121_design_review` + `/root/p121_detector`, score source post-fix
+32/40, zéro P0/P1, détecteur déterministe post-fix `[]`. Les tests landing et
+rôles UI passent 12/12, typecheck/lint/build passent. Snapshot :
+`.impeccable/critique/2026-08-02T23-26-09Z__apps-mail-components-home-homecontent-tsx.md`.
+
+Computer Use final : la landing reconstruite a été inspectée en lecture seule
+dans Dia sur le serveur local 3100, page entière, en light puis dark. L'arbre
+AX expose le menu mobile sous le nom `Open navigation` et un seul heading par
+bloc narratif. Après ouverture, le panneau est le seul dialogue/modal exposé ;
+`Escape` le démonte, restaure le contenu principal, remet le trigger à
+`Open navigation` et lui rend le focus. Le backdrop ferme aussi le panneau.
+Aucun clic métier/externe, aucune action Chrome/Orca et aucune mutation de
+données n'ont été exécutés.
+
+## P17 — LIVRÉ + REVU (Fable puis revue Codex, 2026-08-03) — voir reta-collab-p17-governance.md
+
+Le périmètre autorisé a été implémenté : rôles owner/admin/member/guest/
+auditor (matrice de capacités `team-roles.ts`, ACL role-aware, zéro
+migration pour la colonne), export SIGNÉ du journal d'audit (HKDF sur le
+ring KEK + HMAC canonique, vérification serveur), rétention bornée 30..730 j
+(table 0047 + sweep planifié audité), sessions/appareils révocables
+(better-auth, tokens jamais exposés), export/restauration de données
+d'équipe (nouvelle équipe, plan pur, round-trip PG prouvé). Détails,
+décisions et différés : `docs/spec/reta-collab-p17-governance.md`.
+SAML/SCIM/legal hold restent EXPLICITEMENT différés sans prospect nommé.
+La revue indépendante a ajouté la sérialisation du dernier owner, la
+révocation realtime à chaque rôle/retrait, les gardes sur mutations
+historiques, la restauration non-bearer liée à la source et le curseur de
+sweep équitable `last_swept_at` (migration 0048).
+
+## P18 — Intégration Linear — base déployée fail-closed, revue 0049 prête à publier
 
 Turn reta-p18-09 + hardening-10 + adversarial-11, release du 2026-08-02.
 
@@ -438,6 +507,36 @@ Adversarial-11 (turn reta-p18-adversarial-11, passe finale bornée) :
   timeout d'envoi 10 s explicite ≪ bail 5 min ; contrat AT-LEAST-ONCE
   documenté (deliveryId stable X-Reta-Delivery, le récepteur déduplique —
   exactly-once jamais promis).
+- Pont P17→P18 (revue Codex 2026-08-03) : guest/auditor ne peuvent plus
+  ajouter/retirer de lien ni lancer preview/confirm ; les mappings assignee
+  refusent les rôles sans `thread.write`, restent supprimables après
+  rétrogradation et sont revalidés (rôle + ACL du fil) à la confirmation et à
+  chaque webhook entrant. Un mapping stale est ignoré, jamais appliqué comme
+  assignation.
+
+Review-12 (Fable puis revue Codex, 2026-08-03) :
+
+- **Ordre des événements Linear** : migration 0049
+  (`0049_lying_wallflower.sql`) ajoute
+  `team_thread_issue_link.last_linear_updated_at`. Le webhook exige le
+  `data.updatedAt` officiel et avance ce watermark par update atomique
+  strictement plus récent AVANT toute mutation du fil ou audit. Un retry
+  ancien ne peut donc plus rouvrir ou réassigner un état plus récent (prouvé
+  sur PostgreSQL : closed récent puis open ancien, état et watermark restent
+  récents).
+- **Contrat webhook officiel** : l'en-tête `Linear-Timestamp` est bien
+  documenté par Linear et reste exigé, authentifié et comparé au timestamp du
+  corps avec une fenêtre ±60 s. Référence :
+  https://linear.app/developers/webhooks.
+- **Export/route** : le curseur d'export est validé à l'entrée au format
+  `createdAt|UUID` borné ; un curseur malformé ne devient plus un faux 404.
+  Un test structurel verrouille le montage du webhook Linear à la racine,
+  hors du sous-routeur `/api`.
+- **Preuves** : ciblés P18 50/50 dont 13 PG, serveur complet 1116/1116, mail
+  840/840, deux typechecks verts, ESLint 0 erreur, build production vert et
+  `db:generate` sans changement après 0049. La chaîne Drizzle 0000→0049 passe
+  depuis une base vide avec 50 migrations journalisées ; 0049 est appliquée
+  uniquement sur cette base jetable. La production attend le gate visuel P12.
 
 Limites restantes libellées : `listLinearTargets` (config des mappings) exige
 l'API Linear vivante — hors QA l'UI affiche l'erreur et réessaie ; la
@@ -448,7 +547,37 @@ d'APPLICATION (un seul, env — correct pour une app Linear) ; le CHECK
 le SET NULL de suppression de compte, documentée) ; l'export borne à 200/page
 et l'UI à 2000 entrées par téléchargement.
 
+## Baseline de prépublication — lecture seule, 2026-08-03
+
+- Cloudflare actif : `zero-server-production` sert la version
+  `6e3385be-0925-468d-8d6f-b0a7518c87b1` (secret change, code issu de la
+  release 0046) ; `zero-production` sert
+  `beea0e38-634b-4a09-9f56-01d9c5ed138e`.
+- Les noms `LINEAR_CLIENT_ID`, `LINEAR_CLIENT_SECRET` et
+  `LINEAR_WEBHOOK_SECRET` sont maintenant présents dans les secrets du Worker.
+  Aucune valeur n'a été lue, aucun OAuth/install/webhook n'a été déclenché et
+  leur présence seule ne prouve pas la configuration externe Linear.
+- Hyperdrive production pointe vers le service Railway `Postgres-vjKE`. La
+  base répond en `Etc/UTC`; son journal Drizzle contient 47 entrées (jusqu'à
+  0046). `mail0_team_retention_policy`, `last_swept_at` et
+  `last_linear_updated_at` sont absents, comme attendu avant cette release.
+- Baseline HTTP : `/health` répond 200 ; les navigations HTML `/`, `/team`,
+  `/team?view=ops`, `/team?view=integrations` et
+  `/integrations/linear/callback` répondent 200 avec le shell
+  `<title>Reta by Devlab</title>`. Un fetch d'asset générique `Accept: */*` sur
+  une deep-link reste volontairement 404, conformément au Worker SPA qui ne
+  masque jamais les chunks manquants par de l'HTML.
+- Ordre de publication verrouillé : gate visuel P12 **PASS** → commit/push →
+  appliquer 0047, 0048 et 0049 sur cette base → vérifier journal/colonnes/CHECKs →
+  déployer le Worker serveur → health/route checks → déployer le Worker mail →
+  QA Dia lecture seule. Au moment de cette baseline, seules les étapes après
+  le gate visuel restent à exécuter.
+
 ## Preuves de release production — 2026-08-02
+
+Cette preuve décrit la release 0046 déjà en production. Les hardenings P17
+0047/0048, P18 0049 et la landing P12/P121/P122 ci-dessus ne sont pas encore
+publiés au moment de la revue du 2026-08-03.
 
 - Base production : journal Drizzle vérifié jusqu'à 0046 ; hashes 0042–0046
   présents, tables/index/FK/CHECK attendus vérifiés. L'état 0042 préexistant a
@@ -468,11 +597,11 @@ et l'UI à 2000 entrées par téléchargement.
   `/team?view=integrations` affichent la session Reta authentifiée, les cinq
   onglets Shared/Assigned/Mentions/Ops/Integrations, un état vide d'équipe
   explicite et aucune erreur. Aucun clic ni mutation n'a été effectué.
-- Activation Linear réelle : `LINEAR_CLIENT_ID`, `LINEAR_CLIENT_SECRET` et
-  `LINEAR_WEBHOOK_SECRET` sont absents de la production. Le code publié refuse
-  donc toute installation et l'explique à l'owner. L'OAuth, les mappings et les
-  webhooks réels restent non vérifiables tant que l'application Linear externe
-  et son secret de signature ne sont pas provisionnés.
+- Activation Linear au moment de cette release : `LINEAR_CLIENT_ID`,
+  `LINEAR_CLIENT_SECRET` et `LINEAR_WEBHOOK_SECRET` étaient absents. Ils ont été
+  ajoutés ensuite par trois secret changes le 2026-08-03 (voir baseline
+  ci-dessus). L'OAuth, les mappings et les webhooks réels restent volontairement
+  non exercés en QA pour éviter toute mutation externe.
 
 ## Dettes/restes connus hors phases
 
