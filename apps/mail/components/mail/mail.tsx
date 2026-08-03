@@ -1,4 +1,9 @@
 import {
+  getMailSplitLayout,
+  mailSplitAutoSaveId,
+  shouldFocusReaderWithWorkspace,
+} from '@/lib/mail-split-layout';
+import {
   DropdownMenu,
   DropdownMenuItem,
   DropdownMenuContent,
@@ -12,9 +17,9 @@ import {
 } from '@/lib/mail-list-status';
 import { ThreadReaderSurface, PricingDialogSurface } from '@/components/mail/mail-lazy-surfaces';
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable';
+import { useGlobalWorkspace } from '@/components/workspace/global-workspace-context';
 import { useCategorySettings, useDefaultCategoryId } from '@/hooks/use-categories';
 import { Bell, Lightning, Mail, ScanEye, Tag, User, Search } from '../icons/icons';
-import { getMailSplitLayout, mailSplitAutoSaveId } from '@/lib/mail-split-layout';
 import { useCommandPalette } from '../context/command-palette-context';
 import { useWarmCoreMailFolders } from '@/hooks/use-folder-prefetch';
 import { useHotkeys, useHotkeysContext } from 'react-hotkeys-hook';
@@ -361,8 +366,15 @@ export function MailLayout() {
   useWarmCoreMailFolders(Boolean(session?.user), folder);
   const isDesktop = useMediaQuery('(min-width: 768px)');
   const isCompactDesktop = useMediaQuery('(min-width: 768px) and (max-width: 1023px)');
+  const isCompactWorkspace = useMediaQuery('(min-width: 768px) and (max-width: 1279px)');
+  const { open: workspaceOpen } = useGlobalWorkspace();
   const [threadId] = useQueryState('threadId');
   const readerOpen = isDesktop && Boolean(threadId);
+  const workspaceReaderFocus = shouldFocusReaderWithWorkspace(
+    readerOpen,
+    workspaceOpen,
+    isCompactWorkspace,
+  );
   const splitLayout = getMailSplitLayout(readerOpen, isCompactDesktop);
   const [pricingDialogOpen] = useQueryState('pricingDialog');
 
@@ -436,120 +448,132 @@ export function MailLayout() {
       <PricingDialogSurface open={!!pricingDialogOpen} />
       <div className="rounded-inherit z-5 relative flex p-0 md:mr-0.5 md:mt-1">
         <ResizablePanelGroup
-          key={readerOpen ? (isCompactDesktop ? 'reader-compact' : 'reader-wide') : 'list-only'}
+          key={
+            workspaceReaderFocus
+              ? 'reader-workspace-focus'
+              : readerOpen
+                ? isCompactDesktop
+                  ? 'reader-compact'
+                  : 'reader-wide'
+                : 'list-only'
+          }
           direction="horizontal"
-          autoSaveId={readerOpen ? mailSplitAutoSaveId(isCompactDesktop) : undefined}
+          autoSaveId={
+            readerOpen && !workspaceReaderFocus ? mailSplitAutoSaveId(isCompactDesktop) : undefined
+          }
           data-reader-open={readerOpen ? 'true' : 'false'}
           className="rounded-inherit overflow-hidden"
         >
-          <ResizablePanel
-            defaultSize={splitLayout.listDefault}
-            minSize={splitLayout.listMin}
-            maxSize={splitLayout.listMax}
-            className={cn(
-              'bg-panelLight dark:bg-panelDark mb-1 w-fit shadow-sm md:mr-[3px] md:flex md:h-[calc(100dvh-8px)] md:rounded-2xl md:shadow-sm',
-            )}
-            // onMouseEnter={handleMailListMouseEnter}
-            // onMouseLeave={handleMailListMouseLeave}
-          >
-            <div className="w-full md:h-[calc(100dvh-10px)]">
-              <div className="z-15 sticky top-0 p-4 pb-0">
-                <div className="flex items-center gap-2">
-                  <SidebarToggle className="h-10 w-10" />
+          {!workspaceReaderFocus && (
+            <ResizablePanel
+              defaultSize={splitLayout.listDefault}
+              minSize={splitLayout.listMin}
+              maxSize={splitLayout.listMax}
+              className={cn(
+                'bg-panelLight dark:bg-panelDark mb-1 w-fit shadow-sm md:mr-[3px] md:flex md:h-[calc(100dvh-8px)] md:rounded-2xl md:shadow-sm',
+              )}
+              // onMouseEnter={handleMailListMouseEnter}
+              // onMouseLeave={handleMailListMouseLeave}
+            >
+              <div className="w-full md:h-[calc(100dvh-10px)]">
+                <div className="z-15 sticky top-0 p-4 pb-0">
+                  <div className="flex items-center gap-2">
+                    <SidebarToggle className="h-10 w-10" />
 
-                  {mail.bulkSelected.length === 0 ? (
-                    <>
-                      <Button
-                        variant="outline"
-                        className={cn(
-                          'text-muted-foreground border-border/40 bg-background/50 hover:bg-accent/30 focus-visible:ring-ring dark:border-border/20 dark:bg-background/40 relative flex h-10 flex-1 select-none items-center justify-start overflow-hidden rounded-lg border pl-3 text-left text-sm font-normal shadow-none ring-0 backdrop-blur-sm transition-all focus-visible:ring-2 focus-visible:ring-offset-2',
-                        )}
-                        onClick={handleOpenCommandPalette}
-                      >
-                        <Search className="fill-muted-foreground h-4 w-4" />
+                    {mail.bulkSelected.length === 0 ? (
+                      <>
+                        <Button
+                          variant="outline"
+                          className={cn(
+                            'text-muted-foreground border-border/40 bg-background/50 hover:bg-accent/30 focus-visible:ring-ring dark:border-border/20 dark:bg-background/40 relative flex h-10 flex-1 select-none items-center justify-start overflow-hidden rounded-lg border pl-3 text-left text-sm font-normal shadow-none ring-0 backdrop-blur-sm transition-all focus-visible:ring-2 focus-visible:ring-offset-2',
+                          )}
+                          onClick={handleOpenCommandPalette}
+                        >
+                          <Search className="fill-muted-foreground h-4 w-4" />
 
-                        <span className="ml-3 hidden truncate pr-20 lg:inline-block">
-                          {activeFilters.length > 0
-                            ? activeFilters.map((f) => f.display).join(', ')
-                            : m['common.searchBar.search']()}
-                        </span>
-                        <span className="ml-3 inline-block truncate pr-20 lg:hidden">
-                          {activeFilters.length > 0
-                            ? m['states.mailList.activeFilterCount']({
-                                count: activeFilters.length,
-                              })
-                            : m['common.searchBar.search']()}
-                        </span>
+                          <span className="ml-3 hidden truncate pr-20 lg:inline-block">
+                            {activeFilters.length > 0
+                              ? activeFilters.map((f) => f.display).join(', ')
+                              : m['common.searchBar.search']()}
+                          </span>
+                          <span className="ml-3 inline-block truncate pr-20 lg:hidden">
+                            {activeFilters.length > 0
+                              ? m['states.mailList.activeFilterCount']({
+                                  count: activeFilters.length,
+                                })
+                              : m['common.searchBar.search']()}
+                          </span>
 
-                        <div className="absolute right-2 flex items-center gap-2">
-                          {/* {activeFilters.length > 0 && (
+                          <div className="absolute right-2 flex items-center gap-2">
+                            {/* {activeFilters.length > 0 && (
                             <Badge variant="secondary" className="ml-2 h-5 rounded px-1">
                               {activeFilters.length}
                             </Badge>
                           )} */}
-                          {activeFilters.length > 0 && (
-                            <Button
-                              variant="secondary"
-                              size="sm"
-                              className="h-6 rounded-md px-2 text-xs"
-                              onClick={handleClearFilters}
-                            >
-                              {m['common.searchBar.clearSearch']()}
-                            </Button>
-                          )}
-                          <kbd className="bg-muted border-border/40 dark:bg-muted/40 pointer-events-none hidden h-6 select-none items-center gap-1 rounded border px-2 text-xs font-medium opacity-80 sm:flex">
-                            <span className={cn('text-xs', isMac ? 'text-sm' : 'text-xs')}>
-                              {isMac ? '⌘' : 'Ctrl'}
-                            </span>
-                            <span className="text-xs">K</span>
-                          </kbd>
-                        </div>
-                      </Button>
+                            {activeFilters.length > 0 && (
+                              <Button
+                                variant="secondary"
+                                size="sm"
+                                className="h-6 rounded-md px-2 text-xs"
+                                onClick={handleClearFilters}
+                              >
+                                {m['common.searchBar.clearSearch']()}
+                              </Button>
+                            )}
+                            <kbd className="bg-muted border-border/40 dark:bg-muted/40 pointer-events-none hidden h-6 select-none items-center gap-1 rounded border px-2 text-xs font-medium opacity-80 sm:flex">
+                              <span className={cn('text-xs', isMac ? 'text-sm' : 'text-xs')}>
+                                {isMac ? '⌘' : 'Ctrl'}
+                              </span>
+                              <span className="text-xs">K</span>
+                            </kbd>
+                          </div>
+                        </Button>
 
-                      {activeConnection?.providerId === 'google' && folder === 'inbox' && (
-                        <CategoryDropdown isMultiSelectMode={mail.bulkSelected.length > 0} />
-                      )}
-                    </>
-                  ) : (
-                    <BulkActionBar
-                      selectedIds={mail.bulkSelected}
-                      folder={folder ?? 'inbox'}
-                      onExit={handleExitBulkSelection}
-                    />
-                  )}
+                        {activeConnection?.providerId === 'google' && folder === 'inbox' && (
+                          <CategoryDropdown isMultiSelectMode={mail.bulkSelected.length > 0} />
+                        )}
+                      </>
+                    ) : (
+                      <BulkActionBar
+                        selectedIds={mail.bulkSelected}
+                        folder={folder ?? 'inbox'}
+                        onExit={handleExitBulkSelection}
+                      />
+                    )}
 
-                  <Button
-                    onClick={handleRefetchThreads}
-                    variant="ghost"
-                    size="icon"
-                    aria-label={m['common.actions.refresh']()}
-                    className="hover:bg-accent/50 h-10 w-10 rounded-lg border-none bg-transparent backdrop-blur-sm"
-                  >
-                    <RefreshCcw className="text-muted-foreground h-4 w-4" aria-hidden />
-                  </Button>
+                    <Button
+                      onClick={handleRefetchThreads}
+                      variant="ghost"
+                      size="icon"
+                      aria-label={m['common.actions.refresh']()}
+                      className="hover:bg-accent/50 h-10 w-10 rounded-lg border-none bg-transparent backdrop-blur-sm"
+                    >
+                      <RefreshCcw className="text-muted-foreground h-4 w-4" aria-hidden />
+                    </Button>
+                  </div>
+                  {mail.bulkSelected.length === 0 ? (
+                    <MailListStatus folder={folder} threadsQuery={threadsQuery} />
+                  ) : null}
                 </div>
-                {mail.bulkSelected.length === 0 ? (
-                  <MailListStatus folder={folder} threadsQuery={threadsQuery} />
-                ) : null}
-              </div>
 
-              <div className="px-4 pt-2">
-                <div
-                  className={cn(
-                    `${category === 'Important' ? 'bg-[#F59E0D]' : category === 'All Mail' ? 'bg-[#006FFE]' : category === 'Personal' ? 'bg-[#39ae4a]' : category === 'Updates' ? 'bg-[#8B5CF6]' : category === 'Promotions' ? 'bg-[#F43F5E]' : category === 'Unread' ? 'bg-[#FF4800]' : 'bg-[#F59E0D]'}`,
-                    'h-0.5 w-full rounded-full transition-opacity',
-                    isFetching ? 'opacity-100' : 'opacity-0',
-                  )}
-                />
-              </div>
+                <div className="px-4 pt-2">
+                  <div
+                    className={cn(
+                      `${category === 'Important' ? 'bg-[#F59E0D]' : category === 'All Mail' ? 'bg-[#006FFE]' : category === 'Personal' ? 'bg-[#39ae4a]' : category === 'Updates' ? 'bg-[#8B5CF6]' : category === 'Promotions' ? 'bg-[#F43F5E]' : category === 'Unread' ? 'bg-[#FF4800]' : 'bg-[#F59E0D]'}`,
+                      'h-0.5 w-full rounded-full transition-opacity',
+                      isFetching ? 'opacity-100' : 'opacity-0',
+                    )}
+                  />
+                </div>
 
-              <div className="z-1 relative h-[calc(100dvh-(2px+2px))] overflow-hidden pt-0 md:h-[calc(100dvh-4rem)]">
-                <MailList />
+                <div className="z-1 relative h-[calc(100dvh-(2px+2px))] overflow-hidden pt-0 md:h-[calc(100dvh-4rem)]">
+                  <MailList />
+                </div>
               </div>
-            </div>
-          </ResizablePanel>
+            </ResizablePanel>
+          )}
 
-          {readerOpen && (
+          {readerOpen && !workspaceReaderFocus && (
             <ResizableHandle
               withHandle
               aria-label={m['common.mail.resizeReader']()}
@@ -560,8 +584,8 @@ export function MailLayout() {
           {readerOpen && (
             <ResizablePanel
               className="bg-panelLight dark:bg-panelDark mb-1 mr-0.5 w-fit rounded-2xl shadow-sm md:h-[calc(100dvh-8px)]"
-              defaultSize={splitLayout.readerDefault}
-              minSize={splitLayout.readerMin}
+              defaultSize={workspaceReaderFocus ? 100 : splitLayout.readerDefault}
+              minSize={workspaceReaderFocus ? 100 : splitLayout.readerMin}
             >
               <div className="relative flex-1">
                 <ThreadReaderSurface threadId={threadId} emptyOnNull />

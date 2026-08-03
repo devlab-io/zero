@@ -1,4 +1,8 @@
-import { getMailSplitLayout, mailSplitAutoSaveId } from './mail-split-layout';
+import {
+  getMailSplitLayout,
+  mailSplitAutoSaveId,
+  shouldFocusReaderWithWorkspace,
+} from './mail-split-layout';
 import { describe, expect, it } from 'vitest';
 
 describe('mail split reader layout', () => {
@@ -32,5 +36,12 @@ describe('mail split reader layout', () => {
 
   it('stores compact and wide user-resized ratios independently', () => {
     expect(mailSplitAutoSaveId(false)).not.toBe(mailSplitAutoSaveId(true));
+  });
+
+  it('focuses the reader when the workspace shares a compact desktop', () => {
+    expect(shouldFocusReaderWithWorkspace(true, true, true)).toBe(true);
+    expect(shouldFocusReaderWithWorkspace(false, true, true)).toBe(false);
+    expect(shouldFocusReaderWithWorkspace(true, false, true)).toBe(false);
+    expect(shouldFocusReaderWithWorkspace(true, true, false)).toBe(false);
   });
 });

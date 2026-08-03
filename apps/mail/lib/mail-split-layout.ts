@@ -33,5 +33,13 @@ export function getMailSplitLayout(readerOpen: boolean, compactDesktop: boolean)
   return compactDesktop ? COMPACT_READER_LAYOUT : WIDE_READER_LAYOUT;
 }
 
+export function shouldFocusReaderWithWorkspace(
+  readerOpen: boolean,
+  workspaceOpen: boolean,
+  compactWorkspace: boolean,
+) {
+  return readerOpen && workspaceOpen && compactWorkspace;
+}
+
 export const mailSplitAutoSaveId = (compactDesktop: boolean) =>
   compactDesktop ? 'mail-panel-layout:reader-compact-v2' : 'mail-panel-layout:reader-wide-v2';

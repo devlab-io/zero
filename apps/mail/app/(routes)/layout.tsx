@@ -1,4 +1,5 @@
 import { DeferredGlobalWorkspaceDock } from '@/components/workspace/global-workspace-dock.deferred';
+import { GlobalWorkspaceProvider } from '@/components/workspace/global-workspace-context';
 import { HotkeyProviderWrapper } from '@/components/providers/hotkey-provider-wrapper';
 import { CommandPaletteProvider } from '@/components/context/command-palette-context';
 import { AskRetaWorkspace } from '@/components/copilot/ask-reta-workspace';
@@ -30,19 +31,21 @@ export default function Layout() {
                 >
                   {m['common.actions.skipToContent']()}
                 </a>
-                <div
-                  id="reta-app-shell"
-                  className="relative flex max-h-screen w-full overflow-hidden"
-                >
+                <GlobalWorkspaceProvider>
                   <div
-                    id="main-content"
-                    tabIndex={-1}
-                    className="relative flex min-w-0 flex-1 overflow-hidden focus:outline-none"
+                    id="reta-app-shell"
+                    className="relative flex max-h-screen w-full overflow-hidden"
                   >
-                    <Outlet />
+                    <div
+                      id="main-content"
+                      tabIndex={-1}
+                      className="relative flex min-w-0 flex-1 overflow-hidden focus:outline-none"
+                    >
+                      <Outlet />
+                    </div>
+                    <DeferredGlobalWorkspaceDock />
                   </div>
-                  <DeferredGlobalWorkspaceDock />
-                </div>
+                </GlobalWorkspaceProvider>
                 <AskRetaWorkspace />
               </HotkeyProviderWrapper>
             </CommandPaletteProvider>

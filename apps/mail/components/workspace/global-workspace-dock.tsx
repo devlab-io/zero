@@ -1,15 +1,13 @@
 import { Activity, CalendarDays, ContactRound, PanelRightClose } from 'lucide-react';
+import { useGlobalWorkspace } from './global-workspace-context';
 import type { WorkspaceTab } from './global-workspace-model';
-import { useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { ContactsPane } from './contacts-pane';
 import { CalendarPane } from './calendar-pane';
 import { ActivityPane } from './activity-pane';
 import { m } from '@/paraglide/messages';
 import { cn } from '@/lib/utils';
-
-const OPEN_KEY = 'reta-global-workspace-open';
-const TAB_KEY = 'reta-global-workspace-tab';
+import { useRef } from 'react';
 
 const tabs = [
   { id: 'calendar' as const, icon: CalendarDays, label: () => m['globalWorkspace.calendar.tab']() },
@@ -18,37 +16,14 @@ const tabs = [
 ];
 
 export function GlobalWorkspaceDock() {
-  const [open, setOpen] = useState(false);
-  const [tab, setTab] = useState<WorkspaceTab>('calendar');
+  const { open, tab, chooseWorkspaceTab, closeWorkspace } = useGlobalWorkspace();
   const dockTriggerRef = useRef<HTMLButtonElement>(null);
 
-  useEffect(() => {
-    try {
-      setOpen(localStorage.getItem(OPEN_KEY) === 'true');
-      const stored = localStorage.getItem(TAB_KEY);
-      if (stored === 'calendar' || stored === 'activity' || stored === 'contacts') setTab(stored);
-    } catch {
-      // Private mode/storage denial: the global panel still works in-memory.
-    }
-  }, []);
-
   const choose = (next: WorkspaceTab) => {
-    setTab(next);
-    setOpen(true);
-    try {
-      localStorage.setItem(TAB_KEY, next);
-      localStorage.setItem(OPEN_KEY, 'true');
-    } catch {
-      // In-memory fallback.
-    }
+    chooseWorkspaceTab(next);
   };
   const close = () => {
-    setOpen(false);
-    try {
-      localStorage.setItem(OPEN_KEY, 'false');
-    } catch {
-      // In-memory fallback.
-    }
+    closeWorkspace();
     requestAnimationFrame(() => dockTriggerRef.current?.focus());
   };
 
@@ -76,17 +51,16 @@ export function GlobalWorkspaceDock() {
         </aside>
       )}
 
-      {/* CUA P1 (largeur intermédiaire) : ouvert, le panneau RÉSERVE sa place
-          dans le shell à partir de xl (le mail se replie au lieu d'être
-          recouvert/tronqué) ; en dessous il reste un overlay, un peu plus
-          étroit en md pour laisser respirer la liste. */}
+      {/* Sur tablette et desktop, le panneau réserve sa place. Le shell mail
+          passe alors en mode lecteur + workspace au lieu de laisser ce dock
+          recouvrir le message ouvert. Sur mobile, il reste un overlay. */}
       <aside
         aria-label={m['globalWorkspace.title']()}
         aria-hidden={!open}
         className={cn(
           'border-border/70 bg-background z-40 flex flex-col overflow-hidden rounded-2xl border transition-[transform,opacity] duration-200 ease-out motion-reduce:transition-none',
           open
-            ? 'fixed inset-y-2 right-2 w-[min(390px,calc(100vw-16px))] translate-x-0 opacity-100 shadow-2xl md:w-[340px] xl:static xl:inset-auto xl:mb-1 xl:mr-0.5 xl:mt-1 xl:h-[calc(100dvh-8px)] xl:w-[360px] xl:shrink-0 xl:shadow-sm'
+            ? 'fixed inset-y-2 right-2 w-[min(390px,calc(100vw-16px))] translate-x-0 opacity-100 shadow-2xl md:static md:inset-auto md:mb-1 md:mr-0.5 md:mt-1 md:h-[calc(100dvh-8px)] md:w-[340px] md:shrink-0 md:shadow-sm xl:w-[360px]'
             : 'pointer-events-none fixed inset-y-2 right-2 w-[min(390px,calc(100vw-16px))] translate-x-[calc(100%+16px)] opacity-0 shadow-2xl',
         )}
       >
