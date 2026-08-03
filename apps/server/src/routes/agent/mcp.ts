@@ -53,6 +53,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { getThread, getZeroAgent } from '../../lib/server-utils';
 import { sanitizeMailContent } from '../../lib/mail-sanitize';
 import { composeEmail } from '../../trpc/routes/ai/compose';
+import { runMcpDbOpWithFreshDb } from './mcp-db-operation';
 import { getCurrentDateContext } from '../../lib/prompts';
 import type { ThreadsResponse } from '@zero/types';
 import { invariant } from '../../lib/invariant';
@@ -61,7 +62,7 @@ import { logger } from '../../lib/logger';
 import { env } from 'cloudflare:workers';
 import { eq, and } from 'drizzle-orm';
 import { McpAgent } from 'agents/mcp';
-import { createDb } from '../../db';
+import type { DB } from '../../db';
 import z from 'zod';
 
 type DraftRecipient = z.infer<typeof schemas.createDraft.to.element>;
@@ -100,15 +101,20 @@ export class ZeroMCP extends McpAgent<typeof env, Record<string, unknown>, { use
     return stub;
   }
 
+  private async dbOp<T>(operation: (db: DB) => Promise<T>): Promise<T> {
+    return await runMcpDbOpWithFreshDb(env.HYPERDRIVE.connectionString, operation);
+  }
+
   /** In-flight createDraft tasks per idempotency storage key (atomic dedupe). */
   private draftCreationsInFlight = new Map<string, Promise<CreateDraftResult>>();
 
   async init(): Promise<void> {
     if (!this.props.userId) return;
-    const { db, conn } = createDb(env.HYPERDRIVE.connectionString);
-    const _connection = await db.query.connection.findFirst({
-      where: eq(connection.userId, this.props.userId),
-    });
+    const _connection = await this.dbOp((db) =>
+      db.query.connection.findFirst({
+        where: eq(connection.userId, this.props.userId),
+      }),
+    );
     if (!_connection) {
       throw new Error('Unauthorized');
     }
@@ -147,9 +153,11 @@ export class ZeroMCP extends McpAgent<typeof env, Record<string, unknown>, { use
       'getConnections',
       { description: descriptions.getConnections, inputSchema: schemas.getConnections },
       async () => {
-        const connections = await db.query.connection.findMany({
-          where: eq(connection.userId, this.props.userId),
-        });
+        const connections = await this.dbOp((db) =>
+          db.query.connection.findMany({
+            where: eq(connection.userId, this.props.userId),
+          }),
+        );
         return {
           content: connections.map((c) => ({
             type: 'text' as const,
@@ -166,9 +174,12 @@ export class ZeroMCP extends McpAgent<typeof env, Record<string, unknown>, { use
         if (!this.activeConnectionId) {
           throw new Error('No active connection');
         }
-        const active = await db.query.connection.findFirst({
-          where: eq(connection.id, this.activeConnectionId),
-        });
+        const activeConnectionId = this.activeConnectionId;
+        const active = await this.dbOp((db) =>
+          db.query.connection.findFirst({
+            where: eq(connection.id, activeConnectionId),
+          }),
+        );
         if (!active) {
           throw new Error('Connection not found');
         }
@@ -182,9 +193,11 @@ export class ZeroMCP extends McpAgent<typeof env, Record<string, unknown>, { use
       async (s) => {
         // Ownership-scoped: an unknown or other-user address is "not found" — existence is
         // never revealed (spec §"Cross-user ... identifiers are rejected without revealing").
-        const owned = await db.query.connection.findFirst({
-          where: and(eq(connection.userId, this.props.userId), eq(connection.email, s.email)),
-        });
+        const owned = await this.dbOp((db) =>
+          db.query.connection.findFirst({
+            where: and(eq(connection.userId, this.props.userId), eq(connection.email, s.email)),
+          }),
+        );
         if (!owned) {
           throw new Error('Connection not found');
         }
@@ -351,10 +364,12 @@ export class ZeroMCP extends McpAgent<typeof env, Record<string, unknown>, { use
       'listOutbox',
       { description: descriptions.listOutbox, inputSchema: schemas.listOutbox },
       async (s) => {
-        const items = await listDraftOutboxItems(db, {
-          userId: this.props.userId,
-          status: s.status,
-        });
+        const items = await this.dbOp((db) =>
+          listDraftOutboxItems(db, {
+            userId: this.props.userId,
+            status: s.status,
+          }),
+        );
         if (!items.length) return text('No outbox items');
         return text(items.map(formatOutboxItem).join('\n'));
       },
@@ -364,7 +379,9 @@ export class ZeroMCP extends McpAgent<typeof env, Record<string, unknown>, { use
       'getOutboxItem',
       { description: descriptions.getOutboxItem, inputSchema: schemas.getOutboxItem },
       async (s) => {
-        const item = await getDraftOutboxItem(db, { id: s.id, userId: this.props.userId });
+        const item = await this.dbOp((db) =>
+          getDraftOutboxItem(db, { id: s.id, userId: this.props.userId }),
+        );
         // Missing OR other-user ids share one identical message — existence is never revealed.
         return text(item ? formatOutboxItem(item) : 'Outbox item not found');
       },
@@ -462,28 +479,30 @@ export class ZeroMCP extends McpAgent<typeof env, Record<string, unknown>, { use
               // Outbox durable UNIQUEMENT — jamais d'appel fournisseur direct.
               // Le consumer délivrera via sendStoredDraft (brouillon tel que
               // stocké : PJ/threading/signature préservés).
-              return enqueueConfirmedStoredDraft({
-                createJob: () =>
-                  createSendJob(db, {
-                    connectionId,
-                    clientSubmissionKey: input.clientSubmissionKey,
-                    payload: {
-                      draftId: input.draftId,
-                      sendAsStored: true,
-                      to: [],
-                      subject: input.subject,
-                      message: '',
-                    },
-                    threadId: null,
-                    scheduledSendAt: null,
-                  }),
-                publish: (jobId) =>
-                  env.send_email_queue.send(
-                    { messageId: jobId, jobId, connectionId },
-                    { delaySeconds: 0 },
-                  ),
-                markEnqueued: (jobId) => markSendJobEnqueued(db, jobId),
-              });
+              return await this.dbOp((db) =>
+                enqueueConfirmedStoredDraft({
+                  createJob: () =>
+                    createSendJob(db, {
+                      connectionId,
+                      clientSubmissionKey: input.clientSubmissionKey,
+                      payload: {
+                        draftId: input.draftId,
+                        sendAsStored: true,
+                        to: [],
+                        subject: input.subject,
+                        message: '',
+                      },
+                      threadId: null,
+                      scheduledSendAt: null,
+                    }),
+                  publish: (jobId) =>
+                    env.send_email_queue.send(
+                      { messageId: jobId, jobId, connectionId },
+                      { delaySeconds: 0 },
+                    ),
+                  markEnqueued: (jobId) => markSendJobEnqueued(db, jobId),
+                }),
+              );
             },
             audit: (event) =>
               logger.info('[mcp] sendConfirmedDraft audit', {
@@ -598,13 +617,16 @@ export class ZeroMCP extends McpAgent<typeof env, Record<string, unknown>, { use
         if (!this.activeConnectionId) {
           throw new Error('No active connection');
         }
-        const queued = await enqueueDraftJob(db, {
-          connectionId: this.activeConnectionId,
-          threadId: data.threadId ?? null,
-          mission: data.mission ?? null,
-          subject: data.subject ?? null,
-          body: data.body ?? null,
-        });
+        const connectionId = this.activeConnectionId;
+        const queued = await this.dbOp((db) =>
+          enqueueDraftJob(db, {
+            connectionId,
+            threadId: data.threadId ?? null,
+            mission: data.mission ?? null,
+            subject: data.subject ?? null,
+            body: data.body ?? null,
+          }),
+        );
         return text(`Draft job queued: ${queued.id}`);
       },
     );
@@ -613,12 +635,14 @@ export class ZeroMCP extends McpAgent<typeof env, Record<string, unknown>, { use
       'cancelOutboxItem',
       { description: descriptions.cancelOutboxItem, inputSchema: schemas.cancelOutboxItem },
       async (s) => {
-        const message = await handleCancelOutboxItem(
-          {
-            getItem: (id) => getDraftOutboxItem(db, { id, userId: this.props.userId }),
-            cancel: (item) => cancelDraftOutboxJob(db, item),
-          },
-          s.id,
+        const message = await this.dbOp((db) =>
+          handleCancelOutboxItem(
+            {
+              getItem: (id) => getDraftOutboxItem(db, { id, userId: this.props.userId }),
+              cancel: (item) => cancelDraftOutboxJob(db, item),
+            },
+            s.id,
+          ),
         );
         return text(message);
       },
@@ -628,12 +652,14 @@ export class ZeroMCP extends McpAgent<typeof env, Record<string, unknown>, { use
       'retryOutboxItem',
       { description: descriptions.retryOutboxItem, inputSchema: schemas.retryOutboxItem },
       async (s) => {
-        const message = await handleRetryOutboxItem(
-          {
-            getItem: (id) => getDraftOutboxItem(db, { id, userId: this.props.userId }),
-            retry: (item) => retryDraftOutboxJob(db, item),
-          },
-          s.id,
+        const message = await this.dbOp((db) =>
+          handleRetryOutboxItem(
+            {
+              getItem: (id) => getDraftOutboxItem(db, { id, userId: this.props.userId }),
+              retry: (item) => retryDraftOutboxJob(db, item),
+            },
+            s.id,
+          ),
         );
         return text(message);
       },
@@ -643,6 +669,5 @@ export class ZeroMCP extends McpAgent<typeof env, Record<string, unknown>, { use
       userId: this.props.userId,
       toolCount: MCP_TOOL_DEFINITIONS.length,
     });
-    this.ctx.waitUntil(conn.end());
   }
 }
