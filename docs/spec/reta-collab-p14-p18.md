@@ -1,6 +1,6 @@
 # Reta — carte de continuation P12 → P18
 
-État au 2026-08-03, commit applicatif de release `b4df4c28` sur la branche
+État au 2026-08-03, commit applicatif courant `cb7e29f9` sur la branche
 `codex/reta-team-collaboration`. Les migrations 0042 à 0049 sont appliquées en
 production et les Workers front/serveur sont publiés. Chaque phase ci-dessous
 liste l'ordre de dépendance, les points d'ancrage EXACTS dans le code actuel et
@@ -40,7 +40,7 @@ Invariants transverses (toutes phases) :
 
 Les 38 tests du routeur `teams` complètent transversalement P13–P16 ; le lot
 dédié totalise donc serveur 175/175 et mail 60/60 sans compter deux fois ces
-routes. Les suites exhaustives restent serveur 1116/1116 et mail 840/840.
+routes. Les suites exhaustives restent serveur 1121/1121 et mail 840/840.
 
 ## P13 — Activation collaboration factuelle — déployée et vérifiée
 
@@ -532,7 +532,7 @@ Review-12 (Fable puis revue Codex, 2026-08-03) :
   `createdAt|UUID` borné ; un curseur malformé ne devient plus un faux 404.
   Un test structurel verrouille le montage du webhook Linear à la racine,
   hors du sous-routeur `/api`.
-- **Preuves** : ciblés P18 50/50 dont 13 PG, serveur complet 1116/1116, mail
+- **Preuves** : ciblés P18 50/50 dont 13 PG, serveur complet 1121/1121, mail
   840/840, deux typechecks verts, ESLint 0 erreur, build production vert et
   `db:generate` sans changement après 0049. La chaîne Drizzle 0000→0049 passe
   depuis une base vide avec 50 migrations journalisées. Après le gate visuel
@@ -575,7 +575,8 @@ et l'UI à 2000 entrées par téléchargement.
 
 ## Publication P12–P18 — 2026-08-03
 
-- Git : commit applicatif `b4df4c28` poussé sur
+- Git : commit applicatif de release `b4df4c28` puis remédiation production
+  `cb7e29f9`, poussés sur
   `codex/reta-team-collaboration` après gates complets et scan gitleaks sans
   fuite.
 - Base Railway production : `railway`, fuseau `Etc/UTC`, journal Drizzle à 50
@@ -584,19 +585,22 @@ et l'UI à 2000 entrées par téléchargement.
   les FK `team_id` CASCADE et `updated_by` SET NULL, ainsi que les colonnes
   nullable `last_swept_at` et `last_linear_updated_at` sont présents.
 - Worker serveur `zero-server-production` : version
-  `b393a1c4-1aa3-45dc-9483-b460d6e40569`, `/health` répond 200 en JSON.
+  `b3686437-6f0c-489b-b4d8-368ded47e12f`, `/health` répond 200 en JSON.
 - Worker mail `zero-production` : version
   `e4ae87f3-9d67-4f5b-a6da-c33a2620454c`. Les navigations HTML `/`, `/team`,
   `/team?view=ops`, `/team?view=integrations` et
   `/integrations/linear/callback` répondent 200 avec le titre
   `Reta by Devlab`.
-- CUA production Dia reste **non prouvée** : la sélection AX de l'onglet
-  explicitement nommé `Reta by Devlab` a échoué avec
-  `Computer Use server error -10005: cannotClickOffscreenElement`. Le fallback
-  borné (`super+n`, puis `super+l`) n'a exposé que `commandBarTextField`, pas le
-  champ autorisé `navigationBarAssistantBarTextField`. Aucun champ de
-  substitution, bouton ambigu, clic par coordonnées ou action métier n'a été
-  utilisé. La preuve visuelle locale finale dans Dia reste PASS.
+- Remédiation Ops : le prédicat de fenêtre interpolait une `Date` brute dans
+  un fragment SQL ; Postgres.js échouait dans son chemin prepared avec
+  `Buffer.byteLength(Date)`. Le comparateur Drizzle typé encode désormais le
+  timestamp en chaîne ISO. Un test compile le prédicat et interdit tout
+  paramètre `Date`; la suite serveur passe à 1121/1121.
+- CUA production Dia **PASS** : `/team?view=ops` monte `Team operations`, la
+  fenêtre 30 jours, la couverture, les absences et la politique SLA sans
+  erreur. `/team?view=integrations` monte l'état Linear non connecté, les
+  webhooks sortants vides et l'avertissement metadata-only. Aucun Connect
+  Linear, webhook, export, bouton métier ou mutation externe n'a été actionné.
 
 ## Preuves de release production — 2026-08-02
 
