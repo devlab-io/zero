@@ -56,7 +56,7 @@ type ChatParams = {
   signal?: AbortSignal;
   /**
    * Accepted for interface parity with Workers AI and IGNORED here (tour 06):
-   * the five BYOK upstreams have no portable structured-output contract, and
+   * the six BYOK upstreams have no portable structured-output contract, and
    * the shared extract/parse path never depends on it — a schema hint must
    * never break a provider call.
    */
@@ -255,6 +255,23 @@ const ADAPTERS: Record<Exclude<RetaProviderId, 'workers-ai'>, AdapterSpec> = {
       },
     }),
     parse: parseGemini,
+  },
+  openrouter: {
+    url: () => 'https://openrouter.ai/api/v1/chat/completions',
+    headers: (apiKey) => ({ Authorization: `Bearer ${apiKey}` }),
+    body: (entry, p) => ({
+      model: entry.upstreamModel,
+      messages: [
+        { role: 'system', content: p.system },
+        { role: 'user', content: p.user },
+      ],
+      max_tokens: p.maxTokens,
+      ...temperatureIfSupported(entry, p),
+      // Email correction and drafting benefit from low latency; the selected
+      // Gemini Flash model supports OpenRouter's bounded reasoning control.
+      reasoning: { effort: 'low', exclude: true },
+    }),
+    parse: parseOpenAiCompatChat,
   },
   moonshot: {
     url: () => 'https://api.moonshot.ai/v1/chat/completions',

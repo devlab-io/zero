@@ -146,7 +146,7 @@ describe('copilot.modelCatalog', () => {
     harness.status = [currentStatus('anthropic')];
     harness.kekV1 = KEK_SECRET_V1;
     const result = (await call('modelCatalog')) as CatalogResult;
-    expect(result.models).toHaveLength(12);
+    expect(result.models).toHaveLength(13);
     expect(result.selectedModelId).toBe(DEFAULT_CATALOGUE_ID);
     expect(result.vaultAvailable).toBe(true);
     const anthropic = result.models.find((m) => m.id === 'anthropic:claude-fable-5');
@@ -241,6 +241,11 @@ describe('copilot.setCredential', () => {
     // No caller-controlled identity: a smuggled userId is STRIPPED by zod.
     const parsed = schema.parse({ ...validInput, userId: 'user-B' }) as Record<string, unknown>;
     expect(parsed.userId).toBeUndefined();
+    const openRouterParsed = schema.parse({
+      ...validInput,
+      provider: 'openrouter',
+    }) as Record<string, unknown>;
+    expect(openRouterParsed.provider).toBe('openrouter');
   });
 
   it('fails closed without a KEK ring', async () => {

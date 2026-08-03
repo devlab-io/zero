@@ -33,6 +33,7 @@ const BYOK_PROVIDERS: { provider: string; label: string }[] = [
   { provider: 'openai', label: 'OpenAI' },
   { provider: 'anthropic', label: 'Anthropic' },
   { provider: 'gemini', label: 'Google' },
+  { provider: 'openrouter', label: 'OpenRouter' },
   { provider: 'moonshot', label: 'Moonshot' },
   { provider: 'zai', label: 'Z.AI' },
 ];

@@ -8,7 +8,14 @@
  * nothing off-catalogue is ever passed to a provider.
  */
 
-export type RetaProviderId = 'workers-ai' | 'openai' | 'anthropic' | 'gemini' | 'moonshot' | 'zai';
+export type RetaProviderId =
+  | 'workers-ai'
+  | 'openai'
+  | 'anthropic'
+  | 'gemini'
+  | 'openrouter'
+  | 'moonshot'
+  | 'zai';
 
 export type RetaCatalogueEntry = {
   /** Internal id (`provider:model`) — the ONLY value the client handles. */
@@ -93,6 +100,14 @@ export const RETA_MODEL_CATALOGUE: readonly RetaCatalogueEntry[] = [
     supportsTemperature: true,
   },
   {
+    id: 'openrouter:google/gemini-3-flash-preview',
+    provider: 'openrouter',
+    upstreamModel: 'google/gemini-3-flash-preview',
+    label: 'Gemini 3 Flash Preview (OpenRouter)',
+    requiresCredential: true,
+    supportsTemperature: true,
+  },
+  {
     id: 'moonshot:kimi-k2.5',
     provider: 'moonshot',
     upstreamModel: 'kimi-k2.5',
@@ -130,6 +145,7 @@ export const RETA_BYOK_PROVIDERS: readonly RetaProviderId[] = [
   'openai',
   'anthropic',
   'gemini',
+  'openrouter',
   'moonshot',
   'zai',
 ];

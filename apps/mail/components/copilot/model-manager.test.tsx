@@ -151,10 +151,10 @@ afterEach(() => {
 });
 
 describe('ModelManagerDialog — cards and states', () => {
-  it('renders Workers as included plus the five BYOK provider cards with configured state ONLY', () => {
+  it('renders Workers as included plus the six BYOK provider cards with configured state ONLY', () => {
     render();
     expect(container.textContent).toContain('askReta.workersIncluded');
-    for (const provider of ['openai', 'anthropic', 'gemini', 'moonshot', 'zai']) {
+    for (const provider of ['openai', 'anthropic', 'gemini', 'openrouter', 'moonshot', 'zai']) {
       expect(card(provider), provider).toBeTruthy();
     }
     expect(card('anthropic').textContent).toContain('askReta.configured');

@@ -19,6 +19,7 @@ describe('Ask Reta model catalogue — deployment-owned, closed set', () => {
       'anthropic:claude-sonnet-5',
       'gemini:gemini-3.6-flash',
       'gemini:gemini-3.1-pro-preview',
+      'openrouter:google/gemini-3-flash-preview',
       'moonshot:kimi-k2.5',
       'zai:glm-5.1',
       'zai:glm-5',
@@ -33,7 +34,14 @@ describe('Ask Reta model catalogue — deployment-owned, closed set', () => {
       expect(entry.id.startsWith(`${entry.provider}:`)).toBe(true);
       expect(entry.requiresCredential).toBe(entry.provider !== 'workers-ai');
     }
-    expect(RETA_BYOK_PROVIDERS).toEqual(['openai', 'anthropic', 'gemini', 'moonshot', 'zai']);
+    expect(RETA_BYOK_PROVIDERS).toEqual([
+      'openai',
+      'anthropic',
+      'gemini',
+      'openrouter',
+      'moonshot',
+      'zai',
+    ]);
   });
 
   it('findCatalogueEntry: exact ids only — unknown, legacy or non-string → null', () => {
@@ -82,6 +90,9 @@ describe('Ask Reta model catalogue — deployment-owned, closed set', () => {
   it('catalogueIdsForProvider returns the exact server-owned reset set', () => {
     expect(catalogueIdsForProvider('zai')).toEqual(['zai:glm-5.1', 'zai:glm-5', 'zai:glm-5-turbo']);
     expect(catalogueIdsForProvider('moonshot')).toEqual(['moonshot:kimi-k2.5']);
+    expect(catalogueIdsForProvider('openrouter')).toEqual([
+      'openrouter:google/gemini-3-flash-preview',
+    ]);
     expect(catalogueIdsForProvider('workers-ai')).toEqual([
       'workers-ai:llama-4-scout',
       'workers-ai:llama-3.3-70b',

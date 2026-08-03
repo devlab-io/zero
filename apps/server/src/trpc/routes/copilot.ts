@@ -31,7 +31,14 @@ const formatSender = (sender?: { name?: string; email?: string }) =>
   sender ? `${sender.name ?? ''} <${sender.email ?? 'unknown'}>`.trim() : 'unknown';
 
 /** BYOK providers accepted over the wire — must mirror RETA_BYOK_PROVIDERS. */
-const byokProviderSchema = z.enum(['openai', 'anthropic', 'gemini', 'moonshot', 'zai']);
+const byokProviderSchema = z.enum([
+  'openai',
+  'anthropic',
+  'gemini',
+  'openrouter',
+  'moonshot',
+  'zai',
+]);
 
 const vaultUnavailable = () =>
   new TRPCError({ code: 'PRECONDITION_FAILED', message: 'BYOK vault unavailable' });
