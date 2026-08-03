@@ -46,6 +46,13 @@ const defaultCatalogue = () => ({
       requiresCredential: true,
       configured: false,
     },
+    {
+      id: 'openrouter:google/gemini-3-flash-preview',
+      provider: 'openrouter',
+      label: 'Gemini 3 Flash Preview (OpenRouter)',
+      requiresCredential: true,
+      configured: false,
+    },
   ],
 });
 
@@ -1022,12 +1029,16 @@ describe('AskRetaSurface — model catalogue select (slice 3B)', () => {
     const select = modelSelect();
     expect(select.value).toBe('workers-ai:llama-4-scout');
     const groups = [...select.querySelectorAll('optgroup')].map((group) => group.label);
-    expect(groups).toEqual(['Workers AI', 'OpenAI', 'Anthropic']);
+    expect(groups).toEqual(['Workers AI', 'OpenAI', 'Anthropic', 'OpenRouter']);
     // Configured BYOK models selectable; unconfigured VISIBLE but disabled
     // (the manage button is the configure path).
     expect(option('anthropic:claude-fable-5').disabled).toBe(false);
     expect(option('openai:gpt-5.2').disabled).toBe(true);
     expect(option('openai:gpt-5.2').textContent).toContain('askReta.notConfigured');
+    expect(option('openrouter:google/gemini-3-flash-preview').disabled).toBe(true);
+    expect(option('openrouter:google/gemini-3-flash-preview').textContent).toContain(
+      'Gemini 3 Flash Preview (OpenRouter)',
+    );
   });
 
   it('changing the model fires selectModel THEN atomically refreshes the catalogue', async () => {
