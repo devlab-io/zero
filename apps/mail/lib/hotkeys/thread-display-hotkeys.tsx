@@ -99,6 +99,8 @@ export function ThreadDisplayHotkeys() {
         key: event.key,
         hasModifier: event.metaKey || event.ctrlKey || event.altKey || event.shiftKey,
         isTypingOrModal: isTypingOrModalTarget(event.target),
+        isWorkspaceTarget:
+          event.target instanceof Element && Boolean(event.target.closest('[data-reta-workspace]')),
       });
       if (!action) return;
 

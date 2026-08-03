@@ -67,6 +67,17 @@ describe('resolveThreadDisplayCaptureAction', () => {
     ).toBe('close');
   });
 
+  it('leaves Escape to the focused right workspace instead of closing the thread', () => {
+    expect(
+      resolveThreadDisplayCaptureAction({
+        key: 'Escape',
+        hasModifier: false,
+        isTypingOrModal: false,
+        isWorkspaceTarget: true,
+      }),
+    ).toBeNull();
+  });
+
   it('leaves modified and composer keys alone', () => {
     expect(
       resolveThreadDisplayCaptureAction({

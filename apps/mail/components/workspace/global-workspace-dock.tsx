@@ -58,6 +58,7 @@ export function GlobalWorkspaceDock() {
       {/* One exclusive workspace host: calendar, collaboration and Ask Reta
           can replace one another, never stack over the message reader. */}
       <aside
+        data-reta-workspace=""
         aria-label={m['globalWorkspace.title']()}
         aria-hidden={!open}
         inert={!open}

@@ -34,8 +34,9 @@ export function resolveThreadDisplayCaptureAction(input: {
   key: string;
   hasModifier: boolean;
   isTypingOrModal: boolean;
+  isWorkspaceTarget?: boolean;
 }): ThreadDisplayCaptureAction {
-  if (input.hasModifier || input.isTypingOrModal) return null;
+  if (input.hasModifier || input.isTypingOrModal || input.isWorkspaceTarget) return null;
   if (input.key === 'ArrowDown') return 'next';
   if (input.key === 'ArrowUp') return 'previous';
   if (input.key === 'Escape') return 'close';
