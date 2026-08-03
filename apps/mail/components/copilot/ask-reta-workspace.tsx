@@ -2,7 +2,6 @@ import { lazy, Suspense, useEffect, useRef } from 'react';
 import { memoizedImport } from '@/lib/memoized-import';
 import { LoaderCircle } from 'lucide-react';
 import { m } from '@/paraglide/messages';
-import { useQueryState } from 'nuqs';
 
 const loadAskRetaSurface = memoizedImport(() => import('./ask-reta-surface'));
 const AskRetaSurfaceLazy = lazy(() => loadAskRetaSurface());
@@ -31,7 +30,6 @@ function AskRetaLoadingFallback() {
 
 /** Ask Reta content for the exclusive global workspace host. */
 export function AskRetaWorkspace() {
-  const [, setPanelOpen] = useQueryState('isAskRetaOpen');
   const panelRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
@@ -44,12 +42,6 @@ export function AskRetaWorkspace() {
       role="complementary"
       aria-label={m['common.askReta.title']()}
       tabIndex={-1}
-      onKeyDown={(event) => {
-        if (event.key === 'Escape') {
-          event.stopPropagation();
-          void setPanelOpen(null);
-        }
-      }}
       className="bg-background dark:bg-panelDark flex min-h-0 flex-1 flex-col overflow-hidden outline-none"
     >
       <span className="sr-only">{m['common.askReta.subtitle']()}</span>

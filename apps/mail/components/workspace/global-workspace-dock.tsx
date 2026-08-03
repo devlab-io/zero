@@ -34,7 +34,7 @@ export function GlobalWorkspaceDock() {
       {!open && (
         <aside
           aria-label={m['globalWorkspace.open']()}
-          className="border-border/70 bg-background fixed right-2 top-1/2 z-40 flex -translate-y-1/2 flex-col gap-1 rounded-xl border p-1 shadow-sm"
+          className="border-border/70 bg-background fixed right-2 top-1/2 z-40 hidden -translate-y-1/2 flex-col gap-1 rounded-xl border p-1 shadow-sm md:flex"
         >
           {tabs.map(({ id, icon: Icon, label }) => (
             <Button
@@ -60,10 +60,17 @@ export function GlobalWorkspaceDock() {
       <aside
         aria-label={m['globalWorkspace.title']()}
         aria-hidden={!open}
+        inert={!open}
+        onKeyDown={(event) => {
+          if (event.key !== 'Escape') return;
+          event.preventDefault();
+          event.stopPropagation();
+          close();
+        }}
         className={cn(
           'border-border/70 bg-background z-40 flex flex-col overflow-hidden rounded-2xl border transition-[transform,opacity] duration-200 ease-out motion-reduce:transition-none',
           open
-            ? 'fixed inset-0 w-full translate-x-0 rounded-none opacity-100 shadow-2xl md:static md:inset-auto md:mb-1 md:mr-0.5 md:mt-1 md:h-[calc(100dvh-8px)] md:w-[320px] md:shrink-0 md:rounded-2xl md:shadow-sm xl:w-[360px] 2xl:w-[380px]'
+            ? 'fixed inset-0 z-50 w-full translate-x-0 rounded-none opacity-100 shadow-2xl md:static md:inset-auto md:mb-1 md:mr-0.5 md:mt-1 md:h-[calc(100dvh-8px)] md:w-[320px] md:shrink-0 md:rounded-2xl md:shadow-sm xl:w-[360px] 2xl:w-[380px]'
             : 'pointer-events-none fixed inset-y-2 right-2 w-[min(390px,calc(100vw-16px))] translate-x-[calc(100%+16px)] opacity-0 shadow-2xl',
         )}
       >

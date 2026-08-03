@@ -140,6 +140,23 @@ describe('AskRetaButton — P8 : panneau latéral non-modal persistant', () => {
     expect(region!.querySelector('[data-testid="ask-reta-surface"]')).toBeTruthy();
   });
 
+  it('retire le workspace fermé de la navigation clavier', () => {
+    act(() => {
+      root.render(
+        <GlobalWorkspaceProvider>
+          <GlobalWorkspaceDock />
+        </GlobalWorkspaceProvider>,
+      );
+    });
+
+    const workspace = [...document.querySelectorAll('aside')].find((aside) =>
+      aside.getAttribute('aria-label')?.includes('globalWorkspace.title'),
+    );
+    expect(workspace).toBeTruthy();
+    expect(workspace?.getAttribute('aria-hidden')).toBe('true');
+    expect(workspace?.hasAttribute('inert')).toBe(true);
+  });
+
   it('le bouton de fermeture remet le param à null et démonte le panneau', async () => {
     await openPanel();
     const close = [...document.querySelectorAll('aside button')].find((b) =>
@@ -173,5 +190,37 @@ describe('AskRetaButton — P8 : panneau latéral non-modal persistant', () => {
       trigger.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
     });
     expect(queryStore.isAskRetaOpen).toBeNull();
+  });
+
+  it('Escape ferme aussi Calendar et restaure le focus sur le mini-rail', async () => {
+    act(() => {
+      root.render(
+        <GlobalWorkspaceProvider>
+          <GlobalWorkspaceDock />
+        </GlobalWorkspaceProvider>,
+      );
+    });
+    const trigger = [...container.querySelectorAll('button')].find((button) =>
+      button.getAttribute('aria-label')?.includes('globalWorkspace.calendar.tab'),
+    )!;
+
+    await act(async () => {
+      trigger.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    });
+    const workspace = [...document.querySelectorAll('aside')].find((aside) =>
+      aside.getAttribute('aria-label')?.includes('globalWorkspace.title'),
+    )!;
+    expect(workspace.hasAttribute('inert')).toBe(false);
+
+    await act(async () => {
+      workspace.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    });
+
+    const restoredTrigger = [...container.querySelectorAll('button')].find((button) =>
+      button.getAttribute('aria-label')?.includes('globalWorkspace.calendar.tab'),
+    );
+    expect(restoredTrigger).toBeTruthy();
+    expect(document.activeElement).toBe(restoredTrigger);
   });
 });
