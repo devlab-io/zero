@@ -28,17 +28,17 @@ export default function Footer() {
     <footer className="bg-panelDark mx-1 mb-3 flex w-full flex-col items-center justify-center overflow-hidden rounded-xl md:mx-4">
       <div className="flex w-full flex-col items-center px-4 pb-6 pt-16 text-center md:pt-24">
         <h2 className="max-w-3xl text-3xl font-bold text-white sm:text-4xl md:text-5xl">
-          Move your inbox to {productBrand.name}
+          Connect your inbox to {productBrand.name}
         </h2>
         <p className="mt-4 max-w-2xl text-base font-normal leading-7 text-white/80 md:text-lg">
-          Sign in with Google, keep your address, and bring your team into the thread. Reta works
-          against the connected mailbox; your team sees only threads you explicitly share.
+          Keep your address and connect through Google. Reta works with the mailbox you already use;
+          your team sees only the threads you explicitly share.
         </p>
         <Button
           asChild
           className="mt-6 h-9 cursor-pointer bg-white px-5 text-[#140151] hover:bg-[#f1e8ff]"
         >
-          <a href="/login">Get Started</a>
+          <a href="/login">Get started</a>
         </Button>
       </div>
 
@@ -56,7 +56,7 @@ export default function Footer() {
                   target="_blank"
                   rel="noopener noreferrer"
                   aria-label={social.name}
-                  className="flex items-center justify-center gap-2.5 rounded-full bg-white/10 p-2 transition-colors hover:bg-white/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
+                  className="flex size-11 items-center justify-center gap-2.5 rounded-full bg-white/10 transition-colors hover:bg-white/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
                 >
                   <social.icon className="size-3.5 fill-white" />
                 </a>
@@ -76,7 +76,7 @@ export default function Footer() {
             </a>
           </div>
 
-          <div className="flex flex-1 items-start justify-end gap-5 md:gap-10">
+          <div className="grid w-full flex-1 grid-cols-2 items-start gap-8 sm:grid-cols-3 md:w-auto md:justify-end md:gap-10">
             <FooterColumn
               title="Product"
               links={[

@@ -179,6 +179,10 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
+  --color-brand-violet: var(--brand-violet);
+  --color-brand-violet-deep: var(--brand-violet-deep);
+  --color-brand-violet-soft: var(--brand-violet-soft);
+  --color-brand-navy: var(--brand-navy);
 
   /* Chart colors */
   --color-chart-1: var(--chart-1);

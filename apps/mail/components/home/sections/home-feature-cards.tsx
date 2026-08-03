@@ -30,11 +30,14 @@ const features = [
 export function HomeFeatureCards() {
   return (
     <section className="relative mt-32 px-4 md:mt-40">
-      <div className="mx-auto grid w-full max-w-[1100px] grid-cols-1 gap-x-12 gap-y-10 md:grid-cols-3">
+      <div className="mx-auto grid w-full max-w-[1100px] grid-cols-1 gap-x-12 gap-y-8 lg:grid-cols-3">
         {features.map((feature) => (
-          <article key={feature.title} className="flex flex-col items-start">
-            <span className="mb-4 flex size-9 items-center justify-center rounded-xl bg-[#f1e8ff] dark:bg-[#6f00ff]/15">
-              <feature.icon className="size-4 fill-[#6f00ff] dark:fill-[#c9afff]" />
+          <article
+            key={feature.title}
+            className="flex flex-col items-start border-t border-zinc-200 pt-5 dark:border-white/10"
+          >
+            <span className="bg-brand-violet-soft dark:bg-brand-violet/15 mb-4 flex size-9 items-center justify-center rounded-xl">
+              <feature.icon className="fill-brand-violet size-4 dark:fill-[#c9afff]" />
             </span>
             <h2 className="mb-2 text-xl font-medium text-zinc-950 dark:text-white">
               {feature.title}

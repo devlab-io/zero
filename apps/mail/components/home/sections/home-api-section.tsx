@@ -24,25 +24,24 @@ const capabilities = [
 
 export function HomeApiSection() {
   return (
-    <section className="relative mt-32 px-4 md:mt-40">
-      <p className="text-center text-lg font-light text-zinc-600 md:text-xl dark:text-zinc-200">
-        AI-agnostic · API-first · MCP-native
-      </p>
-      <div className="mt-2 flex flex-col items-center justify-center md:mt-8">
-        <h2 className="text-center text-4xl font-medium text-zinc-950 md:text-6xl dark:text-white">
-          Your inbox, your models
-        </h2>
-        <h2 className="mb-3 text-center text-4xl font-medium text-zinc-600 md:text-6xl dark:text-zinc-200">
-          your rules
-        </h2>
-      </div>
-      <div className="mx-auto mt-6 grid w-full max-w-[1100px] grid-cols-1 items-center gap-10 md:grid-cols-2">
+    <section aria-labelledby="automation-heading" className="relative mt-32 px-4 md:mt-40">
+      <div className="mx-auto grid w-full max-w-[1100px] grid-cols-1 items-center gap-10 lg:grid-cols-2 lg:gap-16">
         <div className="flex flex-col items-start gap-5">
+          <p className="text-lg font-light text-zinc-600 md:text-xl dark:text-zinc-200">
+            Automation is optional
+          </p>
+          <h2
+            id="automation-heading"
+            className="text-balance text-4xl font-medium tracking-[-0.03em] text-zinc-950 md:text-5xl dark:text-white"
+          >
+            <span className="block">Your inbox, your models</span>
+            <span className="block">your rules</span>
+          </h2>
           <p className="max-w-md text-base font-normal leading-7 text-zinc-600 dark:text-zinc-200">
-            {productBrand.name} never makes a model the center of your mailbox. Bring your own AI —
-            or none at all — and connect an MCP-compatible tool to an ACL-scoped surface. Draft
-            sending is exposed only through an explicit human-confirmation step; email deletion is
-            not exposed.
+            {productBrand.name} works without AI. Technical teams can bring their own model key or
+            connect an MCP-compatible agent to a permission-scoped interface. Agents may prepare
+            drafts, but sending still requires an explicit human confirmation; email deletion is not
+            available to the agent.
           </p>
           <ul className="flex flex-col gap-3">
             {capabilities.map((capability) => (
@@ -50,13 +49,16 @@ export function HomeApiSection() {
                 key={capability}
                 className="flex items-start gap-2.5 text-sm font-medium text-zinc-700 dark:text-zinc-200"
               >
-                <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-[#6f00ff] dark:bg-[#c9afff]" />
+                <span
+                  aria-hidden="true"
+                  className="bg-brand-violet mt-1.5 size-1.5 shrink-0 rounded-full dark:bg-[#c9afff]"
+                />
                 {capability}
               </li>
             ))}
           </ul>
         </div>
-        <div className="bg-panelDark overflow-hidden rounded-2xl border border-[#252525] shadow-md">
+        <div className="bg-panelDark min-w-0 overflow-hidden rounded-2xl border border-[#252525] shadow-md">
           <div className="flex h-10 items-center gap-1.5 border-b border-[#252525] px-4">
             <span className="size-2.5 rounded-full bg-[#313131]" />
             <span className="size-2.5 rounded-full bg-[#313131]" />

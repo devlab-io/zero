@@ -6,17 +6,25 @@ import {
   NavigationMenuContent,
   ListItem,
 } from '@/components/ui/navigation-menu';
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
-import { DevlabMark, ProductLockup } from '@/components/brand/devlab-brand';
-import { signIn, useSession } from '@/lib/auth-client';
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from '@/components/ui/sheet';
+import { ProductLockup } from '@/components/brand/devlab-brand';
+import { ThemeToggle } from '@/components/theme/theme-toggle';
 import { Separator } from '@/components/ui/separator';
+import { useEffect, useRef, useState } from 'react';
 import { GitHub, LinkedIn } from './icons/icons';
-import { Link, useNavigate } from 'react-router';
 import { Button } from '@/components/ui/button';
 import { productBrand } from '@/lib/brand';
+import { Link } from 'react-router';
 import { Menu } from 'lucide-react';
-import { useState } from 'react';
-import { toast } from 'sonner';
+
+const mobileNavigationPanelId = 'mobile-navigation-panel';
 
 const resources = [
   {
@@ -58,23 +66,49 @@ const IconComponent = {
 
 export function Navigation() {
   const [open, setOpen] = useState(false);
-  const { data: session } = useSession();
-  const navigate = useNavigate();
+  const mobileNavigationTriggerRef = useRef<HTMLButtonElement>(null);
+  const mobileNavigationWasOpenRef = useRef(false);
+
+  useEffect(() => {
+    if (!open) return;
+
+    const closeMobileNavigationOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' || event.key === 'Esc') {
+        setOpen(false);
+      }
+    };
+
+    document.addEventListener('keydown', closeMobileNavigationOnEscape, true);
+    return () => {
+      document.removeEventListener('keydown', closeMobileNavigationOnEscape, true);
+    };
+  }, [open]);
+
+  useEffect(() => {
+    if (mobileNavigationWasOpenRef.current && !open) {
+      mobileNavigationTriggerRef.current?.focus();
+    }
+    mobileNavigationWasOpenRef.current = open;
+  }, [open]);
 
   return (
     <>
       {/* Desktop Navigation - Hidden on mobile */}
       <header className="fixed left-[50%] z-50 hidden w-full max-w-4xl translate-x-[-50%] items-center justify-center px-4 pt-6 lg:flex">
-        <nav className="border-input/50 flex w-full max-w-4xl items-center justify-between gap-2 rounded-xl border bg-white p-3 px-6 text-zinc-950 shadow-sm transition-colors duration-200 motion-reduce:transition-none dark:border-t dark:bg-[#1E1E1E] dark:text-white">
+        <nav className="border-input/50 flex w-full max-w-4xl items-center justify-between gap-2 rounded-xl border bg-white p-3 px-5 text-zinc-950 shadow-sm transition-colors duration-200 motion-reduce:transition-none dark:border-t dark:bg-[#1E1E1E] dark:text-white">
           <div className="flex items-center gap-6">
-            <Link to="/" className="flex cursor-pointer items-center gap-1.5">
+            <Link
+              to="/"
+              aria-label={`${productBrand.fullName} home`}
+              className="focus-visible:ring-brand-violet flex cursor-pointer items-center gap-1.5 rounded-md focus-visible:outline-none focus-visible:ring-2"
+            >
               <ProductLockup />
               <span className="text-muted-foreground text-[10px]">beta</span>
             </Link>
             <NavigationMenu>
               <NavigationMenuList className="gap-1">
                 <NavigationMenuItem>
-                  <NavigationMenuTrigger className="cursor-pointer bg-transparent text-zinc-950 focus-visible:ring-2 focus-visible:ring-[#6f00ff] dark:text-white">
+                  <NavigationMenuTrigger className="focus-visible:ring-brand-violet cursor-pointer bg-transparent text-zinc-950 focus-visible:ring-2 dark:text-white">
                     Company
                   </NavigationMenuTrigger>
                   <NavigationMenuContent>
@@ -88,7 +122,7 @@ export function Navigation() {
                   </NavigationMenuContent>
                 </NavigationMenuItem>
                 <NavigationMenuItem>
-                  <NavigationMenuTrigger className="cursor-pointer bg-transparent text-zinc-950 focus-visible:ring-2 focus-visible:ring-[#6f00ff] dark:text-white">
+                  <NavigationMenuTrigger className="focus-visible:ring-brand-violet cursor-pointer bg-transparent text-zinc-950 focus-visible:ring-2 dark:text-white">
                     Resources
                   </NavigationMenuTrigger>
                   <NavigationMenuContent>
@@ -113,49 +147,16 @@ export function Navigation() {
                     </a>
                   </Button>
                 </NavigationMenuItem>
-                <NavigationMenuItem className="cursor-pointer bg-transparent text-zinc-950 dark:text-white">
-                  <a
-                    href="https://devlab.io/en/privacy-policy"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
-                    <Button variant="ghost" className="ml-1 h-9 bg-transparent">
-                      Privacy
-                    </Button>
-                  </a>
-                </NavigationMenuItem>
               </NavigationMenuList>
             </NavigationMenu>
           </div>
-          <div className="flex gap-2">
-            <a
-              href={productBrand.companyUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="group inline-flex h-8 items-center gap-2 rounded-lg border border-[#6f00ff]/20 bg-[#f1e8ff] px-3 text-sm font-medium text-[#140151] transition-colors hover:bg-[#e6d5ff] dark:border-[#9d6dff]/30 dark:bg-[#6f00ff]/15 dark:text-[#c9afff] dark:hover:bg-[#6f00ff]/25"
-            >
-              <DevlabMark className="size-4" />
-              Devlab
-            </a>
+          <div className="flex items-center gap-2">
+            <ThemeToggle className="focus-visible:ring-brand-violet size-8 justify-center p-0 focus-visible:outline-none focus-visible:ring-2" />
             <Button
-              className="h-8 cursor-pointer bg-[#6f00ff] text-white hover:bg-[#5600ff] hover:text-white"
-              onClick={() => {
-                if (session) {
-                  navigate('/mail/inbox');
-                } else {
-                  toast.promise(
-                    signIn.social({
-                      provider: 'google',
-                      callbackURL: `${window.location.origin}/mail`,
-                    }),
-                    {
-                      error: 'Login redirect failed',
-                    },
-                  );
-                }
-              }}
+              asChild
+              className="bg-brand-violet hover:bg-brand-violet-deep h-8 cursor-pointer text-white hover:text-white"
             >
-              Get Started
+              <Link to="/login">Get started</Link>
             </Button>
           </div>
         </nav>
@@ -163,55 +164,87 @@ export function Navigation() {
 
       {/* Mobile Navigation Sheet */}
       <div className="lg:hidden">
+        <ThemeToggle
+          showLabel
+          className="focus-visible:ring-brand-violet fixed right-4 top-6 z-50 min-h-11 border border-zinc-200 bg-white px-3 shadow-sm hover:bg-zinc-50 focus-visible:outline-none focus-visible:ring-2 dark:border-white/10 dark:bg-[#1E1E1E] dark:hover:bg-[#272727]"
+        />
         <Sheet open={open} onOpenChange={setOpen}>
           <SheetTrigger asChild>
-            <Button variant="ghost" size="icon" className="fixed left-4 top-6 z-50">
-              <Menu className="h-6 w-6" />
+            <Button
+              ref={mobileNavigationTriggerRef}
+              variant="outline"
+              size="icon"
+              aria-label={open ? 'Close navigation' : 'Open navigation'}
+              aria-expanded={open}
+              aria-controls={mobileNavigationPanelId}
+              className="focus-visible:ring-brand-violet fixed left-4 top-6 z-50 size-11 min-h-11 min-w-11 bg-white shadow-sm dark:bg-[#1E1E1E]"
+            >
+              <Menu aria-hidden="true" className="h-6 w-6" />
+              <span className="sr-only">{open ? 'Close navigation' : 'Open navigation'}</span>
             </Button>
           </SheetTrigger>
-          <SheetContent side="left" className="w-[300px] sm:w-[400px] dark:bg-[#111111]">
+          <SheetContent
+            id={mobileNavigationPanelId}
+            side="left"
+            onEscapeKeyDown={() => setOpen(false)}
+            className="w-[300px] sm:w-[400px] dark:bg-[#111111]"
+          >
             <SheetHeader className="flex flex-row items-center justify-between">
               <SheetTitle>
                 <Link to="/" onClick={() => setOpen(false)}>
                   <ProductLockup />
                 </Link>
               </SheetTitle>
+              <SheetDescription className="sr-only">
+                Navigate Reta and Devlab resources.
+              </SheetDescription>
             </SheetHeader>
             <div className="mt-8 flex flex-col space-y-3">
               <div className="flex flex-col space-y-3">
                 <Link to="/" onClick={() => setOpen(false)}>
                   Home
                 </Link>
-                <a href={productBrand.contactUrl} target="_blank" rel="noopener noreferrer">
+                <a
+                  href={productBrand.contactUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={() => setOpen(false)}
+                >
                   Contact
                 </a>
                 {aboutLinks.map((link) => (
-                  <a key={link.title} href={link.href} className="block font-medium">
+                  <a
+                    key={link.title}
+                    href={link.href}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="block font-medium"
+                    onClick={() => setOpen(false)}
+                  >
                     {link.title}
                   </a>
                 ))}
               </div>
-              <a
-                target="_blank"
-                rel="noreferrer noopener"
-                href={productBrand.contactUrl}
-                className="font-medium"
-              >
-                Contact Us
-              </a>
             </div>
             <Separator className="mt-8" />
-            <div className="mt-8 flex flex-row items-center justify-center gap-4">
+            <div className="mt-8 flex flex-row flex-wrap items-center gap-3">
               {resources.map((resource) => {
                 const Icon = IconComponent[resource.platform];
                 return (
-                  <Link
+                  <a
                     key={resource.title}
-                    to={resource.href}
-                    className="flex items-center gap-2 font-medium"
+                    href={resource.href}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    aria-label={resource.title}
+                    className="focus-visible:ring-brand-violet flex min-h-11 items-center gap-2 rounded-lg border border-zinc-200 px-3 font-medium focus-visible:outline-none focus-visible:ring-2 dark:border-white/10"
+                    onClick={() => setOpen(false)}
                   >
-                    {resource.platform && <Icon className="dark:fill-muted-foreground h-5 w-5" />}
-                  </Link>
+                    {resource.platform && (
+                      <Icon aria-hidden="true" className="dark:fill-muted-foreground h-5 w-5" />
+                    )}
+                    <span>{resource.title}</span>
+                  </a>
                 );
               })}
             </div>

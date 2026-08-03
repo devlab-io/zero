@@ -45,6 +45,47 @@ describe('P12/P121 landing quality contract', () => {
     ]) {
       expect(source.toLowerCase()).not.toContain(claim.toLowerCase());
     }
+    expect(source).not.toContain('assign it to Done');
+    expect(source).not.toContain('Move your inbox');
+  });
+
+  it('keeps activation consistent and lets the login page explain the provider step', () => {
+    const hero = read('components/home/sections/home-hero.tsx');
+    const navigation = read('components/navigation.tsx');
+    const footer = read('components/home/footer.tsx');
+    expect(hero).toContain('<Link to="/login">Get started</Link>');
+    expect(navigation).toContain('<Link to="/login">Get started</Link>');
+    expect(footer).toContain('<a href="/login">Get started</a>');
+    expect(hero + navigation).not.toContain('signIn.social');
+  });
+
+  it('keeps one semantic heading per landing narrative beat', () => {
+    for (const file of [
+      'components/home/sections/home-collab-section.tsx',
+      'components/home/sections/home-reply-mockup.tsx',
+      'components/home/sections/home-api-section.tsx',
+    ]) {
+      expect(read(file).match(/<h2\b/g)).toHaveLength(1);
+    }
+
+    for (const file of [
+      'components/home/sections/home-collab-section.tsx',
+      'components/home/sections/home-reply-mockup.tsx',
+      'components/home/sections/home-api-section.tsx',
+    ]) {
+      expect(read(file).match(/<span\b/g)?.length ?? 0).toBeGreaterThanOrEqual(2);
+    }
+  });
+
+  it('labels mobile navigation and its icon links', () => {
+    const navigation = read('components/navigation.tsx');
+    expect(navigation).toContain("aria-label={open ? 'Close navigation' : 'Open navigation'}");
+    expect(navigation).toContain('aria-expanded={open}');
+    expect(navigation).toContain('aria-controls={mobileNavigationPanelId}');
+    expect(navigation).toContain('id={mobileNavigationPanelId}');
+    expect(navigation).toContain('size-11 min-h-11 min-w-11');
+    expect(navigation).toContain('aria-label={resource.title}');
+    expect(navigation).not.toContain('Contact Us');
   });
 
   it('advertises only collaboration search operators implemented by Reta', () => {

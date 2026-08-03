@@ -3,7 +3,6 @@ import { HomeFeatureCards } from '@/components/home/sections/home-feature-cards'
 import { HomeReplyMockup } from '@/components/home/sections/home-reply-mockup';
 import { HomeApiSection } from '@/components/home/sections/home-api-section';
 import { HomeHero } from '@/components/home/sections/home-hero';
-import { ThemeToggle } from '@/components/theme/theme-toggle';
 import { Navigation } from '../navigation';
 import Footer from './footer';
 
@@ -16,11 +15,6 @@ export default function HomeContent() {
   return (
     <main className="brand-landing relative flex h-full flex-1 flex-col overflow-x-hidden bg-[#F7F7F8] px-2 text-zinc-950 transition-colors duration-200 motion-reduce:transition-none dark:bg-[#0F0F0F] dark:text-white">
       <Navigation />
-
-      <ThemeToggle
-        showLabel
-        className="fixed right-4 top-6 z-[60] border border-zinc-200 bg-white px-3 shadow-sm hover:bg-zinc-50 dark:border-white/10 dark:bg-[#1E1E1E] dark:hover:bg-[#272727]"
-      />
 
       <HomeHero />
 
