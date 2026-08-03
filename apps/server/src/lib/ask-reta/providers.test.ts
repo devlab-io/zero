@@ -107,21 +107,21 @@ const CASES: {
     },
   },
   {
-    id: 'openrouter:google/gemini-3-flash-preview',
+    id: 'openrouter:deepseek/deepseek-v4-flash-0731',
     url: 'https://openrouter.ai/api/v1/chat/completions',
     authHeader: ['Authorization', `Bearer ${API_KEY}`],
     fixture: { choices: [{ message: { content: 'réponse openrouter' } }] },
     expected: 'réponse openrouter',
     assertBody: (body) => {
       expect(body).toEqual({
-        model: 'google/gemini-3-flash-preview',
+        model: 'deepseek/deepseek-v4-flash-0731',
         messages: [
           { role: 'system', content: 'sys prompt' },
           { role: 'user', content: 'user prompt' },
         ],
         max_tokens: 200,
         temperature: 0.1,
-        reasoning: { effort: 'low', exclude: true },
+        provider: { zdr: true, data_collection: 'deny' },
       });
     },
   },

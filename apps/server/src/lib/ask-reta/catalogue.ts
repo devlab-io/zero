@@ -100,10 +100,10 @@ export const RETA_MODEL_CATALOGUE: readonly RetaCatalogueEntry[] = [
     supportsTemperature: true,
   },
   {
-    id: 'openrouter:google/gemini-3-flash-preview',
+    id: 'openrouter:deepseek/deepseek-v4-flash-0731',
     provider: 'openrouter',
-    upstreamModel: 'google/gemini-3-flash-preview',
-    label: 'Gemini 3 Flash Preview (OpenRouter)',
+    upstreamModel: 'deepseek/deepseek-v4-flash-0731',
+    label: 'DeepSeek V4 Flash 0731 (OpenRouter, ZDR)',
     requiresCredential: true,
     supportsTemperature: true,
   },

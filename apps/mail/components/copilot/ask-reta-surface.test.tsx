@@ -47,9 +47,9 @@ const defaultCatalogue = () => ({
       configured: false,
     },
     {
-      id: 'openrouter:google/gemini-3-flash-preview',
+      id: 'openrouter:deepseek/deepseek-v4-flash-0731',
       provider: 'openrouter',
-      label: 'Gemini 3 Flash Preview (OpenRouter)',
+      label: 'DeepSeek V4 Flash 0731 (OpenRouter, ZDR)',
       requiresCredential: true,
       configured: false,
     },
@@ -1035,9 +1035,9 @@ describe('AskRetaSurface — model catalogue select (slice 3B)', () => {
     expect(option('anthropic:claude-fable-5').disabled).toBe(false);
     expect(option('openai:gpt-5.2').disabled).toBe(true);
     expect(option('openai:gpt-5.2').textContent).toContain('askReta.notConfigured');
-    expect(option('openrouter:google/gemini-3-flash-preview').disabled).toBe(true);
-    expect(option('openrouter:google/gemini-3-flash-preview').textContent).toContain(
-      'Gemini 3 Flash Preview (OpenRouter)',
+    expect(option('openrouter:deepseek/deepseek-v4-flash-0731').disabled).toBe(true);
+    expect(option('openrouter:deepseek/deepseek-v4-flash-0731').textContent).toContain(
+      'DeepSeek V4 Flash 0731 (OpenRouter, ZDR)',
     );
   });
 

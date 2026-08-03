@@ -19,7 +19,7 @@ describe('Ask Reta model catalogue — deployment-owned, closed set', () => {
       'anthropic:claude-sonnet-5',
       'gemini:gemini-3.6-flash',
       'gemini:gemini-3.1-pro-preview',
-      'openrouter:google/gemini-3-flash-preview',
+      'openrouter:deepseek/deepseek-v4-flash-0731',
       'moonshot:kimi-k2.5',
       'zai:glm-5.1',
       'zai:glm-5',
@@ -91,7 +91,7 @@ describe('Ask Reta model catalogue — deployment-owned, closed set', () => {
     expect(catalogueIdsForProvider('zai')).toEqual(['zai:glm-5.1', 'zai:glm-5', 'zai:glm-5-turbo']);
     expect(catalogueIdsForProvider('moonshot')).toEqual(['moonshot:kimi-k2.5']);
     expect(catalogueIdsForProvider('openrouter')).toEqual([
-      'openrouter:google/gemini-3-flash-preview',
+      'openrouter:deepseek/deepseek-v4-flash-0731',
     ]);
     expect(catalogueIdsForProvider('workers-ai')).toEqual([
       'workers-ai:llama-4-scout',

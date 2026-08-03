@@ -267,9 +267,9 @@ const ADAPTERS: Record<Exclude<RetaProviderId, 'workers-ai'>, AdapterSpec> = {
       ],
       max_tokens: p.maxTokens,
       ...temperatureIfSupported(entry, p),
-      // Email correction and drafting benefit from low latency; the selected
-      // Gemini Flash model supports OpenRouter's bounded reasoning control.
-      reasoning: { effort: 'low', exclude: true },
+      // Mail excerpts are sensitive. Fail closed unless OpenRouter can route
+      // to an endpoint that neither retains nor collects prompt content.
+      provider: { zdr: true, data_collection: 'deny' },
     }),
     parse: parseOpenAiCompatChat,
   },
