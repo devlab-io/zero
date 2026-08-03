@@ -45,8 +45,6 @@ export type ZeroEnv = {
   DISABLE_WORKFLOWS: 'true';
   AUTORAG_ID: '';
   USE_OPENAI: 'true';
-  CLOUDFLARE_ACCOUNT_ID: '';
-  CLOUDFLARE_API_TOKEN: '';
   BASE_URL: string;
   VITE_PUBLIC_APP_URL: string;
   DATABASE_URL: string;

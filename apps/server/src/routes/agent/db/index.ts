@@ -269,8 +269,21 @@ export async function modifyThreadLabels(
   threadId: string,
   addLabelIds: string[],
   removeLabelIds: string[],
-): Promise<{ addedLabels: string[]; removedLabels: string[] }> {
+): Promise<{ threadFound: boolean; addedLabels: string[]; removedLabels: string[] }> {
   return await db.transaction(async (tx) => {
+    // History deltas can reach the agent before the corresponding thread sync.
+    // Check inside the same transaction so we never create orphan label rows or
+    // race a concurrent thread deletion.
+    const [thread] = await tx
+      .select({ id: threads.id })
+      .from(threads)
+      .where(eq(threads.id, threadId))
+      .limit(1);
+
+    if (!thread) {
+      return { threadFound: false, addedLabels: [], removedLabels: [] };
+    }
+
     // Remove labels first
     if (removeLabelIds.length > 0) {
       await tx
@@ -305,10 +318,10 @@ export async function modifyThreadLabels(
         await tx.insert(threadLabels).values(threadLabelInserts);
       }
 
-      return { addedLabels: newLabelIds, removedLabels: removeLabelIds };
+      return { threadFound: true, addedLabels: newLabelIds, removedLabels: removeLabelIds };
     }
 
-    return { addedLabels: [], removedLabels: removeLabelIds };
+    return { threadFound: true, addedLabels: [], removedLabels: removeLabelIds };
   });
 }
 

@@ -63,10 +63,6 @@ RESEND_API_KEY=""
 REDIS_URL="http://localhost:8079"
 REDIS_TOKEN="upstash-local-token"
 
-# --- Cloudflare API (vectorize/autorag tooling) ---
-CLOUDFLARE_ACCOUNT_ID=""
-CLOUDFLARE_API_TOKEN=""
-
 # --- Billing / analytics ---
 AUTUMN_SECRET_KEY=""
 DUB_API_KEY=""

@@ -14,10 +14,10 @@
  * Reuse or distribution of this file requires a license from Zero Email Inc.
  */
 
-import { logger } from '../../lib/logger';
 import { getThreadLabels, modifyThreadLabels } from './db';
 import type { ZeroDriverInternal } from './internal';
 import { OutgoingMessageType } from './types';
+import { logger } from '../../lib/logger';
 
 export async function modifyThreadLabelsByName(
   self: ZeroDriverInternal,
@@ -77,6 +77,23 @@ export async function modifyThreadLabelsInDB(
     const currentLabels = currentLabelsData.map((l) => l.id);
 
     const result = await modifyThreadLabels(self.db, threadId, addLabels, removeLabels);
+
+    if (!result.threadFound) {
+      logger.warn('[labels] Skipped local label mutation because the thread is not synced', {
+        threadIdLength: threadId.length,
+        addCount: addLabels.length,
+        removeCount: removeLabels.length,
+      });
+
+      return {
+        success: false,
+        threadId,
+        previousLabels: currentLabels,
+        addedLabels: [],
+        removedLabels: [],
+        skipped: 'thread_not_found' as const,
+      };
+    }
 
     const allAffectedLabels = [...new Set([...addLabels, ...removeLabels])];
     await Promise.all(allAffectedLabels.map((label) => self.reloadFolder(label.toLowerCase())));

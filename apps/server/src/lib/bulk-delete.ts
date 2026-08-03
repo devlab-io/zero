@@ -1,14 +1,7 @@
 import { env } from 'cloudflare:workers';
 import { logger } from './logger';
 
-// KV namespace IDs for different environments
-const KV_NAMESPACE_IDS = {
-  local: 'b7db3a98a80f4e16a8b6edc5fa8c7b76',
-  staging: 'b7db3a98a80f4e16a8b6edc5fa8c7b76',
-  production: '3348ff0976284269a8d8a5e6e4c04c56',
-} as const;
-
-export type Environment = 'local' | 'staging' | 'production';
+const DELETE_BATCH_SIZE = 50;
 
 export interface BulkDeleteResult {
   successful: number;
@@ -16,54 +9,41 @@ export interface BulkDeleteResult {
 }
 
 /**
- * Bulk delete keys from Cloudflare KV namespace
+ * Delete keys from the bound Cloudflare KV namespace.
+ *
+ * KV bindings do not expose the REST bulk-delete endpoint, so keep concurrency
+ * bounded while avoiding a second set of Cloudflare credentials in the Worker.
  * @param keys Array of keys to delete
- * @param environment Environment to use (defaults to 'local')
  * @returns Promise with deletion results
  */
-export const bulkDeleteKeys = async (
-  keys: string[],
-  environment: Environment = env.NODE_ENV as Environment,
-): Promise<BulkDeleteResult> => {
-  if (environment === 'local') {
-    await Promise.all(keys.map((key) => env.gmail_processing_threads.delete(key)));
-    return { successful: keys.length, failed: 0 };
-  }
-  if (keys.length === 0) {
+export const bulkDeleteKeys = async (keys: string[]): Promise<BulkDeleteResult> => {
+  const uniqueKeys = [...new Set(keys)];
+  if (uniqueKeys.length === 0) {
     return { successful: 0, failed: 0 };
   }
 
-  const namespaceId = KV_NAMESPACE_IDS[environment];
-  const accountId = env.CLOUDFLARE_ACCOUNT_ID;
+  let successful = 0;
+  let failed = 0;
 
-  if (!accountId) {
-    logger.error('[BULK_DELETE] CLOUDFLARE_ACCOUNT_ID environment variable not set');
-    return { successful: 0, failed: keys.length };
-  }
+  for (let offset = 0; offset < uniqueKeys.length; offset += DELETE_BATCH_SIZE) {
+    const batch = uniqueKeys.slice(offset, offset + DELETE_BATCH_SIZE);
+    const results = await Promise.allSettled(
+      batch.map((key) => env.gmail_processing_threads.delete(key)),
+    );
 
-  try {
-    // The cloudflare SDK (~50 MB on disk) is only needed on this cold path — keep it
-    // out of the isolate's static import graph.
-    const { default: Cloudflare } = await import('cloudflare');
-    const cloudflareClient = new Cloudflare({
-      apiToken: env.CLOUDFLARE_API_TOKEN || '',
-    });
-    const response = await cloudflareClient.kv.namespaces.bulkDelete(namespaceId, {
-      account_id: accountId,
-      body: keys,
-    });
-
-    const successful = response?.successful_key_count || 0;
-    const failed = keys.length - successful;
-
-    logger.info(`[BULK_DELETE] Successfully deleted ${successful}/${keys.length} keys`);
-    if (failed > 0) {
-      logger.warn(`[BULK_DELETE] Failed to delete ${failed} keys`);
+    for (const result of results) {
+      if (result.status === 'fulfilled') successful += 1;
+      else failed += 1;
     }
-
-    return { successful, failed };
-  } catch (error) {
-    logger.error('[BULK_DELETE] Failed to bulk delete keys:', error);
-    return { successful: 0, failed: keys.length };
   }
+
+  if (failed > 0) {
+    logger.warn('[BULK_DELETE] Some KV deletions failed', {
+      attempted: uniqueKeys.length,
+      successful,
+      failed,
+    });
+  }
+
+  return { successful, failed };
 };

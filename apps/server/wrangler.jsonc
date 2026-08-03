@@ -188,8 +188,6 @@
         "DISABLE_WORKFLOWS": "true",
         "AUTORAG_ID": "",
         "USE_OPENAI": "true",
-        "CLOUDFLARE_ACCOUNT_ID": "",
-        "CLOUDFLARE_API_TOKEN": "",
         "MEET_AUTH_HEADER": "",
         "OTEL_EXPORTER_OTLP_ENDPOINT": "https://api.axiom.co/v1/traces",
         "OTEL_SERVICE_NAME": "zero-email-server-local",
