@@ -1,7 +1,7 @@
 # Reta — carte de continuation P12 → P18
 
-État au 2026-08-02, commit de release `8c405e31496f` sur la branche
-`codex/reta-team-collaboration`. Les migrations 0042 à 0046 sont appliquées en
+État au 2026-08-03, commit applicatif de release `b4df4c28` sur la branche
+`codex/reta-team-collaboration`. Les migrations 0042 à 0049 sont appliquées en
 production et les Workers front/serveur sont publiés. Chaque phase ci-dessous
 liste l'ordre de dépendance, les points d'ancrage EXACTS dans le code actuel et
 les invariants à ne pas casser.
@@ -35,8 +35,8 @@ Invariants transverses (toutes phases) :
 | P14           | Règles ACL-safe, claim/undo/simulation/confirmation        | serveur moteur+store 51/51, mail form+explication 9/9                          | Prouvé                         |
 | P15           | Reviews, soft-lock et collision fail-closed                | serveur shared+store+PG+DO 35/35, mail 38/38                                   | Prouvé sur PG UTC              |
 | P16           | SLA ouvré et pilotage ACL-first                            | serveur business-time+ops+store 39/39, mail dashboard 6/6                      | Prouvé                         |
-| P17           | Rôles, audit signé, rétention, sessions, portabilité       | ciblés 107/107 dont 16 PG                                                      | Prouvé source/local            |
-| P18           | Linear/email-first, webhooks signés, export/API, sans chat | ciblés 50/50 dont 13 PG                                                        | Prouvé source/local            |
+| P17           | Rôles, audit signé, rétention, sessions, portabilité       | ciblés 107/107 dont 16 PG                                                      | Prouvé source/local + DB prod  |
+| P18           | Linear/email-first, webhooks signés, export/API, sans chat | ciblés 50/50 dont 13 PG                                                        | Prouvé source/local + DB prod  |
 
 Les 38 tests du routeur `teams` complètent transversalement P13–P16 ; le lot
 dédié totalise donc serveur 175/175 et mail 60/60 sans compter deux fois ces
@@ -535,8 +535,8 @@ Review-12 (Fable puis revue Codex, 2026-08-03) :
 - **Preuves** : ciblés P18 50/50 dont 13 PG, serveur complet 1116/1116, mail
   840/840, deux typechecks verts, ESLint 0 erreur, build production vert et
   `db:generate` sans changement après 0049. La chaîne Drizzle 0000→0049 passe
-  depuis une base vide avec 50 migrations journalisées ; 0049 est appliquée
-  uniquement sur cette base jetable. La production attend le gate visuel P12.
+  depuis une base vide avec 50 migrations journalisées. Après le gate visuel
+  P12, 0047 à 0049 ont été appliquées et vérifiées en production.
 
 Limites restantes libellées : `listLinearTargets` (config des mappings) exige
 l'API Linear vivante — hors QA l'UI affiche l'erreur et réessaie ; la
@@ -572,6 +572,31 @@ et l'UI à 2000 entrées par téléchargement.
   déployer le Worker serveur → health/route checks → déployer le Worker mail →
   QA Dia lecture seule. Au moment de cette baseline, seules les étapes après
   le gate visuel restent à exécuter.
+
+## Publication P12–P18 — 2026-08-03
+
+- Git : commit applicatif `b4df4c28` poussé sur
+  `codex/reta-team-collaboration` après gates complets et scan gitleaks sans
+  fuite.
+- Base Railway production : `railway`, fuseau `Etc/UTC`, journal Drizzle à 50
+  entrées (ids 1–50). Les hashes 0047, 0048 et 0049 correspondent aux fichiers
+  locaux. `mail0_team_retention_policy`, les trois CHECKs de rétention 30–730,
+  les FK `team_id` CASCADE et `updated_by` SET NULL, ainsi que les colonnes
+  nullable `last_swept_at` et `last_linear_updated_at` sont présents.
+- Worker serveur `zero-server-production` : version
+  `b393a1c4-1aa3-45dc-9483-b460d6e40569`, `/health` répond 200 en JSON.
+- Worker mail `zero-production` : version
+  `e4ae87f3-9d67-4f5b-a6da-c33a2620454c`. Les navigations HTML `/`, `/team`,
+  `/team?view=ops`, `/team?view=integrations` et
+  `/integrations/linear/callback` répondent 200 avec le titre
+  `Reta by Devlab`.
+- CUA production Dia reste **non prouvée** : la sélection AX de l'onglet
+  explicitement nommé `Reta by Devlab` a échoué avec
+  `Computer Use server error -10005: cannotClickOffscreenElement`. Le fallback
+  borné (`super+n`, puis `super+l`) n'a exposé que `commandBarTextField`, pas le
+  champ autorisé `navigationBarAssistantBarTextField`. Aucun champ de
+  substitution, bouton ambigu, clic par coordonnées ou action métier n'a été
+  utilisé. La preuve visuelle locale finale dans Dia reste PASS.
 
 ## Preuves de release production — 2026-08-02
 
