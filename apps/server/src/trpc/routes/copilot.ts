@@ -215,6 +215,11 @@ export const copilotRouter = router({
         // Vault writes are fail-closed like every copilot write surface.
         key: 'userId',
         failClosed: true,
+        durableFallback: async (ctx) => {
+          if (!ctx.sessionUser) throw new Error('unreachable: identity checked upstream');
+          const db = await getZeroDB(ctx.sessionUser.id);
+          return db.consumeCopilotControlRateLimit('byok-set');
+        },
       }),
     )
     .input(
@@ -268,6 +273,11 @@ export const copilotRouter = router({
         generatePrefix: () => 'ratelimit:copilot-byok-delete',
         key: 'userId',
         failClosed: true,
+        durableFallback: async (ctx) => {
+          if (!ctx.sessionUser) throw new Error('unreachable: identity checked upstream');
+          const db = await getZeroDB(ctx.sessionUser.id);
+          return db.consumeCopilotControlRateLimit('byok-delete');
+        },
       }),
     )
     .input(z.object({ provider: byokProviderSchema }))
@@ -294,6 +304,11 @@ export const copilotRouter = router({
         generatePrefix: () => 'ratelimit:copilot-byok-select',
         key: 'userId',
         failClosed: true,
+        durableFallback: async (ctx) => {
+          if (!ctx.sessionUser) throw new Error('unreachable: identity checked upstream');
+          const db = await getZeroDB(ctx.sessionUser.id);
+          return db.consumeCopilotControlRateLimit('byok-select');
+        },
       }),
     )
     .input(z.object({ modelId: z.string().min(1).max(60) }))

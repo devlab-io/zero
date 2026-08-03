@@ -45,6 +45,7 @@ import { EProviders } from '../types';
 import type { ZeroEnv } from '../env';
 
 type TeamDbFactory = (url: string) => ReturnType<typeof createDb>;
+export type CopilotControlRateLimitKind = 'byok-set' | 'byok-delete' | 'byok-select';
 
 /**
  * Cloudflare attaches postgres-js sockets to the invocation that opened them.
@@ -265,6 +266,10 @@ export class DbRpcDO extends RpcTarget {
    */
   async consumeAskRetaRateLimit() {
     return await this.mainDo.consumeAskRetaRateLimit();
+  }
+
+  async consumeCopilotControlRateLimit(kind: CopilotControlRateLimitKind) {
+    return await this.mainDo.consumeCopilotControlRateLimit(kind);
   }
 
   async rewrapRetaByokCredential(
@@ -1090,6 +1095,12 @@ export class ZeroDB extends DurableObject<ZeroEnv> {
   private static readonly ASK_RETA_RATE_KEY = 'reta:ask-rate:v1';
   private static readonly ASK_RETA_RATE_LIMIT = 20;
   private static readonly ASK_RETA_RATE_WINDOW_MS = 5 * 60 * 1000;
+  private static readonly COPILOT_CONTROL_RATE_LIMITS = {
+    'byok-set': 10,
+    'byok-delete': 10,
+    'byok-select': 30,
+  } as const satisfies Record<CopilotControlRateLimitKind, number>;
+  private static readonly COPILOT_CONTROL_RATE_WINDOW_MS = 5 * 60 * 1000;
 
   /**
    * Exact 20-calls / 5-minute sliding window, persisted in ctx.storage and
@@ -1117,6 +1128,37 @@ export class ZeroDB extends DurableObject<ZeroEnv> {
       return {
         allowed: result.allowed,
         limit: ZeroDB.ASK_RETA_RATE_LIMIT,
+        remaining: result.remaining,
+        reset: result.reset,
+      };
+    });
+  }
+
+  /**
+   * Durable, per-user fallback for fail-closed BYOK control mutations when
+   * remote Redis is unavailable in production. Each operation owns a
+   * separate PII-free bucket so selecting a model cannot exhaust key writes.
+   */
+  async consumeCopilotControlRateLimit(kind: CopilotControlRateLimitKind): Promise<{
+    allowed: boolean;
+    limit: number;
+    remaining: number;
+    reset: number;
+  }> {
+    const limit = ZeroDB.COPILOT_CONTROL_RATE_LIMITS[kind];
+    const storageKey = `reta:control-rate:${kind}:v1`;
+    return await this.ctx.storage.transaction(async (txn) => {
+      const stored = (await txn.get<number[]>(storageKey)) ?? [];
+      const result = consumeSlidingWindow(
+        stored,
+        Date.now(),
+        limit,
+        ZeroDB.COPILOT_CONTROL_RATE_WINDOW_MS,
+      );
+      await txn.put(storageKey, result.timestamps);
+      return {
+        allowed: result.allowed,
+        limit,
         remaining: result.remaining,
         reset: result.reset,
       };

@@ -102,3 +102,57 @@ describe('DbRpcDO.consumeAskRetaRateLimit — façade structurellement scopée',
     expect(mainDo.consumeAskRetaRateLimit).toHaveBeenCalledWith();
   });
 });
+
+describe('ZeroDB.consumeCopilotControlRateLimit — buckets BYOK séparés par utilisateur', () => {
+  it('applique 10/5 min aux écritures et 30/5 min à la sélection, avec des clés sans PII', async () => {
+    const { map, zeroDb } = makeDo();
+    expect(await zeroDb.consumeCopilotControlRateLimit('byok-set')).toMatchObject({
+      allowed: true,
+      limit: 10,
+      remaining: 9,
+    });
+    expect(await zeroDb.consumeCopilotControlRateLimit('byok-delete')).toMatchObject({
+      allowed: true,
+      limit: 10,
+      remaining: 9,
+    });
+    expect(await zeroDb.consumeCopilotControlRateLimit('byok-select')).toMatchObject({
+      allowed: true,
+      limit: 30,
+      remaining: 29,
+    });
+    expect([...map.keys()].sort()).toEqual([
+      'reta:control-rate:byok-delete:v1',
+      'reta:control-rate:byok-select:v1',
+      'reta:control-rate:byok-set:v1',
+    ]);
+  });
+
+  it("épuiser l'enregistrement ne bloque ni la suppression ni la sélection", async () => {
+    const { zeroDb } = makeDo();
+    for (let i = 0; i < 10; i += 1) {
+      expect((await zeroDb.consumeCopilotControlRateLimit('byok-set')).allowed).toBe(true);
+    }
+    expect((await zeroDb.consumeCopilotControlRateLimit('byok-set')).allowed).toBe(false);
+    expect((await zeroDb.consumeCopilotControlRateLimit('byok-delete')).allowed).toBe(true);
+    expect((await zeroDb.consumeCopilotControlRateLimit('byok-select')).allowed).toBe(true);
+  });
+});
+
+describe('DbRpcDO.consumeCopilotControlRateLimit — façade structurellement scopée', () => {
+  it("délègue uniquement le type d'opération, jamais un identifiant utilisateur", async () => {
+    const mainDo = {
+      consumeCopilotControlRateLimit: vi.fn(async () => ({
+        allowed: true,
+        limit: 10,
+        remaining: 9,
+        reset: 1,
+      })),
+    };
+    const facade = new DbRpcDO(mainDo as never, 'user-a');
+    await expect(facade.consumeCopilotControlRateLimit('byok-set')).resolves.toMatchObject({
+      allowed: true,
+    });
+    expect(mainDo.consumeCopilotControlRateLimit).toHaveBeenCalledWith('byok-set');
+  });
+});

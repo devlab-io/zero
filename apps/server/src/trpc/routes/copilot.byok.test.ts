@@ -25,6 +25,12 @@ const harness = vi.hoisted(() => ({
     void args;
     return harness.selectResult;
   }),
+  consumeCopilotControlRateLimit: vi.fn(async (kind: string) => ({
+    allowed: true,
+    limit: kind === 'byok-select' ? 30 : 10,
+    remaining: kind === 'byok-select' ? 29 : 9,
+    reset: 1,
+  })),
   limiterConfigs: [] as Record<string, unknown>[],
 }));
 
@@ -81,6 +87,7 @@ vi.mock('../../lib/server-utils', () => ({
     replaceRetaByokCredential: harness.replaceRetaByokCredential,
     deleteRetaByokCredentialAndResetModel: harness.deleteRetaByokCredentialAndResetModel,
     selectRetaModel: harness.selectRetaModel,
+    consumeCopilotControlRateLimit: harness.consumeCopilotControlRateLimit,
   })),
 }));
 
@@ -132,6 +139,7 @@ beforeEach(() => {
   harness.replaceRetaByokCredential.mockClear();
   harness.deleteRetaByokCredentialAndResetModel.mockClear();
   harness.selectRetaModel.mockClear();
+  harness.consumeCopilotControlRateLimit.mockClear();
 });
 
 const currentStatus = (provider: string, kekVersion = 'v1') => ({
@@ -394,6 +402,24 @@ describe('copilot BYOK — write surfaces are rate-limited FAIL-CLOSED per user'
       expect(index, expected).toBeGreaterThan(-1);
       expect(harness.limiterConfigs[index]).toMatchObject({ key: 'userId', failClosed: true });
     }
+  });
+
+  it('each fail-closed limiter has the exact per-user durable fallback used in production', async () => {
+    const expectedKinds = new Map([
+      ['ratelimit:copilot-byok-set', 'byok-set'],
+      ['ratelimit:copilot-byok-delete', 'byok-delete'],
+      ['ratelimit:copilot-byok-select', 'byok-select'],
+    ]);
+    for (const config of harness.limiterConfigs) {
+      const prefix = (config.generatePrefix as () => string)();
+      const expectedKind = expectedKinds.get(prefix);
+      if (!expectedKind) continue;
+      const fallback = config.durableFallback as (context: typeof ctx) => Promise<unknown>;
+      expect(fallback, prefix).toBeTypeOf('function');
+      await expect(fallback(ctx)).resolves.toMatchObject({ allowed: true });
+      expect(harness.consumeCopilotControlRateLimit).toHaveBeenLastCalledWith(expectedKind);
+    }
+    expect(harness.consumeCopilotControlRateLimit).toHaveBeenCalledTimes(3);
   });
 
   it('no BYOK route accepts a userId or connectionId input', () => {
