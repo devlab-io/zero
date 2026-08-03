@@ -330,6 +330,27 @@
       "when": 1785664088171,
       "tag": "0046_messy_molly_hayes",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1785706737977,
+      "tag": "0047_volatile_grandmaster",
+      "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1785709609134,
+      "tag": "0048_overconfident_colossus",
+      "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1785712237624,
+      "tag": "0049_lying_wallflower",
+      "breakpoints": true
     }
   ]
 }

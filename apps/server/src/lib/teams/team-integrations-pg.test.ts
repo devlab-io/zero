@@ -18,10 +18,10 @@ import {
   unlinkIssue,
 } from './team-integrations-store';
 import { deliverDueOutbound, enqueueOutboundEvent, reapStaleOutboundLeases } from './team-outbound';
+import { listTeamAudit, setMemberRole, setThreadStatus } from './team-store';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { LinearApiError } from '../integrations/linear-client';
 import type { SealedSecret } from './team-integrations-shared';
-import { listTeamAudit, setThreadStatus } from './team-store';
 import { createDb, type DB } from '../../db';
 
 /**
@@ -80,16 +80,22 @@ async function seed(tx: DB) {
   await sql(`insert into mail0_user (id, name, email, email_verified, created_at, updated_at) values
     ('vgi-owner','Owner','vgi-owner@example.test',true,now(),now()),
     ('vgi-member','Member','vgi-member@example.test',true,now(),now()),
+    ('vgi-guest','Guest','vgi-guest@example.test',true,now(),now()),
+    ('vgi-auditor','Auditor','vgi-auditor@example.test',true,now(),now()),
     ('vgi-out','Outsider','vgi-out@example.test',true,now(),now())`);
   await sql(`insert into mail0_connection (id,user_id,email,scope,expires_at,created_at,updated_at,provider_id)
     values ('vgi-connA','vgi-owner','vgi-owner@example.test','s',now()+interval '1 day',now(),now(),'google')`);
   await sql(`insert into mail0_team (id,name,created_by) values ('vgi-t1','T','vgi-owner')`);
   await sql(`insert into mail0_team_member (team_id,user_id,role) values
-    ('vgi-t1','vgi-owner','owner'),('vgi-t1','vgi-member','member')`);
+    ('vgi-t1','vgi-owner','owner'),('vgi-t1','vgi-member','member'),
+    ('vgi-t1','vgi-guest','guest'),('vgi-t1','vgi-auditor','auditor')`);
   await sql(
     `insert into mail0_team_thread (id,team_id,thread_id,sharer_user_id,sharer_connection_id,sharer_email,provider_id,subject,visibility)
      values ('vgi-tt1','vgi-t1','vgi-th1','vgi-owner','vgi-connA','vgi-owner@example.test','google','Panne serveur','team')`,
   );
+  await sql(`insert into mail0_team_thread_access
+    (id,team_thread_id,user_id,source,granted_by)
+    values ('vgi-guest-access','vgi-tt1','vgi-guest','manual','vgi-owner')`);
 }
 
 async function seedActiveInstall(tx: DB, workspaceId = 'ws-1') {
@@ -292,6 +298,127 @@ describe('P18 durci — PostgreSQL réel (skippé si base absente)', () => {
       expect(client.issueCreate).toHaveBeenCalledTimes(1);
       const view = await listThreadIntegration(tx, 'vgi-member', 'vgi-tt1');
       expect(view.issueLinks).toHaveLength(1);
+    });
+  });
+
+  it('pont P17→P18 : guest/auditor ne mutent rien et un mapping assignee stale est ignoré', async (ctx) => {
+    if (!available) return ctx.skip();
+    await inRollback(async (tx) => {
+      await seed(tx);
+      await seedActiveInstall(tx, 'ws-role');
+      await setMapping(tx, 'vgi-owner', 'vgi-t1', {
+        kind: 'team',
+        retaValue: 'lt-1',
+        externalId: 'lt-1',
+      });
+      await setMapping(tx, 'vgi-owner', 'vgi-t1', {
+        kind: 'assignee',
+        retaValue: 'vgi-member',
+        externalId: 'linear-member',
+      });
+
+      for (const actor of ['vgi-guest', 'vgi-auditor']) {
+        await expect(
+          addExternalLink(tx, actor, 'vgi-tt1', {
+            kind: 'crm',
+            label: 'Interdit',
+            url: 'https://example.com/customer',
+          }),
+        ).rejects.toThrow('forbidden');
+        await expect(
+          previewIssue(
+            tx,
+            actor,
+            { teamThreadId: 'vgi-tt1', clientRequestKey: `role-${actor}`, linearTeamId: 'lt-1' },
+            APP,
+          ),
+        ).rejects.toThrow('forbidden');
+      }
+
+      await tx.execute(`insert into mail0_team_thread_issue_link
+        (id,team_thread_id,install_id,issue_id,issue_identifier,issue_url,created_by)
+        values ('vgi-role-link','vgi-tt1','vgi-inst1','lin-role','ENG-99','https://linear.app/x/issue/ENG-99','vgi-owner')`);
+      await setMemberRole(tx, 'vgi-owner', 'vgi-t1', 'vgi-member', 'auditor');
+      const outcome = await processLinearEvent(tx, {
+        type: 'Issue',
+        action: 'update',
+        organizationId: 'ws-role',
+        data: {
+          id: 'lin-role',
+          updatedAt: '2026-08-03T00:00:00.000Z',
+          assignee: { id: 'linear-member' },
+        },
+      });
+      expect(outcome).toBe('ignored');
+      const assigned = (await tx.execute(
+        `select assignee_user_id from mail0_team_thread where id='vgi-tt1'`,
+      )) as unknown as Array<{ assignee_user_id: string | null }>;
+      expect(assigned[0]!.assignee_user_id).toBeNull();
+
+      // Le mapping devenu stale reste supprimable par l'owner.
+      await expect(
+        setMapping(tx, 'vgi-owner', 'vgi-t1', {
+          kind: 'assignee',
+          retaValue: 'vgi-member',
+          externalId: '',
+        }),
+      ).resolves.toEqual({ ok: true });
+    });
+  });
+
+  it('webhook Issue : un retry ancien ne peut pas écraser un état Linear plus récent', async (ctx) => {
+    if (!available) return ctx.skip();
+    await inRollback(async (tx) => {
+      await seed(tx);
+      await seedActiveInstall(tx, 'ws-order');
+      await setMapping(tx, 'vgi-owner', 'vgi-t1', {
+        kind: 'status',
+        retaValue: 'open',
+        externalId: 'state-open',
+      });
+      await setMapping(tx, 'vgi-owner', 'vgi-t1', {
+        kind: 'status',
+        retaValue: 'closed',
+        externalId: 'state-done',
+      });
+      await tx.execute(`insert into mail0_team_thread_issue_link
+        (id,team_thread_id,install_id,issue_id,issue_identifier,issue_url,created_by)
+        values ('vgi-order-link','vgi-tt1','vgi-inst1','lin-order','ENG-100','https://linear.app/x/issue/ENG-100','vgi-owner')`);
+
+      expect(
+        await processLinearEvent(tx, {
+          type: 'Issue',
+          action: 'update',
+          organizationId: 'ws-order',
+          data: {
+            id: 'lin-order',
+            updatedAt: '2026-08-03T00:02:00.000Z',
+            state: { id: 'state-done' },
+          },
+        }),
+      ).toBe('synced');
+      expect(
+        await processLinearEvent(tx, {
+          type: 'Issue',
+          action: 'update',
+          organizationId: 'ws-order',
+          data: {
+            id: 'lin-order',
+            updatedAt: '2026-08-03T00:01:00.000Z',
+            state: { id: 'state-open' },
+          },
+        }),
+      ).toBe('ignored');
+
+      const thread = (await tx.execute(
+        `select status from mail0_team_thread where id='vgi-tt1'`,
+      )) as unknown as Array<{ status: string }>;
+      expect(thread[0]?.status).toBe('closed');
+      const link = (await tx.execute(
+        `select to_char(last_linear_updated_at, 'YYYY-MM-DD"T"HH24:MI:SS.MS') as watermark
+           from mail0_team_thread_issue_link where id='vgi-order-link'`,
+      )) as unknown as Array<{ watermark: string }>;
+      expect(link[0]?.watermark).toBe('2026-08-03T00:02:00.000');
     });
   });
 
@@ -562,7 +689,11 @@ describe('P18 durci — PostgreSQL réel (skippé si base absente)', () => {
         type: 'Issue',
         action: 'update',
         organizationId: 'ws-1',
-        data: { id: 'lin-issue-1', state: { id: 'state-done' } },
+        data: {
+          id: 'lin-issue-1',
+          updatedAt: '2026-08-03T00:00:00.000Z',
+          state: { id: 'state-done' },
+        },
       });
       expect(outcome).toBe('synced');
       const audit = await listTeamAudit(tx, 'vgi-owner', 'vgi-t1');

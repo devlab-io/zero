@@ -3,6 +3,7 @@ import {
   team,
   teamAuditLog,
   teamCommentReaction,
+  teamDraftReview,
   teamInvite,
   teamLabel,
   teamMember,
@@ -15,6 +16,14 @@ import {
   user,
   type TeamNotificationPrefs,
 } from '../../db/schema';
+import {
+  assignableRoles,
+  roleCan,
+  RESTRICTED_OVERSEER_ROLES,
+  TEAM_VISIBILITY_ROLES,
+  type TeamCapability,
+  type TeamRole,
+} from './team-roles';
 import { and, asc, desc, eq, gt, inArray, isNull, lt, or, sql, type SQL } from 'drizzle-orm';
 import { enqueueOutboundEvent } from './team-outbound';
 import type { DB } from '../../db';
@@ -34,7 +43,7 @@ import type { DB } from '../../db';
  * audit row). Full thread/attachment reads resolve through resolveAccess —
  * the sharer's connection is only ever used server-side AFTER that check.
  */
-export type TeamRole = 'owner' | 'member';
+export type { TeamRole } from './team-roles';
 export type TeamThreadStatus = 'open' | 'closed';
 export type TeamThreadVisibility = 'team' | 'restricted';
 
@@ -78,7 +87,13 @@ export class TeamStoreError extends Error {
       | 'preview_expired'
       | 'preview_invalid'
       | 'needs_reconciliation'
-      | 'oauth_scope_mismatch',
+      | 'oauth_scope_mismatch'
+      // P17 — gouvernance + rôles
+      | 'mention_requires_access'
+      | 'export_unavailable'
+      | 'invalid_retention'
+      | 'restore_invalid'
+      | 'restore_too_large',
   ) {
     super(code);
     this.name = 'TeamStoreError';
@@ -141,6 +156,23 @@ async function requireMembership(db: DbOrTx, teamId: string, userId: string) {
 async function requireOwner(db: DbOrTx, teamId: string, userId: string) {
   const membership = await requireMembership(db, teamId, userId);
   if (membership.role !== 'owner') throw new TeamStoreError('forbidden');
+  return membership;
+}
+
+/**
+ * P17 — garde par CAPACITÉ : membership + matrice de rôles (team-roles.ts).
+ * C'est la porte unique des mutations non structurelles ; requireOwner ne
+ * subsiste que pour les actes réservés au owner (suppression d'équipe, rôles
+ * owner/admin).
+ */
+export async function requireCapability(
+  db: DbOrTx,
+  teamId: string,
+  userId: string,
+  capability: TeamCapability,
+) {
+  const membership = await requireMembership(db, teamId, userId);
+  if (!roleCan(membership.role, capability)) throw new TeamStoreError('forbidden');
   return membership;
 }
 
@@ -314,7 +346,7 @@ export async function listMyTeams(db: DB, userId: string) {
 }
 
 export async function renameTeam(db: DB, userId: string, teamId: string, name: string) {
-  await requireOwner(db, teamId, userId);
+  await requireCapability(db, teamId, userId, 'team.manage');
   await db.update(team).set({ name, updatedAt: new Date() }).where(eq(team.id, teamId));
   await audit(db, {
     teamId,
@@ -328,7 +360,12 @@ export async function renameTeam(db: DB, userId: string, teamId: string, name: s
 
 export async function deleteTeam(db: DB, userId: string, teamId: string) {
   await requireOwner(db, teamId, userId);
+  const threadRows = await db
+    .select({ id: teamThread.id })
+    .from(teamThread)
+    .where(eq(teamThread.teamId, teamId));
   await db.delete(team).where(eq(team.id, teamId));
+  return { realtimeThreadIds: threadRows.map((row) => row.id) };
 }
 
 /**
@@ -336,7 +373,7 @@ export async function deleteTeam(db: DB, userId: string, teamId: string) {
  * first); the last remaining member leaving deletes the team entirely.
  */
 export async function leaveTeam(db: DB, userId: string, teamId: string) {
-  await db.transaction(async (tx) => {
+  return await db.transaction(async (tx) => {
     const members = await tx
       .select({ userId: teamMember.userId, role: teamMember.role })
       .from(teamMember)
@@ -344,9 +381,13 @@ export async function leaveTeam(db: DB, userId: string, teamId: string) {
       .for('update');
     const mine = members.find((m) => m.userId === userId);
     if (!mine) throw new TeamStoreError('not_a_member');
+    const threadRows = await tx
+      .select({ id: teamThread.id })
+      .from(teamThread)
+      .where(eq(teamThread.teamId, teamId));
     if (members.length === 1) {
       await tx.delete(team).where(eq(team.id, teamId));
-      return;
+      return { realtimeThreadIds: threadRows.map((row) => row.id), teamDeleted: true };
     }
     const otherOwners = members.some((m) => m.userId !== userId && m.role === 'owner');
     if (mine.role === 'owner' && !otherOwners) throw new TeamStoreError('last_owner');
@@ -364,12 +405,13 @@ export async function leaveTeam(db: DB, userId: string, teamId: string) {
       subjectType: 'user',
       subjectId: userId,
     });
+    return { realtimeThreadIds: threadRows.map((row) => row.id), teamDeleted: false };
   });
 }
 
 export async function listTeamMembers(db: DB, userId: string, teamId: string) {
-  await requireMembership(db, teamId, userId);
-  return await db
+  const membership = await requireMembership(db, teamId, userId);
+  const rows = await db
     .select({
       userId: teamMember.userId,
       role: teamMember.role,
@@ -382,15 +424,25 @@ export async function listTeamMembers(db: DB, userId: string, teamId: string) {
     .innerJoin(user, eq(user.id, teamMember.userId))
     .where(eq(teamMember.teamId, teamId))
     .orderBy(asc(teamMember.createdAt));
+  // Un guest externe n'obtient pas l'annuaire (noms/emails) de l'équipe :
+  // son périmètre reste les fils explicitement accordés. Sa propre ligne est
+  // conservée pour que l'UI puisse afficher son rôle et ses préférences.
+  return membership.role === 'guest' ? rows.filter((row) => row.userId === userId) : rows;
 }
 
 export async function removeTeamMember(db: DB, userId: string, teamId: string, targetId: string) {
   if (targetId === userId) throw new TeamStoreError('forbidden');
-  await requireOwner(db, teamId, userId);
+  const actor = await requireCapability(db, teamId, userId, 'team.manage');
   const target = await findMembership(db, teamId, targetId);
   if (!target) throw new TeamStoreError('not_found');
   if (target.role === 'owner') throw new TeamStoreError('forbidden');
-  await db.transaction(async (tx) => {
+  // Un admin ne retire pas un pair : seuls les owners retirent des admins.
+  if (target.role === 'admin' && actor.role !== 'owner') throw new TeamStoreError('forbidden');
+  return await db.transaction(async (tx) => {
+    const threadRows = await tx
+      .select({ id: teamThread.id })
+      .from(teamThread)
+      .where(eq(teamThread.teamId, teamId));
     await tx
       .delete(teamMember)
       .where(and(eq(teamMember.teamId, teamId), eq(teamMember.userId, targetId)));
@@ -405,6 +457,91 @@ export async function removeTeamMember(db: DB, userId: string, teamId: string, t
       subjectType: 'user',
       subjectId: targetId,
     });
+    return { realtimeThreadIds: threadRows.map((row) => row.id) };
+  });
+}
+
+/**
+ * P17 — changement de rôle d'un membre. Gardes structurelles :
+ * - le nouveau rôle doit être ATTRIBUABLE par l'acteur (anti-escalade) ;
+ * - seuls les owners touchent les lignes owner/admin ;
+ * - dernier owner protégé (last_owner) ;
+ * - un rôle qui perd 'thread.write' (guest/auditor) est désassigné de ses fils.
+ */
+export async function setMemberRole(
+  db: DB,
+  userId: string,
+  teamId: string,
+  targetId: string,
+  newRole: TeamRole,
+) {
+  return await db.transaction(async (tx) => {
+    // Verrouille TOUTES les memberships de l'équipe : deux owners ne peuvent
+    // pas se rétrograder simultanément après avoir chacun observé l'autre.
+    const memberships = await tx
+      .select()
+      .from(teamMember)
+      .where(eq(teamMember.teamId, teamId))
+      .for('update');
+    const actor = memberships.find((row) => row.userId === userId);
+    if (!actor || !roleCan(actor.role, 'team.manage')) throw new TeamStoreError('forbidden');
+    const target = memberships.find((row) => row.userId === targetId);
+    if (!target) throw new TeamStoreError('not_found');
+    if (target.role === newRole) return { role: newRole, realtimeThreadIds: [] as string[] };
+    if (!assignableRoles(actor.role).includes(newRole)) throw new TeamStoreError('forbidden');
+    if ((target.role === 'owner' || target.role === 'admin') && actor.role !== 'owner') {
+      throw new TeamStoreError('forbidden');
+    }
+    if (target.role === 'owner' && memberships.filter((row) => row.role === 'owner').length <= 1) {
+      throw new TeamStoreError('last_owner');
+    }
+
+    const threadRows = await tx
+      .select({ id: teamThread.id })
+      .from(teamThread)
+      .where(eq(teamThread.teamId, teamId));
+    await tx
+      .update(teamMember)
+      .set({ role: newRole })
+      .where(and(eq(teamMember.teamId, teamId), eq(teamMember.userId, targetId)));
+    if (!roleCan(newRole, 'thread.write')) {
+      await tx
+        .update(teamThread)
+        .set({ assigneeUserId: null })
+        .where(and(eq(teamThread.teamId, teamId), eq(teamThread.assigneeUserId, targetId)));
+    }
+    let cancelledDraftReviews = 0;
+    if (!roleCan(newRole, 'draft.review')) {
+      const cancelled = await tx
+        .update(teamDraftReview)
+        .set({ state: 'cancelled', updatedAt: new Date() })
+        .where(
+          and(
+            inArray(teamDraftReview.state, ['requested', 'changes_requested', 'approved']),
+            or(
+              eq(teamDraftReview.ownerUserId, targetId),
+              eq(teamDraftReview.reviewerUserId, targetId),
+            ),
+            sql`exists (
+              select 1 from ${teamThread} tt
+              where tt.id = ${teamDraftReview.teamThreadId} and tt.team_id = ${teamId}
+            )`,
+          ),
+        )
+        .returning({ id: teamDraftReview.id });
+      cancelledDraftReviews = cancelled.length;
+    }
+    await audit(tx, {
+      teamId,
+      actorUserId: userId,
+      action: 'member.role_changed',
+      subjectType: 'user',
+      subjectId: targetId,
+      metadata: { from: target.role, to: newRole, cancelledDraftReviews },
+    });
+    // Toute transition force les sockets du membre à se reconnecter : leur
+    // attachement DO reprend ainsi le rôle courant (notamment auditor/guest).
+    return { role: newRole, realtimeThreadIds: threadRows.map((row) => row.id) };
   });
 }
 
@@ -433,7 +570,10 @@ export async function createInvite(
   rawEmail: string,
   role: TeamRole,
 ) {
-  await requireMembership(db, teamId, userId);
+  const actor = await requireCapability(db, teamId, userId, 'invite.create');
+  // Anti-escalade : le rôle invité doit être attribuable par l'acteur
+  // (owner → tout ; admin → member/guest/auditor ; member → member seul).
+  if (!assignableRoles(actor.role).includes(role)) throw new TeamStoreError('forbidden');
   const email = rawEmail.trim().toLowerCase();
   const existingMember = await db
     .select({ userId: teamMember.userId })
@@ -468,7 +608,7 @@ export async function createInvite(
 }
 
 export async function listTeamInvites(db: DB, userId: string, teamId: string) {
-  await requireMembership(db, teamId, userId);
+  await requireCapability(db, teamId, userId, 'invite.create');
   return await db
     .select({
       id: teamInvite.id,
@@ -488,7 +628,7 @@ export async function revokeInvite(db: DB, userId: string, inviteId: string) {
   const [invite] = await db.select().from(teamInvite).where(eq(teamInvite.id, inviteId)).limit(1);
   if (!invite || invite.status !== 'pending') throw new TeamStoreError('not_found');
   const membership = await requireMembership(db, invite.teamId, userId);
-  if (membership.role !== 'owner' && invite.invitedBy !== userId) {
+  if (!roleCan(membership.role, 'team.manage') && invite.invitedBy !== userId) {
     throw new TeamStoreError('forbidden');
   }
   await db
@@ -583,12 +723,35 @@ export async function declineInvite(db: DB, sessionEmail: string, inviteId: stri
  * (P16 : tout agrégat ops filtre par ce prédicat AVANT de compter).
  */
 export function accessPredicate(userId: string): SQL {
+  // P17 : prédicat conscient du RÔLE.
+  // - visibilité 'team' : réservée aux rôles TEAM_VISIBILITY_ROLES (guest
+  //   exclu — un guest ne voit que ses lignes d'accès explicites) ; la
+  //   membership est désormais portée par le prédicat lui-même, plus par le
+  //   contexte d'appel seul.
+  // - fils restreints : partageur, superviseurs (owner/admin) et lignes
+  //   d'accès actives — l'élargissement reste explicite et audité.
+  const teamVisibilityRoles = sql.join(
+    TEAM_VISIBILITY_ROLES.map((role) => sql`${role}`),
+    sql`, `,
+  );
+  const overseerRoles = sql.join(
+    RESTRICTED_OVERSEER_ROLES.map((role) => sql`${role}`),
+    sql`, `,
+  );
   return or(
-    eq(teamThread.visibility, 'team'),
+    and(
+      eq(teamThread.visibility, 'team'),
+      sql`exists (
+        select 1 from ${teamMember} tm
+        where tm.team_id = ${teamThread.teamId} and tm.user_id = ${userId}
+          and tm.role in (${teamVisibilityRoles})
+      )`,
+    ),
     eq(teamThread.sharerUserId, userId),
     sql`exists (
       select 1 from ${teamMember} tm
-      where tm.team_id = ${teamThread.teamId} and tm.user_id = ${userId} and tm.role = 'owner'
+      where tm.team_id = ${teamThread.teamId} and tm.user_id = ${userId}
+        and tm.role in (${overseerRoles})
     )`,
     sql`exists (
       select 1 from ${teamThreadAccess} ta
@@ -622,8 +785,8 @@ export async function resolveAccess(db: DB, userId: string, teamThreadId: string
     const membership = await findMembership(db, bare.teamId, userId);
     throw new TeamStoreError(membership ? 'forbidden' : 'not_found');
   }
-  await requireMembership(db, row.teamId, userId);
-  return row;
+  const membership = await requireMembership(db, row.teamId, userId);
+  return { ...row, callerRole: membership.role };
 }
 
 async function canAccessThread(db: DbOrTx, userId: string, teamThreadId: string) {
@@ -664,6 +827,8 @@ export async function grantThreadAccess(
   source: 'share' | 'mention' | 'manual' = 'manual',
 ) {
   const row = await resolveAccess(db, userId, teamThreadId);
+  // P17 : élargir l'accès est une écriture de fil — guest et auditor exclus.
+  await requireCapability(db, row.teamId, userId, 'thread.write');
   const target = await findMembership(db, row.teamId, targetUserId);
   if (!target) throw new TeamStoreError('mention_not_member');
   await db.transaction(async (tx) => {
@@ -708,7 +873,8 @@ export async function revokeThreadAccess(
 ) {
   const row = await resolveAccess(db, userId, teamThreadId);
   const membership = await requireMembership(db, row.teamId, userId);
-  if (row.sharerUserId !== userId && membership.role !== 'owner') {
+  if (!roleCan(membership.role, 'thread.write')) throw new TeamStoreError('forbidden');
+  if (row.sharerUserId !== userId && !roleCan(membership.role, 'team.manage')) {
     throw new TeamStoreError('forbidden');
   }
   await db.transaction(async (tx) => {
@@ -764,7 +930,7 @@ export async function shareThread(
     context?: RuleActionContext;
   },
 ) {
-  await requireMembership(db, teamId, userId);
+  await requireCapability(db, teamId, userId, 'thread.share');
   const accessIds = [...new Set(options.accessUserIds)].filter((id) => id !== userId);
   if (accessIds.length > 0) {
     const members = await db
@@ -846,7 +1012,8 @@ export async function unshareThread(db: DB, userId: string, teamThreadId: string
   const [row] = await db.select().from(teamThread).where(eq(teamThread.id, teamThreadId)).limit(1);
   if (!row) throw new TeamStoreError('not_found');
   const membership = await requireMembership(db, row.teamId, userId);
-  if (row.sharerUserId !== userId && membership.role !== 'owner') {
+  if (!roleCan(membership.role, 'thread.share')) throw new TeamStoreError('forbidden');
+  if (row.sharerUserId !== userId && !roleCan(membership.role, 'team.manage')) {
     throw new TeamStoreError('forbidden');
   }
   await db.transaction(async (tx) => {
@@ -1001,6 +1168,7 @@ export async function setThreadStatus(
   context?: RuleActionContext,
 ) {
   const row = await resolveAccess(db, userId, teamThreadId);
+  await requireCapability(db, row.teamId, userId, 'thread.write');
   const now = new Date();
   await db.transaction(async (tx) => {
     await tx
@@ -1040,9 +1208,12 @@ export async function setThreadAssignee(
   context?: RuleActionContext,
 ) {
   const row = await resolveAccess(db, userId, teamThreadId);
+  await requireCapability(db, row.teamId, userId, 'thread.write');
   if (assigneeUserId) {
     const assignee = await findMembership(db, row.teamId, assigneeUserId);
     if (!assignee) throw new TeamStoreError('assignee_not_member');
+    // Un fil ne s'assigne qu'à quelqu'un qui peut le TRAVAILLER.
+    if (!roleCan(assignee.role, 'thread.write')) throw new TeamStoreError('assignee_not_member');
     const hasAccess = await canAccessThread(db, assigneeUserId, teamThreadId);
     if (!hasAccess) throw new TeamStoreError('assignee_no_access');
   }
@@ -1090,6 +1261,7 @@ export async function addComment(
   quote: CommentQuote | null,
 ) {
   const row = await resolveAccess(db, userId, teamThreadId);
+  const author = await requireCapability(db, row.teamId, userId, 'comment.write');
   const uniqueMentions = [...new Set(mentions)];
   if (uniqueMentions.length > 0) {
     const members = await db
@@ -1097,6 +1269,16 @@ export async function addComment(
       .from(teamMember)
       .where(and(eq(teamMember.teamId, row.teamId), inArray(teamMember.userId, uniqueMentions)));
     if (members.length !== uniqueMentions.length) throw new TeamStoreError('mention_not_member');
+    // P17 : sur un fil RESTREINT, la mention élargit l'ACL — un auteur sans
+    // thread.write (guest) ne peut mentionner que des personnes qui ont DÉJÀ
+    // accès ; sinon ce serait un élargissement d'ACL par un invité.
+    if (row.visibility === 'restricted' && !roleCan(author.role, 'thread.write')) {
+      for (const mentioned of uniqueMentions) {
+        if (!(await canAccessThread(db, mentioned, teamThreadId))) {
+          throw new TeamStoreError('mention_requires_access');
+        }
+      }
+    }
   }
   const id = crypto.randomUUID();
   const now = new Date();
@@ -1196,6 +1378,7 @@ export async function editComment(db: DB, userId: string, commentId: string, bod
     .limit(1);
   if (!comment || comment.authorUserId !== userId) throw new TeamStoreError('not_found');
   const row = await resolveAccess(db, userId, comment.teamThreadId);
+  await requireCapability(db, row.teamId, userId, 'comment.write');
   await db.transaction(async (tx) => {
     await tx
       .update(teamThreadComment)
@@ -1221,10 +1404,11 @@ export async function deleteComment(db: DB, userId: string, commentId: string) {
     .limit(1);
   if (!comment) throw new TeamStoreError('not_found');
   const row = await resolveAccess(db, userId, comment.teamThreadId);
+  await requireCapability(db, row.teamId, userId, 'comment.write');
   let action = 'comment.deleted';
   if (comment.authorUserId !== userId) {
     const membership = await requireMembership(db, row.teamId, userId);
-    if (membership.role !== 'owner') throw new TeamStoreError('forbidden');
+    if (!roleCan(membership.role, 'team.manage')) throw new TeamStoreError('forbidden');
     action = 'comment.deleted_by_owner';
   }
   await db.transaction(async (tx) => {
@@ -1274,7 +1458,8 @@ export async function toggleReaction(db: DB, userId: string, commentId: string, 
     .where(eq(teamThreadComment.id, commentId))
     .limit(1);
   if (!comment) throw new TeamStoreError('not_found');
-  await resolveAccess(db, userId, comment.teamThreadId);
+  const thread = await resolveAccess(db, userId, comment.teamThreadId);
+  await requireCapability(db, thread.teamId, userId, 'reaction.write');
   const deleted = await db
     .delete(teamCommentReaction)
     .where(
@@ -1299,7 +1484,7 @@ export async function createLabel(
   name: string,
   color: string,
 ) {
-  await requireMembership(db, teamId, userId);
+  await requireCapability(db, teamId, userId, 'label.manage');
   const id = crypto.randomUUID();
   try {
     await db.insert(teamLabel).values({ id, teamId, name, color, createdBy: userId });
@@ -1320,8 +1505,8 @@ export async function createLabel(
 export async function deleteLabel(db: DB, userId: string, labelId: string) {
   const [label] = await db.select().from(teamLabel).where(eq(teamLabel.id, labelId)).limit(1);
   if (!label) throw new TeamStoreError('label_not_found');
-  const membership = await requireMembership(db, label.teamId, userId);
-  if (membership.role !== 'owner' && label.createdBy !== userId) {
+  const membership = await requireCapability(db, label.teamId, userId, 'label.manage');
+  if (!roleCan(membership.role, 'team.manage') && label.createdBy !== userId) {
     throw new TeamStoreError('forbidden');
   }
   await db.delete(teamLabel).where(eq(teamLabel.id, labelId));
@@ -1358,6 +1543,7 @@ export async function setThreadLabels(
   context?: RuleActionContext,
 ) {
   const row = await resolveAccess(db, userId, teamThreadId);
+  await requireCapability(db, row.teamId, userId, 'thread.write');
   const unique = [...new Set(labelIds)];
   if (unique.length > 0) {
     const labels = await db
@@ -1455,10 +1641,11 @@ export async function assignSharedThreadsBatch(
 ): Promise<{
   results: { threadId: string; outcome: BatchAssignOutcome; teamThreadId?: string }[];
 }> {
-  await requireMembership(db, params.teamId, userId);
+  await requireCapability(db, params.teamId, userId, 'thread.write');
   if (params.assigneeUserId) {
     const assignee = await findMembership(db, params.teamId, params.assigneeUserId);
     if (!assignee) throw new TeamStoreError('assignee_not_member');
+    if (!roleCan(assignee.role, 'thread.write')) throw new TeamStoreError('assignee_not_member');
   }
   const email = params.connectionEmail.trim().toLowerCase();
   const uniqueThreadIds = [...new Set(params.threadIds)];
@@ -1551,7 +1738,7 @@ export async function markNotificationsRead(db: DB, userId: string, ids: string[
 // --- audit -------------------------------------------------------------------
 
 export async function listTeamAudit(db: DB, userId: string, teamId: string, limit = 100) {
-  await requireMembership(db, teamId, userId);
+  await requireCapability(db, teamId, userId, 'audit.read');
   // P18 : leftJoin — un audit système/intégration (actorUserId NULL) doit
   // apparaître dans l'historique, jamais être silencieusement filtré.
   return await db
@@ -1582,7 +1769,8 @@ export async function heartbeatPresence(
   typing: boolean,
   replying = false,
 ) {
-  await resolveAccess(db, userId, teamThreadId);
+  const thread = await resolveAccess(db, userId, teamThreadId);
+  await requireCapability(db, thread.teamId, userId, 'comment.write');
   const now = new Date();
   const typingUntil = typing ? new Date(now.getTime() + 8_000) : null;
   // P15 fallback polling du « rédige une réponse » — TTL long, rafraîchi par

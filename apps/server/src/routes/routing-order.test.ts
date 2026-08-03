@@ -55,3 +55,13 @@ describe('ordre de routage /api (r14)', () => {
     expect(source).toContain('handleGetSessionFast(createAuth, c.req.raw)');
   });
 });
+
+describe('montage public du webhook Linear (P18)', () => {
+  it('reste sur le routeur racine, hors du sous-routeur /api qui porte la session', () => {
+    const apiMount = source.indexOf(".route('/api', api)");
+    const integrationsMount = source.indexOf(".route('/integrations', integrationsLinearRouter)");
+    expect(apiMount).toBeGreaterThan(-1);
+    expect(integrationsMount).toBeGreaterThan(apiMount);
+    expect(source).toContain("import { integrationsLinearRouter } from './integrations-linear'");
+  });
+});

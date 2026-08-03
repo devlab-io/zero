@@ -16,8 +16,8 @@ import {
   teamReplyIntent,
   user,
 } from '../../db/schema';
+import { getTeamThread, notifyDraftReview, requireCapability, TeamStoreError } from './team-store';
 import { and, asc, desc, eq, gt, inArray, isNotNull, isNull } from 'drizzle-orm';
-import { getTeamThread, notifyDraftReview, TeamStoreError } from './team-store';
 import type { DB } from '../../db';
 
 /**
@@ -114,6 +114,7 @@ export async function requestReview(
   const thread = await getTeamThread(db, userId, input.teamThreadId);
   // Le brouillon appartient au PARTAGEUR — lui seul peut demander relecture.
   if (thread.sharerUserId !== userId) throw new TeamStoreError('not_draft_owner');
+  await requireCapability(db, thread.teamId, userId, 'draft.review');
   if (input.reviewerUserId === userId) throw new TeamStoreError('not_reviewer');
   // Le reviewer doit passer la même ACL stricte que toute lecture du fil.
   try {
@@ -121,6 +122,11 @@ export async function requestReview(
   } catch {
     throw new TeamStoreError('assignee_no_access');
   }
+  // P17 : le rôle du reviewer doit PORTER la capacité de relecture — un guest
+  // avec accès explicite peut relire, un auditor (lecture seule) jamais.
+  await requireCapability(db, thread.teamId, input.reviewerUserId, 'draft.review').catch(() => {
+    throw new TeamStoreError('not_reviewer');
+  });
 
   // Lecture/flush AUTORITATIVE du brouillon du propriétaire.
   const { digest } = await readOwnerDraft(db, effects, thread.sharerConnectionId, input.draftId);
@@ -162,7 +168,7 @@ export async function requestReview(
 
 /** Review active d'un fil + suggestions — contenu des suggestions réservé au couple owner/reviewer. */
 export async function getReviewForThread(db: DB, userId: string, teamThreadId: string) {
-  await getTeamThread(db, userId, teamThreadId);
+  const thread = await getTeamThread(db, userId, teamThreadId);
   const rows = await db
     .select({
       id: teamDraftReview.id,
@@ -189,6 +195,7 @@ export async function getReviewForThread(db: DB, userId: string, teamThreadId: s
   const review = rows[0];
   if (!review) return null;
   const isParty = userId === review.ownerUserId || userId === review.reviewerUserId;
+  if (isParty) await requireCapability(db, thread.teamId, userId, 'draft.review');
   const reviewerRows = await db
     .select({ name: user.name })
     .from(user)
@@ -236,6 +243,7 @@ export async function readReviewDraft(
   if (userId !== review.ownerUserId && userId !== review.reviewerUserId) {
     throw new TeamStoreError('forbidden');
   }
+  await requireCapability(db, thread.teamId, userId, 'draft.review');
   const { snapshot, digest } = await readOwnerDraft(
     db,
     effects,
@@ -277,6 +285,7 @@ export async function suggestEdit(
   const review = await requireReview(db, reviewId);
   const thread = await getTeamThread(db, userId, review.teamThreadId);
   if (userId !== review.reviewerUserId) throw new TeamStoreError('not_reviewer');
+  await requireCapability(db, thread.teamId, userId, 'draft.review');
   if (!isActive(review.state) || review.state === 'approved') {
     throw new TeamStoreError('review_not_actionable');
   }
@@ -316,6 +325,7 @@ export async function setReviewDecision(
   const review = await requireReview(db, reviewId);
   const thread = await getTeamThread(db, userId, review.teamThreadId);
   if (userId !== review.reviewerUserId) throw new TeamStoreError('not_reviewer');
+  await requireCapability(db, thread.teamId, userId, 'draft.review');
   if (!isActive(review.state)) throw new TeamStoreError('review_not_actionable');
   await requireFreshDraft(db, effects, review, thread.sharerConnectionId, input.baseDigest);
   await db
@@ -348,6 +358,7 @@ export async function rebaseReview(
   const review = await requireReview(db, reviewId);
   const thread = await getTeamThread(db, userId, review.teamThreadId);
   if (userId !== review.ownerUserId) throw new TeamStoreError('not_draft_owner');
+  await requireCapability(db, thread.teamId, userId, 'draft.review');
   if (!isActive(review.state)) throw new TeamStoreError('review_not_actionable');
   const { digest } = await readOwnerDraft(db, effects, thread.sharerConnectionId, review.draftId);
   await db
@@ -387,6 +398,7 @@ export async function markSuggestionApplied(db: DB, userId: string, suggestionId
   const review = await requireReview(db, suggestion.reviewId);
   const thread = await getTeamThread(db, userId, review.teamThreadId);
   if (userId !== review.ownerUserId) throw new TeamStoreError('not_draft_owner');
+  await requireCapability(db, thread.teamId, userId, 'draft.review');
   await db
     .update(teamDraftSuggestion)
     .set({ appliedAt: new Date(), appliedBy: userId })
@@ -406,6 +418,7 @@ export async function cancelReview(db: DB, userId: string, reviewId: string) {
   if (userId !== review.ownerUserId && userId !== review.reviewerUserId) {
     throw new TeamStoreError('forbidden');
   }
+  await requireCapability(db, thread.teamId, userId, 'draft.review');
   if (!isActive(review.state)) throw new TeamStoreError('review_not_actionable');
   await db
     .update(teamDraftReview)
@@ -432,6 +445,7 @@ export async function cancelReview(db: DB, userId: string, reviewId: string) {
  */
 export async function markThreadReviewsCompleted(db: DB, userId: string, teamThreadId: string) {
   const thread = await getTeamThread(db, userId, teamThreadId);
+  await requireCapability(db, thread.teamId, userId, 'thread.write');
   const reviews = await db
     .select({ id: teamDraftReview.id, revision: teamDraftReview.revision })
     .from(teamDraftReview)
@@ -469,6 +483,7 @@ const OVERRIDE_ARM_WINDOW_MS = 10 * 60_000;
  */
 export async function createReplyIntent(db: DB, userId: string, teamThreadId: string) {
   const thread = await getTeamThread(db, userId, teamThreadId);
+  await requireCapability(db, thread.teamId, userId, 'thread.write');
   const id = crypto.randomUUID();
   const now = new Date();
   await db.insert(teamReplyIntent).values({
@@ -578,7 +593,8 @@ export async function claimTeamReply(
   userId: string,
   input: { teamThreadId: string; clientSubmissionKey: string; reviewId?: string | null },
 ) {
-  await getTeamThread(db, userId, input.teamThreadId);
+  const thread = await getTeamThread(db, userId, input.teamThreadId);
+  await requireCapability(db, thread.teamId, userId, 'thread.write');
   // reviewId (durci) : jamais accepté aveuglément — la review doit exister,
   // appartenir EXACTEMENT à ce fil d'équipe, et l'appelant doit être une
   // partie (owner ou reviewer). Sinon : refus AVANT tout claim.

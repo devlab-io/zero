@@ -264,7 +264,11 @@ export const integrationsRouter = router({
   exportActivity: privateProcedure
     .input(
       teamIdInput.extend({
-        cursor: z.string().max(128).nullish(),
+        cursor: z
+          .string()
+          .max(128)
+          .regex(/^\d{1,16}\|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)
+          .nullish(),
         limit: z.number().int().min(1).max(200).optional(),
       }),
     )

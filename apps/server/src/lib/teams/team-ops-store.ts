@@ -28,6 +28,7 @@ import { and, asc, eq, gte, inArray, lt, min, sql } from 'drizzle-orm';
 import { accessPredicate, TeamStoreError } from './team-store';
 import type { TeamBusinessHours } from './team-rules-shared';
 import { TeamRuleValidationError } from './team-rules';
+import { roleCan } from './team-roles';
 import type { DB } from '../../db';
 
 /**
@@ -68,9 +69,10 @@ async function requireMembership(db: DB, teamId: string, userId: string) {
   return membership;
 }
 
-async function requireOwner(db: DB, teamId: string, userId: string) {
+/** P17 : écritures de politique (SLA) = capacité 'team.manage' (owner/admin). */
+async function requireOpsManager(db: DB, teamId: string, userId: string) {
   const membership = await requireMembership(db, teamId, userId);
-  if (membership.role !== 'owner') throw new TeamStoreError('forbidden');
+  if (!roleCan(membership.role, 'team.manage')) throw new TeamStoreError('forbidden');
   return membership;
 }
 
@@ -130,7 +132,8 @@ function validatePolicy(input: SlaPolicyInput) {
 }
 
 export async function getSlaPolicy(db: DB, userId: string, teamId: string) {
-  await requireMembership(db, teamId, userId);
+  const membership = await requireMembership(db, teamId, userId);
+  if (!roleCan(membership.role, 'ops.read')) throw new TeamStoreError('forbidden');
   const rows = await db
     .select({
       teamId: teamSlaPolicy.teamId,
@@ -147,7 +150,7 @@ export async function getSlaPolicy(db: DB, userId: string, teamId: string) {
 }
 
 export async function setSlaPolicy(db: DB, userId: string, teamId: string, input: SlaPolicyInput) {
-  await requireOwner(db, teamId, userId);
+  await requireOpsManager(db, teamId, userId);
   validatePolicy(input);
   const now = new Date();
   await db
@@ -220,10 +223,14 @@ export async function declareAbsence(
   input: { targetUserId: string; startsAt: Date; endsAt: Date; note?: string },
 ) {
   const membership = await requireMembership(db, teamId, userId);
-  if (input.targetUserId !== userId && membership.role !== 'owner') {
+  // P17 : déclarer une absence = disponibilité de TRAVAIL — rôles porteurs de
+  // fils seulement (owner/admin/member) ; autrui réservé à la gestion.
+  if (!roleCan(membership.role, 'thread.write')) throw new TeamStoreError('forbidden');
+  if (input.targetUserId !== userId && !roleCan(membership.role, 'team.manage')) {
     throw new TeamStoreError('forbidden');
   }
-  await requireMembership(db, teamId, input.targetUserId);
+  const target = await requireMembership(db, teamId, input.targetUserId);
+  if (!roleCan(target.role, 'thread.write')) throw new TeamStoreError('forbidden');
   if (
     input.endsAt <= input.startsAt ||
     input.endsAt.getTime() - input.startsAt.getTime() > MAX_ABSENCE_DAYS * 24 * 3_600_000
@@ -264,7 +271,8 @@ export async function removeAbsence(db: DB, userId: string, absenceId: string) {
   const absence = rows[0];
   if (!absence) throw new TeamStoreError('not_found');
   const membership = await requireMembership(db, absence.teamId, userId);
-  if (absence.userId !== userId && membership.role !== 'owner') {
+  if (!roleCan(membership.role, 'thread.write')) throw new TeamStoreError('forbidden');
+  if (absence.userId !== userId && !roleCan(membership.role, 'team.manage')) {
     throw new TeamStoreError('forbidden');
   }
   await db.delete(teamMemberAbsence).where(eq(teamMemberAbsence.id, absenceId));
@@ -286,7 +294,9 @@ export async function getOpsOverview(
   teamId: string,
   options: { windowDays: number },
 ) {
-  await requireMembership(db, teamId, userId);
+  const membership = await requireMembership(db, teamId, userId);
+  // P17 : le pilotage ops est fermé aux guests (flux d'équipe, pas le leur).
+  if (!roleCan(membership.role, 'ops.read')) throw new TeamStoreError('forbidden');
   const windowDays = Math.min(Math.max(Math.floor(options.windowDays), 1), 90);
   const nowMs = Date.now();
   const windowStart = new Date(nowMs - windowDays * 24 * 3_600_000);

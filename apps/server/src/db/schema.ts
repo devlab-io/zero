@@ -9,6 +9,7 @@ import {
   unique,
   index,
   uniqueIndex,
+  check,
 } from 'drizzle-orm/pg-core';
 // Types des règles d'équipe (P14) : module feuille SANS import — la frontière
 // tRPC les référence directement, le schema ne fait que typer ses colonnes.
@@ -479,7 +480,12 @@ export const teamMember = createTable(
     userId: text('user_id')
       .notNull()
       .references(() => user.id, { onDelete: 'cascade' }),
-    role: text('role').$type<'owner' | 'member'>().notNull().default('member'),
+    // P17 : élargi owner/admin/member/guest/auditor — colonne text sans CHECK,
+    // aucun changement SQL ; la matrice de capacités vit dans team-roles.ts.
+    role: text('role')
+      .$type<'owner' | 'admin' | 'member' | 'guest' | 'auditor'>()
+      .notNull()
+      .default('member'),
     prefs: jsonb('prefs').$type<TeamMemberPrefs>().notNull().default(defaultTeamNotificationPrefs),
     createdAt: timestamp('created_at').notNull().defaultNow(),
   },
@@ -499,7 +505,10 @@ export const teamInvite = createTable(
       .notNull()
       .references(() => team.id, { onDelete: 'cascade' }),
     email: text('email').notNull(),
-    role: text('role').$type<'owner' | 'member'>().notNull().default('member'),
+    role: text('role')
+      .$type<'owner' | 'admin' | 'member' | 'guest' | 'auditor'>()
+      .notNull()
+      .default('member'),
     invitedBy: text('invited_by')
       .notNull()
       .references(() => user.id, { onDelete: 'cascade' }),
@@ -1018,6 +1027,45 @@ export const teamSlaPolicy = createTable('team_sla_policy', {
 });
 
 /**
+ * Politique de RÉTENTION d'une équipe (P17-C) — UNE ligne par équipe.
+ * Chaque champ est un âge maximal en JOURS pour une famille d'historique
+ * (audit, runs de règles, notifications) ; null = conserver indéfiniment.
+ * Bornes 30..730 verrouillées par CHECK SQL ET par le store. La purge est
+ * exécutée par le sweep planifié (team-retention-runner), par lots bornés,
+ * et AUDITÉE (actor system) — jamais silencieuse.
+ */
+export const teamRetentionPolicy = createTable(
+  'team_retention_policy',
+  {
+    teamId: text('team_id')
+      .primaryKey()
+      .references(() => team.id, { onDelete: 'cascade' }),
+    auditDays: integer('audit_days'),
+    ruleRunDays: integer('rule_run_days'),
+    notificationDays: integer('notification_days'),
+    updatedBy: text('updated_by').references(() => user.id, { onDelete: 'set null' }),
+    /** Curseur équitable du sweep : évite d'affamer les équipes > 200. */
+    lastSweptAt: timestamp('last_swept_at'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (t) => [
+    check(
+      'team_retention_audit_days_bounds',
+      sql`${t.auditDays} is null or (${t.auditDays} >= 30 and ${t.auditDays} <= 730)`,
+    ),
+    check(
+      'team_retention_rule_run_days_bounds',
+      sql`${t.ruleRunDays} is null or (${t.ruleRunDays} >= 30 and ${t.ruleRunDays} <= 730)`,
+    ),
+    check(
+      'team_retention_notification_days_bounds',
+      sql`${t.notificationDays} is null or (${t.notificationDays} >= 30 and ${t.notificationDays} <= 730)`,
+    ),
+  ],
+);
+
+/**
  * Absence DÉCLARÉE d'un membre (P16 couverture) : période plate, sans motif
  * santé ni catégorie RH — une simple fenêtre d'indisponibilité. Écriture :
  * le membre pour LUI-MÊME ou un owner ; lecture : tout membre. Auditée.
@@ -1171,6 +1219,9 @@ export const teamThreadIssueLink = createTable(
     issueUrl: text('issue_url').notNull().default(''),
     createdBy: text('created_by').references(() => user.id, { onDelete: 'set null' }),
     createdAt: timestamp('created_at').notNull().defaultNow(),
+    // Watermark Linear autoritaire : empêche un retry ancien, livré après un
+    // événement plus récent, de rétablir un statut/assigné obsolète.
+    lastLinearUpdatedAt: timestamp('last_linear_updated_at'),
     unlinkedAt: timestamp('unlinked_at'),
     unlinkedBy: text('unlinked_by').references(() => user.id, { onDelete: 'set null' }),
   },

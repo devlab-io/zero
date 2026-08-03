@@ -28,6 +28,17 @@ import superjson from 'superjson';
 // better-auth types. `ZeroEnv` is a nameable alias and is stubbed on the mail side of
 // the boundary. See docs/adr/0006-trpc-type-boundary.md.
 type BoundarySessionUser = { id: string; name: string; email: string };
+/** Vue structurelle d'une session better-auth (P17-D) — le token ne sort JAMAIS vers le client. */
+type BoundaryListedSession = {
+  id: string;
+  token: string;
+  userId: string;
+  expiresAt: Date;
+  createdAt: Date;
+  updatedAt: Date;
+  ipAddress?: string | null;
+  userAgent?: string | null;
+};
 type BoundaryAuthApi = {
   api: {
     listUserAccounts: (input: { headers: Headers }) => Promise<
@@ -47,6 +58,15 @@ type BoundaryAuthApi = {
       headers: Headers;
       request: Request;
     }) => Promise<{ success: boolean; message: string }>;
+    // P17-D — sessions/appareils révocables. On passe par l'API better-auth
+    // (jamais par un DELETE SQL direct) : elle invalide AUSSI le
+    // secondaryStorage (KV/Redis) ; le cookieCache borne le reliquat à 5 min.
+    getSession: (input: {
+      headers: Headers;
+    }) => Promise<{ session: { id: string; token: string } } | null>;
+    listSessions: (input: { headers: Headers }) => Promise<BoundaryListedSession[]>;
+    revokeSession: (input: { body: { token: string }; headers: Headers }) => Promise<unknown>;
+    revokeOtherSessions: (input: { headers: Headers }) => Promise<unknown>;
   };
 };
 type BoundaryVariables = {

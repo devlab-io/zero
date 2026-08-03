@@ -298,7 +298,10 @@ function SharedThreadSection({
             {isDone ? m['common.teams.done']() : m['common.teams.open']()}
           </Button>
           {(share.sharerUserId === myUserId ||
-            members.find((member) => member.userId === myUserId)?.role === 'owner') && (
+            // P17 : team.manage (owner/admin) peut dépublier, comme au store.
+            ['owner', 'admin'].includes(
+              members.find((member) => member.userId === myUserId)?.role ?? '',
+            )) && (
             <Button
               variant="ghost"
               size="sm"

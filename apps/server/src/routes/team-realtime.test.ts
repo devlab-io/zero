@@ -37,7 +37,7 @@ type FakeSocket = {
 
 const makeSocket = (userId: string): FakeSocket => {
   const socket: FakeSocket = {
-    attachment: { userId },
+    attachment: { userId, socketId: `socket-${userId}`, interactive: true },
     sent: [],
     closed: null,
     tags: [userId],
@@ -142,6 +142,7 @@ describe('route d’upgrade — handshake refusé sans ACL', () => {
   it('autorisé → la requête est transmise au DO du fil EXACT avec le header interne', async () => {
     const doFetch = vi.fn(async (req: Request) => {
       expect(req.headers.get('x-zero-team-rt-user')).toBe('user-a');
+      expect(req.headers.get('x-zero-team-rt-interactive')).toBe('1');
       return new Response('ok', { status: 200 });
     });
     const idFromName = vi.fn().mockReturnValue('id-tt-1');
@@ -153,6 +154,24 @@ describe('route d’upgrade — handshake refusé sans ACL', () => {
     expect(res.status).toBe(200);
     expect(idFromName).toHaveBeenCalledWith('tt-1');
     expect(doFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('auditor → socket lecture seule, flag interactif refusé', async () => {
+    harness.resolveTeamThreadAccess.mockResolvedValue({ id: 'tt-1', callerRole: 'auditor' });
+    const doFetch = vi.fn(async (req: Request) => {
+      expect(req.headers.get('x-zero-team-rt-interactive')).toBe('0');
+      return new Response('ok', { status: 200 });
+    });
+    const request = makeApp(
+      { id: 'auditor-a' },
+      {
+        TEAM_THREAD_RT: {
+          idFromName: vi.fn().mockReturnValue('id-tt-1'),
+          get: vi.fn().mockReturnValue({ fetch: doFetch }),
+        },
+      },
+    );
+    expect((await request('/team-rt/tt-1')).status).toBe(200);
   });
 });
 
@@ -200,6 +219,21 @@ describe('TeamThreadRealtime — présence, typing, isolation par instance', () 
     expect(
       rt.presenceSnapshot().find((u) => u.userId === 'user-a')?.typingUntil ?? null,
     ).toBeNull();
+  });
+
+  it('auditor : typing/replying ignorés côté DO', async () => {
+    const { rt, sockets } = makeDo();
+    const auditor = makeSocket('auditor-a');
+    auditor.attachment = { userId: 'auditor-a', socketId: 'auditor-socket', interactive: false };
+    const observer = makeSocket('observer');
+    sockets.push(auditor, observer);
+    await rt.webSocketMessage(auditor as never, JSON.stringify({ type: 'typing' }));
+    await rt.webSocketMessage(auditor as never, JSON.stringify({ type: 'replying', active: true }));
+    expect(observer.sent).toHaveLength(0);
+    expect(rt.presenceSnapshot().find((user) => user.userId === 'auditor-a')).toMatchObject({
+      typingUntil: null,
+      replyingUntil: null,
+    });
   });
 
   it('deux instances DO (deux fils) sont totalement étanches', async () => {

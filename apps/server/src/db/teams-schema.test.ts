@@ -1,4 +1,5 @@
 import {
+  teamRetentionPolicy,
   teamAuditLog,
   teamCommentReaction,
   teamDraftReview,
@@ -251,7 +252,13 @@ describe('schéma 0046 — intégrations (P18)', () => {
     expect(unique?.config.unique).toBe(true);
     expect(unique?.config.where).toBeDefined();
     expect(config.columns.map((c) => c.name)).toEqual(
-      expect.arrayContaining(['unlinked_at', 'unlinked_by', 'issue_identifier', 'issue_url']),
+      expect.arrayContaining([
+        'unlinked_at',
+        'unlinked_by',
+        'issue_identifier',
+        'issue_url',
+        'last_linear_updated_at',
+      ]),
     );
   });
 
@@ -282,5 +289,47 @@ describe('schéma 0046 — intégrations (P18)', () => {
     expect(
       delivery.indexes.some((index) => index.config.name === 'team_outbound_delivery_due_idx'),
     ).toBe(true);
+  });
+});
+
+describe('schéma 0047 — gouvernance (P17)', () => {
+  it('rétention : UNE ligne par équipe (PK team_id), trois familles bornées par CHECK SQL', () => {
+    const config = getTableConfig(teamRetentionPolicy);
+    expect(config.columns.map((c) => c.name)).toEqual(
+      expect.arrayContaining([
+        'team_id',
+        'audit_days',
+        'rule_run_days',
+        'notification_days',
+        'updated_by',
+      ]),
+    );
+    expect(config.columns.find((c) => c.name === 'team_id')?.primary).toBe(true);
+    expect(config.checks.map((check) => check.name)).toEqual(
+      expect.arrayContaining([
+        'team_retention_audit_days_bounds',
+        'team_retention_rule_run_days_bounds',
+        'team_retention_notification_days_bounds',
+      ]),
+    );
+  });
+
+  it('la migration 0047 crée la table avec FK cascade équipe et bornes 30..730', () => {
+    const sql = readFileSync(
+      fileURLToPath(new URL('./migrations/0047_volatile_grandmaster.sql', import.meta.url).href),
+      'utf8',
+    );
+    expect(sql).toContain('CREATE TABLE "mail0_team_retention_policy"');
+    expect(sql).toContain('ON DELETE cascade');
+    expect(sql).toMatch(/audit_days" >= 30/);
+    expect(sql).toMatch(/audit_days" <= 730/);
+  });
+
+  it('rôles élargis : team_member.role reste une colonne text SANS migration (matrice applicative)', () => {
+    const config = getTableConfig(teamMember);
+    const role = config.columns.find((c) => c.name === 'role');
+    expect(role?.getSQLType()).toBe('text');
+    expect(role?.notNull).toBe(true);
+    expect(role?.default).toBe('member');
   });
 });

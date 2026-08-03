@@ -44,6 +44,35 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
                             success: boolean;
                             message: string;
                         }>;
+                        getSession: (input: {
+                            headers: Headers;
+                        }) => Promise<{
+                            session: {
+                                id: string;
+                                token: string;
+                            };
+                        } | null>;
+                        listSessions: (input: {
+                            headers: Headers;
+                        }) => Promise<{
+                            id: string;
+                            token: string;
+                            userId: string;
+                            expiresAt: Date;
+                            createdAt: Date;
+                            updatedAt: Date;
+                            ipAddress?: string | null;
+                            userAgent?: string | null;
+                        }[]>;
+                        revokeSession: (input: {
+                            body: {
+                                token: string;
+                            };
+                            headers: Headers;
+                        }) => Promise<unknown>;
+                        revokeOtherSessions: (input: {
+                            headers: Headers;
+                        }) => Promise<unknown>;
                     };
                 };
                 sessionUser?: {
@@ -102,6 +131,35 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
                                 success: boolean;
                                 message: string;
                             }>;
+                            getSession: (input: {
+                                headers: Headers;
+                            }) => Promise<{
+                                session: {
+                                    id: string;
+                                    token: string;
+                                };
+                            } | null>;
+                            listSessions: (input: {
+                                headers: Headers;
+                            }) => Promise<{
+                                id: string;
+                                token: string;
+                                userId: string;
+                                expiresAt: Date;
+                                createdAt: Date;
+                                updatedAt: Date;
+                                ipAddress?: string | null;
+                                userAgent?: string | null;
+                            }[]>;
+                            revokeSession: (input: {
+                                body: {
+                                    token: string;
+                                };
+                                headers: Headers;
+                            }) => Promise<unknown>;
+                            revokeOtherSessions: (input: {
+                                headers: Headers;
+                            }) => Promise<unknown>;
                         };
                     };
                     sessionUser?: {
@@ -217,6 +275,35 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
                                 success: boolean;
                                 message: string;
                             }>;
+                            getSession: (input: {
+                                headers: Headers;
+                            }) => Promise<{
+                                session: {
+                                    id: string;
+                                    token: string;
+                                };
+                            } | null>;
+                            listSessions: (input: {
+                                headers: Headers;
+                            }) => Promise<{
+                                id: string;
+                                token: string;
+                                userId: string;
+                                expiresAt: Date;
+                                createdAt: Date;
+                                updatedAt: Date;
+                                ipAddress?: string | null;
+                                userAgent?: string | null;
+                            }[]>;
+                            revokeSession: (input: {
+                                body: {
+                                    token: string;
+                                };
+                                headers: Headers;
+                            }) => Promise<unknown>;
+                            revokeOtherSessions: (input: {
+                                headers: Headers;
+                            }) => Promise<unknown>;
                         };
                     };
                     sessionUser?: {
@@ -248,8 +335,8 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
                 context?: {
                     threadId?: string | undefined;
                     attachments?: {
-                        name: string;
                         type: string;
+                        name: string;
                         size: number;
                         text: string;
                     }[] | undefined;
@@ -359,6 +446,35 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
                                 success: boolean;
                                 message: string;
                             }>;
+                            getSession: (input: {
+                                headers: Headers;
+                            }) => Promise<{
+                                session: {
+                                    id: string;
+                                    token: string;
+                                };
+                            } | null>;
+                            listSessions: (input: {
+                                headers: Headers;
+                            }) => Promise<{
+                                id: string;
+                                token: string;
+                                userId: string;
+                                expiresAt: Date;
+                                createdAt: Date;
+                                updatedAt: Date;
+                                ipAddress?: string | null;
+                                userAgent?: string | null;
+                            }[]>;
+                            revokeSession: (input: {
+                                body: {
+                                    token: string;
+                                };
+                                headers: Headers;
+                            }) => Promise<unknown>;
+                            revokeOtherSessions: (input: {
+                                headers: Headers;
+                            }) => Promise<unknown>;
                         };
                     };
                     sessionUser?: {
@@ -454,6 +570,35 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
                                 success: boolean;
                                 message: string;
                             }>;
+                            getSession: (input: {
+                                headers: Headers;
+                            }) => Promise<{
+                                session: {
+                                    id: string;
+                                    token: string;
+                                };
+                            } | null>;
+                            listSessions: (input: {
+                                headers: Headers;
+                            }) => Promise<{
+                                id: string;
+                                token: string;
+                                userId: string;
+                                expiresAt: Date;
+                                createdAt: Date;
+                                updatedAt: Date;
+                                ipAddress?: string | null;
+                                userAgent?: string | null;
+                            }[]>;
+                            revokeSession: (input: {
+                                body: {
+                                    token: string;
+                                };
+                                headers: Headers;
+                            }) => Promise<unknown>;
+                            revokeOtherSessions: (input: {
+                                headers: Headers;
+                            }) => Promise<unknown>;
                         };
                     };
                     sessionUser?: {
@@ -576,6 +721,35 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
                                 success: boolean;
                                 message: string;
                             }>;
+                            getSession: (input: {
+                                headers: Headers;
+                            }) => Promise<{
+                                session: {
+                                    id: string;
+                                    token: string;
+                                };
+                            } | null>;
+                            listSessions: (input: {
+                                headers: Headers;
+                            }) => Promise<{
+                                id: string;
+                                token: string;
+                                userId: string;
+                                expiresAt: Date;
+                                createdAt: Date;
+                                updatedAt: Date;
+                                ipAddress?: string | null;
+                                userAgent?: string | null;
+                            }[]>;
+                            revokeSession: (input: {
+                                body: {
+                                    token: string;
+                                };
+                                headers: Headers;
+                            }) => Promise<unknown>;
+                            revokeOtherSessions: (input: {
+                                headers: Headers;
+                            }) => Promise<unknown>;
                         };
                     };
                     sessionUser?: {
@@ -600,8 +774,8 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
         defaults: import("@trpc/server").TRPCQueryProcedure<{
             input: void;
             output: {
-                name: string;
                 id: string;
+                name: string;
                 searchValue: string;
                 order: number;
                 isDefault: boolean;
@@ -647,6 +821,35 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
                                 success: boolean;
                                 message: string;
                             }>;
+                            getSession: (input: {
+                                headers: Headers;
+                            }) => Promise<{
+                                session: {
+                                    id: string;
+                                    token: string;
+                                };
+                            } | null>;
+                            listSessions: (input: {
+                                headers: Headers;
+                            }) => Promise<{
+                                id: string;
+                                token: string;
+                                userId: string;
+                                expiresAt: Date;
+                                createdAt: Date;
+                                updatedAt: Date;
+                                ipAddress?: string | null;
+                                userAgent?: string | null;
+                            }[]>;
+                            revokeSession: (input: {
+                                body: {
+                                    token: string;
+                                };
+                                headers: Headers;
+                            }) => Promise<unknown>;
+                            revokeOtherSessions: (input: {
+                                headers: Headers;
+                            }) => Promise<unknown>;
                         };
                     };
                     sessionUser?: {
@@ -747,6 +950,35 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
                                 success: boolean;
                                 message: string;
                             }>;
+                            getSession: (input: {
+                                headers: Headers;
+                            }) => Promise<{
+                                session: {
+                                    id: string;
+                                    token: string;
+                                };
+                            } | null>;
+                            listSessions: (input: {
+                                headers: Headers;
+                            }) => Promise<{
+                                id: string;
+                                token: string;
+                                userId: string;
+                                expiresAt: Date;
+                                createdAt: Date;
+                                updatedAt: Date;
+                                ipAddress?: string | null;
+                                userAgent?: string | null;
+                            }[]>;
+                            revokeSession: (input: {
+                                body: {
+                                    token: string;
+                                };
+                                headers: Headers;
+                            }) => Promise<unknown>;
+                            revokeOtherSessions: (input: {
+                                headers: Headers;
+                            }) => Promise<unknown>;
                         };
                     };
                     sessionUser?: {
@@ -819,6 +1051,35 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
                                 success: boolean;
                                 message: string;
                             }>;
+                            getSession: (input: {
+                                headers: Headers;
+                            }) => Promise<{
+                                session: {
+                                    id: string;
+                                    token: string;
+                                };
+                            } | null>;
+                            listSessions: (input: {
+                                headers: Headers;
+                            }) => Promise<{
+                                id: string;
+                                token: string;
+                                userId: string;
+                                expiresAt: Date;
+                                createdAt: Date;
+                                updatedAt: Date;
+                                ipAddress?: string | null;
+                                userAgent?: string | null;
+                            }[]>;
+                            revokeSession: (input: {
+                                body: {
+                                    token: string;
+                                };
+                                headers: Headers;
+                            }) => Promise<unknown>;
+                            revokeOtherSessions: (input: {
+                                headers: Headers;
+                            }) => Promise<unknown>;
                         };
                     };
                     sessionUser?: {
@@ -842,18 +1103,18 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
     }, import("@trpc/server").TRPCDecorateCreateRouterOptions<{
         create: import("@trpc/server").TRPCMutationProcedure<{
             input: {
-                message: string;
                 id: string | null;
                 subject: string;
+                message: string;
                 to: string;
                 threadId: string | null;
                 fromEmail: string | null;
                 cc?: string | undefined;
                 bcc?: string | undefined;
                 attachments?: {
-                    name: string;
                     base64: string;
                     type: string;
+                    name: string;
                     size: number;
                     lastModified: number;
                 }[] | undefined;
@@ -942,6 +1203,35 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
                                 success: boolean;
                                 message: string;
                             }>;
+                            getSession: (input: {
+                                headers: Headers;
+                            }) => Promise<{
+                                session: {
+                                    id: string;
+                                    token: string;
+                                };
+                            } | null>;
+                            listSessions: (input: {
+                                headers: Headers;
+                            }) => Promise<{
+                                id: string;
+                                token: string;
+                                userId: string;
+                                expiresAt: Date;
+                                createdAt: Date;
+                                updatedAt: Date;
+                                ipAddress?: string | null;
+                                userAgent?: string | null;
+                            }[]>;
+                            revokeSession: (input: {
+                                body: {
+                                    token: string;
+                                };
+                                headers: Headers;
+                            }) => Promise<unknown>;
+                            revokeOtherSessions: (input: {
+                                headers: Headers;
+                            }) => Promise<unknown>;
                         };
                     };
                     sessionUser?: {
@@ -966,9 +1256,9 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
         list: import("@trpc/server").TRPCQueryProcedure<{
             input: void;
             output: {
-                name: string;
                 id: string;
                 type: string;
+                name: string;
                 color?: {
                     backgroundColor: string;
                     textColor: string;
@@ -989,8 +1279,8 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
         }>;
         update: import("@trpc/server").TRPCMutationProcedure<{
             input: {
-                name: string;
                 id: string;
+                name: string;
                 type?: string | undefined;
                 color?: {
                     backgroundColor: string;
@@ -1045,6 +1335,35 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
                                 success: boolean;
                                 message: string;
                             }>;
+                            getSession: (input: {
+                                headers: Headers;
+                            }) => Promise<{
+                                session: {
+                                    id: string;
+                                    token: string;
+                                };
+                            } | null>;
+                            listSessions: (input: {
+                                headers: Headers;
+                            }) => Promise<{
+                                id: string;
+                                token: string;
+                                userId: string;
+                                expiresAt: Date;
+                                createdAt: Date;
+                                updatedAt: Date;
+                                ipAddress?: string | null;
+                                userAgent?: string | null;
+                            }[]>;
+                            revokeSession: (input: {
+                                body: {
+                                    token: string;
+                                };
+                                headers: Headers;
+                            }) => Promise<unknown>;
+                            revokeOtherSessions: (input: {
+                                headers: Headers;
+                            }) => Promise<unknown>;
                         };
                     };
                     sessionUser?: {
@@ -1114,9 +1433,9 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
                     title: string;
                     subject: string;
                     tags: {
-                        name: string;
                         id: string;
                         type: string;
+                        name: string;
                     }[];
                     sender: {
                         email: string;
@@ -1156,8 +1475,8 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
                         mimeType: string;
                         size: number;
                         headers: {
-                            name: string | null;
                             value: string | null;
+                            name: string | null;
                         }[];
                     }[] | undefined;
                     isDraft?: boolean | undefined;
@@ -1165,17 +1484,17 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
                 hasUnread: boolean;
                 totalReplies: number;
                 labels: {
-                    name: string;
                     id: string;
+                    name: string;
                 }[];
                 latest?: {
                     id: string;
                     title: string;
                     subject: string;
                     tags: {
-                        name: string;
                         id: string;
                         type: string;
+                        name: string;
                     }[];
                     sender: {
                         email: string;
@@ -1215,8 +1534,8 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
                         mimeType: string;
                         size: number;
                         headers: {
-                            name: string | null;
                             value: string | null;
+                            name: string | null;
                         }[];
                     }[] | undefined;
                     isDraft?: boolean | undefined;
@@ -1237,9 +1556,9 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
                         title: string;
                         subject: string;
                         tags: {
-                            name: string;
                             id: string;
                             type: string;
+                            name: string;
                         }[];
                         sender: {
                             email: string;
@@ -1279,8 +1598,8 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
                             mimeType: string;
                             size: number;
                             headers: {
-                                name: string | null;
                                 value: string | null;
+                                name: string | null;
                             }[];
                         }[] | undefined;
                         isDraft?: boolean | undefined;
@@ -1288,17 +1607,17 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
                     hasUnread: boolean;
                     totalReplies: number;
                     labels: {
-                        name: string;
                         id: string;
+                        name: string;
                     }[];
                     latest?: {
                         id: string;
                         title: string;
                         subject: string;
                         tags: {
-                            name: string;
                             id: string;
                             type: string;
+                            name: string;
                         }[];
                         sender: {
                             email: string;
@@ -1338,8 +1657,8 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
                             mimeType: string;
                             size: number;
                             headers: {
-                                name: string | null;
                                 value: string | null;
+                                name: string | null;
                             }[];
                         }[] | undefined;
                         isDraft?: boolean | undefined;
@@ -1377,8 +1696,8 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
                     receivedOn?: string | undefined;
                     unread?: boolean | undefined;
                     labels?: {
-                        name: string;
                         id: string;
+                        name: string;
                     }[] | undefined;
                     $raw?: unknown;
                 }[];
@@ -1483,8 +1802,8 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
         }>;
         send: import("@trpc/server").TRPCMutationProcedure<{
             input: {
-                message: string;
                 subject: string;
+                message: string;
                 to: {
                     email: string;
                     name?: string | undefined;
@@ -1500,9 +1819,9 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
                 threadId?: string | undefined;
                 headers?: Record<string, string> | undefined;
                 attachments?: {
-                    name: string;
                     base64: string;
                     type: string;
+                    name: string;
                     size: number;
                     lastModified: number;
                 }[] | undefined;
@@ -1642,7 +1961,7 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
                 error: null;
                 sendAt: null;
             } | {
-                status: "sent" | "failed" | "sending" | "queued" | "cancelled";
+                status: "failed" | "sending" | "sent" | "queued" | "cancelled";
                 error: string | null;
                 sendAt: number | null;
             };
@@ -1650,11 +1969,11 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
         }>;
         listSendJobs: import("@trpc/server").TRPCQueryProcedure<{
             input: {
-                statuses?: ("sent" | "failed" | "sending" | "queued" | "cancelled")[] | undefined;
+                statuses?: ("failed" | "sending" | "sent" | "queued" | "cancelled")[] | undefined;
             } | undefined;
             output: {
                 id: string;
-                status: "sent" | "failed" | "sending" | "queued" | "cancelled";
+                status: "failed" | "sending" | "sent" | "queued" | "cancelled";
                 error: string | null;
                 subject: string | null;
                 to: string[];
@@ -1699,7 +2018,7 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
                 error?: undefined;
             } | {
                 readonly success: false;
-                readonly error: "Too late to cancel (status: sent)" | "Too late to cancel (status: failed)" | "Too late to cancel (status: sending)" | "Too late to cancel (status: queued)" | "Too late to cancel (status: cancelled)";
+                readonly error: "Too late to cancel (status: failed)" | "Too late to cancel (status: sending)" | "Too late to cancel (status: sent)" | "Too late to cancel (status: queued)" | "Too late to cancel (status: cancelled)";
             } | {
                 readonly success: false;
                 readonly error: "Unauthorized: Cannot cancel another user's scheduled email";
@@ -1873,6 +2192,35 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
                                 success: boolean;
                                 message: string;
                             }>;
+                            getSession: (input: {
+                                headers: Headers;
+                            }) => Promise<{
+                                session: {
+                                    id: string;
+                                    token: string;
+                                };
+                            } | null>;
+                            listSessions: (input: {
+                                headers: Headers;
+                            }) => Promise<{
+                                id: string;
+                                token: string;
+                                userId: string;
+                                expiresAt: Date;
+                                createdAt: Date;
+                                updatedAt: Date;
+                                ipAddress?: string | null;
+                                userAgent?: string | null;
+                            }[]>;
+                            revokeSession: (input: {
+                                body: {
+                                    token: string;
+                                };
+                                headers: Headers;
+                            }) => Promise<unknown>;
+                            revokeOtherSessions: (input: {
+                                headers: Headers;
+                            }) => Promise<unknown>;
                         };
                     };
                     sessionUser?: {
@@ -2020,6 +2368,35 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
                                 success: boolean;
                                 message: string;
                             }>;
+                            getSession: (input: {
+                                headers: Headers;
+                            }) => Promise<{
+                                session: {
+                                    id: string;
+                                    token: string;
+                                };
+                            } | null>;
+                            listSessions: (input: {
+                                headers: Headers;
+                            }) => Promise<{
+                                id: string;
+                                token: string;
+                                userId: string;
+                                expiresAt: Date;
+                                createdAt: Date;
+                                updatedAt: Date;
+                                ipAddress?: string | null;
+                                userAgent?: string | null;
+                            }[]>;
+                            revokeSession: (input: {
+                                body: {
+                                    token: string;
+                                };
+                                headers: Headers;
+                            }) => Promise<unknown>;
+                            revokeOtherSessions: (input: {
+                                headers: Headers;
+                            }) => Promise<unknown>;
                         };
                     };
                     sessionUser?: {
@@ -2043,7 +2420,7 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
     }, import("@trpc/server").TRPCDecorateCreateRouterOptions<{
         list: import("@trpc/server").TRPCQueryProcedure<{
             input: {
-                status?: "sent" | "failed" | "sending" | "queued" | "generating" | "draft_ready" | "approved" | "cancelled" | undefined;
+                status?: "failed" | "sending" | "sent" | "queued" | "generating" | "draft_ready" | "approved" | "cancelled" | undefined;
             } | undefined;
             output: import("../lib/draft-outbox").DraftOutboxItem[];
             meta: object;
@@ -2127,6 +2504,35 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
                                 success: boolean;
                                 message: string;
                             }>;
+                            getSession: (input: {
+                                headers: Headers;
+                            }) => Promise<{
+                                session: {
+                                    id: string;
+                                    token: string;
+                                };
+                            } | null>;
+                            listSessions: (input: {
+                                headers: Headers;
+                            }) => Promise<{
+                                id: string;
+                                token: string;
+                                userId: string;
+                                expiresAt: Date;
+                                createdAt: Date;
+                                updatedAt: Date;
+                                ipAddress?: string | null;
+                                userAgent?: string | null;
+                            }[]>;
+                            revokeSession: (input: {
+                                body: {
+                                    token: string;
+                                };
+                                headers: Headers;
+                            }) => Promise<unknown>;
+                            revokeOtherSessions: (input: {
+                                headers: Headers;
+                            }) => Promise<unknown>;
                         };
                     };
                     sessionUser?: {
@@ -2200,6 +2606,35 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
                                 success: boolean;
                                 message: string;
                             }>;
+                            getSession: (input: {
+                                headers: Headers;
+                            }) => Promise<{
+                                session: {
+                                    id: string;
+                                    token: string;
+                                };
+                            } | null>;
+                            listSessions: (input: {
+                                headers: Headers;
+                            }) => Promise<{
+                                id: string;
+                                token: string;
+                                userId: string;
+                                expiresAt: Date;
+                                createdAt: Date;
+                                updatedAt: Date;
+                                ipAddress?: string | null;
+                                userAgent?: string | null;
+                            }[]>;
+                            revokeSession: (input: {
+                                body: {
+                                    token: string;
+                                };
+                                headers: Headers;
+                            }) => Promise<unknown>;
+                            revokeOtherSessions: (input: {
+                                headers: Headers;
+                            }) => Promise<unknown>;
                         };
                     };
                     sessionUser?: {
@@ -2229,7 +2664,7 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
                     timezone: string;
                     externalImages: boolean;
                     customPrompt: string;
-                    colorTheme: "light" | "dark" | "system";
+                    colorTheme: "system" | "light" | "dark";
                     zeroSignature: boolean;
                     undoSendEnabled: boolean;
                     confirmDirectDraftSend: boolean;
@@ -2242,8 +2677,8 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
                     isOnboarded?: boolean | undefined;
                     trustedSenders?: string[] | undefined;
                     categories?: {
-                        name: string;
                         id: string;
+                        name: string;
                         searchValue: string;
                         order: number;
                         isDefault: boolean;
@@ -2263,11 +2698,11 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
                 customPrompt?: string | undefined;
                 isOnboarded?: boolean | undefined;
                 trustedSenders?: string[] | undefined;
-                colorTheme?: "light" | "dark" | "system" | undefined;
+                colorTheme?: "system" | "light" | "dark" | undefined;
                 zeroSignature?: boolean | undefined;
                 categories?: {
-                    name: string;
                     id: string;
+                    name: string;
                     searchValue: string;
                     order: number;
                     icon?: string | undefined;
@@ -2325,6 +2760,35 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
                                 success: boolean;
                                 message: string;
                             }>;
+                            getSession: (input: {
+                                headers: Headers;
+                            }) => Promise<{
+                                session: {
+                                    id: string;
+                                    token: string;
+                                };
+                            } | null>;
+                            listSessions: (input: {
+                                headers: Headers;
+                            }) => Promise<{
+                                id: string;
+                                token: string;
+                                userId: string;
+                                expiresAt: Date;
+                                createdAt: Date;
+                                updatedAt: Date;
+                                ipAddress?: string | null;
+                                userAgent?: string | null;
+                            }[]>;
+                            revokeSession: (input: {
+                                body: {
+                                    token: string;
+                                };
+                                headers: Headers;
+                            }) => Promise<unknown>;
+                            revokeOtherSessions: (input: {
+                                headers: Headers;
+                            }) => Promise<unknown>;
                         };
                     };
                     sessionUser?: {
@@ -2357,6 +2821,36 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
         getIntercomToken: import("@trpc/server").TRPCQueryProcedure<{
             input: void;
             output: string;
+            meta: object;
+        }>;
+        listSessions: import("@trpc/server").TRPCQueryProcedure<{
+            input: void;
+            output: {
+                sessions: {
+                    id: string;
+                    createdAt: Date;
+                    updatedAt: Date;
+                    expiresAt: Date;
+                    userAgent: string | null;
+                    current: boolean;
+                }[];
+            };
+            meta: object;
+        }>;
+        revokeSession: import("@trpc/server").TRPCMutationProcedure<{
+            input: {
+                sessionId: string;
+            };
+            output: {
+                success: boolean;
+            };
+            meta: object;
+        }>;
+        revokeOtherSessions: import("@trpc/server").TRPCMutationProcedure<{
+            input: void;
+            output: {
+                success: boolean;
+            };
             meta: object;
         }>;
     }>>;
@@ -2397,6 +2891,35 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
                                 success: boolean;
                                 message: string;
                             }>;
+                            getSession: (input: {
+                                headers: Headers;
+                            }) => Promise<{
+                                session: {
+                                    id: string;
+                                    token: string;
+                                };
+                            } | null>;
+                            listSessions: (input: {
+                                headers: Headers;
+                            }) => Promise<{
+                                id: string;
+                                token: string;
+                                userId: string;
+                                expiresAt: Date;
+                                createdAt: Date;
+                                updatedAt: Date;
+                                ipAddress?: string | null;
+                                userAgent?: string | null;
+                            }[]>;
+                            revokeSession: (input: {
+                                body: {
+                                    token: string;
+                                };
+                                headers: Headers;
+                            }) => Promise<unknown>;
+                            revokeOtherSessions: (input: {
+                                headers: Headers;
+                            }) => Promise<unknown>;
                         };
                     };
                     sessionUser?: {
@@ -2434,7 +2957,7 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
                 teams: {
                     id: string;
                     name: string;
-                    role: "owner" | "member";
+                    role: "owner" | "admin" | "member" | "guest" | "auditor";
                     prefs: {
                         onComment: boolean;
                         onMention: boolean;
@@ -2482,7 +3005,7 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
             output: {
                 members: {
                     userId: string;
-                    role: "owner" | "member";
+                    role: "owner" | "admin" | "member" | "guest" | "auditor";
                     name: string;
                     email: string;
                     image: string | null;
@@ -2498,6 +3021,17 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
             };
             output: {
                 success: boolean;
+            };
+            meta: object;
+        }>;
+        setMemberRole: import("@trpc/server").TRPCMutationProcedure<{
+            input: {
+                role: "owner" | "admin" | "member" | "guest" | "auditor";
+                userId: string;
+                teamId: string;
+            };
+            output: {
+                role: "owner" | "admin" | "member" | "guest" | "auditor";
             };
             meta: object;
         }>;
@@ -3088,12 +3622,12 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
             input: {
                 email: string;
                 teamId: string;
-                role?: "owner" | "member" | undefined;
+                role?: "owner" | "admin" | "member" | "guest" | "auditor" | undefined;
             };
             output: {
                 id: string;
                 email: string;
-                role: import("../lib/teams/team-store").TeamRole;
+                role: "owner" | "admin" | "member" | "guest" | "auditor";
             } & Disposable;
             meta: object;
         }>;
@@ -3105,7 +3639,7 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
                 invites: {
                     id: string;
                     email: string;
-                    role: "owner" | "member";
+                    role: "owner" | "admin" | "member" | "guest" | "auditor";
                     status: "pending" | "revoked" | "accepted" | "declined";
                     createdAt: Date;
                     invitedByName: string;
@@ -3129,7 +3663,7 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
                     id: string;
                     teamId: string;
                     teamName: string;
-                    role: "owner" | "member";
+                    role: "owner" | "admin" | "member" | "guest" | "auditor";
                     createdAt: Date;
                     invitedByName: string;
                 }[] & Disposable;
@@ -3199,10 +3733,10 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
             input: {
                 teamId: string;
                 status?: "open" | "closed" | undefined;
-                limit?: number | undefined;
                 assignee?: "me" | "unassigned" | {
                     userId: string;
                 } | undefined;
+                limit?: number | undefined;
                 labelId?: string | undefined;
                 cursor?: {
                     id: string;
@@ -3595,6 +4129,192 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
             };
             meta: object;
         }>;
+        exportAudit: import("@trpc/server").TRPCMutationProcedure<{
+            input: {
+                teamId: string;
+                to?: string | undefined;
+                from?: string | undefined;
+            };
+            output: import("../lib/teams/team-governance-shared").SignedAuditExport;
+            meta: object;
+        }>;
+        verifyAuditExport: import("@trpc/server").TRPCQueryProcedure<{
+            input: {
+                doc: {
+                    signature: {
+                        kekVersion: string;
+                        algorithm: string;
+                        mac: string;
+                        kdf: string;
+                    };
+                    payload?: unknown;
+                };
+            };
+            output: {
+                verdict: import("../lib/teams/team-governance-shared").AuditExportVerdict;
+            };
+            meta: object;
+        }>;
+        getRetentionPolicy: import("@trpc/server").TRPCQueryProcedure<{
+            input: {
+                teamId: string;
+            };
+            output: {
+                policy: ({
+                    teamId: string;
+                    auditDays: number | null;
+                    ruleRunDays: number | null;
+                    notificationDays: number | null;
+                    updatedAt: string;
+                } & Disposable) | null;
+            };
+            meta: object;
+        }>;
+        setRetentionPolicy: import("@trpc/server").TRPCMutationProcedure<{
+            input: {
+                teamId: string;
+                auditDays: number | null;
+                ruleRunDays: number | null;
+                notificationDays: number | null;
+            };
+            output: {
+                success: boolean;
+            };
+            meta: object;
+        }>;
+        exportData: import("@trpc/server").TRPCMutationProcedure<{
+            input: {
+                teamId: string;
+            };
+            output: never;
+            meta: object;
+        }>;
+        restoreData: import("@trpc/server").TRPCMutationProcedure<{
+            input: {
+                payload: {
+                    team: {
+                        id: string;
+                        name: string;
+                        createdAt: string;
+                        createdBy: string;
+                    };
+                    labels: {
+                        id: string;
+                        name: string;
+                        color: string;
+                        createdBy: string;
+                    }[];
+                    threads: {
+                        status: string;
+                        id: string;
+                        subject: string;
+                        threadId: string;
+                        createdAt: string;
+                        providerId: string;
+                        sharerUserId: string;
+                        sharerEmail: string;
+                        visibility: string;
+                        preview: string;
+                        participants: {
+                            email: string;
+                            name?: string | undefined;
+                        }[];
+                        messageCount: number;
+                        latestReceivedOn: string | null;
+                        assigneeUserId: string | null;
+                        lastActivityAt: string;
+                        labelIds: string[];
+                        accessUserIds: string[];
+                    }[];
+                    format: "reta-team-export";
+                    version: 1;
+                    rules: {
+                        id: string;
+                        name: string;
+                        actions: unknown[];
+                        createdAt: string;
+                        createdBy: string;
+                        triggers: Record<string, unknown>;
+                        watchedEmail: string;
+                    }[];
+                    exportedAt: string;
+                    members: {
+                        name: string | null;
+                        email: string;
+                        role: string;
+                        userId: string;
+                        prefs: Record<string, unknown>;
+                    }[];
+                    comments: {
+                        id: string;
+                        body: string;
+                        quote: {
+                            receivedOn: string;
+                            messageId: string;
+                            text: string;
+                            authorEmail: string;
+                            authorName?: string | undefined;
+                        } | null;
+                        createdAt: string;
+                        updatedAt: string;
+                        teamThreadId: string;
+                        authorUserId: string;
+                        mentions: string[];
+                        reactions: {
+                            userId: string;
+                            emoji: string;
+                        }[];
+                    }[];
+                    slaPolicy: {
+                        firstResponseMinutes: number | null;
+                        resolutionMinutes: number | null;
+                        timeZone: string;
+                        businessHours: {
+                            start: string;
+                            end: string;
+                            days: number[];
+                        };
+                    } | null;
+                    retentionPolicy: {
+                        auditDays: number | null;
+                        ruleRunDays: number | null;
+                        notificationDays: number | null;
+                    } | null;
+                    absences: {
+                        userId: string;
+                        note: string | null;
+                        startsAt: string;
+                        endsAt: string;
+                    }[];
+                    truncated: string[];
+                    excluded: string[];
+                };
+            };
+            output: {
+                report: {
+                    teamId: string;
+                    teamName: string;
+                    restored: {
+                        members: number;
+                        labels: number;
+                        threads: number;
+                        comments: number;
+                        reactions: number;
+                        rules: number;
+                        absences: number;
+                        accessRows: number;
+                    };
+                    skipped: {
+                        kind: "member" | "thread" | "comment" | "reaction" | "absence" | "rule" | "access" | "assignee";
+                        id: string;
+                        reason: "user_missing" | "user_email_mismatch" | "user_not_source_member" | "sharer_connection_missing" | "source_thread_mismatch" | "watched_connection_missing" | "source_rule_mismatch" | "thread_skipped" | "author_missing" | "assignee_not_writer";
+                    }[];
+                    rulesRestoredDisabled: boolean;
+                    sourceDigest: string;
+                } & Disposable;
+            };
+            meta: object;
+        }>;
         heartbeat: import("@trpc/server").TRPCMutationProcedure<{
             input: {
                 teamThreadId: string;
@@ -3677,6 +4397,35 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
                                 success: boolean;
                                 message: string;
                             }>;
+                            getSession: (input: {
+                                headers: Headers;
+                            }) => Promise<{
+                                session: {
+                                    id: string;
+                                    token: string;
+                                };
+                            } | null>;
+                            listSessions: (input: {
+                                headers: Headers;
+                            }) => Promise<{
+                                id: string;
+                                token: string;
+                                userId: string;
+                                expiresAt: Date;
+                                createdAt: Date;
+                                updatedAt: Date;
+                                ipAddress?: string | null;
+                                userAgent?: string | null;
+                            }[]>;
+                            revokeSession: (input: {
+                                body: {
+                                    token: string;
+                                };
+                                headers: Headers;
+                            }) => Promise<unknown>;
+                            revokeOtherSessions: (input: {
+                                headers: Headers;
+                            }) => Promise<unknown>;
                         };
                     };
                     sessionUser?: {
@@ -3758,7 +4507,7 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
         }>;
         setMapping: import("@trpc/server").TRPCMutationProcedure<{
             input: {
-                kind: "status" | "team" | "assignee";
+                kind: "team" | "status" | "assignee";
                 teamId: string;
                 retaValue: string;
                 externalId: string;
@@ -4034,6 +4783,35 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
                                 success: boolean;
                                 message: string;
                             }>;
+                            getSession: (input: {
+                                headers: Headers;
+                            }) => Promise<{
+                                session: {
+                                    id: string;
+                                    token: string;
+                                };
+                            } | null>;
+                            listSessions: (input: {
+                                headers: Headers;
+                            }) => Promise<{
+                                id: string;
+                                token: string;
+                                userId: string;
+                                expiresAt: Date;
+                                createdAt: Date;
+                                updatedAt: Date;
+                                ipAddress?: string | null;
+                                userAgent?: string | null;
+                            }[]>;
+                            revokeSession: (input: {
+                                body: {
+                                    token: string;
+                                };
+                                headers: Headers;
+                            }) => Promise<unknown>;
+                            revokeOtherSessions: (input: {
+                                headers: Headers;
+                            }) => Promise<unknown>;
                         };
                     };
                     sessionUser?: {
@@ -4134,6 +4912,35 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
                                 success: boolean;
                                 message: string;
                             }>;
+                            getSession: (input: {
+                                headers: Headers;
+                            }) => Promise<{
+                                session: {
+                                    id: string;
+                                    token: string;
+                                };
+                            } | null>;
+                            listSessions: (input: {
+                                headers: Headers;
+                            }) => Promise<{
+                                id: string;
+                                token: string;
+                                userId: string;
+                                expiresAt: Date;
+                                createdAt: Date;
+                                updatedAt: Date;
+                                ipAddress?: string | null;
+                                userAgent?: string | null;
+                            }[]>;
+                            revokeSession: (input: {
+                                body: {
+                                    token: string;
+                                };
+                                headers: Headers;
+                            }) => Promise<unknown>;
+                            revokeOtherSessions: (input: {
+                                headers: Headers;
+                            }) => Promise<unknown>;
                         };
                     };
                     sessionUser?: {
@@ -4235,6 +5042,35 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
                                 success: boolean;
                                 message: string;
                             }>;
+                            getSession: (input: {
+                                headers: Headers;
+                            }) => Promise<{
+                                session: {
+                                    id: string;
+                                    token: string;
+                                };
+                            } | null>;
+                            listSessions: (input: {
+                                headers: Headers;
+                            }) => Promise<{
+                                id: string;
+                                token: string;
+                                userId: string;
+                                expiresAt: Date;
+                                createdAt: Date;
+                                updatedAt: Date;
+                                ipAddress?: string | null;
+                                userAgent?: string | null;
+                            }[]>;
+                            revokeSession: (input: {
+                                body: {
+                                    token: string;
+                                };
+                                headers: Headers;
+                            }) => Promise<unknown>;
+                            revokeOtherSessions: (input: {
+                                headers: Headers;
+                            }) => Promise<unknown>;
                         };
                     };
                     sessionUser?: {
@@ -4329,6 +5165,35 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
                                 success: boolean;
                                 message: string;
                             }>;
+                            getSession: (input: {
+                                headers: Headers;
+                            }) => Promise<{
+                                session: {
+                                    id: string;
+                                    token: string;
+                                };
+                            } | null>;
+                            listSessions: (input: {
+                                headers: Headers;
+                            }) => Promise<{
+                                id: string;
+                                token: string;
+                                userId: string;
+                                expiresAt: Date;
+                                createdAt: Date;
+                                updatedAt: Date;
+                                ipAddress?: string | null;
+                                userAgent?: string | null;
+                            }[]>;
+                            revokeSession: (input: {
+                                body: {
+                                    token: string;
+                                };
+                                headers: Headers;
+                            }) => Promise<unknown>;
+                            revokeOtherSessions: (input: {
+                                headers: Headers;
+                            }) => Promise<unknown>;
                         };
                     };
                     sessionUser?: {

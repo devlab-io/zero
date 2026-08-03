@@ -150,6 +150,16 @@ export default class Entry extends WorkerEntrypoint<ZeroEnv> {
             await runOutboundDeliverySweep(this.env as unknown as import('./env').ZeroEnv);
           },
         ],
+        [
+          'team-retention-sweep',
+          async () => {
+            // P17 : purge bornée selon les politiques de rétention d'équipe
+            // + moisson des intents de réponse expirés. Auditée, jamais
+            // silencieuse.
+            const { runTeamRetentionSweep } = await import('./lib/teams/team-retention-runner');
+            await runTeamRetentionSweep(this.env as unknown as import('./env').ZeroEnv);
+          },
+        ],
       ],
       (name, error) => logger.error(`scheduled task ${name} failed`, error),
     );

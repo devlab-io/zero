@@ -27,20 +27,38 @@ describe('team rules store contract — authority', () => {
     expect(source).not.toContain("visibility: 'restricted'");
   });
 
-  it('rule mutations require the owner role; reads only membership', () => {
+  it('rule mutations require rules.manage; reads require audit.read (guest exclu)', () => {
     const mutators = ['createRule', 'updateRule', 'setRuleEnabled', 'deleteRule', 'undoRuleRun'];
     for (const name of mutators) {
       const start = source.indexOf(`export async function ${name}`);
       expect(start, name).toBeGreaterThan(-1);
       const block = source.slice(start, source.indexOf('export async function', start + 1));
-      expect(block, name).toContain('requireOwner');
+      // P17 : porte par CAPACITÉ (owner/admin via la matrice).
+      expect(block, name).toContain('requireRulesManager');
     }
+    const managerGate = source.slice(
+      source.indexOf('async function requireRulesManager'),
+      source.indexOf('async function requireRulesReader'),
+    );
+    expect(managerGate).toContain("roleCan(membership.role, 'rules.manage')");
     const listBlock = source.slice(
       source.indexOf('export async function listRules'),
       source.indexOf('export async function createRule'),
     );
-    expect(listBlock).toContain('requireMembership');
-    expect(listBlock).not.toContain('requireOwner');
+    expect(listBlock).toContain('requireRulesReader');
+    expect(listBlock).not.toContain('requireRulesManager');
+    // L'aperçu lit des fils ENTIERS de la boîte de l'appelant : surface
+    // d'AUTEUR de règles, même capacité que les mutations.
+    const previewBlock = source.slice(
+      source.indexOf('export async function previewRule'),
+      source.indexOf('export async function requireAclConfirmation') > -1
+        ? source.indexOf('export async function requireAclConfirmation')
+        : source.indexOf(
+            'export async function',
+            source.indexOf('export async function previewRule') + 1,
+          ),
+    );
+    expect(previewBlock).toContain('requireRulesManager');
   });
 });
 
@@ -285,13 +303,17 @@ describe('team store contract — optional rule provenance on thread mutations',
 
 // --- previewRule : test RÉEL (une seule lecture SQL, fake drizzle minimal) ---
 
-const membershipDb = {
-  select: () => ({
-    from: () => ({
-      where: () => ({ limit: async () => [{ role: 'member' }] }),
+// P17 : l'aperçu exige rules.manage — le fake porte un rôle owner ; un rôle
+// member est refusé (test dédié plus bas).
+const roleDb = (role: string) =>
+  ({
+    select: () => ({
+      from: () => ({
+        where: () => ({ limit: async () => [{ role }] }),
+      }),
     }),
-  }),
-} as unknown as DB;
+  }) as unknown as DB;
+const membershipDb = roleDb('owner');
 
 const candidate = (threadId: string, meta: RulePreviewCandidate['meta']): RulePreviewCandidate => ({
   threadId,
@@ -341,5 +363,11 @@ describe('previewRule — exact, read-only evaluation', () => {
       [candidate('th-broken', null)],
     );
     expect(rows[0]?.verdict).toBeNull();
+  });
+
+  it('P17 : un simple member est refusé — l’aperçu est une surface d’auteur de règles', async () => {
+    await expect(
+      previewRule(roleDb('member'), 'user-1', 'team-1', { triggers: {} }, []),
+    ).rejects.toThrow('forbidden');
   });
 });

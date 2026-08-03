@@ -40,6 +40,7 @@ import type {
 import { and, count, desc, eq, gte, isNull, inArray, or } from 'drizzle-orm';
 import type { IGetThreadResponse } from '../driver/types';
 import { buildTeamThreadMetadata } from './team-access';
+import { roleCan } from './team-roles';
 import type { DB } from '../../db';
 
 /**
@@ -98,9 +99,17 @@ async function requireMembership(db: DB, teamId: string, userId: string) {
   return membership;
 }
 
-async function requireOwner(db: DB, teamId: string, userId: string) {
+/** P17 : mutations de règles = capacité 'rules.manage' (owner/admin). */
+async function requireRulesManager(db: DB, teamId: string, userId: string) {
   const membership = await requireMembership(db, teamId, userId);
-  if (membership.role !== 'owner') throw new TeamStoreError('forbidden');
+  if (!roleCan(membership.role, 'rules.manage')) throw new TeamStoreError('forbidden');
+  return membership;
+}
+
+/** P17 : lecture des règles/historique — tout rôle sauf guest (audit.read). */
+async function requireRulesReader(db: DB, teamId: string, userId: string) {
+  const membership = await requireMembership(db, teamId, userId);
+  if (!roleCan(membership.role, 'audit.read')) throw new TeamStoreError('forbidden');
   return membership;
 }
 
@@ -192,7 +201,7 @@ function toPublicRule(row: {
 }
 
 export async function listRules(db: DB, userId: string, teamId: string) {
-  await requireMembership(db, teamId, userId);
+  await requireRulesReader(db, teamId, userId);
   const rows = await db
     .select({
       id: teamRule.id,
@@ -228,7 +237,7 @@ export async function createRule(
     confirmAclExpansion?: boolean;
   },
 ) {
-  await requireOwner(db, teamId, userId);
+  await requireRulesManager(db, teamId, userId);
   const existing = await db
     .select({ id: teamRule.id })
     .from(teamRule)
@@ -286,7 +295,7 @@ export async function updateRule(
   },
 ) {
   const rule = await requireRule(db, ruleId);
-  await requireOwner(db, rule.teamId, userId);
+  await requireRulesManager(db, rule.teamId, userId);
   const triggers = patch.triggers ? normalizeTriggers(patch.triggers) : undefined;
   const actions = patch.actions ? normalizeActions(patch.actions) : undefined;
   // Une règle share modifiée re-cible ce qui sera partagé (actions OU
@@ -321,7 +330,7 @@ export async function setRuleEnabled(
   confirmAclExpansion?: boolean,
 ) {
   const rule = await requireRule(db, ruleId);
-  await requireOwner(db, rule.teamId, userId);
+  await requireRulesManager(db, rule.teamId, userId);
   // RÉACTIVER une règle share ré-arme un élargissement d'ACL : confirmation
   // fraîche exigée. Désactiver, jamais.
   if (enabled) requireAclConfirmation(rule.actions, confirmAclExpansion);
@@ -341,7 +350,7 @@ export async function setRuleEnabled(
  */
 export async function deleteRule(db: DB, userId: string, ruleId: string) {
   const rule = await requireRule(db, ruleId);
-  await requireOwner(db, rule.teamId, userId);
+  await requireRulesManager(db, rule.teamId, userId);
   await db
     .update(teamRule)
     .set({ deletedAt: new Date(), enabled: false, updatedAt: new Date() })
@@ -361,7 +370,7 @@ export async function listRuleRuns(
   teamId: string,
   options: { ruleId?: string; teamThreadId?: string; limit?: number },
 ) {
-  await requireMembership(db, teamId, userId);
+  await requireRulesReader(db, teamId, userId);
   const limit = Math.min(Math.max(options.limit ?? 50, 1), RUNS_PAGE);
   // Jointure SANS filtre deleted_at : l'historique des règles supprimées
   // reste visible et nommé.
@@ -436,7 +445,9 @@ export async function previewRule(
 ): Promise<
   Array<{ threadId: string; subject: string; senderEmail: string; verdict: RuleVerdict | null }>
 > {
-  await requireMembership(db, teamId, userId);
+  // P17 : l'aperçu est une surface d'AUTEUR de règles (il lit des fils
+  // entiers de la boîte de l'appelant) — même capacité que les mutations.
+  await requireRulesManager(db, teamId, userId);
   const triggers = normalizeTriggers(input.triggers);
   return candidates.map((candidate) => ({
     threadId: candidate.threadId,
@@ -813,7 +824,7 @@ export async function undoRuleRun(
   const rows = await db.select().from(teamRuleRun).where(eq(teamRuleRun.id, runId)).limit(1);
   const run = rows[0];
   if (!run) throw new TeamStoreError('not_found');
-  await requireOwner(db, run.teamId, userId);
+  await requireRulesManager(db, run.teamId, userId);
   if (run.outcome !== 'applied') throw new TeamStoreError('run_not_undoable');
 
   // L'historique est durable : l'undo d'un run d'une règle SUPPRIMÉE reste

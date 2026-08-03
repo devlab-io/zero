@@ -9,7 +9,7 @@ import { describe, expect, it, vi } from 'vitest';
  * factice, comme ask-reta-rate-do.test.ts.
  */
 
-type Attachment = { userId: string; socketId: string };
+type Attachment = { userId: string; socketId: string; interactive: boolean };
 
 class FakeSocket {
   attachment: Attachment | null = null;
@@ -40,7 +40,7 @@ const makeHarness = () => {
   const realtime = new TeamThreadRealtime(ctx as never, {} as never);
   const connect = (userId: string) => {
     const socket = new FakeSocket();
-    socket.serializeAttachment({ userId, socketId: crypto.randomUUID() });
+    socket.serializeAttachment({ userId, socketId: crypto.randomUUID(), interactive: true });
     sockets.push(socket);
     return socket;
   };

@@ -6,12 +6,16 @@ import {
   FormItem,
   FormLabel,
 } from '@/components/ui/form';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { SettingsCard } from '@/components/settings/settings-card';
+import { useTRPC } from '@/providers/query-provider';
 import { zodResolver } from '@/lib/zod-resolver';
 import { Switch } from '@/components/ui/switch';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { useForm } from 'react-hook-form';
 import { m } from '@/paraglide/messages';
+import { Loader2 } from 'lucide-react';
 
 import { useState } from 'react';
 import * as z from 'zod';
@@ -100,6 +104,89 @@ export default function SecurityPage() {
           </form>
         </Form>
       </SettingsCard>
+
+      <SessionsCard />
     </div>
+  );
+}
+
+/**
+ * P17-D — appareils et sessions révocables. La liste vient du serveur SANS
+ * token (des ids seuls) ; la révocation passe par better-auth (Postgres +
+ * cache), fenêtre résiduelle bornée à 5 minutes par le cookieCache.
+ */
+function SessionsCard() {
+  const trpc = useTRPC();
+  const queryClient = useQueryClient();
+  const { data, isLoading } = useQuery(
+    trpc.user.listSessions.queryOptions(undefined, { staleTime: 15_000 }),
+  );
+  const sessions = data?.sessions ?? [];
+  const invalidate = () =>
+    void queryClient.invalidateQueries({ queryKey: trpc.user.listSessions.queryKey() });
+  const revoke = useMutation(trpc.user.revokeSession.mutationOptions({ onSuccess: invalidate }));
+  const revokeOthers = useMutation(
+    trpc.user.revokeOtherSessions.mutationOptions({ onSuccess: invalidate }),
+  );
+
+  return (
+    <SettingsCard
+      title={m['pages.settings.security.sessionsTitle']()}
+      description={m['pages.settings.security.sessionsDescription']()}
+      footer={
+        sessions.length > 1 ? (
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={revokeOthers.isPending}
+            onClick={() => revokeOthers.mutate(undefined)}
+          >
+            {m['pages.settings.security.sessionRevokeOthers']()}
+          </Button>
+        ) : undefined
+      }
+    >
+      {isLoading ? (
+        <div className="text-muted-foreground flex items-center gap-2 text-sm">
+          <Loader2 className="h-4 w-4 animate-spin" />
+        </div>
+      ) : (
+        <ul className="space-y-2">
+          {sessions.map((session) => (
+            <li
+              key={session.id}
+              className="bg-popover flex items-center justify-between gap-2 rounded-lg border p-3 text-sm"
+            >
+              <span className="min-w-0">
+                <span className="block truncate">
+                  {session.userAgent ?? m['pages.settings.security.sessionUnknownDevice']()}
+                  {session.current && (
+                    <Badge variant="secondary" className="ml-2 text-[10px]">
+                      {m['pages.settings.security.currentSession']()}
+                    </Badge>
+                  )}
+                </span>
+                <span className="text-muted-foreground block text-xs">
+                  {m['pages.settings.security.sessionLastActive']({
+                    date: new Date(session.updatedAt).toLocaleString(),
+                  })}
+                </span>
+              </span>
+              {!session.current && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7 shrink-0 text-xs"
+                  disabled={revoke.isPending}
+                  onClick={() => revoke.mutate({ sessionId: session.id })}
+                >
+                  {m['pages.settings.security.sessionRevoke']()}
+                </Button>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </SettingsCard>
   );
 }

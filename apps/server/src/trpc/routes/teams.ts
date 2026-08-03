@@ -12,6 +12,7 @@ import {
 } from '../../routes/team-realtime';
 import { getThread, getThreadsFromDB, getZeroDB } from '../../lib/server-utils';
 import { activeDriverProcedure, privateProcedure, router } from '../trpc';
+import { TEAM_ROLES } from '../../lib/teams/team-roles';
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 
@@ -65,7 +66,10 @@ function rtClose(ctx: RtCtx, teamThreadId: string) {
  * resolveAccess before the sharer's connection is used server-side.
  */
 
-const TEAM_ERROR_CODES: Record<string, 'NOT_FOUND' | 'FORBIDDEN' | 'BAD_REQUEST'> = {
+const TEAM_ERROR_CODES: Record<
+  string,
+  'NOT_FOUND' | 'FORBIDDEN' | 'BAD_REQUEST' | 'PRECONDITION_FAILED'
+> = {
   not_found: 'NOT_FOUND',
   label_not_found: 'NOT_FOUND',
   message_not_in_thread: 'NOT_FOUND',
@@ -98,6 +102,12 @@ const TEAM_ERROR_CODES: Record<string, 'NOT_FOUND' | 'FORBIDDEN' | 'BAD_REQUEST'
   override_not_armed: 'BAD_REQUEST',
   not_draft_owner: 'FORBIDDEN',
   not_reviewer: 'FORBIDDEN',
+  // P17 — gouvernance (export signé, rétention, export/restauration) + rôles.
+  mention_requires_access: 'BAD_REQUEST',
+  export_unavailable: 'PRECONDITION_FAILED',
+  invalid_retention: 'BAD_REQUEST',
+  restore_invalid: 'BAD_REQUEST',
+  restore_too_large: 'BAD_REQUEST',
 };
 
 /** Store errors carry their fixed code as message — even across the DO RPC. */
@@ -160,6 +170,139 @@ const ruleActionSchema = z.discriminatedUnion('kind', [
 const ruleNameSchema = z.string().trim().min(1).max(120);
 const ruleIdInput = z.object({ ruleId: z.string().min(1).max(64) });
 
+// --- P17 : document d'export de données d'équipe (restauration) ---------------
+// Bornes ALIGNÉES sur celles de l'export (team-governance-store EXPORT_BOUNDS) :
+// un export produit par ce serveur revalide toujours ; un document forgé
+// au-delà des bornes est refusé au schéma, avant tout travail.
+const isoDate = z.string().datetime();
+const restoreQuoteSchema = z
+  .object({
+    messageId: z.string().max(256),
+    authorEmail: z.string().max(320),
+    authorName: z.string().max(256).optional(),
+    receivedOn: z.string().max(64),
+    text: z.string().max(8_000),
+  })
+  .nullable();
+const teamDataExportSchema = z.object({
+  format: z.literal('reta-team-export'),
+  version: z.literal(1),
+  exportedAt: isoDate,
+  team: z.object({
+    id: z.string().min(1).max(64),
+    name: z.string().min(1).max(80),
+    createdBy: z.string().min(1).max(64),
+    createdAt: isoDate,
+  }),
+  members: z
+    .array(
+      z.object({
+        userId: z.string().min(1).max(64),
+        email: z.string().max(320),
+        name: z.string().max(256).nullable(),
+        role: z.string().max(32),
+        prefs: z.record(z.unknown()),
+      }),
+    )
+    .max(500),
+  labels: z
+    .array(
+      z.object({
+        id: z.string().min(1).max(64),
+        name: z.string().min(1).max(40),
+        color: z.string().min(1).max(24),
+        createdBy: z.string().min(1).max(64),
+      }),
+    )
+    .max(200),
+  threads: z
+    .array(
+      z.object({
+        id: z.string().min(1).max(64),
+        threadId: z.string().min(1).max(256),
+        sharerUserId: z.string().min(1).max(64),
+        sharerEmail: z.string().max(320),
+        providerId: z.string().min(1).max(64),
+        visibility: z.string().max(16),
+        subject: z.string().max(2_000),
+        preview: z.string().max(4_000),
+        participants: z
+          .array(z.object({ name: z.string().max(256).optional(), email: z.string().max(320) }))
+          .max(100),
+        messageCount: z.number().int().min(0).max(100_000),
+        latestReceivedOn: z.string().max(64).nullable(),
+        status: z.string().max(16),
+        assigneeUserId: z.string().max(64).nullable(),
+        lastActivityAt: isoDate,
+        createdAt: isoDate,
+        labelIds: z.array(z.string().min(1).max(64)).max(20),
+        accessUserIds: z.array(z.string().min(1).max(64)).max(50),
+      }),
+    )
+    .max(2_000),
+  comments: z
+    .array(
+      z.object({
+        id: z.string().min(1).max(64),
+        teamThreadId: z.string().min(1).max(64),
+        authorUserId: z.string().min(1).max(64),
+        body: z.string().max(5_000),
+        mentions: z.array(z.string().min(1).max(64)).max(20),
+        quote: restoreQuoteSchema,
+        createdAt: isoDate,
+        updatedAt: isoDate,
+        reactions: z
+          .array(z.object({ userId: z.string().min(1).max(64), emoji: z.string().max(16) }))
+          .max(100),
+      }),
+    )
+    .max(10_000),
+  rules: z
+    .array(
+      z.object({
+        id: z.string().min(1).max(64),
+        name: z.string().min(1).max(120),
+        triggers: z.record(z.unknown()),
+        actions: z.array(z.unknown()).max(10),
+        createdBy: z.string().min(1).max(64),
+        watchedEmail: z.string().max(320),
+        createdAt: isoDate,
+      }),
+    )
+    .max(200),
+  slaPolicy: z
+    .object({
+      firstResponseMinutes: z.number().int().nullable(),
+      resolutionMinutes: z.number().int().nullable(),
+      timeZone: z.string().min(1).max(64),
+      businessHours: z.object({
+        days: z.array(z.number().int().min(0).max(6)).min(1).max(7),
+        start: z.string().regex(HOURS_RE),
+        end: z.string().regex(HOURS_RE),
+      }),
+    })
+    .nullable(),
+  retentionPolicy: z
+    .object({
+      auditDays: z.number().int().min(30).max(730).nullable(),
+      ruleRunDays: z.number().int().min(30).max(730).nullable(),
+      notificationDays: z.number().int().min(30).max(730).nullable(),
+    })
+    .nullable(),
+  absences: z
+    .array(
+      z.object({
+        userId: z.string().min(1).max(64),
+        startsAt: isoDate,
+        endsAt: isoDate,
+        note: z.string().max(300).nullable(),
+      }),
+    )
+    .max(500),
+  truncated: z.array(z.string().max(64)).max(16),
+  excluded: z.array(z.string().max(200)).max(16),
+});
+
 /**
  * Garde ROUTE de l'élargissement d'ACL (doublée d'une garde STORE) : une
  * action share = chaque fil qui matche devient lisible par TOUTE l'équipe —
@@ -202,14 +345,19 @@ export const teamsRouter = router({
   delete: privateProcedure.input(teamIdInput).mutation(async ({ ctx, input }) =>
     mapTeamErrors(async () => {
       const db = await getZeroDB(ctx.sessionUser.id);
-      await db.deleteTeam(input.teamId);
+      const result = await db.deleteTeam(input.teamId);
+      for (const teamThreadId of result.realtimeThreadIds) rtClose(ctx, teamThreadId);
       return { success: true };
     }),
   ),
   leave: privateProcedure.input(teamIdInput).mutation(async ({ ctx, input }) =>
     mapTeamErrors(async () => {
       const db = await getZeroDB(ctx.sessionUser.id);
-      await db.leaveTeam(input.teamId);
+      const result = await db.leaveTeam(input.teamId);
+      for (const teamThreadId of result.realtimeThreadIds) {
+        if (result.teamDeleted) rtClose(ctx, teamThreadId);
+        else rtKick(ctx, teamThreadId, ctx.sessionUser.id);
+      }
       return { success: true };
     }),
   ),
@@ -226,8 +374,28 @@ export const teamsRouter = router({
     .mutation(async ({ ctx, input }) =>
       mapTeamErrors(async () => {
         const db = await getZeroDB(ctx.sessionUser.id);
-        await db.removeTeamMember(input.teamId, input.userId);
+        const result = await db.removeTeamMember(input.teamId, input.userId);
+        for (const teamThreadId of result.realtimeThreadIds ?? []) {
+          rtKick(ctx, teamThreadId, input.userId);
+        }
         return { success: true };
+      }),
+    ),
+  /**
+   * P17 — changement de rôle. Gardes structurelles dans le store : rôle
+   * attribuable par l'acteur (anti-escalade), owners/admins réservés aux
+   * owners, dernier owner protégé, désassignation si le rôle perd l'écriture.
+   */
+  setMemberRole: privateProcedure
+    .input(teamIdInput.extend({ userId: z.string().min(1).max(64), role: z.enum(TEAM_ROLES) }))
+    .mutation(async ({ ctx, input }) =>
+      mapTeamErrors(async () => {
+        const db = await getZeroDB(ctx.sessionUser.id);
+        const result = await db.setTeamMemberRole(input.teamId, input.userId, input.role);
+        for (const teamThreadId of result.realtimeThreadIds ?? []) {
+          rtKick(ctx, teamThreadId, input.userId);
+        }
+        return { role: result.role };
       }),
     ),
   updateMyPrefs: privateProcedure
@@ -614,7 +782,9 @@ export const teamsRouter = router({
     .input(
       teamIdInput.extend({
         email: z.string().trim().toLowerCase().email().max(320),
-        role: z.enum(['owner', 'member']).default('member'),
+        // P17 : rôle librement demandé, mais le store refuse tout rôle non
+        // ATTRIBUABLE par l'acteur (anti-escalade, team-roles.assignableRoles).
+        role: z.enum(TEAM_ROLES).default('member'),
       }),
     )
     .mutation(async ({ ctx, input }) =>
@@ -1023,6 +1193,135 @@ export const teamsRouter = router({
       mapTeamErrors(async () => {
         const db = await getZeroDB(ctx.sessionUser.id);
         return { entries: await db.listTeamAudit(input.teamId, input.limit) };
+      }),
+    ),
+
+  // --- gouvernance (P17) -------------------------------------------------------
+  /**
+   * Export SIGNÉ du journal d'audit (capacité audit.export : owner/admin/
+   * auditor). Le store construit le payload borné (et audite l'export) ; la
+   * signature HMAC est dérivée du KEK ring serveur ICI — sans ring, fail
+   * closed PRECONDITION_FAILED, le reste de l'app n'est pas affecté.
+   */
+  exportAudit: privateProcedure
+    .input(
+      teamIdInput.extend({
+        from: z.string().datetime().optional(),
+        to: z.string().datetime().optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) =>
+      mapTeamErrors(async () => {
+        const db = await getZeroDB(ctx.sessionUser.id);
+        const payload = await db.buildTeamAuditExport(input.teamId, {
+          from: input.from ? new Date(input.from) : undefined,
+          to: input.to ? new Date(input.to) : undefined,
+        });
+        const { signAuditExport } = await import('../../lib/teams/team-audit-export');
+        const env = ctx.c.env as {
+          RETA_BYOK_KEK_V1?: string;
+          RETA_BYOK_KEK_V2?: string;
+          RETA_BYOK_KEK_ACTIVE?: string;
+        };
+        const doc = await signAuditExport(
+          {
+            RETA_BYOK_KEK_V1: env.RETA_BYOK_KEK_V1,
+            RETA_BYOK_KEK_V2: env.RETA_BYOK_KEK_V2,
+            RETA_BYOK_KEK_ACTIVE: env.RETA_BYOK_KEK_ACTIVE,
+          },
+          payload,
+        );
+        if (!doc) {
+          throw new TRPCError({ code: 'PRECONDITION_FAILED', message: 'export_unavailable' });
+        }
+        return doc;
+      }),
+    ),
+  /** Vérification serveur d'un export signé — validité seule, rien d'autre. */
+  verifyAuditExport: privateProcedure
+    .input(
+      z.object({
+        doc: z
+          .object({
+            payload: z.unknown(),
+            signature: z.object({
+              algorithm: z.string().max(32),
+              kdf: z.string().max(32),
+              kekVersion: z.string().max(16),
+              mac: z.string().max(128),
+            }),
+          })
+          .refine((doc) => JSON.stringify(doc.payload ?? null).length <= 8_000_000, {
+            message: 'restore_too_large',
+          }),
+      }),
+    )
+    .query(async ({ ctx, input }) =>
+      mapTeamErrors(async () => {
+        const { verifyAuditExport } = await import('../../lib/teams/team-audit-export');
+        const env = ctx.c.env as {
+          RETA_BYOK_KEK_V1?: string;
+          RETA_BYOK_KEK_V2?: string;
+          RETA_BYOK_KEK_ACTIVE?: string;
+        };
+        const verdict = await verifyAuditExport(
+          {
+            RETA_BYOK_KEK_V1: env.RETA_BYOK_KEK_V1,
+            RETA_BYOK_KEK_V2: env.RETA_BYOK_KEK_V2,
+            RETA_BYOK_KEK_ACTIVE: env.RETA_BYOK_KEK_ACTIVE,
+          },
+          input.doc as Parameters<typeof verifyAuditExport>[1],
+        );
+        if (!verdict) {
+          throw new TRPCError({ code: 'PRECONDITION_FAILED', message: 'export_unavailable' });
+        }
+        return { verdict };
+      }),
+    ),
+  getRetentionPolicy: privateProcedure.input(teamIdInput).query(async ({ ctx, input }) =>
+    mapTeamErrors(async () => {
+      const db = await getZeroDB(ctx.sessionUser.id);
+      return { policy: await db.getTeamRetentionPolicy(input.teamId) };
+    }),
+  ),
+  setRetentionPolicy: privateProcedure
+    .input(
+      teamIdInput.extend({
+        auditDays: z.number().int().min(30).max(730).nullable(),
+        ruleRunDays: z.number().int().min(30).max(730).nullable(),
+        notificationDays: z.number().int().min(30).max(730).nullable(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) =>
+      mapTeamErrors(async () => {
+        const db = await getZeroDB(ctx.sessionUser.id);
+        await db.setTeamRetentionPolicy(input.teamId, {
+          auditDays: input.auditDays,
+          ruleRunDays: input.ruleRunDays,
+          notificationDays: input.notificationDays,
+        });
+        return { success: true };
+      }),
+    ),
+  /** Export des données d'équipe (capacité data.export : owner/admin). Audité. */
+  exportData: privateProcedure.input(teamIdInput).mutation(async ({ ctx, input }) =>
+    mapTeamErrors(async () => {
+      const db = await getZeroDB(ctx.sessionUser.id);
+      return await db.exportTeamData(input.teamId);
+    }),
+  ),
+  /**
+   * Restauration d'un export dans une NOUVELLE équipe (l'appelant devient
+   * owner). Validation stricte du document ici ; le plan pur écarte tout ce
+   * qui ne se re-résout pas et le rapport nomme chaque écart. Les règles
+   * restaurées sont TOUJOURS désactivées (ré-armement ACL explicite).
+   */
+  restoreData: privateProcedure
+    .input(z.object({ payload: teamDataExportSchema }))
+    .mutation(async ({ ctx, input }) =>
+      mapTeamErrors(async () => {
+        const db = await getZeroDB(ctx.sessionUser.id);
+        return { report: await db.restoreTeamData(input.payload) };
       }),
     ),
 

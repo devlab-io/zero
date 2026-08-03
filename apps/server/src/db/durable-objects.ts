@@ -29,6 +29,7 @@ import {
   type WritingStyleMatrix,
 } from '../services/writing-style-service';
 import * as teamIntegrationsStore from '../lib/teams/team-integrations-store';
+import * as teamGovernanceStore from '../lib/teams/team-governance-store';
 import * as teamDraftsStore from '../lib/teams/team-drafts-store';
 import * as teamRulesStore from '../lib/teams/team-rules-store';
 import * as teamOnboarding from '../lib/teams/team-onboarding';
@@ -287,6 +288,12 @@ export class DbRpcDO extends RpcTarget {
   async removeTeamMember(teamId: string, targetUserId: string) {
     return await this.mainDo.teamOp((db) =>
       teamStore.removeTeamMember(db, this.userId, teamId, targetUserId),
+    );
+  }
+
+  async setTeamMemberRole(teamId: string, targetUserId: string, role: teamStore.TeamRole) {
+    return await this.mainDo.teamOp((db) =>
+      teamStore.setMemberRole(db, this.userId, teamId, targetUserId, role),
     );
   }
 
@@ -576,6 +583,45 @@ export class DbRpcDO extends RpcTarget {
   async getTeamOpsOverview(teamId: string, options: { windowDays: number }) {
     return await this.mainDo.teamOp((db) =>
       teamOpsStore.getOpsOverview(db, this.userId, teamId, options),
+    );
+  }
+
+  // --- P17 : gouvernance (export d'audit signé, rétention, export/restauration)
+
+  async buildTeamAuditExport(teamId: string, options: { from?: Date; to?: Date }) {
+    return await this.mainDo.teamOp((db) =>
+      teamGovernanceStore.buildAuditExportPayload(db, this.userId, teamId, options),
+    );
+  }
+
+  async getTeamRetentionPolicy(teamId: string) {
+    return await this.mainDo.teamOp((db) =>
+      teamGovernanceStore.getRetentionPolicy(db, this.userId, teamId),
+    );
+  }
+
+  async setTeamRetentionPolicy(
+    teamId: string,
+    input: {
+      auditDays: number | null;
+      ruleRunDays: number | null;
+      notificationDays: number | null;
+    },
+  ) {
+    return await this.mainDo.teamOp((db) =>
+      teamGovernanceStore.setRetentionPolicy(db, this.userId, teamId, input),
+    );
+  }
+
+  async exportTeamData(teamId: string) {
+    return await this.mainDo.teamOp((db) =>
+      teamGovernanceStore.exportTeamData(db, this.userId, teamId),
+    );
+  }
+
+  async restoreTeamData(payload: Parameters<typeof teamGovernanceStore.restoreTeamData>[2]) {
+    return await this.mainDo.teamOp((db) =>
+      teamGovernanceStore.restoreTeamData(db, this.userId, payload),
     );
   }
 

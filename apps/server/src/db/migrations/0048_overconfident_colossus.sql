@@ -1,0 +1,1 @@
+ALTER TABLE "mail0_team_retention_policy" ADD COLUMN "last_swept_at" timestamp;

@@ -26,6 +26,7 @@ import { Hono } from 'hono';
  */
 
 export const TEAM_RT_USER_HEADER = 'x-zero-team-rt-user';
+export const TEAM_RT_INTERACTIVE_HEADER = 'x-zero-team-rt-interactive';
 export const TYPING_TTL_MS = 6_000;
 /** P15 : « rédige une réponse » — TTL long, rafraîchi par le composeur ouvert. */
 export const REPLYING_TTL_MS = 45_000;
@@ -41,7 +42,7 @@ export type TeamRealtimeServerEvent =
   | { type: 'thread.invalidate' }
   | { type: 'access.revoked'; userId: string };
 
-type SocketAttachment = { userId: string; socketId: string };
+type SocketAttachment = { userId: string; socketId: string; interactive: boolean };
 
 export class TeamThreadRealtime extends DurableObject<ZeroEnv> {
   /** typingUntil par userId — éphémère : perdu à l'hibernation, sans gravité. */
@@ -58,6 +59,7 @@ export class TeamThreadRealtime extends DurableObject<ZeroEnv> {
 
   override async fetch(request: Request): Promise<Response> {
     const userId = request.headers.get(TEAM_RT_USER_HEADER);
+    const interactive = request.headers.get(TEAM_RT_INTERACTIVE_HEADER) === '1';
     const upgrade = request.headers.get('Upgrade');
     if (!userId || !upgrade || upgrade.toLowerCase() !== 'websocket') {
       return new Response('Bad Request', { status: 400 });
@@ -70,6 +72,7 @@ export class TeamThreadRealtime extends DurableObject<ZeroEnv> {
     server.serializeAttachment({
       userId,
       socketId: crypto.randomUUID(),
+      interactive,
     } satisfies SocketAttachment);
     this.ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair('ping', 'pong'));
     this.broadcastPresence();
@@ -88,6 +91,10 @@ export class TeamThreadRealtime extends DurableObject<ZeroEnv> {
     const kind = (parsed as { type?: unknown }).type;
     const attachment = ws.deserializeAttachment() as SocketAttachment | null;
     if (!attachment?.userId) return;
+    // Un auditor reçoit les invalidations/presence en lecture seule mais ne
+    // peut jamais publier typing/replying. Les changements de rôle expulsent
+    // les sockets afin qu'un reconnect reprenne cette capacité fraîche.
+    if (!attachment.interactive) return;
     if (kind === 'typing') {
       this.typing.set(attachment.userId, Date.now() + TYPING_TTL_MS);
       this.broadcastPresence();
@@ -276,9 +283,11 @@ export const teamRealtimeRouter = new Hono<HonoContext>().get('/:teamThreadId', 
   }
   const teamThreadId = c.req.param('teamThreadId');
   if (!teamThreadId || teamThreadId.length > 64) return c.text('Bad Request', 400);
+  let interactive = false;
   try {
     const db = await getZeroDB(sessionUser.id);
-    await db.resolveTeamThreadAccess(teamThreadId);
+    const access = await db.resolveTeamThreadAccess(teamThreadId);
+    interactive = access?.callerRole !== 'auditor';
   } catch (error) {
     const code = error instanceof Error ? error.message : '';
     if (code === 'not_found') return c.text('Not Found', 404);
@@ -289,5 +298,6 @@ export const teamRealtimeRouter = new Hono<HonoContext>().get('/:teamThreadId', 
   const stub = ns.get(ns.idFromName(teamThreadId));
   const forwarded = new Request(c.req.raw.url, c.req.raw);
   forwarded.headers.set(TEAM_RT_USER_HEADER, sessionUser.id);
+  forwarded.headers.set(TEAM_RT_INTERACTIVE_HEADER, interactive ? '1' : '0');
   return await stub.fetch(forwarded);
 });

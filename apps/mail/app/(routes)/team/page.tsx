@@ -208,7 +208,10 @@ export default function TeamWorkspacePage() {
             <TeamOpsView
               key={selectedTeamId}
               teamId={selectedTeamId}
-              isOwner={teams.find((team) => team.id === selectedTeamId)?.role === 'owner'}
+              // P17 : team.manage = owner OU admin (matrice serveur).
+              isOwner={['owner', 'admin'].includes(
+                teams.find((team) => team.id === selectedTeamId)?.role ?? '',
+              )}
             />
           </Suspense>
         ) : teamsLoading ||

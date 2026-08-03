@@ -1,0 +1,1 @@
+ALTER TABLE "mail0_team_thread_issue_link" ADD COLUMN "last_linear_updated_at" timestamp;

@@ -31,6 +31,13 @@ const harness = vi.hoisted(() => ({
     previewTeamRule: vi.fn(),
     undoTeamRuleRun: vi.fn(),
     setTeamRuleEnabled: vi.fn(),
+    // P17 — rôles + gouvernance
+    setTeamMemberRole: vi.fn(),
+    buildTeamAuditExport: vi.fn(),
+    getTeamRetentionPolicy: vi.fn(),
+    setTeamRetentionPolicy: vi.fn(),
+    exportTeamData: vi.fn(),
+    restoreTeamData: vi.fn(),
   } as Record<string, ReturnType<typeof vi.fn>>,
   getThread: vi.fn(),
   getZeroAgent: vi.fn(),
@@ -632,5 +639,149 @@ describe('teams — SLA + opérations (P16)', () => {
       endsAt: new Date('2026-08-12T00:00:00.000Z'),
       note: undefined,
     });
+  });
+});
+
+describe('teams — rôles + gouvernance (P17)', () => {
+  it('setMemberRole : schéma des cinq rôles, délégation, mapping last_owner', async () => {
+    harness.db.setTeamMemberRole.mockResolvedValue({ role: 'auditor' });
+    await call('setMemberRole', { teamId: 'team-1', userId: 'user-2', role: 'auditor' });
+    expect(harness.db.setTeamMemberRole).toHaveBeenCalledWith('team-1', 'user-2', 'auditor');
+    expect(() =>
+      call('setMemberRole', { teamId: 'team-1', userId: 'user-2', role: 'root' }),
+    ).toThrow(); // rôle inconnu refusé au schéma
+    harness.db.setTeamMemberRole.mockRejectedValueOnce(new Error('last_owner'));
+    await expect(
+      call('setMemberRole', { teamId: 'team-1', userId: 'user-2', role: 'member' }),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+  });
+
+  it('invite accepte les cinq rôles au schéma (anti-escalade côté store)', async () => {
+    harness.db.createTeamInvite.mockResolvedValue({ id: 'inv-1' });
+    await call('invite', { teamId: 'team-1', email: 'g@ext.pf', role: 'guest' });
+    expect(harness.db.createTeamInvite).toHaveBeenCalledWith('team-1', 'g@ext.pf', 'guest');
+    harness.db.createTeamInvite.mockRejectedValueOnce(new Error('forbidden'));
+    await expect(
+      call('invite', { teamId: 'team-1', email: 'a@devlab.io', role: 'admin' }),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+  });
+
+  it('exportAudit : sans ring KEK, FAIL CLOSED (PRECONDITION_FAILED), jamais un doc non signé', async () => {
+    harness.db.buildTeamAuditExport.mockResolvedValue({
+      format: 'reta-team-audit-export',
+      version: 1,
+      teamId: 'team-1',
+      teamName: 'T',
+      requestedByUserId: 'user-1',
+      range: { from: null, to: null },
+      generatedAt: '2026-08-03T00:00:00.000Z',
+      entryCount: 0,
+      truncated: false,
+      entries: [],
+    });
+    // ctx.c.env vide = pas de ring.
+    const ctx = { ...makeCtx(), c: { env: {} } };
+    await expect(call('exportAudit', { teamId: 'team-1' }, ctx)).rejects.toMatchObject({
+      code: 'PRECONDITION_FAILED',
+    });
+  });
+
+  it('exportAudit : avec ring, document signé retourné et vérifiable par verifyAuditExport', async () => {
+    const kek = Buffer.from(new Uint8Array(32).fill(3)).toString('base64url');
+    const env = { RETA_BYOK_KEK_V1: kek, RETA_BYOK_KEK_ACTIVE: 'v1' };
+    harness.db.buildTeamAuditExport.mockResolvedValue({
+      format: 'reta-team-audit-export',
+      version: 1,
+      teamId: 'team-1',
+      teamName: 'T',
+      requestedByUserId: 'user-1',
+      range: { from: '2026-08-01T00:00:00.000Z', to: null },
+      generatedAt: '2026-08-03T00:00:00.000Z',
+      entryCount: 1,
+      truncated: false,
+      entries: [
+        {
+          id: 'a1',
+          action: 'thread.shared',
+          subjectType: 'team_thread',
+          subjectId: 'tt-1',
+          metadata: {},
+          createdAt: '2026-08-02T00:00:00.000Z',
+          actorUserId: 'user-1',
+          actorKind: 'user',
+          actorName: 'Thomas',
+        },
+      ],
+    });
+    const ctx = { ...makeCtx(), c: { env } };
+    const doc = await call(
+      'exportAudit',
+      { teamId: 'team-1', from: '2026-08-01T00:00:00.000Z' },
+      ctx,
+    );
+    expect(harness.db.buildTeamAuditExport).toHaveBeenCalledWith('team-1', {
+      from: new Date('2026-08-01T00:00:00.000Z'),
+      to: undefined,
+    });
+    expect(doc.signature).toMatchObject({ algorithm: 'HMAC-SHA256', kekVersion: 'v1' });
+
+    const { verdict } = await call('verifyAuditExport', { doc }, ctx);
+    expect(verdict).toEqual({ valid: true, kekVersion: 'v1' });
+    // Document altéré → invalide.
+    const tampered = { ...doc, payload: { ...doc.payload, teamName: 'X' } };
+    const bad = await call('verifyAuditExport', { doc: tampered }, ctx);
+    expect(bad.verdict).toEqual({ valid: false, reason: 'bad_signature' });
+  });
+
+  it('setRetentionPolicy : bornes 30..730 au schéma, délégation store', async () => {
+    harness.db.setTeamRetentionPolicy.mockResolvedValue(undefined);
+    await call('setRetentionPolicy', {
+      teamId: 'team-1',
+      auditDays: 180,
+      ruleRunDays: null,
+      notificationDays: 30,
+    });
+    expect(harness.db.setTeamRetentionPolicy).toHaveBeenCalledWith('team-1', {
+      auditDays: 180,
+      ruleRunDays: null,
+      notificationDays: 30,
+    });
+    expect(() =>
+      call('setRetentionPolicy', {
+        teamId: 'team-1',
+        auditDays: 10,
+        ruleRunDays: null,
+        notificationDays: null,
+      }),
+    ).toThrow(); // sous la borne
+  });
+
+  it('restoreData : document conforme délégué, format inconnu refusé au schéma', async () => {
+    harness.db.restoreTeamData.mockResolvedValue({ teamId: 'new-1', skipped: [] });
+    const payload = {
+      format: 'reta-team-export',
+      version: 1,
+      exportedAt: '2026-08-01T00:00:00.000Z',
+      team: {
+        id: 'old',
+        name: 'T',
+        createdBy: 'user-1',
+        createdAt: '2026-01-01T00:00:00.000Z',
+      },
+      members: [],
+      labels: [],
+      threads: [],
+      comments: [],
+      rules: [],
+      slaPolicy: null,
+      retentionPolicy: null,
+      absences: [],
+      truncated: [],
+      excluded: [],
+    };
+    await call('restoreData', { payload });
+    expect(harness.db.restoreTeamData).toHaveBeenCalledWith(payload);
+    expect(() => call('restoreData', { payload: { ...payload, format: 'autre' } })).toThrow();
+    expect(() => call('restoreData', { payload: { ...payload, version: 2 } })).toThrow();
   });
 });

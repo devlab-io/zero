@@ -1,3 +1,9 @@
+import {
+  assignableRolesFor,
+  canExportAudit,
+  canManageTeam,
+  type TeamRole,
+} from '@/lib/team-roles-ui';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { SettingsCard } from '@/components/settings/settings-card';
 import { TeamRulesBlock } from '@/components/team/team-rules';
@@ -11,7 +17,26 @@ import { useSession } from '@/lib/auth-client';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { m } from '@/paraglide/messages';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
+
+const ROLE_LABELS: Record<TeamRole, () => string> = {
+  owner: () => m['common.teams.roleOwner'](),
+  admin: () => m['common.teams.roleAdmin'](),
+  member: () => m['common.teams.roleMember'](),
+  guest: () => m['common.teams.roleGuest'](),
+  auditor: () => m['common.teams.roleAuditor'](),
+};
+
+/** Téléchargement client d'un document JSON (export d'audit signé, données). */
+function downloadJson(name: string, value: unknown) {
+  const blob = new Blob([JSON.stringify(value, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = name;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
 
 /**
  * Réglages Équipes : créer, inviter (l'invitation est liée à une adresse
@@ -144,7 +169,7 @@ function TeamBlock({
   team: {
     id: string;
     name: string;
-    role: 'owner' | 'member';
+    role: TeamRole;
     memberCount: number;
     prefs: { onComment: boolean; onMention: boolean; onAssignment: boolean } | null;
   };
@@ -154,15 +179,21 @@ function TeamBlock({
   const queryClient = useQueryClient();
   const { data: session } = useSession();
   const myUserId = session?.user?.id;
+  const canManage = canManageTeam(team.role);
+  const invitableRoles = assignableRolesFor(team.role);
   const { data: membersData } = useQuery(
     trpc.teams.listMembers.queryOptions({ teamId: team.id }, { staleTime: 30_000 }),
   );
   const { data: invitesData } = useQuery(
-    trpc.teams.listInvites.queryOptions({ teamId: team.id }, { staleTime: 30_000 }),
+    trpc.teams.listInvites.queryOptions(
+      { teamId: team.id },
+      { staleTime: 30_000, enabled: invitableRoles.length > 0 },
+    ),
   );
   const members = membersData?.members ?? [];
   const invites = invitesData?.invites ?? [];
   const [email, setEmail] = useState('');
+  const [inviteRole, setInviteRole] = useState<TeamRole>('member');
 
   const invalidate = () => {
     void queryClient.invalidateQueries({
@@ -186,6 +217,9 @@ function TeamBlock({
   );
   const removeMember = useMutation(
     trpc.teams.removeMember.mutationOptions({ onSuccess: invalidate }),
+  );
+  const setMemberRole = useMutation(
+    trpc.teams.setMemberRole.mutationOptions({ onSuccess: invalidate }),
   );
   const leaveTeam = useMutation(trpc.teams.leave.mutationOptions({ onSuccess: invalidate }));
   const deleteTeam = useMutation(trpc.teams.delete.mutationOptions({ onSuccess: invalidate }));
@@ -212,9 +246,9 @@ function TeamBlock({
           <Badge variant="outline" className="text-[10px]">
             {m['common.teams.memberCount']({ count: team.memberCount })}
           </Badge>
-          {team.role === 'owner' && (
+          {team.role !== 'member' && (
             <Badge variant="secondary" className="text-[10px]">
-              owner
+              {ROLE_LABELS[team.role]()}
             </Badge>
           )}
         </h4>
@@ -252,39 +286,85 @@ function TeamBlock({
           {m['common.teams.members']()}
         </h5>
         <ul className="space-y-1">
-          {members.map((member) => (
-            <li key={member.userId} className="flex items-center justify-between gap-2 text-sm">
-              <span className="min-w-0 truncate">
-                {member.name} <span className="text-muted-foreground text-xs">{member.email}</span>
-                {member.role === 'owner' && (
-                  <Badge variant="outline" className="ml-1 text-[9px]">
-                    owner
-                  </Badge>
-                )}
-              </span>
-              {team.role === 'owner' && member.userId !== myUserId && member.role !== 'owner' && (
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="h-6 w-6 p-0"
-                  aria-label={m['common.teams.removeMember']()}
-                  disabled={removeMember.isPending}
-                  onClick={() => removeMember.mutate({ teamId: team.id, userId: member.userId })}
-                >
-                  <Trash2 className="h-3.5 w-3.5 text-[#9A9A9A]" />
-                </Button>
-              )}
-            </li>
-          ))}
+          {members.map((member) => {
+            const memberRole = member.role as TeamRole;
+            // Miroir des gardes serveur : owners/admins ne sont touchés que
+            // par un owner ; le rôle proposé doit être attribuable.
+            const canEditTarget =
+              canManage &&
+              member.userId !== myUserId &&
+              (team.role === 'owner' || (memberRole !== 'owner' && memberRole !== 'admin'));
+            const roleOptions = invitableRoles.includes(memberRole)
+              ? invitableRoles
+              : [memberRole, ...invitableRoles];
+            return (
+              <li key={member.userId} className="flex items-center justify-between gap-2 text-sm">
+                <span className="min-w-0 truncate">
+                  {member.name}{' '}
+                  <span className="text-muted-foreground text-xs">{member.email}</span>
+                  {memberRole !== 'member' && (
+                    <Badge variant="outline" className="ml-1 text-[9px]">
+                      {ROLE_LABELS[memberRole]()}
+                    </Badge>
+                  )}
+                </span>
+                <span className="flex shrink-0 items-center gap-1">
+                  {canEditTarget && (
+                    <select
+                      className="border-input bg-background h-6 rounded border px-1 text-xs"
+                      aria-label={m['common.teams.roleChange']()}
+                      value={memberRole}
+                      disabled={setMemberRole.isPending}
+                      onChange={(event) =>
+                        setMemberRole.mutate({
+                          teamId: team.id,
+                          userId: member.userId,
+                          role: event.target.value as TeamRole,
+                        })
+                      }
+                    >
+                      {roleOptions.map((role) => (
+                        <option key={role} value={role}>
+                          {ROLE_LABELS[role]()}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                  {canEditTarget && memberRole !== 'owner' && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-6 w-6 p-0"
+                      aria-label={m['common.teams.removeMember']()}
+                      disabled={removeMember.isPending}
+                      onClick={() =>
+                        removeMember.mutate({ teamId: team.id, userId: member.userId })
+                      }
+                    >
+                      <Trash2 className="h-3.5 w-3.5 text-[#9A9A9A]" />
+                    </Button>
+                  )}
+                </span>
+              </li>
+            );
+          })}
         </ul>
+        {setMemberRole.isError && (
+          <p className="text-destructive mt-1 text-xs" role="alert">
+            {String(setMemberRole.error)}
+          </p>
+        )}
+        <p className="text-muted-foreground mt-1 text-[11px]">{m['common.teams.rolesHint']()}</p>
       </div>
 
       <form
         className="mt-3 flex items-center gap-2"
+        // Un guest/auditor n'invite personne (invitableRoles vide) : pas de formulaire.
+        hidden={invitableRoles.length === 0}
         onSubmit={(event) => {
           event.preventDefault();
           const trimmed = email.trim();
-          if (trimmed) invite.mutate({ teamId: team.id, email: trimmed });
+          if (trimmed) invite.mutate({ teamId: team.id, email: trimmed, role: inviteRole });
         }}
       >
         <Input
@@ -295,6 +375,20 @@ function TeamBlock({
           aria-label={m['common.teams.invite']()}
           className="h-8 max-w-xs text-sm"
         />
+        {invitableRoles.length > 1 && (
+          <select
+            className="border-input bg-background h-8 rounded border px-1 text-xs"
+            aria-label={m['common.teams.roleChange']()}
+            value={inviteRole}
+            onChange={(event) => setInviteRole(event.target.value as TeamRole)}
+          >
+            {invitableRoles.map((role) => (
+              <option key={role} value={role}>
+                {ROLE_LABELS[role]()}
+              </option>
+            ))}
+          </select>
+        )}
         <Button
           type="submit"
           size="sm"
@@ -356,12 +450,233 @@ function TeamBlock({
         ))}
       </div>
 
-      <TeamRulesBlock
-        teamId={team.id}
-        teamName={team.name}
-        isOwner={team.role === 'owner'}
-        members={members}
-      />
+      <TeamRulesBlock teamId={team.id} teamName={team.name} isOwner={canManage} members={members} />
+
+      {(canManage || canExportAudit(team.role)) && (
+        <GovernanceBlock teamId={team.id} role={team.role} canManage={canManage} />
+      )}
     </section>
+  );
+}
+
+/**
+ * Gouvernance P17 : export signé du journal, export/restauration des données
+ * (owner/admin), rétention bornée. Un auditor ne voit que l'export d'audit.
+ */
+function GovernanceBlock({
+  teamId,
+  role,
+  canManage,
+}: {
+  teamId: string;
+  role: TeamRole;
+  canManage: boolean;
+}) {
+  const trpc = useTRPC();
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const { data: retentionData } = useQuery(
+    trpc.teams.getRetentionPolicy.queryOptions(
+      { teamId },
+      { staleTime: 30_000, enabled: canManage },
+    ),
+  );
+  const policy = retentionData?.policy ?? null;
+  const [retention, setRetention] = useState<{
+    auditDays: number | null;
+    ruleRunDays: number | null;
+    notificationDays: number | null;
+  } | null>(null);
+  const effective = retention ?? {
+    auditDays: policy?.auditDays ?? null,
+    ruleRunDays: policy?.ruleRunDays ?? null,
+    notificationDays: policy?.notificationDays ?? null,
+  };
+
+  const exportAudit = useMutation(trpc.teams.exportAudit.mutationOptions());
+  const exportData = useMutation(trpc.teams.exportData.mutationOptions());
+  const restoreData = useMutation(trpc.teams.restoreData.mutationOptions());
+  const setRetentionPolicy = useMutation(
+    trpc.teams.setRetentionPolicy.mutationOptions({
+      onSuccess: () => setNotice(m['common.teams.retentionSaved']()),
+    }),
+  );
+
+  const fail = (err: unknown) => {
+    const message = err instanceof Error ? err.message : String(err);
+    setError(
+      message.includes('export_unavailable')
+        ? m['common.teams.exportUnavailable']()
+        : m['common.teams.exportFailed'](),
+    );
+  };
+
+  const RETENTION_CHOICES = [null, 30, 90, 180, 365, 730] as const;
+  const retentionSelect = (
+    key: 'auditDays' | 'ruleRunDays' | 'notificationDays',
+    label: string,
+  ) => (
+    <label className="flex items-center justify-between gap-2 text-xs">
+      <span>{label}</span>
+      <select
+        className="border-input bg-background h-6 rounded border px-1 text-xs"
+        value={effective[key] === null ? '' : String(effective[key])}
+        onChange={(event) =>
+          setRetention({
+            ...effective,
+            [key]: event.target.value === '' ? null : Number(event.target.value),
+          })
+        }
+      >
+        {RETENTION_CHOICES.map((choice) => (
+          <option key={choice ?? 'keep'} value={choice === null ? '' : String(choice)}>
+            {choice === null
+              ? m['common.teams.retentionKeep']()
+              : m['common.teams.retentionDays']({ days: choice })}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+
+  return (
+    <div className="mt-4 border-t border-[#E7E7E7] pt-3 dark:border-[#252525]">
+      <h5 className="text-muted-foreground mb-2 text-xs font-medium uppercase">
+        {m['common.teams.governance']()}
+      </h5>
+      <div className="flex flex-wrap gap-2">
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-7 text-xs"
+          disabled={exportAudit.isPending}
+          onClick={() => {
+            setError(null);
+            exportAudit.mutate(
+              { teamId },
+              {
+                onSuccess: (doc) => downloadJson(`reta-audit-${teamId}.json`, doc),
+                onError: fail,
+              },
+            );
+          }}
+        >
+          {m['common.teams.exportAudit']()}
+        </Button>
+        {canManage && (
+          <>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 text-xs"
+              disabled={exportData.isPending}
+              onClick={() => {
+                setError(null);
+                exportData.mutate(
+                  { teamId },
+                  {
+                    onSuccess: (payload) => downloadJson(`reta-team-${teamId}.json`, payload),
+                    onError: fail,
+                  },
+                );
+              }}
+            >
+              {m['common.teams.exportData']()}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 text-xs"
+              disabled={restoreData.isPending}
+              onClick={() => fileRef.current?.click()}
+            >
+              {restoreData.isPending ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                m['common.teams.restoreData']()
+              )}
+            </Button>
+            <input
+              ref={fileRef}
+              type="file"
+              accept="application/json"
+              className="hidden"
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                event.target.value = '';
+                if (!file) return;
+                setError(null);
+                setNotice(null);
+                void file.text().then((text) => {
+                  let payload: unknown;
+                  try {
+                    payload = JSON.parse(text);
+                  } catch {
+                    setError(m['common.teams.restoreFailed']());
+                    return;
+                  }
+                  restoreData.mutate(
+                    { payload: payload as never },
+                    {
+                      onSuccess: ({ report }) =>
+                        setNotice(
+                          m['common.teams.restoreDone']({
+                            name: report.teamName,
+                            threads: report.restored.threads,
+                            skipped: report.skipped.length,
+                          }),
+                        ),
+                      onError: () => setError(m['common.teams.restoreFailed']()),
+                    },
+                  );
+                });
+              }}
+            />
+          </>
+        )}
+      </div>
+
+      {canManage && (
+        <div className="mt-3 max-w-xs space-y-1">
+          <h6 className="text-muted-foreground text-[11px] font-medium uppercase">
+            {m['common.teams.retentionTitle']()}
+          </h6>
+          {retentionSelect('auditDays', m['common.teams.retentionAudit']())}
+          {retentionSelect('ruleRunDays', m['common.teams.retentionRuleRuns']())}
+          {retentionSelect('notificationDays', m['common.teams.retentionNotifications']())}
+          <div className="flex items-center gap-2 pt-1">
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-6 text-xs"
+              disabled={retention === null || setRetentionPolicy.isPending}
+              onClick={() => {
+                setNotice(null);
+                setRetentionPolicy.mutate({ teamId, ...effective });
+              }}
+            >
+              {m['common.teams.retentionSave']()}
+            </Button>
+          </div>
+          <p className="text-muted-foreground text-[11px]">{m['common.teams.retentionHint']()}</p>
+        </div>
+      )}
+
+      {notice && (
+        <p className="mt-2 text-xs text-emerald-700 dark:text-emerald-400" role="status">
+          {notice}
+        </p>
+      )}
+      {error && (
+        <p className="text-destructive mt-2 text-xs" role="alert">
+          {error}
+        </p>
+      )}
+      {role === 'auditor' && !canManage && (
+        <p className="text-muted-foreground mt-2 text-[11px]">{m['common.teams.rolesHint']()}</p>
+      )}
+    </div>
   );
 }

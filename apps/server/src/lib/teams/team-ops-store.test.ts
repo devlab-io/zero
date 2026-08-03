@@ -65,23 +65,38 @@ describe('team ops store contract — ACL-first aggregation', () => {
 });
 
 describe('team ops store contract — write authorization', () => {
-  it('setSlaPolicy is owner-write; reads are member-read', () => {
+  it('setSlaPolicy is manager-write (team.manage) ; reads are member-read gated ops.read', () => {
     const block = source.slice(
       source.indexOf('export async function setSlaPolicy'),
       source.indexOf('// --- disponibilité'),
     );
-    expect(block).toContain('requireOwner');
+    // P17 : la porte des écritures de politique est la CAPACITÉ team.manage
+    // (owner/admin via la matrice), plus jamais un test de rôle en dur.
+    expect(block).toContain('requireOpsManager');
+    const managerGate = source.slice(
+      source.indexOf('async function requireOpsManager'),
+      source.indexOf('function validatePolicy'),
+    );
+    expect(managerGate).toContain("roleCan(membership.role, 'team.manage')");
     const readBlock = source.slice(
       source.indexOf('export async function getSlaPolicy'),
       source.indexOf('export async function setSlaPolicy'),
     );
     expect(readBlock).toContain('requireMembership');
-    expect(readBlock).not.toContain('requireOwner');
+    expect(readBlock).toContain("roleCan(membership.role, 'ops.read')");
+    expect(readBlock).not.toContain('requireOpsManager');
   });
 
-  it('absence writes are self-or-owner, never a member for someone else', () => {
-    expect(source).toContain("if (input.targetUserId !== userId && membership.role !== 'owner')");
-    expect(source).toContain("if (absence.userId !== userId && membership.role !== 'owner')");
+  it('absence writes are self-or-manager among thread-writers, never a member for someone else', () => {
+    // P17 : autrui exige team.manage ; la cible ET l'acteur doivent porter
+    // des fils (thread.write) — un guest/auditor n'a pas d'absence déclarable.
+    expect(source).toContain(
+      "if (input.targetUserId !== userId && !roleCan(membership.role, 'team.manage'))",
+    );
+    expect(source).toContain(
+      "if (absence.userId !== userId && !roleCan(membership.role, 'team.manage'))",
+    );
+    expect(source).toContain("if (!roleCan(target.role, 'thread.write'))");
   });
 
   it('policy and availability writes are audited', () => {

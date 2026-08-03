@@ -37,10 +37,17 @@ import {
   type OutboundEventType,
   type SealedSecret,
 } from './team-integrations-shared';
+import {
+  accessPredicate,
+  appendTeamAudit,
+  getTeamThread,
+  requireCapability,
+  TeamStoreError,
+} from './team-store';
 import { assertPublicHttpsUrl, type ResolveIps } from '../integrations/outbound-security';
 import { LinearApiError, type LinearIssueClient } from '../integrations/linear-client';
-import { appendTeamAudit, getTeamThread, TeamStoreError } from './team-store';
 import { and, asc, desc, eq, gt, inArray, isNull, lt, or } from 'drizzle-orm';
+import { roleCan } from './team-roles';
 import type { DB } from '../../db';
 
 type DbOrTx = DB | Parameters<Parameters<DB['transaction']>[0]>[0];
@@ -339,10 +346,6 @@ export async function setMapping(
   await requireOwner(db, teamId, userId);
   const install = await findInstall(db, teamId);
   if (!install) throw new TeamStoreError('integration_not_installed');
-  if (input.kind === 'assignee') {
-    // Le côté Reta d'un mapping assignee est un MEMBRE de l'équipe.
-    await requireMember(db, teamId, input.retaValue);
-  }
   if (input.externalId === '') {
     await db
       .delete(teamIntegrationMapping)
@@ -354,6 +357,15 @@ export async function setMapping(
         ),
       );
   } else {
+    if (input.kind === 'assignee') {
+      // Un mapping neuf ne cible qu'un membre qui peut réellement travailler
+      // un fil. La suppression d'un mapping stale reste toujours possible.
+      const mapped = await requireMember(db, teamId, input.retaValue);
+      if (!roleCan(mapped.role, 'thread.write')) throw new TeamStoreError('mapping_missing');
+    }
+    if (input.kind === 'status' && input.retaValue !== 'open' && input.retaValue !== 'closed') {
+      throw new TeamStoreError('mapping_missing');
+    }
     await db
       .insert(teamIntegrationMapping)
       .values({
@@ -461,6 +473,7 @@ export async function addExternalLink(
   input: { kind: ExternalLinkKind; label: string; url: string },
 ) {
   const thread = await getTeamThread(db, userId, teamThreadId);
+  await requireCapability(db, thread.teamId, userId, 'thread.write');
   let parsed: URL;
   try {
     parsed = new URL(input.url);
@@ -502,6 +515,7 @@ export async function removeExternalLink(db: DB, userId: string, linkId: string)
   const link = rows[0];
   if (!link || link.removedAt) throw new TeamStoreError('not_found');
   const thread = await getTeamThread(db, userId, link.teamThreadId);
+  await requireCapability(db, thread.teamId, userId, 'thread.write');
   if (link.createdBy !== userId) {
     // Sinon : owner de l'équipe uniquement.
     await requireOwner(db, thread.teamId, userId);
@@ -535,6 +549,7 @@ export async function unlinkIssue(db: DB, userId: string, linkId: string) {
   const link = rows[0];
   if (!link || link.unlinkedAt) throw new TeamStoreError('not_found');
   const thread = await getTeamThread(db, userId, link.teamThreadId);
+  await requireCapability(db, thread.teamId, userId, 'thread.write');
   await db
     .update(teamThreadIssueLink)
     .set({ unlinkedAt: new Date(), unlinkedBy: userId })
@@ -593,6 +608,23 @@ function validateMappings(
   }
 }
 
+async function requireAssignableMember(
+  db: DbOrTx,
+  teamId: string,
+  memberUserId: string,
+  teamThreadId: string,
+) {
+  const member = await requireMember(db, teamId, memberUserId);
+  if (!roleCan(member.role, 'thread.write')) throw new TeamStoreError('mapping_missing');
+  const accessible = await db
+    .select({ id: teamThread.id })
+    .from(teamThread)
+    .where(and(eq(teamThread.id, teamThreadId), accessPredicate(memberUserId)))
+    .limit(1);
+  if (!accessible[0]) throw new TeamStoreError('mapping_missing');
+  return member;
+}
+
 /** Bail 'pending' expiré → needs_reconciliation (CAS) — JAMAIS de rejeu aveugle. */
 async function reconcileStalePending(db: DbOrTx, requestId: string) {
   await db
@@ -630,6 +662,7 @@ export async function previewIssue(
   config: { appOrigin: string },
 ) {
   const thread = await getTeamThread(db, userId, input.teamThreadId);
+  await requireCapability(db, thread.teamId, userId, 'thread.write');
   const install = await requireActiveInstallForThread(db, thread.teamId);
   const mappings = await loadMappings(db, install.id);
   let assigneeExternalId: string | null = null;
@@ -638,6 +671,7 @@ export async function previewIssue(
       (m) => m.kind === 'assignee' && m.retaValue === input.assigneeUserId,
     );
     if (!mapping) throw new TeamStoreError('mapping_missing');
+    await requireAssignableMember(db, thread.teamId, input.assigneeUserId, input.teamThreadId);
     assigneeExternalId = mapping.externalId;
   }
   validateMappings(mappings, {
@@ -777,6 +811,7 @@ export async function confirmIssue(
   if (request.requestedBy !== userId) throw new TeamStoreError('forbidden');
   // ACL RELUE + fil exact + install active de l'équipe DU FIL.
   const thread = await getTeamThread(db, userId, request.teamThreadId);
+  await requireCapability(db, thread.teamId, userId, 'thread.write');
   const install = await requireActiveInstallForThread(db, thread.teamId);
   if (install.id !== request.installId) throw new TeamStoreError('preview_invalid');
 
@@ -806,11 +841,19 @@ export async function confirmIssue(
     throw new TeamStoreError('preview_expired');
   }
   // Mappings REVALIDÉS à la confirmation : un owner a pu les changer.
-  validateMappings(await loadMappings(db, install.id), {
+  const currentMappings = await loadMappings(db, install.id);
+  validateMappings(currentMappings, {
     linearTeamId: request.linearTeamId,
     stateId: request.stateId,
     assigneeExternalId: request.assigneeExternalId,
   });
+  if (request.assigneeExternalId) {
+    const mapping = currentMappings.find(
+      (row) => row.kind === 'assignee' && row.externalId === request.assigneeExternalId,
+    );
+    if (!mapping) throw new TeamStoreError('mapping_missing');
+    await requireAssignableMember(db, thread.teamId, mapping.retaValue, request.teamThreadId);
+  }
 
   // Claim CAS : previewed|failed → pending avec bail.
   const claimed = await db
@@ -937,29 +980,32 @@ export async function acceptIssueLink(
   input: { teamThreadId: string; identifier: string },
 ) {
   const thread = await getTeamThread(db, userId, input.teamThreadId);
+  await requireCapability(db, thread.teamId, userId, 'thread.write');
   const install = await requireActiveInstallForThread(db, thread.teamId);
   const client = await getClient({ id: install.id, teamId: install.teamId });
   const issue = await client.findIssueByIdentifier(input.identifier);
   if (!issue) throw new TeamStoreError('not_found');
-  await db
-    .insert(teamThreadIssueLink)
-    .values({
-      id: crypto.randomUUID(),
-      teamThreadId: input.teamThreadId,
-      installId: install.id,
-      issueId: issue.id,
-      issueIdentifier: issue.identifier,
-      issueUrl: issue.url,
-      createdBy: userId,
-    })
-    .onConflictDoNothing();
-  await appendTeamAudit(db, {
-    teamId: thread.teamId,
-    actorUserId: userId,
-    action: 'integration.issue_linked',
-    subjectType: 'issue_link',
-    subjectId: issue.id,
-    metadata: { teamThreadId: input.teamThreadId, issueIdentifier: issue.identifier },
+  await db.transaction(async (tx) => {
+    await tx
+      .insert(teamThreadIssueLink)
+      .values({
+        id: crypto.randomUUID(),
+        teamThreadId: input.teamThreadId,
+        installId: install.id,
+        issueId: issue.id,
+        issueIdentifier: issue.identifier,
+        issueUrl: issue.url,
+        createdBy: userId,
+      })
+      .onConflictDoNothing();
+    await appendTeamAudit(tx, {
+      teamId: thread.teamId,
+      actorUserId: userId,
+      action: 'integration.issue_linked',
+      subjectType: 'issue_link',
+      subjectId: issue.id,
+      metadata: { teamThreadId: input.teamThreadId, issueIdentifier: issue.identifier },
+    });
   });
   return { issueId: issue.id, issueIdentifier: issue.identifier, issueUrl: issue.url };
 }
@@ -1027,6 +1073,11 @@ export async function processLinearEvent(
   const data = (payload['data'] ?? {}) as Record<string, unknown>;
   const issueId = String(data['id'] ?? '');
   if (!issueId) return 'ignored';
+  // `data.updatedAt` décrit la version de l'issue elle-même. Contrairement au
+  // timestamp d'envoi du webhook, il reste stable lors d'un retry tardif et
+  // permet donc de rejeter un état plus ancien arrivé après un état récent.
+  const issueUpdatedAt = new Date(String(data['updatedAt'] ?? ''));
+  if (!Number.isFinite(issueUpdatedAt.getTime())) return 'ignored';
 
   const installs = await db
     .select({ id: teamIntegrationInstall.id, teamId: teamIntegrationInstall.teamId })
@@ -1064,16 +1115,57 @@ export async function processLinearEvent(
     const assigneeMapping = assigneeId
       ? mappings.find((m) => m.kind === 'assignee' && m.externalId === assigneeId)
       : undefined;
-    if (!statusMapping && !assigneeMapping) continue;
+    const retaStatus =
+      statusMapping?.retaValue === 'open' || statusMapping?.retaValue === 'closed'
+        ? statusMapping.retaValue
+        : null;
+    let mappedAssigneeIsWriter = false;
+    if (assigneeMapping) {
+      const mappedRows = await db
+        .select({ role: teamMember.role })
+        .from(teamMember)
+        .where(
+          and(
+            eq(teamMember.teamId, install.teamId),
+            eq(teamMember.userId, assigneeMapping.retaValue),
+          ),
+        )
+        .limit(1);
+      mappedAssigneeIsWriter = !!mappedRows[0] && roleCan(mappedRows[0].role, 'thread.write');
+    }
+    if (!retaStatus && !mappedAssigneeIsWriter) continue;
     for (const link of links) {
       const set: Record<string, unknown> = { lastActivityAt: new Date(), updatedAt: new Date() };
-      if (
-        statusMapping &&
-        (statusMapping.retaValue === 'open' || statusMapping.retaValue === 'closed')
-      ) {
-        set['status'] = statusMapping.retaValue;
+      if (retaStatus) {
+        set['status'] = retaStatus;
       }
-      if (assigneeMapping) set['assigneeUserId'] = assigneeMapping.retaValue;
+      let assigneeUserId: string | null = null;
+      if (assigneeMapping && mappedAssigneeIsWriter) {
+        const accessible = await db
+          .select({ id: teamThread.id })
+          .from(teamThread)
+          .where(
+            and(eq(teamThread.id, link.teamThreadId), accessPredicate(assigneeMapping.retaValue)),
+          )
+          .limit(1);
+        if (accessible[0]) assigneeUserId = assigneeMapping.retaValue;
+      }
+      if (assigneeUserId) set['assigneeUserId'] = assigneeUserId;
+      if (!retaStatus && !assigneeUserId) continue;
+      const claimedFreshness = await db
+        .update(teamThreadIssueLink)
+        .set({ lastLinearUpdatedAt: issueUpdatedAt })
+        .where(
+          and(
+            eq(teamThreadIssueLink.id, link.id),
+            or(
+              isNull(teamThreadIssueLink.lastLinearUpdatedAt),
+              lt(teamThreadIssueLink.lastLinearUpdatedAt, issueUpdatedAt),
+            ),
+          ),
+        )
+        .returning({ id: teamThreadIssueLink.id });
+      if (!claimedFreshness[0]) continue;
       await db.update(teamThread).set(set).where(eq(teamThread.id, link.teamThreadId));
       await appendTeamAudit(db, {
         teamId: install.teamId,
@@ -1085,8 +1177,9 @@ export async function processLinearEvent(
         metadata: {
           provider: 'linear',
           issueId,
-          ...(statusMapping ? { status: statusMapping.retaValue } : {}),
-          ...(assigneeMapping ? { assigneeUserId: assigneeMapping.retaValue } : {}),
+          linearUpdatedAt: issueUpdatedAt.toISOString(),
+          ...(retaStatus ? { status: retaStatus } : {}),
+          ...(assigneeUserId ? { assigneeUserId } : {}),
         },
       });
       touched += 1;

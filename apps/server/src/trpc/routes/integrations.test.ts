@@ -183,12 +183,14 @@ describe('integrations — config fail closed + webhooks sortants + export', () 
 
   it('exportActivity : limite bornée à 200 au schéma, curseur transmis tel quel', async () => {
     harness.db.exportTeamActivity.mockResolvedValue({ entries: [], nextCursor: null });
-    await call('exportActivity', { teamId: 'team-1', cursor: '123|abc', limit: 200 });
+    const cursor = '123|00000000-0000-4000-8000-000000000001';
+    await call('exportActivity', { teamId: 'team-1', cursor, limit: 200 });
     expect(harness.db.exportTeamActivity).toHaveBeenCalledWith('team-1', {
-      cursor: '123|abc',
+      cursor,
       limit: 200,
     });
     expect(() => call('exportActivity', { teamId: 'team-1', limit: 201 })).toThrow();
+    expect(() => call('exportActivity', { teamId: 'team-1', cursor: 'malformed' })).toThrow();
   });
 
   it('retryDeadOutbound + listOutboundDeliveries délèguent (owner-only côté store) ; reconnect confirmé transmis', async () => {
