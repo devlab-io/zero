@@ -26,6 +26,7 @@ describe('runMcpDbOpWithFreshDb', () => {
   it('closes the client without masking an operation failure', async () => {
     const { end, factory } = makeFactory();
     const failure = new Error('query failed');
+    const logSink = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     await expect(
       runMcpDbOpWithFreshDb(
@@ -38,5 +39,6 @@ describe('runMcpDbOpWithFreshDb', () => {
     ).rejects.toBe(failure);
 
     expect(end).toHaveBeenCalledWith({ timeout: 2 });
+    expect(String(logSink.mock.calls[0]?.[0])).toContain('[mcp-db] operation failed');
   });
 });

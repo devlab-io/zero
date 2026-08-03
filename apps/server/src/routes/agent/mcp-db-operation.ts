@@ -1,4 +1,5 @@
 import { createDb, type DB } from '../../db';
+import { logger } from '../../lib/logger';
 
 type CloseableConnection = {
   end(options: { timeout: number }): Promise<unknown>;
@@ -24,6 +25,9 @@ export async function runMcpDbOpWithFreshDb<T>(
   const { db, conn } = factory(connectionString);
   try {
     return await operation(db);
+  } catch (error) {
+    logger.error('[mcp-db] operation failed', error);
+    throw error;
   } finally {
     await conn.end({ timeout: 2 }).catch(() => {});
   }
