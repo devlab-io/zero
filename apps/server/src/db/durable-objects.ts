@@ -40,6 +40,7 @@ import { consumeSlidingWindow } from '../lib/rate-limit';
 import * as teamStore from '../lib/teams/team-store';
 import { defaultUserSettings } from '../lib/schemas';
 import { createDb, type DB } from './index';
+import { logger } from '../lib/logger';
 import { EProviders } from '../types';
 import type { ZeroEnv } from '../env';
 
@@ -58,6 +59,11 @@ export async function runTeamOpWithFreshDb<T>(
   const { db, conn } = factory(connectionString);
   try {
     return await fn(db);
+  } catch (error) {
+    // Log before the error crosses the Durable Object RPC boundary, which can
+    // strip the postgres driver's nested cause from the serialized exception.
+    logger.error('[team-db] operation failed', error);
+    throw error;
   } finally {
     await conn.end({ timeout: 2 }).catch(() => {});
   }

@@ -53,6 +53,7 @@ describe('runTeamOpWithFreshDb — isolation des invocations Workers', () => {
   it('ferme aussi le client si une requête échoue, sans masquer son erreur', async () => {
     const { factory, resources } = makeFactory();
     const queryError = new Error('query failed');
+    const logSink = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     await expect(
       runTeamOpWithFreshDb(
@@ -65,5 +66,6 @@ describe('runTeamOpWithFreshDb — isolation des invocations Workers', () => {
     ).rejects.toBe(queryError);
 
     expect(resources[0]?.end).toHaveBeenCalledWith({ timeout: 2 });
+    expect(String(logSink.mock.calls[0]?.[0])).toContain('[team-db] operation failed');
   });
 });
