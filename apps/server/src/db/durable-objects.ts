@@ -43,6 +43,26 @@ import { createDb, type DB } from './index';
 import { EProviders } from '../types';
 import type { ZeroEnv } from '../env';
 
+type TeamDbFactory = (url: string) => ReturnType<typeof createDb>;
+
+/**
+ * Cloudflare attaches postgres-js sockets to the invocation that opened them.
+ * Team RPCs can span many sequential queries, so they must never reuse the
+ * long-lived client held by the Durable Object instance across invocations.
+ */
+export async function runTeamOpWithFreshDb<T>(
+  connectionString: string,
+  fn: (db: DB) => Promise<T>,
+  factory: TeamDbFactory = createDb,
+): Promise<T> {
+  const { db, conn } = factory(connectionString);
+  try {
+    return await fn(db);
+  } finally {
+    await conn.end({ timeout: 2 }).catch(() => {});
+  }
+}
+
 export class DbRpcDO extends RpcTarget {
   constructor(
     private mainDo: ZeroDB,
@@ -1098,13 +1118,14 @@ export class ZeroDB extends DurableObject<ZeroEnv> {
   }
 
   /**
-   * Team collaboration ops run against the SHARED Postgres through this DO
-   * (same Hyperdrive pool as every other query). The callback comes from the
-   * local DbRpcDO façade only — functions cannot cross the RPC boundary, so
-   * no external caller can reach this with arbitrary code.
+   * Team collaboration ops run against the SHARED Postgres through this DO.
+   * A fresh Hyperdrive client is created per RPC invocation: Workers forbids
+   * reusing postgres-js sockets attached to an earlier request. The callback
+   * comes from the local DbRpcDO façade only — functions cannot cross the RPC
+   * boundary, so no external caller can reach this with arbitrary code.
    */
   async teamOp<T>(fn: (db: DB) => Promise<T>): Promise<T> {
-    return await fn(this.db);
+    return await runTeamOpWithFreshDb(this.env.HYPERDRIVE.connectionString, fn);
   }
 
   // Ce DO est dédié à un utilisateur (idFromName(userId)) et toutes les écritures
