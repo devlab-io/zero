@@ -20,8 +20,16 @@ function safeString(value: unknown): string {
   }
 }
 
-function serializeError(err: Error): Record<string, unknown> {
-  return { name: err.name, message: err.message, stack: err.stack };
+function serializeError(err: Error, depth = 0): Record<string, unknown> {
+  const serialized: Record<string, unknown> = {
+    name: err.name,
+    message: err.message,
+    stack: err.stack,
+  };
+  if (depth < 3 && err.cause instanceof Error) {
+    serialized.cause = serializeError(err.cause, depth + 1);
+  }
+  return serialized;
 }
 
 function normalize(rest: unknown[]): unknown[] {
