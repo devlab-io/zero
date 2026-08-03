@@ -123,35 +123,29 @@ export function CreateEmail({
     // même clé et le serveur déduplique — un retour prématuré ferait fermer le
     // composer par proceedWithSend avant la confirmation d'enqueue.
     const clientSendId = (sendSubmissionKeyRef.current ??= crypto.randomUUID());
-    const sendingToast = toast.loading(m['states.sending']());
     markStage('send:dispatched');
-    let result: unknown;
-    try {
-      result = await sendEmail({
-        to: data.to.map((email) => ({ email, name: email.split('@')[0] || email })),
-        cc: data.cc?.map((email) => ({ email, name: email.split('@')[0] || email })),
-        bcc: data.bcc?.map((email) => ({ email, name: email.split('@')[0] || email })),
-        subject: data.subject,
-        message: data.message + zeroSignature,
-        attachments: await serializeFiles(data.attachments),
-        fromEmail: userName.trim() ? `${userName.replace(/[<>]/g, '')} <${fromEmail}>` : fromEmail,
-        draftId: draftId ?? undefined,
-        scheduleAt: data.scheduleAt,
-        clientSendId,
-      });
+    const result: unknown = await sendEmail({
+      to: data.to.map((email) => ({ email, name: email.split('@')[0] || email })),
+      cc: data.cc?.map((email) => ({ email, name: email.split('@')[0] || email })),
+      bcc: data.bcc?.map((email) => ({ email, name: email.split('@')[0] || email })),
+      subject: data.subject,
+      message: data.message + zeroSignature,
+      attachments: await serializeFiles(data.attachments),
+      fromEmail: userName.trim() ? `${userName.replace(/[<>]/g, '')} <${fromEmail}>` : fromEmail,
+      draftId: draftId ?? undefined,
+      scheduleAt: data.scheduleAt,
+      clientSendId,
+    });
 
-      // `mail.send` répond `{ success: false, error }` sans throw quand
-      // l'enqueue durable a échoué : le plier en erreur garde le composer
-      // ouvert (snapshot intact) et la même clé de soumission sert au retry.
-      const outcome = interpretSendOutcome(result);
-      if (!outcome.ok) {
-        throw new Error(typeof outcome.error === 'string' ? outcome.error : 'Send failed');
-      }
-      // Enqueue confirmé : la prochaine soumission est une nouvelle clé.
-      sendSubmissionKeyRef.current = null;
-    } finally {
-      toast.dismiss(sendingToast);
+    // `mail.send` répond `{ success: false, error }` sans throw quand
+    // l'enqueue durable a échoué : le plier en erreur garde le composer
+    // ouvert (snapshot intact) et la même clé de soumission sert au retry.
+    const outcome = interpretSendOutcome(result);
+    if (!outcome.ok) {
+      throw new Error(typeof outcome.error === 'string' ? outcome.error : 'Send failed');
     }
+    // Enqueue confirmé : la prochaine soumission est une nouvelle clé.
+    sendSubmissionKeyRef.current = null;
     markStage('send:confirmed');
 
     // Suivi asynchrone : un échec Gmail après l'enqueue devient un toast

@@ -37,8 +37,12 @@ import {
   processComposerAttachments,
   replaceEmojiShortcodes,
 } from './email-composer.helpers';
+import {
+  schema,
+  shouldFinalizeComposerSend,
+  type EmailComposerProps,
+} from './email-composer.types';
 import { useComposerDraftPersistence } from '@/hooks/use-composer-draft-persistence';
-import { schema, type EmailComposerProps } from './email-composer.types';
 // Issue #32 — send-and-archive (mod+shift+Enter): the editor has no Mod-Shift-Enter
 // keymap, so it is bound here with useHotkeys and archives the open thread after send.
 import { useOptimisticActions } from '@/hooks/use-optimistic-actions';
@@ -51,6 +55,7 @@ import { ComposerHeader } from './email-composer.fields';
 import { insertQuotedReply } from '@/lib/thread-quote';
 import { TemplateButton } from './template-button';
 import { useHotkeys } from 'react-hotkeys-hook';
+import { m } from '@/paraglide/messages';
 import { useParams } from 'react-router';
 
 export function EmailComposer({
@@ -408,7 +413,7 @@ export function EmailComposer({
       // Save draft before sending, we want to send drafts instead of sending new emails
       if (hasUnsavedChanges) await saveDraft();
 
-      await onSendEmail({
+      const sendOutcome = await onSendEmail({
         to: values.to,
         cc: showCc ? values.cc : undefined,
         bcc: showBcc ? values.bcc : undefined,
@@ -418,6 +423,9 @@ export function EmailComposer({
         fromEmail: values.fromEmail,
         scheduleAt,
       });
+      // A collision or another explicit host refusal is not a successful send:
+      // restore the untouched composer instead of clearing its body/attachments.
+      if (!shouldFinalizeComposerSend(sendOutcome)) return;
       setHasUnsavedChanges(false);
       editor.commands.clearContent(true);
       form.reset();
@@ -655,6 +663,29 @@ export function EmailComposer({
   const handleScheduleValidityChange = useCallback((valid: boolean) => {
     setIsScheduleValid(valid);
   }, []);
+
+  // Keep the form/editor mounted in React while the durable enqueue is in
+  // flight, but replace the large composer with a compact, non-blocking status.
+  // If the host returns `false` or throws, `finally` restores the exact draft.
+  if (isLoading) {
+    return (
+      <div
+        className={cn(
+          'bg-background text-muted-foreground flex min-h-16 w-full max-w-[750px] items-center justify-center gap-2 rounded-2xl border px-4 text-sm',
+          className,
+        )}
+        role="status"
+        aria-live="polite"
+        data-testid="composer-send-pending"
+      >
+        <span
+          className="border-muted-foreground/30 border-t-foreground h-4 w-4 animate-spin rounded-full border-2 motion-reduce:animate-none"
+          aria-hidden="true"
+        />
+        <span>{m['states.sending']()}</span>
+      </div>
+    );
+  }
 
   return (
     <div

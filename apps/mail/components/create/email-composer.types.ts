@@ -14,6 +14,17 @@ export type ThreadContent = {
   subject: string;
 }[];
 
+/**
+ * `false` means the host deliberately kept the message in the composer
+ * (for example after a team-reply collision). `true`/`void` means the durable
+ * send enqueue was accepted and the local composer can be cleared.
+ */
+export type ComposerSendOutcome = boolean | void;
+
+export function shouldFinalizeComposerSend(outcome: ComposerSendOutcome): boolean {
+  return outcome !== false;
+}
+
 export interface EmailComposerProps {
   /**
    * Partition de compte {userId, connectionId} — OBLIGATOIRE, résolue par le
@@ -38,7 +49,7 @@ export interface EmailComposerProps {
     attachments: File[];
     fromEmail?: string;
     scheduleAt?: string;
-  }) => Promise<void>;
+  }) => Promise<ComposerSendOutcome>;
   onClose?: () => void;
   /**
    * Fermeture d'un composer VIDE (Escape / croix) : le brouillon serveur

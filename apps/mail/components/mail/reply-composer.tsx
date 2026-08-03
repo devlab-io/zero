@@ -200,8 +200,6 @@ export default function ReplyCompose({
     // Deux invocations même-tick partagent aussi cette clé : pas de double
     // envoi possible sans early return (qui fermerait le composer trop tôt).
     const clientSendId = (sendSubmissionKeyRef.current ??= crypto.randomUUID());
-    const sendingToast = toast.loading(m['states.sending']());
-
     try {
       const userEmail = activeConnection.email.toLowerCase();
       const userName = activeConnection.name || session?.user?.name || '';
@@ -326,8 +324,7 @@ export default function ReplyCompose({
         result.collision
       ) {
         setCollisionReasons((result.collision as { reasons: Array<{ type: string }> }).reasons);
-        toast.dismiss(sendingToast);
-        return;
+        return false;
       }
 
       // Intent expiré/invalide (24 h dépassées, contexte changé côté serveur) :
@@ -342,9 +339,8 @@ export default function ReplyCompose({
       ) {
         replyIntentsRef.current.delete(share.id);
         void ensureReplyIntent(share.id).catch(() => {});
-        toast.dismiss(sendingToast);
         toast.error(m['common.teams.collisionIntentInvalid']());
-        return;
+        return false;
       }
 
       // `mail.send` répond `{ success: false, error }` sans throw quand
@@ -365,8 +361,6 @@ export default function ReplyCompose({
         watchSendStatus(result.messageId, result.sendAt);
       }
       posthog.capture('Reply Email Sent');
-      toast.dismiss(sendingToast);
-
       // Close the composer immediately; reconcile the thread in the BACKGROUND.
       // The blocking `await refetch()` was the measured cold-path stall (W2-H) —
       // it is now fire-and-forget so the send feels instant. Purge atomique :
@@ -393,10 +387,11 @@ export default function ReplyCompose({
             : m['common.undoSend.emailSent'](),
         );
       }
+      return true;
     } catch (error) {
-      toast.dismiss(sendingToast);
       log.error('Error sending email:', error);
       toast.error(m['pages.createEmail.failedToSendEmail']());
+      return false;
     }
   };
 
