@@ -1,9 +1,9 @@
 import type { ParsedMessage } from '@zero/types';
 
 export type QueueThreadContextView = {
-  /** Dernier message réel du fil (brouillons exclus) — mis en avant dans le panneau. */
+  /** Dernier message entrant du fil — celui auquel la réponse est destinée. */
   latest: ParsedMessage | null;
-  /** Messages antérieurs, ordre chronologique, repliés par défaut. */
+  /** Messages antérieurs à ce message entrant, repliés par défaut. */
   earlier: ParsedMessage[];
   /**
    * Vrai si le dernier message ne vient pas de la boîte de l'utilisateur.
@@ -20,10 +20,30 @@ export const buildQueueThreadContext = (
   ownEmail?: string | null,
 ): QueueThreadContextView => {
   const conversation = (messages ?? []).filter((message) => !message.isDraft);
-  const latest = conversation.at(-1) ?? null;
-  const earlier = conversation.slice(0, -1);
   const own = normalizeEmail(ownEmail);
-  const latestIsInbound = Boolean(latest && (!own || normalizeEmail(latest.sender.email) !== own));
 
-  return { latest, earlier, latestIsInbound };
+  if (!conversation.length) {
+    return { latest: null, earlier: [], latestIsInbound: false };
+  }
+
+  if (own) {
+    const latestInboundIndex = conversation.findLastIndex(
+      (message) => normalizeEmail(message.sender.email) !== own,
+    );
+
+    if (latestInboundIndex >= 0) {
+      return {
+        latest: conversation[latestInboundIndex] ?? null,
+        earlier: conversation.slice(0, latestInboundIndex),
+        latestIsInbound: true,
+      };
+    }
+  }
+
+  const latest = conversation.at(-1) ?? null;
+  return {
+    latest,
+    earlier: conversation.slice(0, -1),
+    latestIsInbound: Boolean(latest && !own),
+  };
 };

@@ -47,6 +47,22 @@ describe('buildQueueThreadContext', () => {
     expect(context.earlier).toEqual([]);
   });
 
+  it('ignore un brouillon sortant non marqué placé après le dernier message entrant', () => {
+    const context = buildQueueThreadContext(
+      [
+        message({ id: 'old-inbound' }),
+        message({ id: 'outbound', sender: { email: 'thomas@devlab.io' } }),
+        message({ id: 'target-inbound', sender: { email: 'florian@example.com' } }),
+        message({ id: 'generated-reply', sender: { email: 'thomas@devlab.io' } }),
+      ],
+      'thomas@devlab.io',
+    );
+
+    expect(context.latest?.id).toBe('target-inbound');
+    expect(context.earlier.map((entry) => entry.id)).toEqual(['old-inbound', 'outbound']);
+    expect(context.latestIsInbound).toBe(true);
+  });
+
   it('retourne un contexte vide sans messages', () => {
     expect(buildQueueThreadContext(undefined, 'thomas@devlab.io')).toEqual({
       latest: null,
