@@ -226,10 +226,7 @@ export function QueueReview({ embedded = false }: { embedded?: boolean } = {}) {
       subject: string;
       body: string;
     }) => trpcClient.outbox.updateDraft.mutate(input),
-    onSuccess: async () => {
-      toast.success(m['queue.item.saved']());
-      await invalidateOutbox();
-    },
+    onSuccess: async () => invalidateOutbox(),
     onError: () => toast.error(m['queue.item.saveFailed']()),
   });
 
@@ -822,7 +819,8 @@ function QueueItemRow({
     [item.bcc, item.body, item.cc, item.subject, item.to],
   );
   const currentSignature = draftSignature(currentDraft);
-  const isDirty = currentSignature !== draftSignature(serverDraft);
+  const savedSignatureRef = useRef(draftSignature(serverDraft));
+  const isDirty = currentSignature !== savedSignatureRef.current;
   const currentDraftRef = useRef(currentDraft);
   const isDirtyRef = useRef(isDirty);
   onSaveRef.current = onSave;
@@ -838,11 +836,15 @@ function QueueItemRow({
     if (savePromiseRef.current) return savePromiseRef.current;
 
     setSaveState('saving');
-    const savePromise = onSaveRef.current(currentDraftRef.current);
+    const draftToSave = currentDraftRef.current;
+    const signatureToSave = draftSignature(draftToSave);
+    const savePromise = onSaveRef.current(draftToSave);
     savePromiseRef.current = savePromise;
     try {
       await savePromise;
-      setSaveState('saved');
+      savedSignatureRef.current = signatureToSave;
+      isDirtyRef.current = draftSignature(currentDraftRef.current) !== signatureToSave;
+      setSaveState(isDirtyRef.current ? 'pending' : 'saved');
     } catch (error) {
       setSaveState('error');
       throw error;
@@ -904,10 +906,10 @@ function QueueItemRow({
   const saveLabel =
     isSaving || saveState === 'saving'
       ? m['queue.actions.saving']()
-      : saveState === 'pending' || isDirty
-        ? m['queue.item.autosavePending']()
-        : saveState === 'error'
-          ? m['queue.item.saveFailed']()
+      : saveState === 'error'
+        ? m['queue.item.saveFailed']()
+        : saveState === 'pending'
+          ? m['queue.item.autosavePending']()
           : m['queue.item.autosaved']();
 
   return (
