@@ -36,12 +36,16 @@ describe('queue draft editor synchronization', () => {
     expect(source).toContain('item={selectedItem}');
   });
 
-  it('shows the source conversation beside the editable reply', () => {
+  it('shows the source conversation before the editable reply in one reading column', () => {
     expect(source).toContain('<QueueThreadContext');
     expect(source).toContain('threadId={item.threadId}');
-    expect(source).toContain('xl:grid-cols-[minmax(300px,2fr)_minmax(0,3fr)]');
-    expect(source).toContain('h-[260px] min-h-[260px]');
-    expect(source).toContain('xl:h-auto');
+    expect(source).toContain('mx-auto w-full max-w-4xl');
+    expect(source).not.toContain('xl:grid-cols-[minmax(300px,2fr)_minmax(0,3fr)]');
+    expect(source).not.toContain('h-[260px] min-h-[260px]');
+    const threadIndex = source.indexOf('<QueueThreadContext\n');
+    const editorIndex = source.indexOf('<QueueBodyEditor\n');
+    expect(threadIndex).toBeGreaterThan(0);
+    expect(editorIndex).toBeGreaterThan(threadIndex);
   });
 
   it('keeps the queue navigable and sendable from the keyboard', () => {

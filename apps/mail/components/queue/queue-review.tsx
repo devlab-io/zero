@@ -1451,172 +1451,172 @@ function QueueItemRow({
         </div>
       </div>
 
-      {/* Poste de travail : le fil source est LU dans la même vue que la
-          réponse — colonne contexte + colonne édition, chacune avec son
-          propre défilement dès xl ; empilées (contexte d'abord) en dessous. */}
-      <div className="grid min-h-0 flex-1 grid-cols-1 overflow-y-auto xl:grid-cols-[minmax(300px,2fr)_minmax(0,3fr)] xl:overflow-hidden">
-        <QueueThreadContext
-          threadId={item.threadId}
-          classificationReason={item.classificationReason}
-          className="h-[260px] min-h-[260px] overflow-hidden border-b border-zinc-200 xl:h-auto xl:max-h-none xl:min-h-0 xl:border-b-0 xl:border-r dark:border-zinc-800"
-        />
+      {/* Shortwave-style conversation: one reading column, then the editable
+          reply as the final message in the same thread. */}
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className="mx-auto w-full max-w-4xl space-y-4 px-3 py-4 sm:px-5 sm:py-6">
+          <QueueThreadContext
+            threadId={item.threadId}
+            classificationReason={item.classificationReason}
+          />
 
-        <div className="min-w-0 xl:min-h-0 xl:overflow-y-auto">
-          <div className="space-y-3 p-3 sm:p-4">
-            {item.status === 'draft_ready' ? (
-              <div className="grid gap-3">
-                <QueueField label={m['queue.item.to']()}>
+          {item.status === 'draft_ready' ? (
+            <section className="bg-background overflow-hidden rounded-xl border border-zinc-200 shadow-sm dark:border-zinc-800">
+              <div className="border-b border-zinc-100 px-4 py-3 dark:border-zinc-900">
+                <p className="text-sm font-semibold">{m['queue.item.message']()}</p>
+                <p className="text-muted-foreground mt-0.5 text-xs">{saveLabel}</p>
+              </div>
+
+              <div className="divide-y divide-zinc-100 dark:divide-zinc-900">
+                <div className="grid grid-cols-[3rem_minmax(0,1fr)] items-center px-4">
+                  <Label className="text-muted-foreground text-xs">{m['queue.item.to']()}</Label>
                   <Input
+                    className="h-10 border-0 bg-transparent px-0 shadow-none focus-visible:ring-0"
                     value={to}
                     onChange={(event) => setTo(event.target.value)}
                     disabled={!canEdit || isSaving}
                   />
-                </QueueField>
-                <div className="grid gap-2 sm:grid-cols-2">
-                  <QueueField label={m['queue.item.cc']()}>
+                </div>
+                <div className="grid gap-x-4 px-4 sm:grid-cols-2">
+                  <div className="grid grid-cols-[3rem_minmax(0,1fr)] items-center">
+                    <Label className="text-muted-foreground text-xs">{m['queue.item.cc']()}</Label>
                     <Input
+                      className="h-10 border-0 bg-transparent px-0 shadow-none focus-visible:ring-0"
                       value={cc}
                       onChange={(event) => setCc(event.target.value)}
                       disabled={!canEdit || isSaving}
                     />
-                  </QueueField>
-                  <QueueField label={m['queue.item.bcc']()}>
+                  </div>
+                  <div className="grid grid-cols-[3rem_minmax(0,1fr)] items-center border-t border-zinc-100 sm:border-t-0 dark:border-zinc-900">
+                    <Label className="text-muted-foreground text-xs">{m['queue.item.bcc']()}</Label>
                     <Input
+                      className="h-10 border-0 bg-transparent px-0 shadow-none focus-visible:ring-0"
                       value={bcc}
                       onChange={(event) => setBcc(event.target.value)}
                       disabled={!canEdit || isSaving}
                     />
-                  </QueueField>
+                  </div>
                 </div>
-                <QueueField label={m['queue.item.subject']()}>
+                <div className="grid grid-cols-[3rem_minmax(0,1fr)] items-center px-4">
+                  <Label className="text-muted-foreground text-xs">
+                    {m['queue.item.subject']()}
+                  </Label>
                   <Input
-                    className="h-10 text-base font-medium"
+                    className="h-11 border-0 bg-transparent px-0 font-medium shadow-none focus-visible:ring-0"
                     value={subject}
                     onChange={(event) => setSubject(event.target.value)}
                     disabled={!canEdit || isSaving}
                   />
-                </QueueField>
-                <QueueField label={m['queue.item.message']()}>
-                  <QueueBodyEditor
-                    key={item.contentRevision}
-                    initialValue={body}
-                    onChange={setBody}
-                    disabled={!canEdit || isSaving}
-                  />
-                </QueueField>
+                </div>
               </div>
-            ) : (
-              <div className="min-w-0 space-y-2">
-                <h2 className="text-lg font-semibold text-zinc-950 dark:text-zinc-50">
-                  {item.subject || m['queue.item.untitled']()}
-                </h2>
-                <p className="text-muted-foreground text-sm">
-                  {m['queue.item.to']()}: {normalizeEditableAddresses(item.to).join(', ') || '—'}
-                </p>
-                {preview ? (
-                  <p className="max-w-4xl text-sm leading-6 text-zinc-600 dark:text-zinc-400">
-                    {preview}
-                  </p>
-                ) : null}
-              </div>
-            )}
 
-            {errorMessage ? (
-              <div
-                className={cn(
-                  'flex items-start gap-2 rounded-lg border px-3 py-2 text-sm',
-                  runtimeWasUpdated
-                    ? 'border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-200'
-                    : 'border-red-200 bg-red-50 text-red-800 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-300',
-                )}
-              >
-                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-                <p>{errorMessage}</p>
-              </div>
-            ) : null}
+              <QueueBodyEditor
+                key={item.contentRevision}
+                initialValue={body}
+                onChange={setBody}
+                disabled={!canEdit || isSaving}
+              />
 
-            {item.sourceAttachments.length ? (
-              <div className="text-muted-foreground flex flex-wrap items-center gap-2 text-xs">
-                <Paperclip className="h-3.5 w-3.5" />
-                <span className="font-medium">{m['queue.item.attachments']()}:</span>
-                {item.sourceAttachments.map((attachment, index) => (
-                  <span
-                    key={`${attachment.filename}-${index}`}
-                    className="rounded border px-1.5 py-0.5"
-                  >
-                    {attachment.filename}
-                  </span>
-                ))}
-              </div>
-            ) : null}
+              {item.sourceAttachments.length ? (
+                <div className="text-muted-foreground flex flex-wrap items-center gap-2 border-t border-zinc-100 px-4 py-3 text-xs dark:border-zinc-900">
+                  <Paperclip className="h-3.5 w-3.5" />
+                  <span className="font-medium">{m['queue.item.attachments']()}:</span>
+                  {item.sourceAttachments.map((attachment, index) => (
+                    <span
+                      key={`${attachment.filename}-${index}`}
+                      className="rounded-md border px-2 py-1"
+                    >
+                      {attachment.filename}
+                    </span>
+                  ))}
+                </div>
+              ) : null}
+            </section>
+          ) : (
+            <section className="bg-background min-w-0 space-y-2 rounded-xl border p-4">
+              <h2 className="text-lg font-semibold text-zinc-950 dark:text-zinc-50">
+                {item.subject || m['queue.item.untitled']()}
+              </h2>
+              <p className="text-muted-foreground text-sm">
+                {m['queue.item.to']()}: {normalizeEditableAddresses(item.to).join(', ') || '—'}
+              </p>
+              {preview ? (
+                <p className="text-sm leading-6 text-zinc-600 dark:text-zinc-400">{preview}</p>
+              ) : null}
+            </section>
+          )}
 
-            <div className="text-muted-foreground flex flex-wrap gap-x-4 gap-y-1 text-xs">
-              {updatedAt ? (
-                <span>
-                  {m['queue.item.updated']()}: {updatedAt}
-                </span>
-              ) : null}
-              {createdAt ? (
-                <span>
-                  {m['queue.item.created']()}: {createdAt}
-                </span>
-              ) : null}
-              {scheduledAt ? (
-                <span>
-                  {m['queue.item.scheduled']()}: {scheduledAt}
-                </span>
-              ) : null}
+          {errorMessage ? (
+            <div
+              className={cn(
+                'flex items-start gap-2 rounded-lg border px-3 py-2 text-sm',
+                runtimeWasUpdated
+                  ? 'border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-200'
+                  : 'border-red-200 bg-red-50 text-red-800 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-300',
+              )}
+            >
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              <p>{errorMessage}</p>
             </div>
+          ) : null}
+
+          {item.status === 'draft_ready' ? (
+            <section className="rounded-xl border border-violet-200 bg-violet-50/60 p-3 dark:border-violet-500/20 dark:bg-violet-500/10">
+              <div className="flex flex-col gap-2 lg:flex-row lg:items-end">
+                <div className="grid min-w-0 flex-1 gap-1">
+                  <Label htmlFor={`instruction-${item.id}`}>{m['queue.item.instruction']()}</Label>
+                  <Textarea
+                    id={`instruction-${item.id}`}
+                    className="min-h-11 bg-white dark:bg-zinc-950"
+                    value={instruction}
+                    onChange={(event) => setInstruction(event.target.value)}
+                    placeholder={m['queue.item.instructionPlaceholder']()}
+                    disabled={correctionPending || isActionMutating || isSaving}
+                  />
+                </div>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  className="shrink-0"
+                  onClick={() => void requestRevision()}
+                  disabled={
+                    !instruction.trim() || correctionPending || isActionMutating || isSaving
+                  }
+                >
+                  <Sparkles className="h-4 w-4" />
+                  {m['queue.actions.correct']()}
+                </Button>
+              </div>
+              {correctionPending || item.reviewState === 'stale' ? (
+                <p className="text-muted-foreground mt-1.5 text-xs">
+                  {correctionPending
+                    ? m['queue.item.revisionRequested']()
+                    : m['queue.item.revisionStale']()}
+                </p>
+              ) : null}
+            </section>
+          ) : null}
+
+          <div className="text-muted-foreground flex flex-wrap gap-x-4 gap-y-1 px-1 text-xs">
+            {updatedAt ? (
+              <span>
+                {m['queue.item.updated']()}: {updatedAt}
+              </span>
+            ) : null}
+            {createdAt ? (
+              <span>
+                {m['queue.item.created']()}: {createdAt}
+              </span>
+            ) : null}
+            {scheduledAt ? (
+              <span>
+                {m['queue.item.scheduled']()}: {scheduledAt}
+              </span>
+            ) : null}
           </div>
         </div>
       </div>
-
-      {/* Pied fixe : l'instruction Codex reste à portée de main pendant la
-          lecture du fil comme pendant l'édition de la réponse. */}
-      {item.status === 'draft_ready' ? (
-        <div className="shrink-0 border-t border-violet-200 bg-violet-50/60 px-3 py-2.5 sm:px-4 dark:border-violet-500/20 dark:bg-violet-500/10">
-          <div className="flex flex-col gap-2 lg:flex-row lg:items-end">
-            <div className="grid min-w-0 flex-1 gap-1">
-              <Label htmlFor={`instruction-${item.id}`}>{m['queue.item.instruction']()}</Label>
-              <Textarea
-                id={`instruction-${item.id}`}
-                className="min-h-11 bg-white dark:bg-zinc-950"
-                value={instruction}
-                onChange={(event) => setInstruction(event.target.value)}
-                placeholder={m['queue.item.instructionPlaceholder']()}
-                disabled={correctionPending || isActionMutating || isSaving}
-              />
-            </div>
-            <Button
-              type="button"
-              variant="secondary"
-              className="shrink-0"
-              onClick={() => void requestRevision()}
-              disabled={!instruction.trim() || correctionPending || isActionMutating || isSaving}
-            >
-              <Sparkles className="h-4 w-4" />
-              {m['queue.actions.correct']()}
-            </Button>
-          </div>
-          {correctionPending || item.reviewState === 'stale' ? (
-            <p className="text-muted-foreground mt-1.5 text-xs">
-              {correctionPending
-                ? m['queue.item.revisionRequested']()
-                : m['queue.item.revisionStale']()}
-            </p>
-          ) : null}
-        </div>
-      ) : null}
     </article>
-  );
-}
-
-function QueueField({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div className="grid gap-1.5">
-      <Label>{label}</Label>
-      {children}
-    </div>
   );
 }
 
@@ -1643,7 +1643,7 @@ function QueueBodyEditor({
     editorProps: {
       attributes: {
         class:
-          'prose prose-sm dark:prose-invert min-h-56 max-w-none px-4 py-3 leading-6 focus:outline-none',
+          'prose prose-sm dark:prose-invert min-h-64 max-w-none px-4 py-4 leading-7 focus:outline-none',
       },
       handleDOMEvents: {
         beforeinput: (view, event) => {
@@ -1675,7 +1675,7 @@ function QueueBodyEditor({
   }, [editor, initialValue]);
 
   return (
-    <div className="rounded-md border border-zinc-200 bg-white transition-shadow focus-within:border-zinc-400 focus-within:ring-2 focus-within:ring-zinc-200 dark:border-zinc-800 dark:bg-zinc-950 dark:focus-within:border-zinc-600 dark:focus-within:ring-zinc-800">
+    <div className="bg-background border-t border-zinc-100 transition-colors focus-within:bg-zinc-50/40 dark:border-zinc-900 dark:focus-within:bg-zinc-900/20">
       <EditorContent editor={editor} />
     </div>
   );

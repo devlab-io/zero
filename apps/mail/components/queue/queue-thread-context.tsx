@@ -1,16 +1,12 @@
 import {
-  ChevronDown,
-  ChevronRight,
-  MailOpen,
-  MessagesSquare,
-  Paperclip,
-  RefreshCcw,
-  Sparkles,
-} from 'lucide-react';
-import {
   buildQueueThreadContext,
   type QueueThreadContextView,
 } from '@/components/queue/queue-thread-context-model';
+import {
+  isSimpleQueueMessageHtml,
+  queueMessageText,
+} from '@/components/queue/queue-thread-message';
+import { ChevronDown, ChevronRight, MailOpen, Paperclip, RefreshCcw, Sparkles } from 'lucide-react';
 import { useActiveConnection } from '@/hooks/use-connections';
 import { MailContent } from '@/components/mail/mail-content';
 import { useMemo, useState, type ReactNode } from 'react';
@@ -38,8 +34,7 @@ const formatDate = (value?: Date | string | null) => {
 };
 
 const htmlSnippet = (message: ParsedMessage) =>
-  (message.decodedBody || message.processedHtml || message.body)
-    .replace(/<[^>]*>/g, ' ')
+  queueMessageText(message.decodedBody || message.processedHtml || message.body)
     .replace(/\s+/g, ' ')
     .trim()
     .slice(0, 160);
@@ -71,14 +66,12 @@ export function QueueThreadContext({
   const reason = classificationReason?.trim() || null;
 
   return (
-    <section
-      aria-label={m['queue.context.title']()}
-      className={cn('flex min-w-0 flex-col bg-zinc-50/60 dark:bg-zinc-900/20', className)}
-    >
-      <div className="border-border/60 flex min-h-10 shrink-0 items-center justify-between gap-2 border-b px-3 py-1.5">
+    <section aria-label={m['queue.context.title']()} className={cn('min-w-0', className)}>
+      <div className="flex min-h-10 items-center justify-between gap-2 px-1 pb-2">
         <div className="flex min-w-0 items-center gap-2">
-          <MessagesSquare className="text-muted-foreground h-4 w-4 shrink-0" />
-          <h3 className="truncate text-sm font-medium">{m['queue.context.title']()}</h3>
+          <h3 className="text-muted-foreground truncate text-xs font-semibold uppercase tracking-wide">
+            {m['queue.context.title']()}
+          </h3>
         </div>
         {messageCount > 1 ? (
           <span className="text-muted-foreground shrink-0 text-xs tabular-nums">
@@ -87,12 +80,13 @@ export function QueueThreadContext({
         ) : null}
       </div>
 
-      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3">
+      <div className="space-y-3">
         {reason ? (
-          <p className="flex items-start gap-2 rounded-lg border border-violet-200 bg-violet-50/60 px-3 py-2 text-xs leading-5 text-violet-950 dark:border-violet-500/20 dark:bg-violet-500/10 dark:text-violet-100">
+          <p className="text-muted-foreground flex items-start gap-2 px-1 text-xs leading-5">
             <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0" />
             <span>
-              <span className="font-medium">{m['queue.context.reason']()}</span> — {reason}
+              <span className="text-foreground font-medium">{m['queue.context.reason']()}</span> —{' '}
+              {reason}
             </span>
           </p>
         ) : null}
@@ -128,8 +122,8 @@ export function QueueThreadContext({
           </ContextNotice>
         ) : (
           <>
-            <LatestMessageCard message={context.latest} inbound={context.latestIsInbound} />
             {context.earlier.length > 0 ? <EarlierMessages messages={context.earlier} /> : null}
+            <LatestMessageCard message={context.latest} inbound={context.latestIsInbound} />
           </>
         )}
       </div>
@@ -160,22 +154,35 @@ function ContextNotice({
 
 function LatestMessageCard({ message, inbound }: { message: ParsedMessage; inbound: boolean }) {
   const attachments = (message.attachments ?? []).filter((attachment) => attachment.filename);
+  const html = message.decodedBody || message.processedHtml || message.body;
+  const sender = message.sender.name || message.sender.email;
 
   return (
-    <article className="overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
-      <header className="flex flex-wrap items-start justify-between gap-x-3 gap-y-1 border-b border-zinc-100 px-3 py-2 dark:border-zinc-900">
-        <div className="min-w-0">
-          <p className="truncate text-sm font-semibold">
-            {message.sender.name || message.sender.email}
+    <article className="bg-background overflow-hidden rounded-xl border border-zinc-200 shadow-sm dark:border-zinc-800">
+      <header className="flex items-start gap-3 px-4 pb-2.5 pt-3.5">
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-sky-100 text-sm font-semibold text-sky-700 dark:bg-sky-500/15 dark:text-sky-300">
+          {sender.slice(0, 1).toUpperCase()}
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex min-w-0 items-baseline gap-2">
+            <p className="truncate text-sm font-semibold">{sender}</p>
+            {message.sender.name ? (
+              <p className="text-muted-foreground hidden truncate text-xs sm:block">
+                &lt;{message.sender.email}&gt;
+              </p>
+            ) : null}
+          </div>
+          <p className="text-muted-foreground mt-0.5 truncate text-xs">
+            {message.subject || m['queue.context.title']()}
           </p>
-          {message.sender.name ? (
-            <p className="text-muted-foreground truncate text-xs">{message.sender.email}</p>
-          ) : null}
-          {message.subject ? (
-            <p className="mt-1 line-clamp-2 text-sm font-medium leading-5">{message.subject}</p>
-          ) : null}
         </div>
-        <div className="flex shrink-0 flex-col items-end gap-0.5">
+        <div className="flex shrink-0 flex-col items-end gap-1">
+          <time
+            className="text-muted-foreground text-[11px] tabular-nums"
+            dateTime={message.receivedOn}
+          >
+            {formatDate(message.receivedOn) ?? '—'}
+          </time>
           <Badge
             variant="outline"
             className={cn(
@@ -187,21 +194,23 @@ function LatestMessageCard({ message, inbound }: { message: ParsedMessage; inbou
           >
             {inbound ? m['queue.context.latestInbound']() : m['queue.context.latestFromYou']()}
           </Badge>
-          <time
-            className="text-muted-foreground text-[10px] tabular-nums"
-            dateTime={message.receivedOn}
-          >
-            {formatDate(message.receivedOn) ?? '—'}
-          </time>
         </div>
       </header>
-      <div className="px-3 py-2">
-        <MailContent
-          id={message.id}
-          html={message.decodedBody || message.processedHtml || message.body}
-          senderEmail={message.sender.email}
-          senderName={message.sender.name}
-        />
+      <div className="px-4 pb-4 pt-1 sm:pl-16">
+        {isSimpleQueueMessageHtml(html) ? (
+          <div className="whitespace-pre-wrap text-[15px] leading-7 text-zinc-800 dark:text-zinc-200">
+            {queueMessageText(html)}
+          </div>
+        ) : (
+          <div className="overflow-hidden rounded-lg border border-zinc-200 dark:border-zinc-800">
+            <MailContent
+              id={message.id}
+              html={html}
+              senderEmail={message.sender.email}
+              senderName={message.sender.name}
+            />
+          </div>
+        )}
       </div>
       {attachments.length > 0 ? (
         <footer className="text-muted-foreground flex flex-wrap items-center gap-1.5 border-t border-zinc-100 px-3 py-2 text-xs dark:border-zinc-900">
@@ -270,8 +279,10 @@ function EarlierMessageRow({
   expanded: boolean;
   onToggle: () => void;
 }) {
+  const html = message.decodedBody || message.processedHtml || message.body;
+
   return (
-    <li className="overflow-hidden rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950">
+    <li className="bg-background overflow-hidden rounded-xl border border-zinc-200 dark:border-zinc-800">
       <button
         type="button"
         onClick={onToggle}
@@ -304,12 +315,18 @@ function EarlierMessageRow({
       </button>
       {expanded ? (
         <div className="border-t border-zinc-100 px-3 py-2 dark:border-zinc-900">
-          <MailContent
-            id={message.id}
-            html={message.decodedBody || message.processedHtml || message.body}
-            senderEmail={message.sender.email}
-            senderName={message.sender.name}
-          />
+          {isSimpleQueueMessageHtml(html) ? (
+            <div className="whitespace-pre-wrap text-sm leading-6 text-zinc-800 dark:text-zinc-200">
+              {queueMessageText(html)}
+            </div>
+          ) : (
+            <MailContent
+              id={message.id}
+              html={html}
+              senderEmail={message.sender.email}
+              senderName={message.sender.name}
+            />
+          )}
         </div>
       ) : null}
     </li>
