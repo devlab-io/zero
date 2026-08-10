@@ -8,8 +8,8 @@ import {
   updateDraftOutboxSnapshot,
 } from '../lib/mail-agent';
 import { createDraftContentDigest } from '../lib/draft-outbox';
+import { getThread, getZeroAgent } from '../lib/server-utils';
 import type { ParsedDraft } from '../lib/driver/types';
-import { getZeroAgent } from '../lib/server-utils';
 import type { HonoContext } from '../ctx';
 import { createDb, type DB } from '../db';
 import { Hono, type Context } from 'hono';
@@ -114,8 +114,9 @@ export const retaMailWorkerRouter = new Hono<HonoContext>()
     });
     if (!item) return c.json({ error: 'Claim lost' }, 409);
 
-    const { stub: agent } = await getZeroAgent(item.connectionId, c.executionCtx);
-    const thread = item.threadId ? await agent.getThread(item.threadId) : null;
+    const thread = item.threadId
+      ? (await getThread(item.connectionId, item.threadId)).result
+      : null;
     const context = (thread?.messages ?? []).slice(-12).map((message) => ({
       from: message.sender,
       to: message.to,
@@ -129,6 +130,16 @@ export const retaMailWorkerRouter = new Hono<HonoContext>()
         size: attachment.size,
       })),
     }));
+    if (claimed.job.kind === 'compose' && !context.some((message) => message.body)) {
+      await withWorkerDb(c.env.HYPERDRIVE.connectionString, (db) =>
+        failDraftRevisionJob(db, {
+          jobId: claimed.job.id,
+          itemId: item.id,
+          error: 'Le contenu du fil est indisponible. Aucun brouillon n’a été créé.',
+        }),
+      );
+      return c.json({ job: null });
+    }
 
     return c.json({
       job: {

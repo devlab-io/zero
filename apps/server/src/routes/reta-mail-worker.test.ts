@@ -24,4 +24,11 @@ describe('RETA local worker surface', () => {
     expect(source.match(/const device = await authenticate\(c\);/g)).toHaveLength(4);
     expect(source).toContain("return c.json({ error: 'Unauthorized' }, 401)");
   });
+
+  it('reads the owning shard and refuses to compose without message content', () => {
+    expect(source).toContain('await getThread(item.connectionId, item.threadId)');
+    expect(source).not.toContain('await agent.getThread(item.threadId)');
+    expect(source).toContain("claimed.job.kind === 'compose' && !context.some");
+    expect(source).toContain('Aucun brouillon n’a été créé.');
+  });
 });
