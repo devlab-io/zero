@@ -1318,15 +1318,15 @@ function QueueItemRow({
 
       {/* Poste de travail : le fil source est LU dans la même vue que la
           réponse — colonne contexte + colonne édition, chacune avec son
-          propre défilement en 2xl ; empilées (contexte d'abord) en dessous. */}
-      <div className="grid min-h-0 flex-1 grid-cols-1 overflow-y-auto 2xl:grid-cols-[minmax(300px,2fr)_minmax(0,3fr)] 2xl:overflow-hidden">
+          propre défilement en xl ; empilées (contexte d'abord) en dessous. */}
+      <div className="grid min-h-0 flex-1 grid-cols-1 overflow-y-auto xl:grid-cols-[minmax(300px,2fr)_minmax(0,3fr)] xl:overflow-hidden">
         <QueueThreadContext
           threadId={item.threadId}
           classificationReason={item.classificationReason}
-          className="max-h-[260px] overflow-hidden border-b border-zinc-200 2xl:max-h-none 2xl:min-h-0 2xl:border-b-0 2xl:border-r dark:border-zinc-800"
+          className="max-h-[260px] overflow-hidden border-b border-zinc-200 xl:max-h-none xl:min-h-0 xl:border-b-0 xl:border-r dark:border-zinc-800"
         />
 
-        <div className="min-w-0 2xl:min-h-0 2xl:overflow-y-auto">
+        <div className="min-w-0 xl:min-h-0 xl:overflow-y-auto">
           <div className="space-y-3 p-3 sm:p-4">
             {item.status === 'draft_ready' ? (
               <div className="grid gap-3">
