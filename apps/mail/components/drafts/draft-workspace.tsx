@@ -346,7 +346,7 @@ export function DraftWorkspace() {
               createdAt: Date.now(),
             }),
         );
-        watchSendStatus(result.messageId, result.sendAt);
+        watchSendStatus(result.messageId, result.sendAt, draftId);
       }
       void queryClient.invalidateQueries({ queryKey: trpc.mail.listSendJobs.queryKey() });
       queryClient.removeQueries({ queryKey: trpc.drafts.get.queryKey({ id: draftId }) });

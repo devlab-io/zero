@@ -13,12 +13,14 @@ import {
   hashKey,
   hydrate,
   type InfiniteData,
+  useQueryClient,
 } from '@tanstack/react-query';
 import {
   PersistQueryClientProvider,
   persistQueryClientSave,
 } from '@tanstack/react-query-persist-client';
 import { useEffect, useMemo, useRef, useSyncExternalStore, type PropsWithChildren } from 'react';
+import { pruneSentDraftFromCache, subscribeToDraftSent } from '@/lib/draft-send-reconciliation';
 import { createSplitIDBPersister, readPriorityThreadIdFromSearch } from '@/lib/split-persister';
 import { QUERY_PERSIST_MAX_AGE_MS, shouldPersistQuery } from '@/lib/query-persistence';
 import { seedMailListPageSizeMigration } from '@/lib/mail-list-cache-migration';
@@ -35,6 +37,7 @@ import { CACHE_BURST_KEY } from '@/lib/constants';
 import { useQuery } from '@tanstack/react-query';
 import { get, set, del, keys } from 'idb-keyval';
 import { markStage } from '@/lib/perf-stages';
+import { FOLDERS } from '@/lib/utils';
 import superjson from 'superjson';
 import { log } from '@/lib/log';
 
@@ -182,6 +185,35 @@ function ActiveConnectionBridge() {
       setActiveConnectionId(data.id);
     }
   }, [data?.id]);
+  return null;
+}
+
+/** Keep every open RETA tab consistent after another tab sends a draft. */
+function DraftSendSyncBridge({ connectionId }: { connectionId: string | null }) {
+  const trpc = useTRPC();
+  const queryClient = useQueryClient();
+
+  useEffect(
+    () =>
+      subscribeToDraftSent((event) => {
+        if (!connectionId || event.connectionId !== connectionId) return;
+        pruneSentDraftFromCache(
+          queryClient,
+          trpc.mail.listThreads.infiniteQueryKey({ folder: FOLDERS.DRAFT }),
+          event.draftId,
+        );
+        queryClient.removeQueries({
+          queryKey: trpc.drafts.get.queryKey({ id: event.draftId }),
+        });
+        void queryClient.invalidateQueries({
+          queryKey: trpc.mail.listThreads.infiniteQueryKey({ folder: FOLDERS.DRAFT }),
+        });
+        void queryClient.invalidateQueries({ queryKey: trpc.mail.mailboxOverview.queryKey() });
+        void queryClient.invalidateQueries({ queryKey: trpc.mail.listSendJobs.queryKey() });
+      }),
+    [connectionId, queryClient, trpc],
+  );
+
   return null;
 }
 
@@ -396,6 +428,7 @@ export function QueryProvider({ children }: PropsWithChildren) {
     >
       <TRPCProvider trpcClient={trpcClient} queryClient={queryClient}>
         {session?.user.id ? <ActiveConnectionBridge /> : null}
+        <DraftSendSyncBridge connectionId={connectionId} />
         {children}
       </TRPCProvider>
     </PersistQueryClientProvider>

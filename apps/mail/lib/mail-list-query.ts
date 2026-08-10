@@ -1,3 +1,5 @@
+import { FOLDERS } from '@/lib/utils';
+
 /**
  * Contrat de comportement de la requête de liste (partagé entre useThreads et
  * la chauffe des dossiers, prouvé par lib/mail-list-query.test.ts) :
@@ -22,3 +24,16 @@ export const MAIL_LIST_QUERY_BEHAVIOR = {
   refetchOnWindowFocus: false,
   refetchIntervalInBackground: true,
 } as const;
+
+/**
+ * Drafts are provider-owned mutable resources: sending a Gmail draft removes
+ * it from the provider collection. Unlike projected folders, a persisted
+ * draft snapshot must therefore be reconciled every time the view is mounted
+ * or an old tab regains focus. This is intentionally scoped to Drafts so the
+ * normal snapshot-first performance contract stays unchanged elsewhere.
+ */
+export const mailListQueryBehaviorForFolder = (folder?: string) => ({
+  ...MAIL_LIST_QUERY_BEHAVIOR,
+  refetchOnMount: folder === FOLDERS.DRAFT ? ('always' as const) : true,
+  refetchOnWindowFocus: folder === FOLDERS.DRAFT ? ('always' as const) : false,
+});

@@ -37,6 +37,7 @@ import {
   type MailboxSearchRow,
 } from '@/components/queue/queue-search-model';
 import { draftListRow, type DraftListRow } from '@/components/drafts/draft-workspace-model';
+import { pruneSentDraftFromCache, publishDraftSent } from '@/lib/draft-send-reconciliation';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { QueueThreadContext } from '@/components/queue/queue-thread-context';
@@ -44,6 +45,7 @@ import { SendJobsSection } from '@/components/queue/send-jobs-section';
 import { useTRPC, useTRPCClient } from '@/providers/query-provider';
 import { defaultExtensions } from '@/components/create/extensions';
 import { useShortcuts } from '@/lib/hotkeys/use-hotkey-utils';
+import { useActiveConnection } from '@/hooks/use-connections';
 import { EditorContent, useEditor } from '@tiptap/react';
 import { useHotkeysContext } from 'react-hotkeys-hook';
 import { Textarea } from '@/components/ui/textarea';
@@ -53,9 +55,9 @@ import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { useNavigate } from 'react-router';
+import { cn, FOLDERS } from '@/lib/utils';
 import { m } from '@/paraglide/messages';
 import { useQueryState } from 'nuqs';
-import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 
 type QueueItem = {
@@ -138,6 +140,7 @@ export function QueueReview({ embedded = false }: { embedded?: boolean } = {}) {
   const trpc = useTRPC();
   const trpcClient = useTRPCClient();
   const queryClient = useQueryClient();
+  const { data: activeConnection } = useActiveConnection();
   const navigate = useNavigate();
   const [, setDraftId] = useQueryState('draftId');
   const [, setComposeOpen] = useQueryState('isComposeOpen');
@@ -181,6 +184,39 @@ export function QueueReview({ embedded = false }: { embedded?: boolean } = {}) {
     refetchInterval: 15_000,
   });
   const items = useMemo(() => (outboxQuery.data ?? []) as QueueItem[], [outboxQuery.data]);
+  const reconciledSentOutboxIds = useRef(new Set<string>());
+
+  useEffect(() => {
+    const newlySent = items.filter(
+      (item) =>
+        item.status === 'sent' &&
+        Boolean(item.gmailDraftId) &&
+        item.connectionId === activeConnection?.id &&
+        !reconciledSentOutboxIds.current.has(item.id),
+    );
+    if (!newlySent.length) return;
+
+    for (const item of newlySent) {
+      reconciledSentOutboxIds.current.add(item.id);
+      const draftId = item.gmailDraftId!;
+      pruneSentDraftFromCache(
+        queryClient,
+        trpc.mail.listThreads.infiniteQueryKey({ folder: FOLDERS.DRAFT }),
+        draftId,
+      );
+      queryClient.removeQueries({ queryKey: trpc.drafts.get.queryKey({ id: draftId }) });
+      publishDraftSent({
+        type: 'draft-sent',
+        connectionId: item.connectionId,
+        draftId,
+      });
+    }
+
+    void queryClient.invalidateQueries({
+      queryKey: trpc.mail.listThreads.infiniteQueryKey({ folder: FOLDERS.DRAFT }),
+    });
+    void queryClient.invalidateQueries({ queryKey: trpc.mail.mailboxOverview.queryKey() });
+  }, [activeConnection?.id, items, queryClient, trpc]);
   const savedDraftSearchQuery = useQuery({
     ...trpc.drafts.list.queryOptions({
       q: savedDraftSearch,

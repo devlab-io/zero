@@ -2,9 +2,12 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useCallback } from 'react';
 import { toast } from 'sonner';
 
+import { pruneSentDraftFromCache, publishDraftSent } from '@/lib/draft-send-reconciliation';
 import { planSendWatch, sendWatchAction, type SendWatchStatus } from '@/lib/send-watch';
+import { useActiveConnection } from '@/hooks/use-connections';
 import { useTRPC } from '@/providers/query-provider';
 import { m } from '@/paraglide/messages';
+import { FOLDERS } from '@/lib/utils';
 
 /**
  * Suivi post-enqueue d'un envoi : mail.send répond dès l'enqueue durable
@@ -16,10 +19,34 @@ import { m } from '@/paraglide/messages';
 export const useSendStatusWatch = () => {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
+  const { data: activeConnection } = useActiveConnection();
   const { mutateAsync: retrySend } = useMutation(trpc.mail.retrySend.mutationOptions());
 
+  const reconcileSentDraft = useCallback(
+    (draftId: string) => {
+      pruneSentDraftFromCache(
+        queryClient,
+        trpc.mail.listThreads.infiniteQueryKey({ folder: FOLDERS.DRAFT }),
+        draftId,
+      );
+      queryClient.removeQueries({ queryKey: trpc.drafts.get.queryKey({ id: draftId }) });
+      void queryClient.invalidateQueries({
+        queryKey: trpc.mail.listThreads.infiniteQueryKey({ folder: FOLDERS.DRAFT }),
+      });
+      void queryClient.invalidateQueries({ queryKey: trpc.mail.mailboxOverview.queryKey() });
+      if (activeConnection?.id) {
+        publishDraftSent({
+          type: 'draft-sent',
+          connectionId: activeConnection.id,
+          draftId,
+        });
+      }
+    },
+    [activeConnection?.id, queryClient, trpc],
+  );
+
   const watchSendStatus = useCallback(
-    (messageId: string, sendAt?: number) => {
+    (messageId: string, sendAt?: number, draftId?: string | null) => {
       const delays = planSendWatch(sendAt, Date.now());
       if (!delays) return;
 
@@ -55,6 +82,7 @@ export const useSendStatusWatch = () => {
         } catch {
           // Erreur réseau : re-tenter au jalon suivant plutôt qu'alerter à tort.
         }
+        if (status === 'sent' && draftId) reconcileSentDraft(draftId);
         const action = sendWatchAction(status);
         if (action === 'stop') return;
         if (action === 'alert') {
@@ -69,7 +97,7 @@ export const useSendStatusWatch = () => {
 
       setTimeout(() => void poll(0), delays[0]);
     },
-    [queryClient, retrySend, trpc],
+    [queryClient, reconcileSentDraft, retrySend, trpc],
   );
 
   return { watchSendStatus };

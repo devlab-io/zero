@@ -26,10 +26,10 @@ import { emailContentQueryKey, resolveEmailContentTheme } from '@/lib/email-cont
 import { extractCollabFilters, filterThreadsByCollabSets } from '@/lib/collab-search';
 import { requestImmediateDetailPersist } from '@/lib/detail-persist-flush';
 import { canReuseMailListPlaceholder } from '@/lib/mail-list-placeholder';
+import { mailListQueryBehaviorForFolder } from '@/lib/mail-list-query';
 import { useTRPC, useTRPCClient } from '@/providers/query-provider';
 import { hasCompleteThreadBodies } from '@/lib/thread-detail-cache';
 import { recordOpenThreadTimings } from '@/lib/open-thread-timing';
-import { MAIL_LIST_QUERY_BEHAVIOR } from '@/lib/mail-list-query';
 import { isSimpleLiteralSearch } from '@/lib/search-intent';
 import { mailListMaxResults } from '@/lib/mail-pagination';
 import { useSearchValue } from '@/hooks/use-search-value';
@@ -173,7 +173,7 @@ export const useThreads = () => {
       // partagé avec la chauffe des dossiers, prouvé par mail-list-query.test.ts.
       // Les websockets restent la voie chaude ; ceci couvre le dossier COURANT
       // resté ouvert au-delà du staleTime (audit r6).
-      ...MAIL_LIST_QUERY_BEHAVIOR,
+      ...mailListQueryBehaviorForFolder(folder),
       // CUA 2026-07-30 (obs 3) : quand la clé change (recherche tapée, retour de
       // recherche, changement de labels), la vue précédente reste affichée pendant
       // que la nouvelle réponse arrive — plus d'écran-spinner bloquant de 2+ s. La

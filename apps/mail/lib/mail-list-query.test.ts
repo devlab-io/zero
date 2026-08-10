@@ -1,4 +1,8 @@
-import { MAIL_LIST_QUERY_BEHAVIOR, MAIL_LIST_STALE_MS } from './mail-list-query';
+import {
+  MAIL_LIST_QUERY_BEHAVIOR,
+  MAIL_LIST_STALE_MS,
+  mailListQueryBehaviorForFolder,
+} from './mail-list-query';
 import { InfiniteQueryObserver, QueryClient } from '@tanstack/react-query';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -22,6 +26,17 @@ const makeObserver = (queryClient: QueryClient, queryFn: () => Promise<unknown>)
   });
 
 describe('MAIL_LIST_QUERY_BEHAVIOR — snapshot puis réconciliation stale-only', () => {
+  it('réconcilie toujours Drafts au montage et au retour sur un ancien onglet', () => {
+    expect(mailListQueryBehaviorForFolder('draft')).toMatchObject({
+      refetchOnMount: 'always',
+      refetchOnWindowFocus: 'always',
+    });
+    expect(mailListQueryBehaviorForFolder('inbox')).toMatchObject({
+      refetchOnMount: true,
+      refetchOnWindowFocus: false,
+    });
+  });
+
   it('entrée à 6 min : snapshot peint immédiatement, puis UNE seule réconciliation background', async () => {
     const queryClient = new QueryClient();
     const queryFn = vi.fn(async () => page('fresh-row'));

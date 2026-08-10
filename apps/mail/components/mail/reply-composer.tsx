@@ -381,7 +381,7 @@ export default function ReplyCompose({
           );
           void queryClient.invalidateQueries({ queryKey: trpc.mail.listSendJobs.queryKey() });
         }
-        watchSendStatus(result.messageId, result.sendAt);
+        watchSendStatus(result.messageId, result.sendAt, draftId);
       }
       posthog.capture('Reply Email Sent');
       // Close the composer immediately; reconcile the thread in the BACKGROUND.

@@ -175,7 +175,7 @@ export function CreateEmail({
         );
         void queryClient.invalidateQueries({ queryKey: trpc.mail.listSendJobs.queryKey() });
       }
-      watchSendStatus(result.messageId, result.sendAt);
+      watchSendStatus(result.messageId, result.sendAt, sentDraftId);
     }
 
     setDraftId(null);

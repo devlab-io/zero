@@ -60,4 +60,11 @@ describe('queue draft editor synchronization', () => {
     expect(source).toContain('isDirtyRef.current && !savePromiseRef.current');
     expect(source).toContain('onSaveRef.current(currentDraftRef.current)');
   });
+
+  it('purges a Gmail draft after the Agent outbox confirms it sent', () => {
+    expect(source).toContain("item.status === 'sent'");
+    expect(source).toContain('pruneSentDraftFromCache(');
+    expect(source).toContain('publishDraftSent({');
+    expect(source).toContain('reconciledSentOutboxIds');
+  });
 });
