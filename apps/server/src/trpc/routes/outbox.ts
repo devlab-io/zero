@@ -379,10 +379,18 @@ export const outboxRouter = router({
         body: draft.content ?? '',
       };
       const digest = await createDraftContentDigest(snapshot);
+      const itemComparableDigest = await createDraftContentDigest({
+        to: item.to,
+        cc: item.cc,
+        bcc: item.bcc,
+        subject: item.subject,
+        body: item.body,
+      });
 
       return withOutboxDb(async (db) => {
         let baseRevision = item.contentRevision;
-        if (digest !== item.contentDigest) {
+        let baseDigest = item.contentDigest;
+        if (digest !== itemComparableDigest) {
           const synced = await updateDraftOutboxSnapshot(db, {
             id: item.id,
             expectedRevision: item.contentRevision,
@@ -393,11 +401,12 @@ export const outboxRouter = router({
             throw new TRPCError({ code: 'CONFLICT', message: 'Le brouillon a changé' });
           }
           baseRevision = synced.contentRevision;
+          baseDigest = synced.contentDigest;
         }
         const idempotencyKey = await revisionJobIdempotencyKey({
           kind: 'revise',
           itemId: item.id,
-          baseDigest: digest,
+          baseDigest,
           instruction: input.instruction,
         });
         const job = await createDraftRevisionJob(db, {
@@ -405,7 +414,7 @@ export const outboxRouter = router({
           kind: 'revise',
           instruction: input.instruction,
           baseRevision,
-          baseDigest: digest,
+          baseDigest,
           idempotencyKey,
         });
         await db
@@ -456,6 +465,12 @@ export const outboxRouter = router({
       if (item.reviewState === 'revising') {
         throw new TRPCError({ code: 'CONFLICT', message: 'Codex corrige déjà ce brouillon' });
       }
+      if (input.expectedContentDigest && input.expectedContentDigest !== item.contentDigest) {
+        throw new TRPCError({
+          code: 'CONFLICT',
+          message: 'Le brouillon a changé. Recharge la file avant de l’enregistrer.',
+        });
+      }
 
       const executionCtx = getContext<HonoContext>().executionCtx;
       const { stub: agent } = await getZeroAgent(item.connectionId, executionCtx);
@@ -467,7 +482,14 @@ export const outboxRouter = router({
         subject: currentDraft.subject ?? '',
         body: currentDraft.content ?? '',
       });
-      if (input.expectedContentDigest && currentDigest !== input.expectedContentDigest) {
+      const snapshotDigest = await createDraftContentDigest({
+        to: item.to,
+        cc: item.cc,
+        bcc: item.bcc,
+        subject: item.subject,
+        body: item.body,
+      });
+      if (currentDigest !== snapshotDigest) {
         throw new TRPCError({
           code: 'CONFLICT',
           message: 'Le brouillon a changé. Recharge la file avant de l’enregistrer.',

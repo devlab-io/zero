@@ -65,6 +65,38 @@ const defaultSubject = (input: EnqueueDraftJobInput) =>
 const defaultBody = (input: EnqueueDraftJobInput) =>
   input.body ?? normalizeNullable(input.mission) ?? '';
 
+const normalizeDigestAddress = (value: string) => {
+  const trimmed = value.trim();
+  const bracketed = trimmed.match(/<\s*([^<>]+?)\s*>/u)?.[1];
+  return (bracketed ?? trimmed).trim().toLowerCase();
+};
+
+const normalizeDigestAddresses = (values: string[] | undefined) =>
+  Array.from(new Set((values ?? []).map(normalizeDigestAddress).filter(Boolean)));
+
+const normalizeDigestBody = (value: string | undefined) => {
+  const source = (value ?? '').trim();
+  const hasProviderEnvelope = /^(?:<!doctype|<html\b)/iu.test(source) || /<!--\$-->/u.test(source);
+  let body = source
+    .replace(/^<!doctype[^>]*>/iu, '')
+    .replace(/^<html\b[^>]*>/iu, '')
+    .replace(/<\/html>$/iu, '')
+    .replace(/<head\b[^>]*>[\s\S]*?<\/head>/iu, '')
+    .replace(/^<body\b[^>]*>/iu, '')
+    .replace(/<\/body>$/iu, '')
+    .replace(/<!--[\s\S]*?-->/gu, '')
+    .trim();
+  if (hasProviderEnvelope) {
+    const reactEmailWrapper = body.match(/^<div>([\s\S]*)<\/div>$/iu);
+    if (reactEmailWrapper?.[1] !== undefined) body = reactEmailWrapper[1];
+  }
+  return body
+    .replace(/\r\n?/gu, '\n')
+    .replace(/<br\s*\/?\s*>/giu, '<br>')
+    .replace(/>\s+</gu, '><')
+    .trim();
+};
+
 export const createDraftContentDigest = async (input: {
   to?: string[];
   cc?: string[];
@@ -76,11 +108,11 @@ export const createDraftContentDigest = async (input: {
     'SHA-256',
     textEncoder.encode(
       JSON.stringify({
-        to: input.to ?? [],
-        cc: input.cc ?? [],
-        bcc: input.bcc ?? [],
-        subject: input.subject ?? '',
-        body: input.body ?? '',
+        to: normalizeDigestAddresses(input.to),
+        cc: normalizeDigestAddresses(input.cc),
+        bcc: normalizeDigestAddresses(input.bcc),
+        subject: (input.subject ?? '').trim(),
+        body: normalizeDigestBody(input.body),
       }),
     ),
   );

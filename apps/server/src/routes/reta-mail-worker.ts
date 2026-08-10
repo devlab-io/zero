@@ -180,7 +180,7 @@ export const retaMailWorkerRouter = new Hono<HonoContext>()
       const { job, item } = claimed;
       const { stub: agent } = await getZeroAgent(item.connectionId, c.executionCtx);
       let providerDraft: ProviderDraft | null = null;
-      let currentDigest = item.contentDigest;
+      let providerDigest: string | null = null;
       if (job.kind === 'revise') {
         if (!item.gmailDraftId) return c.json({ error: 'Draft missing' }, 409);
         try {
@@ -189,7 +189,7 @@ export const retaMailWorkerRouter = new Hono<HonoContext>()
           const message = error instanceof Error ? error.message : String(error);
           throw new Error(`RETA provider draft read failed: ${message}`);
         }
-        currentDigest = await createDraftContentDigest({
+        providerDigest = await createDraftContentDigest({
           to: providerDraft.to ?? [],
           cc: providerDraft.cc ?? [],
           bcc: providerDraft.bcc ?? [],
@@ -197,7 +197,18 @@ export const retaMailWorkerRouter = new Hono<HonoContext>()
           body: providerDraft.content ?? '',
         });
       }
-      if (currentDigest !== job.baseDigest || item.contentRevision !== job.baseRevision) {
+      const snapshotDigest = await createDraftContentDigest({
+        to: item.to,
+        cc: item.cc,
+        bcc: item.bcc,
+        subject: item.subject,
+        body: item.body,
+      });
+      if (
+        job.baseDigest !== item.contentDigest ||
+        item.contentRevision !== job.baseRevision ||
+        (providerDigest !== null && providerDigest !== snapshotDigest)
+      ) {
         await failDraftRevisionJob(db, {
           jobId: job.id,
           itemId: item.id,
