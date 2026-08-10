@@ -1188,16 +1188,33 @@ function QueueBodyEditor({
   onChange: (value: string) => void;
   disabled: boolean;
 }) {
+  const hasUserInputRef = useRef(false);
   const editor = useEditor({
     extensions: defaultExtensions,
     content: initialValue || '<p></p>',
     editable: !disabled,
     immediatelyRender: false,
-    onUpdate: ({ editor: currentEditor }) => onChange(currentEditor.getHTML()),
+    onUpdate: ({ editor: currentEditor }) => {
+      if (hasUserInputRef.current) onChange(currentEditor.getHTML());
+    },
     editorProps: {
       attributes: {
         class:
           'prose prose-sm dark:prose-invert min-h-56 max-w-none px-4 py-3 leading-6 focus:outline-none',
+      },
+      handleDOMEvents: {
+        beforeinput: () => {
+          hasUserInputRef.current = true;
+          return false;
+        },
+        paste: () => {
+          hasUserInputRef.current = true;
+          return false;
+        },
+        drop: () => {
+          hasUserInputRef.current = true;
+          return false;
+        },
       },
     },
   });
