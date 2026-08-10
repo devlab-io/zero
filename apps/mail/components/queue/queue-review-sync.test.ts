@@ -24,7 +24,8 @@ describe('queue draft editor synchronization', () => {
 
   it('does not autosave TipTap normalization before the user edits the body', () => {
     expect(source).toContain('const hasUserInputRef = useRef(false)');
-    expect(source).toContain('if (hasUserInputRef.current) onChange(currentEditor.getHTML())');
-    expect(source).toContain('beforeinput: () =>');
+    expect(source).toContain('hasUserInputRef.current && currentEditor.isFocused');
+    expect(source).toContain('event.isTrusted && view.hasFocus()');
+    expect(source).toContain('beforeinput: (view, event) =>');
   });
 });

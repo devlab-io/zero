@@ -1195,7 +1195,9 @@ function QueueBodyEditor({
     editable: !disabled,
     immediatelyRender: false,
     onUpdate: ({ editor: currentEditor }) => {
-      if (hasUserInputRef.current) onChange(currentEditor.getHTML());
+      if (hasUserInputRef.current && currentEditor.isFocused) {
+        onChange(currentEditor.getHTML());
+      }
     },
     editorProps: {
       attributes: {
@@ -1203,16 +1205,16 @@ function QueueBodyEditor({
           'prose prose-sm dark:prose-invert min-h-56 max-w-none px-4 py-3 leading-6 focus:outline-none',
       },
       handleDOMEvents: {
-        beforeinput: () => {
-          hasUserInputRef.current = true;
+        beforeinput: (view, event) => {
+          hasUserInputRef.current = event.isTrusted && view.hasFocus();
           return false;
         },
-        paste: () => {
-          hasUserInputRef.current = true;
+        paste: (view, event) => {
+          hasUserInputRef.current = event.isTrusted && view.hasFocus();
           return false;
         },
-        drop: () => {
-          hasUserInputRef.current = true;
+        drop: (view, event) => {
+          hasUserInputRef.current = event.isTrusted && view.hasFocus();
           return false;
         },
       },
