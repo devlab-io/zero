@@ -1209,7 +1209,7 @@ function QueueItemRow({
           : m['queue.item.autosaved']();
 
   return (
-    <article className="flex min-h-0 flex-1 flex-col bg-white dark:bg-zinc-950">
+    <article className="flex min-h-0 flex-1 flex-col bg-white lg:mr-14 dark:bg-zinc-950">
       {/* Barre d'actions permanente : statut, autosave, envoi/annulation
           restent visibles quelle que soit la longueur du fil ou du brouillon. */}
       <div className="flex shrink-0 flex-wrap items-center justify-between gap-x-3 gap-y-1.5 border-b border-zinc-200 px-3 py-2 sm:px-4 dark:border-zinc-800">
@@ -1318,15 +1318,15 @@ function QueueItemRow({
 
       {/* Poste de travail : le fil source est LU dans la même vue que la
           réponse — colonne contexte + colonne édition, chacune avec son
-          propre défilement en xl ; empilées (contexte d'abord) en dessous. */}
-      <div className="grid min-h-0 flex-1 grid-cols-1 overflow-y-auto xl:grid-cols-[minmax(300px,2fr)_minmax(0,3fr)] xl:overflow-hidden">
+          propre défilement en 2xl ; empilées (contexte d'abord) en dessous. */}
+      <div className="grid min-h-0 flex-1 grid-cols-1 overflow-y-auto 2xl:grid-cols-[minmax(300px,2fr)_minmax(0,3fr)] 2xl:overflow-hidden">
         <QueueThreadContext
           threadId={item.threadId}
           classificationReason={item.classificationReason}
-          className="border-b border-zinc-200 xl:min-h-0 xl:border-b-0 xl:border-r dark:border-zinc-800"
+          className="border-b border-zinc-200 2xl:min-h-0 2xl:border-b-0 2xl:border-r dark:border-zinc-800"
         />
 
-        <div className="min-w-0 xl:min-h-0 xl:overflow-y-auto">
+        <div className="min-w-0 2xl:min-h-0 2xl:overflow-y-auto">
           <div className="space-y-3 p-3 sm:p-4">
             {item.status === 'draft_ready' ? (
               <div className="grid gap-3">
