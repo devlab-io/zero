@@ -1323,7 +1323,7 @@ function QueueItemRow({
         <QueueThreadContext
           threadId={item.threadId}
           classificationReason={item.classificationReason}
-          className="border-b border-zinc-200 2xl:min-h-0 2xl:border-b-0 2xl:border-r dark:border-zinc-800"
+          className="max-h-[260px] overflow-hidden border-b border-zinc-200 2xl:max-h-none 2xl:min-h-0 2xl:border-b-0 2xl:border-r dark:border-zinc-800"
         />
 
         <div className="min-w-0 2xl:min-h-0 2xl:overflow-y-auto">

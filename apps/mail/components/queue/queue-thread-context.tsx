@@ -87,7 +87,7 @@ export function QueueThreadContext({
         ) : null}
       </div>
 
-      <div className="min-h-0 flex-1 space-y-3 p-3 2xl:overflow-y-auto">
+      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3">
         {reason ? (
           <p className="flex items-start gap-2 rounded-lg border border-violet-200 bg-violet-50/60 px-3 py-2 text-xs leading-5 text-violet-950 dark:border-violet-500/20 dark:bg-violet-500/10 dark:text-violet-100">
             <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0" />
