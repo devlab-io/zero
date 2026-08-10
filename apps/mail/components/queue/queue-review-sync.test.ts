@@ -40,7 +40,8 @@ describe('queue draft editor synchronization', () => {
     expect(source).toContain('<QueueThreadContext');
     expect(source).toContain('threadId={item.threadId}');
     expect(source).toContain('xl:grid-cols-[minmax(300px,2fr)_minmax(0,3fr)]');
-    expect(source).toContain('max-h-[260px]');
+    expect(source).toContain('h-[260px] min-h-[260px]');
+    expect(source).toContain('xl:h-auto');
   });
 
   it('searches saved drafts and the mailbox as well as Agent replies', () => {

@@ -23,7 +23,7 @@ import { cn } from '@/lib/utils';
 
 /**
  * Contexte source d'une réponse de la file : le fil auquel Reta répond,
- * rendu DANS le poste de travail — dernier message réel mis en avant,
+ * rendu DANS le poste de travail — dernier message entrant mis en avant,
  * historique repliable dans la même vue. Lecture seule ; répondre se fait
  * dans l'éditeur adjacent, jamais ici.
  */
