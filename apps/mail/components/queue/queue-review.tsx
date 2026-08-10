@@ -327,6 +327,7 @@ export function QueueReview({ embedded = false }: { embedded?: boolean } = {}) {
   }, [items, mailboxSearchQuery.data, savedDraftSearch]);
   const selectedItem = visibleItems.find((item) => item.id === selectedItemId) ?? null;
   const hasSearch = searchQuery.trim().length > 0;
+  const isExternalSearchLoading = savedDraftSearchQuery.isFetching || mailboxSearchQuery.isFetching;
   const resultCount =
     visibleItems.length + savedDraftSearchResults.length + mailboxSearchResults.length;
 
@@ -722,7 +723,7 @@ export function QueueReview({ embedded = false }: { embedded?: boolean } = {}) {
                     ? m['queue.search.results']({ count: resultCount })
                     : m['queue.search.queueCount']({ count: visibleItems.length })}
                 </p>
-                {savedDraftSearchQuery.isFetching || mailboxSearchQuery.isFetching ? (
+                {isExternalSearchLoading ? (
                   <LoaderCircle className="text-muted-foreground h-4 w-4 animate-spin" />
                 ) : null}
               </div>
@@ -797,11 +798,20 @@ export function QueueReview({ embedded = false }: { embedded?: boolean } = {}) {
                 savedDraftSearchResults.length === 0 &&
                 mailboxSearchResults.length === 0 ? (
                   <div className="flex min-h-48 flex-col items-center justify-center px-4 text-center">
-                    <Search className="text-muted-foreground h-5 w-5" />
-                    <p className="mt-3 text-sm font-medium">{m['queue.search.noResults']()}</p>
-                    <p className="text-muted-foreground mt-1 text-xs leading-5">
-                      {m['queue.search.noResultsDescription']()}
-                    </p>
+                    {isExternalSearchLoading ? (
+                      <>
+                        <LoaderCircle className="text-muted-foreground h-5 w-5 animate-spin" />
+                        <p className="mt-3 text-sm font-medium">{m['queue.search.searching']()}</p>
+                      </>
+                    ) : (
+                      <>
+                        <Search className="text-muted-foreground h-5 w-5" />
+                        <p className="mt-3 text-sm font-medium">{m['queue.search.noResults']()}</p>
+                        <p className="text-muted-foreground mt-1 text-xs leading-5">
+                          {m['queue.search.noResultsDescription']()}
+                        </p>
+                      </>
+                    )}
                   </div>
                 ) : null}
               </div>

@@ -1072,6 +1072,7 @@
       "savedDrafts": "My drafts",
       "mailboxThreads": "Mailbox",
       "agentDrafts": "Agent replies",
+      "searching": "Searching your mailbox...",
       "noResults": "No matching email",
       "noResultsDescription": "Search covers Agent replies, saved drafts and your mailbox.",
       "selectTitle": "Select a reply",

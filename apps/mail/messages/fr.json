@@ -1072,6 +1072,7 @@
       "savedDrafts": "Mes brouillons",
       "mailboxThreads": "Boîte mail",
       "agentDrafts": "Réponses Agent",
+      "searching": "Recherche dans votre boîte mail...",
       "noResults": "Aucun email trouvé",
       "noResultsDescription": "La recherche couvre les réponses Agent, les brouillons enregistrés et votre boîte mail.",
       "selectTitle": "Sélectionnez une réponse",
