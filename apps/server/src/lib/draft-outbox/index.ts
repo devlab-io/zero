@@ -1,6 +1,3 @@
-import { connection, draftOutbox } from '../../db/schema';
-import { and, asc, desc, eq, lte } from 'drizzle-orm';
-import type { DB } from '../../db';
 import {
   approveDraftOutboxItem,
   beginGeneratingDraftOutboxItem,
@@ -13,6 +10,9 @@ import {
   type DraftOutboxItem,
   type DraftOutboxStatus,
 } from './state-machine';
+import { connection, draftOutbox } from '../../db/schema';
+import { and, asc, desc, eq, lte } from 'drizzle-orm';
+import type { DB } from '../../db';
 
 export type { DraftOutboxItem, DraftOutboxStatus };
 export {
@@ -30,10 +30,21 @@ export {
 
 export type EnqueueDraftJobInput = {
   connectionId: string;
+  triageRunId?: string | null;
   threadId?: string | null;
   mission?: string | null;
+  to?: string[];
+  cc?: string[];
+  bcc?: string[];
   subject?: string | null;
   body?: string | null;
+  sourceAttachments?: Array<{ filename: string; mimeType: string; size: number }>;
+  classification?: 'reply_needed' | 'no_reply_needed';
+  classificationReason?: string | null;
+  generationMode?: 'server' | 'codex';
+  reviewState?: DraftOutboxItem['reviewState'];
+  status?: DraftOutboxStatus;
+  idempotencySeed?: string;
 };
 
 type DraftOutboxRow = typeof draftOutbox.$inferSelect;
@@ -49,14 +60,38 @@ const normalizeNullable = (value: string | null | undefined) => {
 };
 
 const defaultSubject = (input: EnqueueDraftJobInput) =>
-  normalizeNullable(input.subject) ??
-  normalizeNullable(input.mission)?.slice(0, 120) ??
-  'Draft';
+  normalizeNullable(input.subject) ?? normalizeNullable(input.mission)?.slice(0, 120) ?? 'Draft';
 
 const defaultBody = (input: EnqueueDraftJobInput) =>
   input.body ?? normalizeNullable(input.mission) ?? '';
 
+export const createDraftContentDigest = async (input: {
+  to?: string[];
+  cc?: string[];
+  bcc?: string[];
+  subject?: string;
+  body?: string;
+}) => {
+  const digest = await crypto.subtle.digest(
+    'SHA-256',
+    textEncoder.encode(
+      JSON.stringify({
+        to: input.to ?? [],
+        cc: input.cc ?? [],
+        bcc: input.bcc ?? [],
+        subject: input.subject ?? '',
+        body: input.body ?? '',
+      }),
+    ),
+  );
+  return toHex(digest);
+};
+
 export const createDraftOutboxIdempotencyKey = async (input: EnqueueDraftJobInput) => {
+  if (input.idempotencySeed) {
+    const digest = await crypto.subtle.digest('SHA-256', textEncoder.encode(input.idempotencySeed));
+    return `draft_outbox:${toHex(digest)}`;
+  }
   const digest = await crypto.subtle.digest(
     'SHA-256',
     textEncoder.encode(
@@ -76,12 +111,23 @@ export const createDraftOutboxIdempotencyKey = async (input: EnqueueDraftJobInpu
 export const toDraftOutboxItem = (row: DraftOutboxRow): DraftOutboxItem => ({
   id: row.id,
   connectionId: row.connectionId,
+  triageRunId: row.triageRunId,
   threadId: row.threadId,
   mission: row.mission,
   status: row.status,
   gmailDraftId: row.gmailDraftId,
+  to: row.to,
+  cc: row.cc,
+  bcc: row.bcc,
   subject: row.subject,
   body: row.body,
+  sourceAttachments: row.sourceAttachments,
+  classification: row.classification,
+  classificationReason: row.classificationReason,
+  generationMode: row.generationMode,
+  reviewState: row.reviewState,
+  contentRevision: row.contentRevision,
+  contentDigest: row.contentDigest,
   idempotencyKey: row.idempotencyKey,
   scheduledSendAt: row.scheduledSendAt,
   error: row.error,
@@ -92,8 +138,14 @@ export const toDraftOutboxItem = (row: DraftOutboxRow): DraftOutboxItem => ({
 const toDraftOutboxUpdate = (item: DraftOutboxItem): Partial<typeof draftOutbox.$inferInsert> => ({
   status: item.status,
   gmailDraftId: item.gmailDraftId ?? null,
+  to: item.to,
+  cc: item.cc,
+  bcc: item.bcc,
   subject: item.subject,
   body: item.body,
+  reviewState: item.reviewState,
+  contentRevision: item.contentRevision,
+  contentDigest: item.contentDigest,
   scheduledSendAt: item.scheduledSendAt ?? null,
   error: item.error ?? null,
   updatedAt: item.updatedAt,
@@ -118,17 +170,34 @@ export const enqueueDraftJob = async (
 ): Promise<{ id: string }> => {
   const idempotencyKey = await createDraftOutboxIdempotencyKey(input);
   const now = new Date();
+  const subject = defaultSubject(input);
+  const body = defaultBody(input);
+  const to = input.to ?? [];
+  const cc = input.cc ?? [];
+  const bcc = input.bcc ?? [];
+  const contentDigest = await createDraftContentDigest({ to, cc, bcc, subject, body });
   const [inserted] = await db
     .insert(draftOutbox)
     .values({
       id: crypto.randomUUID(),
       connectionId: input.connectionId,
+      triageRunId: normalizeNullable(input.triageRunId),
       threadId: normalizeNullable(input.threadId),
       mission: normalizeNullable(input.mission),
-      status: 'queued',
+      status: input.status ?? 'queued',
       gmailDraftId: null,
-      subject: defaultSubject(input),
-      body: defaultBody(input),
+      to,
+      cc,
+      bcc,
+      subject,
+      body,
+      sourceAttachments: input.sourceAttachments ?? [],
+      classification: input.classification ?? 'reply_needed',
+      classificationReason: normalizeNullable(input.classificationReason),
+      generationMode: input.generationMode ?? 'server',
+      reviewState: input.reviewState ?? 'pending',
+      contentRevision: 0,
+      contentDigest,
       idempotencyKey,
       scheduledSendAt: null,
       error: null,
@@ -221,8 +290,29 @@ export const beginGeneratingDraftOutboxJob = async (db: DB, current: DraftOutbox
 export const markDraftOutboxJobReady = async (
   db: DB,
   current: DraftOutboxItem,
-  draft: { gmailDraftId: string; subject?: string; body?: string },
-) => persistDraftOutboxItemTransition(db, current, markDraftOutboxItemReady(current, draft));
+  draft: {
+    gmailDraftId: string;
+    to?: string[];
+    cc?: string[];
+    bcc?: string[];
+    subject?: string;
+    body?: string;
+  },
+) => {
+  const next = markDraftOutboxItemReady(current, draft);
+  next.to = draft.to ?? current.to;
+  next.cc = draft.cc ?? current.cc;
+  next.bcc = draft.bcc ?? current.bcc;
+  next.contentRevision = current.contentRevision + 1;
+  next.contentDigest = await createDraftContentDigest({
+    to: next.to,
+    cc: next.cc,
+    bcc: next.bcc,
+    subject: next.subject,
+    body: next.body,
+  });
+  return persistDraftOutboxItemTransition(db, current, next);
+};
 
 export const beginSendingDraftOutboxJob = async (db: DB, current: DraftOutboxItem) =>
   persistDraftOutboxItemTransition(db, current, beginSendingDraftOutboxItem(current));
@@ -237,7 +327,13 @@ export const findNextQueuedDraftOutboxItem = async (db: DB, connectionId: string
   const [row] = await db
     .select()
     .from(draftOutbox)
-    .where(and(eq(draftOutbox.connectionId, connectionId), eq(draftOutbox.status, 'queued')))
+    .where(
+      and(
+        eq(draftOutbox.connectionId, connectionId),
+        eq(draftOutbox.status, 'queued'),
+        eq(draftOutbox.generationMode, 'server'),
+      ),
+    )
     .orderBy(asc(draftOutbox.createdAt))
     .limit(1);
 
@@ -275,4 +371,3 @@ export const findNextApprovedDraftOutboxSendAt = async (db: DB, connectionId: st
 
   return row?.scheduledSendAt ?? null;
 };
-

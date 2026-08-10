@@ -387,6 +387,56 @@ export const emailTemplate = createTable(
   ],
 );
 
+export const mailAgentDevice = createTable(
+  'mail_agent_device',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    tokenHash: text('token_hash'),
+    enrollmentCodeHash: text('enrollment_code_hash'),
+    enrollmentExpiresAt: timestamp('enrollment_expires_at'),
+    lastSeenAt: timestamp('last_seen_at'),
+    revokedAt: timestamp('revoked_at'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (t) => [
+    index('mail_agent_device_user_id_idx').on(t.userId),
+    index('mail_agent_device_last_seen_idx').on(t.lastSeenAt),
+  ],
+);
+
+export const mailTriageRun = createTable(
+  'mail_triage_run',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    connectionId: text('connection_id')
+      .notNull()
+      .references(() => connection.id, { onDelete: 'cascade' }),
+    status: text('status').$type<'running' | 'completed' | 'failed'>().notNull().default('running'),
+    lookbackDays: integer('lookback_days').notNull().default(30),
+    maxResults: integer('max_results').notNull().default(30),
+    nextPageToken: text('next_page_token'),
+    scannedCount: integer('scanned_count').notNull().default(0),
+    replyNeededCount: integer('reply_needed_count').notNull().default(0),
+    noReplyNeededCount: integer('no_reply_needed_count').notNull().default(0),
+    error: text('error'),
+    completedAt: timestamp('completed_at'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (t) => [
+    index('mail_triage_run_user_created_idx').on(t.userId, t.createdAt),
+    index('mail_triage_run_connection_status_idx').on(t.connectionId, t.status),
+  ],
+);
+
 export const draftOutbox = createTable(
   'draft_outbox',
   {
@@ -394,6 +444,9 @@ export const draftOutbox = createTable(
     connectionId: text('connection_id')
       .notNull()
       .references(() => connection.id, { onDelete: 'cascade' }),
+    triageRunId: text('triage_run_id').references(() => mailTriageRun.id, {
+      onDelete: 'set null',
+    }),
     threadId: text('thread_id'),
     mission: text('mission'),
     status: text('status')
@@ -405,13 +458,33 @@ export const draftOutbox = createTable(
         | 'sending'
         | 'sent'
         | 'cancelled'
+        | 'no_reply_needed'
         | 'failed'
       >()
       .notNull()
       .default('queued'),
     gmailDraftId: text('gmail_draft_id'),
+    to: jsonb('to').$type<string[]>().notNull().default([]),
+    cc: jsonb('cc').$type<string[]>().notNull().default([]),
+    bcc: jsonb('bcc').$type<string[]>().notNull().default([]),
     subject: text('subject').notNull(),
     body: text('body').notNull(),
+    sourceAttachments: jsonb('source_attachments')
+      .$type<Array<{ filename: string; mimeType: string; size: number }>>()
+      .notNull()
+      .default([]),
+    classification: text('classification')
+      .$type<'reply_needed' | 'no_reply_needed'>()
+      .notNull()
+      .default('reply_needed'),
+    classificationReason: text('classification_reason'),
+    generationMode: text('generation_mode').$type<'server' | 'codex'>().notNull().default('server'),
+    reviewState: text('review_state')
+      .$type<'pending' | 'revision_requested' | 'revising' | 'ready' | 'stale' | 'failed'>()
+      .notNull()
+      .default('pending'),
+    contentRevision: integer('content_revision').notNull().default(0),
+    contentDigest: text('content_digest').notNull().default(''),
     idempotencyKey: text('idempotency_key').notNull(),
     scheduledSendAt: timestamp('scheduled_send_at'),
     error: text('error'),
@@ -421,7 +494,44 @@ export const draftOutbox = createTable(
   (t) => [
     unique('mail0_draft_outbox_idempotency_key_unique').on(t.idempotencyKey),
     index('draft_outbox_connection_status_idx').on(t.connectionId, t.status),
+    index('draft_outbox_triage_run_idx').on(t.triageRunId),
+    index('draft_outbox_review_state_idx').on(t.connectionId, t.reviewState),
     index('draft_outbox_scheduled_send_at_idx').on(t.scheduledSendAt),
+  ],
+);
+
+export const mailDraftRevisionJob = createTable(
+  'mail_draft_revision_job',
+  {
+    id: text('id').primaryKey(),
+    draftOutboxId: text('draft_outbox_id')
+      .notNull()
+      .references(() => draftOutbox.id, { onDelete: 'cascade' }),
+    kind: text('kind').$type<'compose' | 'revise'>().notNull(),
+    instruction: text('instruction').notNull(),
+    baseRevision: integer('base_revision').notNull(),
+    baseDigest: text('base_digest').notNull(),
+    status: text('status')
+      .$type<'queued' | 'claimed' | 'completed' | 'failed' | 'stale' | 'cancelled'>()
+      .notNull()
+      .default('queued'),
+    idempotencyKey: text('idempotency_key').notNull(),
+    claimedByDeviceId: text('claimed_by_device_id').references(() => mailAgentDevice.id, {
+      onDelete: 'set null',
+    }),
+    claimTokenHash: text('claim_token_hash'),
+    leaseExpiresAt: timestamp('lease_expires_at'),
+    resultRevision: integer('result_revision'),
+    error: text('error'),
+    completedAt: timestamp('completed_at'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (t) => [
+    unique('mail0_mail_draft_revision_job_idempotency_unique').on(t.idempotencyKey),
+    index('mail_draft_revision_job_outbox_idx').on(t.draftOutboxId, t.createdAt),
+    index('mail_draft_revision_job_status_idx').on(t.status, t.createdAt),
+    index('mail_draft_revision_job_lease_idx').on(t.leaseExpiresAt),
   ],
 );
 

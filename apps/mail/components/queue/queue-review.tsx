@@ -7,15 +7,31 @@ import {
   groupOutboxItemsByStatus,
   type OutboxStatus,
 } from '@/components/queue/queue-view-model';
-import { CheckCircle2, ExternalLink, RefreshCcw, RotateCcw, Undo2, XCircle } from 'lucide-react';
+import {
+  CheckCircle2,
+  ExternalLink,
+  Laptop,
+  Paperclip,
+  RefreshCcw,
+  RotateCcw,
+  Save,
+  Sparkles,
+  Undo2,
+  XCircle,
+} from 'lucide-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { SendJobsSection } from '@/components/queue/send-jobs-section';
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useTRPC, useTRPCClient } from '@/providers/query-provider';
+import { defaultExtensions } from '@/components/create/extensions';
 import { useShortcuts } from '@/lib/hotkeys/use-hotkey-utils';
+import { EditorContent, useEditor } from '@tiptap/react';
 import { useHotkeysContext } from 'react-hotkeys-hook';
+import { Textarea } from '@/components/ui/textarea';
 import type { Shortcut } from '@/config/shortcuts';
 import { Button } from '@/components/ui/button';
+import { Label } from '@/components/ui/label';
+import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { useNavigate } from 'react-router';
 import { m } from '@/paraglide/messages';
@@ -30,8 +46,17 @@ type QueueItem = {
   mission?: string | null;
   status: OutboxStatus;
   gmailDraftId?: string | null;
+  to: string[];
+  cc: string[];
+  bcc: string[];
   subject: string;
   body: string;
+  sourceAttachments: Array<{ filename: string; mimeType: string; size: number }>;
+  classification: 'reply_needed' | 'no_reply_needed';
+  classificationReason?: string | null;
+  reviewState: 'pending' | 'revision_requested' | 'revising' | 'ready' | 'stale' | 'failed';
+  contentRevision: number;
+  contentDigest: string;
   scheduledSendAt?: Date | string | null;
   error?: string | null;
   createdAt: Date | string;
@@ -54,6 +79,8 @@ const statusTone: Record<OutboxStatus, string> = {
   sent: 'border-zinc-200 bg-zinc-50 text-zinc-700 dark:border-zinc-500/20 dark:bg-zinc-500/10 dark:text-zinc-300',
   cancelled:
     'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-500/20 dark:bg-rose-500/10 dark:text-rose-300',
+  no_reply_needed:
+    'border-violet-200 bg-violet-50 text-violet-700 dark:border-violet-500/20 dark:bg-violet-500/10 dark:text-violet-300',
   failed:
     'border-red-200 bg-red-50 text-red-800 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-300',
 };
@@ -66,6 +93,7 @@ const statusLabels = (): Record<OutboxStatus, string> => ({
   sending: m['queue.status.sending'](),
   sent: m['queue.status.sent'](),
   cancelled: m['queue.status.cancelled'](),
+  no_reply_needed: m['queue.status.noReplyNeeded'](),
   failed: m['queue.status.failed'](),
 });
 
@@ -77,6 +105,7 @@ const statusDescriptions = (): Record<OutboxStatus, string> => ({
   sending: m['queue.statusDescription.sending'](),
   sent: m['queue.statusDescription.sent'](),
   cancelled: m['queue.statusDescription.cancelled'](),
+  no_reply_needed: m['queue.statusDescription.noReplyNeeded'](),
   failed: m['queue.statusDescription.failed'](),
 });
 
@@ -109,6 +138,14 @@ export function QueueReview({ embedded = false }: { embedded?: boolean } = {}) {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
   const [undoDeadlines, setUndoDeadlines] = useState<Record<string, Date | string>>({});
+  const [nextTriagePageToken, setNextTriagePageToken] = useState<string | null>(null);
+  const [triageSummary, setTriageSummary] = useState<{
+    scannedCount: number;
+    replyNeededCount: number;
+    noReplyNeededCount: number;
+    excludedCount: number;
+  } | null>(null);
+  const [enrollmentCode, setEnrollmentCode] = useState<string | null>(null);
   const [now, setNow] = useState(() => new Date());
 
   useEffect(() => {
@@ -121,15 +158,100 @@ export function QueueReview({ embedded = false }: { embedded?: boolean } = {}) {
     return () => window.clearInterval(interval);
   }, []);
 
-  const outboxQuery = useQuery(trpc.outbox.list.queryOptions({}));
-  const items = (outboxQuery.data ?? []) as QueueItem[];
+  const outboxQuery = useQuery({
+    ...trpc.outbox.list.queryOptions({}),
+    refetchInterval: 3_000,
+  });
+  const workerDevicesQuery = useQuery({
+    ...trpc.outbox.listWorkerDevices.queryOptions(),
+    refetchInterval: 15_000,
+  });
+  const items = useMemo(() => (outboxQuery.data ?? []) as QueueItem[], [outboxQuery.data]);
+
+  const prepareMutation = useMutation({
+    mutationFn: (pageToken?: string) =>
+      trpcClient.outbox.prepareQueue.mutate({
+        lookbackDays: 30,
+        maxResults: 30,
+        ...(pageToken ? { pageToken } : {}),
+      }),
+    onSuccess: async (result) => {
+      setTriageSummary(result);
+      setNextTriagePageToken(result.nextPageToken || null);
+      toast.success(
+        m['queue.prepare.summary']({
+          replyCount: result.replyNeededCount,
+          noReplyCount: result.noReplyNeededCount,
+          scannedCount: result.scannedCount,
+          excludedCount: result.excludedCount,
+        }),
+      );
+      await invalidateOutbox();
+    },
+    onError: () => toast.error(m['queue.prepare.failed']()),
+  });
+
+  const enrollmentMutation = useMutation({
+    mutationFn: () => trpcClient.outbox.createWorkerEnrollment.mutate({ name: 'Mac de Thomas' }),
+    onSuccess: async (result) => {
+      setEnrollmentCode(result.code);
+      toast.success(m['queue.worker.created']());
+      await workerDevicesQuery.refetch();
+    },
+    onError: () => toast.error(m['queue.worker.failed']()),
+  });
+
+  const revokeDeviceMutation = useMutation({
+    mutationFn: (id: string) => trpcClient.outbox.revokeWorkerDevice.mutate({ id }),
+    onSuccess: async () => workerDevicesQuery.refetch(),
+    onError: () => toast.error(m['queue.worker.failed']()),
+  });
+
+  const updateDraftMutation = useMutation({
+    mutationFn: (input: {
+      id: string;
+      expectedContentDigest: string;
+      to: string[];
+      cc: string[];
+      bcc: string[];
+      subject: string;
+      body: string;
+    }) => trpcClient.outbox.updateDraft.mutate(input),
+    onSuccess: async () => {
+      toast.success(m['queue.item.saved']());
+      await invalidateOutbox();
+    },
+    onError: () => toast.error(m['queue.item.saveFailed']()),
+  });
+
+  const revisionMutation = useMutation({
+    mutationFn: (input: { id: string; instruction: string }) =>
+      trpcClient.outbox.requestRevision.mutate(input),
+    onSuccess: async () => {
+      toast.success(m['queue.item.correctionQueued']());
+      await invalidateOutbox();
+    },
+    onError: () => toast.error(m['queue.actions.failed']()),
+  });
+
+  const retryRevisionMutation = useMutation({
+    mutationFn: (id: string) => trpcClient.outbox.retryRevision.mutate({ id }),
+    onSuccess: async () => {
+      toast.success(m['queue.actions.retried']());
+      await invalidateOutbox();
+    },
+    onError: () => toast.error(m['queue.actions.failed']()),
+  });
 
   const grouped = useMemo(() => groupOutboxItemsByStatus(items), [items]);
   const pendingReviewCount = getReviewPendingCount(grouped);
   const labels = statusLabels();
   const descriptions = statusDescriptions();
 
-  const visibleStatuses = statusFilter === 'all' ? OUTBOX_STATUSES : [statusFilter];
+  const visibleStatuses = useMemo(
+    () => (statusFilter === 'all' ? OUTBOX_STATUSES : [statusFilter]),
+    [statusFilter],
+  );
   const visibleItems = useMemo(
     () => visibleStatuses.flatMap((status) => grouped[status]),
     [grouped, visibleStatuses],
@@ -222,13 +344,13 @@ export function QueueReview({ embedded = false }: { embedded?: boolean } = {}) {
       toast.info(m['queue.noSelection']());
       return;
     }
+    if (item.threadId) {
+      navigate(`/mail/inbox?threadId=${encodeURIComponent(item.threadId)}`);
+      return;
+    }
     if (item.gmailDraftId) {
       setDraftId(item.gmailDraftId);
       setComposeOpen('true');
-      return;
-    }
-    if (item.threadId) {
-      navigate(`/mail/inbox?threadId=${encodeURIComponent(item.threadId)}`);
       return;
     }
     toast.info(m['queue.actions.cannotOpen']());
@@ -279,23 +401,31 @@ export function QueueReview({ embedded = false }: { embedded?: boolean } = {}) {
     [],
   );
 
-  const shortcutHandlers = useMemo(
-    () => ({
-      approveSelected: () => {
-        void approveItem(selectedItem);
-      },
-      rejectSelected: () => {
-        void cancelItem(selectedItem);
-      },
-      openSelected: () => openItem(selectedItem),
-    }),
-    [selectedItem, undoDeadlines],
-  );
+  const shortcutHandlers = {
+    approveSelected: () => {
+      void approveItem(selectedItem);
+    },
+    rejectSelected: () => {
+      void cancelItem(selectedItem);
+    },
+    openSelected: () => openItem(selectedItem),
+  };
 
   useShortcuts(queueShortcuts, shortcutHandlers, { scope: 'queue', preventDefault: true });
 
   const isMutating =
-    approveMutation.isPending || cancelMutation.isPending || retryMutation.isPending;
+    approveMutation.isPending ||
+    cancelMutation.isPending ||
+    retryMutation.isPending ||
+    updateDraftMutation.isPending ||
+    revisionMutation.isPending ||
+    retryRevisionMutation.isPending;
+  const workerDevice =
+    workerDevicesQuery.data?.find((device) => device.enrolled && !device.revokedAt) ?? null;
+  const workerLastSeen = workerDevice?.lastSeenAt ? new Date(workerDevice.lastSeenAt) : null;
+  const workerOnline = Boolean(
+    workerLastSeen && now.getTime() - workerLastSeen.getTime() < Math.max(45_000, 3 * 15_000),
+  );
 
   return (
     <section
@@ -331,13 +461,90 @@ export function QueueReview({ embedded = false }: { embedded?: boolean } = {}) {
             </div>
           )}
 
-          <div className="text-muted-foreground flex flex-wrap items-center gap-2 text-xs">
-            <span className="text-foreground font-medium">{m['queue.keyboardTitle']()}</span>
-            <ShortcutHint keys="D/A" label={m['queue.keyboardApprove']()} />
-            <ShortcutHint keys="R" label={m['queue.keyboardReject']()} />
-            <ShortcutHint keys="F/H" label={m['queue.keyboardOpen']()} />
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              type="button"
+              onClick={() => prepareMutation.mutate(undefined)}
+              disabled={prepareMutation.isPending}
+            >
+              <Sparkles className="h-4 w-4" />
+              {prepareMutation.isPending
+                ? m['queue.prepare.loading']()
+                : m['queue.prepare.button']()}
+            </Button>
+            {nextTriagePageToken ? (
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => prepareMutation.mutate(nextTriagePageToken)}
+                disabled={prepareMutation.isPending}
+              >
+                {m['queue.prepare.loadMore']()}
+              </Button>
+            ) : null}
           </div>
         </div>
+
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs dark:border-zinc-800 dark:bg-zinc-900/50">
+          <div className="text-muted-foreground flex min-w-0 flex-wrap items-center gap-2">
+            <span>{m['queue.prepare.mailbox']()}</span>
+            {triageSummary ? (
+              <span className="text-foreground font-medium">
+                {m['queue.prepare.summary']({
+                  replyCount: triageSummary.replyNeededCount,
+                  noReplyCount: triageSummary.noReplyNeededCount,
+                  scannedCount: triageSummary.scannedCount,
+                  excludedCount: triageSummary.excludedCount,
+                })}
+              </span>
+            ) : null}
+            <span>{m['queue.prepare.exclusions']()}</span>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant="outline" className={workerOnline ? statusTone.draft_ready : ''}>
+              <Laptop className="mr-1 h-3.5 w-3.5" />
+              {workerDevice
+                ? workerOnline
+                  ? m['queue.worker.online']()
+                  : m['queue.worker.offline']()
+                : m['queue.worker.never']()}
+            </Badge>
+            {workerLastSeen ? (
+              <span className="text-muted-foreground">
+                {m['queue.worker.lastSeen']({ date: formatDate(workerLastSeen) ?? '—' })}
+              </span>
+            ) : null}
+            {!workerDevice ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => enrollmentMutation.mutate()}
+                disabled={enrollmentMutation.isPending}
+              >
+                {m['queue.worker.configure']()}
+              </Button>
+            ) : (
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                onClick={() => revokeDeviceMutation.mutate(workerDevice.id)}
+                disabled={revokeDeviceMutation.isPending}
+              >
+                {m['queue.worker.revoke']()}
+              </Button>
+            )}
+          </div>
+        </div>
+        {enrollmentCode ? (
+          <div className="mt-2 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100">
+            <p>{m['queue.worker.enrollment']()}</p>
+            <code className="mt-2 block select-all overflow-x-auto rounded bg-white px-2 py-1 font-mono text-xs text-zinc-950 dark:bg-zinc-950 dark:text-zinc-50">
+              {enrollmentCode}
+            </code>
+          </div>
+        ) : null}
 
         <div className="mt-4 flex gap-2 overflow-x-auto pb-1">
           <StatusFilterButton
@@ -408,6 +615,17 @@ export function QueueReview({ embedded = false }: { embedded?: boolean } = {}) {
                       onCancel={() => cancelItem(item)}
                       onOpen={() => openItem(item)}
                       onRetry={() => retryItem(item)}
+                      onSave={(draft) =>
+                        updateDraftMutation.mutateAsync({
+                          id: item.id,
+                          expectedContentDigest: item.contentDigest,
+                          ...draft,
+                        })
+                      }
+                      onRequestRevision={(instruction) =>
+                        revisionMutation.mutateAsync({ id: item.id, instruction })
+                      }
+                      onRetryRevision={() => retryRevisionMutation.mutateAsync(item.id)}
                       onSelect={() => setSelectedItemId(item.id)}
                       statusLabel={labels[undoDeadlines[item.id] ? 'approved' : item.status]}
                     />
@@ -450,15 +668,6 @@ function StatusFilterButton({
   );
 }
 
-function ShortcutHint({ keys, label }: { keys: string; label: string }) {
-  return (
-    <span className="inline-flex items-center gap-1 rounded-md border border-zinc-200 bg-white px-2 py-1 dark:border-zinc-800 dark:bg-zinc-950">
-      <kbd className="font-mono text-[11px] font-semibold">{keys}</kbd>
-      <span>{label}</span>
-    </span>
-  );
-}
-
 function StateMessage({
   title,
   description,
@@ -492,6 +701,9 @@ function QueueItemRow({
   onCancel,
   onOpen,
   onRetry,
+  onSave,
+  onRequestRevision,
+  onRetryRevision,
   onSelect,
   statusLabel,
 }: {
@@ -505,9 +717,54 @@ function QueueItemRow({
   onCancel: () => void;
   onOpen: () => void;
   onRetry: () => void;
+  onSave: (draft: {
+    to: string[];
+    cc: string[];
+    bcc: string[];
+    subject: string;
+    body: string;
+  }) => Promise<unknown>;
+  onRequestRevision: (instruction: string) => Promise<unknown>;
+  onRetryRevision: () => Promise<unknown>;
   onSelect: () => void;
   statusLabel: string;
 }) {
+  const [to, setTo] = useState(item.to.join(', '));
+  const [cc, setCc] = useState(item.cc.join(', '));
+  const [bcc, setBcc] = useState(item.bcc.join(', '));
+  const [subject, setSubject] = useState(item.subject);
+  const [body, setBody] = useState(item.body);
+  const [instruction, setInstruction] = useState('');
+
+  useEffect(() => {
+    setTo(item.to.join(', '));
+    setCc(item.cc.join(', '));
+    setBcc(item.bcc.join(', '));
+    setSubject(item.subject);
+    setBody(item.body);
+  }, [item.bcc, item.body, item.cc, item.contentRevision, item.subject, item.to]);
+
+  const parseAddresses = (value: string) =>
+    value
+      .split(',')
+      .map((address) => address.trim())
+      .filter(Boolean);
+  const canEdit = item.status === 'draft_ready' && item.reviewState !== 'revising';
+  const correctionPending =
+    item.reviewState === 'revision_requested' || item.reviewState === 'revising';
+  const save = () =>
+    onSave({
+      to: parseAddresses(to),
+      cc: parseAddresses(cc),
+      bcc: parseAddresses(bcc),
+      subject,
+      body,
+    });
+  const requestRevision = async () => {
+    if (!instruction.trim()) return;
+    await onRequestRevision(instruction.trim());
+    setInstruction('');
+  };
   const countdownItem = {
     ...item,
     status: displayStatus,
@@ -518,7 +775,7 @@ function QueueItemRow({
   const createdAt = formatDate(item.createdAt);
   const updatedAt = formatDate(item.updatedAt);
   const scheduledAt = formatDate(undoDeadline ?? item.scheduledSendAt);
-  const canApprove = APPROVABLE_STATUSES.has(item.status);
+  const canApprove = APPROVABLE_STATUSES.has(item.status) && item.reviewState === 'ready';
   const canCancel = CANCELABLE_STATUSES.has(item.status) || undoSeconds > 0;
   const canOpen = !!item.gmailDraftId || !!item.threadId;
 
@@ -558,16 +815,74 @@ function QueueItemRow({
             ) : null}
           </div>
 
-          <div className="min-w-0">
-            <h2 className="truncate text-base font-semibold text-zinc-950 dark:text-zinc-50">
-              {item.subject || m['queue.item.untitled']()}
-            </h2>
-            {preview ? (
-              <p className="mt-1 line-clamp-2 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
-                {preview}
+          {item.status === 'draft_ready' ? (
+            <div className="grid gap-3 rounded-md border border-zinc-200 bg-zinc-50/70 p-3 dark:border-zinc-800 dark:bg-zinc-900/40">
+              <div className="grid gap-3 lg:grid-cols-3">
+                <QueueField label={m['queue.item.to']()}>
+                  <Input
+                    value={to}
+                    onChange={(event) => setTo(event.target.value)}
+                    disabled={!canEdit}
+                  />
+                </QueueField>
+                <QueueField label={m['queue.item.cc']()}>
+                  <Input
+                    value={cc}
+                    onChange={(event) => setCc(event.target.value)}
+                    disabled={!canEdit}
+                  />
+                </QueueField>
+                <QueueField label={m['queue.item.bcc']()}>
+                  <Input
+                    value={bcc}
+                    onChange={(event) => setBcc(event.target.value)}
+                    disabled={!canEdit}
+                  />
+                </QueueField>
+              </div>
+              <QueueField label={m['queue.item.subject']()}>
+                <Input
+                  value={subject}
+                  onChange={(event) => setSubject(event.target.value)}
+                  disabled={!canEdit}
+                />
+              </QueueField>
+              <QueueField label={m['queue.item.message']()}>
+                <QueueBodyEditor
+                  key={item.contentRevision}
+                  initialValue={body}
+                  onChange={setBody}
+                  disabled={!canEdit}
+                />
+              </QueueField>
+              <div className="flex justify-end">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={save}
+                  disabled={!canEdit || isMutating}
+                >
+                  <Save className="h-4 w-4" />
+                  {m['queue.actions.save']()}
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <div className="min-w-0">
+              <h2 className="truncate text-base font-semibold text-zinc-950 dark:text-zinc-50">
+                {item.subject || m['queue.item.untitled']()}
+              </h2>
+              <p className="text-muted-foreground mt-1 text-xs">
+                {m['queue.item.to']()}: {item.to.join(', ') || '—'}
               </p>
-            ) : null}
-          </div>
+              {preview ? (
+                <p className="mt-1 line-clamp-2 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
+                  {preview}
+                </p>
+              ) : null}
+            </div>
+          )}
 
           <dl className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-zinc-500 dark:text-zinc-400">
             {item.threadId ? (
@@ -590,6 +905,53 @@ function QueueItemRow({
             <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-300">
               <span className="font-medium">{m['queue.item.error']()}:</span> {item.error}
             </p>
+          ) : null}
+
+          {item.sourceAttachments.length ? (
+            <div className="text-muted-foreground flex flex-wrap items-center gap-2 text-xs">
+              <Paperclip className="h-3.5 w-3.5" />
+              <span className="font-medium">{m['queue.item.attachments']()}:</span>
+              {item.sourceAttachments.map((attachment, index) => (
+                <span
+                  key={`${attachment.filename}-${index}`}
+                  className="rounded border px-1.5 py-0.5"
+                >
+                  {attachment.filename}
+                </span>
+              ))}
+            </div>
+          ) : null}
+
+          {item.status === 'draft_ready' ? (
+            <div className="grid gap-2 rounded-md border border-violet-200 bg-violet-50/60 p-3 dark:border-violet-500/20 dark:bg-violet-500/10">
+              <Label htmlFor={`instruction-${item.id}`}>{m['queue.item.instruction']()}</Label>
+              <Textarea
+                id={`instruction-${item.id}`}
+                value={instruction}
+                onChange={(event) => setInstruction(event.target.value)}
+                placeholder={m['queue.item.instructionPlaceholder']()}
+                disabled={correctionPending || isMutating}
+              />
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="text-muted-foreground text-xs">
+                  {correctionPending
+                    ? m['queue.item.revisionRequested']()
+                    : item.reviewState === 'stale'
+                      ? m['queue.item.revisionStale']()
+                      : ''}
+                </span>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  onClick={requestRevision}
+                  disabled={!instruction.trim() || correctionPending || isMutating}
+                >
+                  <Sparkles className="h-4 w-4" />
+                  {m['queue.actions.correct']()}
+                </Button>
+              </div>
+            </div>
           ) : null}
         </div>
 
@@ -630,6 +992,18 @@ function QueueItemRow({
               {m['queue.actions.retry']()}
             </Button>
           ) : null}
+          {item.reviewState === 'failed' && item.status !== 'failed' ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={onRetryRevision}
+              disabled={isMutating}
+            >
+              <RotateCcw className="h-4 w-4" />
+              {m['queue.actions.retry']()}
+            </Button>
+          ) : null}
           {undoSeconds > 0 ? (
             <Button
               type="button"
@@ -653,6 +1027,48 @@ function MetaItem({ label, value }: { label: string; value: string }) {
     <div className="flex min-w-0 items-center gap-1">
       <dt className="shrink-0 font-medium text-zinc-600 dark:text-zinc-300">{label}:</dt>
       <dd className="max-w-[18rem] truncate">{value}</dd>
+    </div>
+  );
+}
+
+function QueueField({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="grid gap-1.5">
+      <Label>{label}</Label>
+      {children}
+    </div>
+  );
+}
+
+function QueueBodyEditor({
+  initialValue,
+  onChange,
+  disabled,
+}: {
+  initialValue: string;
+  onChange: (value: string) => void;
+  disabled: boolean;
+}) {
+  const editor = useEditor({
+    extensions: defaultExtensions,
+    content: initialValue || '<p></p>',
+    editable: !disabled,
+    immediatelyRender: false,
+    onUpdate: ({ editor: currentEditor }) => onChange(currentEditor.getHTML()),
+    editorProps: {
+      attributes: {
+        class: 'prose prose-sm dark:prose-invert min-h-40 max-w-none px-3 py-2 focus:outline-none',
+      },
+    },
+  });
+
+  useEffect(() => {
+    editor?.setEditable(!disabled);
+  }, [disabled, editor]);
+
+  return (
+    <div className="rounded-md border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950">
+      <EditorContent editor={editor} />
     </div>
   );
 }

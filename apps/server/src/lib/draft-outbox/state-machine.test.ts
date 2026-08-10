@@ -1,4 +1,3 @@
-import { describe, expect, it } from 'vitest';
 import {
   approveDraftOutboxItem,
   beginSendingDraftOutboxItem,
@@ -7,6 +6,7 @@ import {
   retryDraftOutboxItem,
   type DraftOutboxItem,
 } from './state-machine';
+import { describe, expect, it } from 'vitest';
 
 const baseItem = (overrides: Partial<DraftOutboxItem> = {}): DraftOutboxItem => ({
   id: 'outbox_1',
@@ -15,8 +15,18 @@ const baseItem = (overrides: Partial<DraftOutboxItem> = {}): DraftOutboxItem => 
   mission: null,
   status: 'draft_ready',
   gmailDraftId: 'gmail_draft_1',
+  to: ['client@example.com'],
+  cc: [],
+  bcc: [],
   subject: 'Subject',
   body: 'Body',
+  sourceAttachments: [],
+  classification: 'reply_needed',
+  classificationReason: null,
+  generationMode: 'server',
+  reviewState: 'ready',
+  contentRevision: 1,
+  contentDigest: 'digest-1',
   idempotencyKey: 'idem_1',
   scheduledSendAt: null,
   error: null,
@@ -30,6 +40,12 @@ describe('draft-outbox state machine guards', () => {
     const approved = baseItem({ status: 'approved', scheduledSendAt: new Date() });
 
     expect(() => approveDraftOutboxItem(approved)).toThrow(/draft_ready/);
+  });
+
+  it('rejects approval while Codex still owns a correction', () => {
+    expect(() => approveDraftOutboxItem(baseItem({ reviewState: 'revising' }))).toThrow(
+      /reviewState ready/,
+    );
   });
 
   it('allows cancellation during the countdown from approved', () => {
@@ -64,4 +80,3 @@ describe('draft-outbox state machine guards', () => {
     expect(() => beginSendingDraftOutboxItem(sent)).toThrow(/terminal/);
   });
 });
-

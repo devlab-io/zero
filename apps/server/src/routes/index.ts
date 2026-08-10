@@ -13,6 +13,7 @@ import { integrationsLinearRouter } from './integrations-linear';
 import { handleGetSessionFast } from '../lib/auth-fast-path';
 import { oAuthDiscoveryMetadata } from 'better-auth/plugins';
 import { getZeroDB, verifyToken } from '../lib/server-utils';
+import { retaMailWorkerRouter } from './reta-mail-worker';
 import { ThinkingMCP } from '../lib/sequential-thinking';
 import { contextStorage } from 'hono/context-storage';
 import { teamRealtimeRouter } from './team-realtime';
@@ -338,6 +339,9 @@ export const app = new Hono<HonoContext>()
     },
     { replaceRequest: false },
   )
+  // Worker local RETA : authentification par appareil révocable, surface
+  // volontairement limitée au claim/complete/fail. Aucune route d'envoi.
+  .route('/api/reta-mail-worker', retaMailWorkerRouter)
   .route('/api', api)
   // P18 — webhooks Linear entrants : montés HORS du middleware de session
   // (authentification par HMAC sur octets bruts, pas par cookie), AVANT tout

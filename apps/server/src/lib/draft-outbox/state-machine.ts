@@ -6,6 +6,7 @@ export const draftOutboxStatuses = [
   'sending',
   'sent',
   'cancelled',
+  'no_reply_needed',
   'failed',
 ] as const;
 
@@ -14,12 +15,23 @@ export type DraftOutboxStatus = (typeof draftOutboxStatuses)[number];
 export interface DraftOutboxItem {
   id: string;
   connectionId: string;
+  triageRunId?: string | null;
   threadId?: string | null;
   mission?: string | null;
   status: DraftOutboxStatus;
   gmailDraftId?: string | null;
+  to: string[];
+  cc: string[];
+  bcc: string[];
   subject: string;
   body: string;
+  sourceAttachments: Array<{ filename: string; mimeType: string; size: number }>;
+  classification: 'reply_needed' | 'no_reply_needed';
+  classificationReason?: string | null;
+  generationMode: 'server' | 'codex';
+  reviewState: 'pending' | 'revision_requested' | 'revising' | 'ready' | 'stale' | 'failed';
+  contentRevision: number;
+  contentDigest: string;
   idempotencyKey: string;
   scheduledSendAt?: Date | null;
   error?: string | null;
@@ -49,7 +61,7 @@ const failFromStatuses = new Set<DraftOutboxStatus>([
   'sending',
 ]);
 
-const terminalStatuses = new Set<DraftOutboxStatus>(['sent', 'cancelled']);
+const terminalStatuses = new Set<DraftOutboxStatus>(['sent', 'cancelled', 'no_reply_needed']);
 
 const withUpdate = (
   item: DraftOutboxItem,
@@ -67,11 +79,7 @@ const rejectTerminal = (item: DraftOutboxItem) => {
   }
 };
 
-const requireStatus = (
-  item: DraftOutboxItem,
-  expected: DraftOutboxStatus,
-  action: string,
-) => {
+const requireStatus = (item: DraftOutboxItem, expected: DraftOutboxStatus, action: string) => {
   if (item.status !== expected) {
     throw new DraftOutboxTransitionError(
       `${action} requires status ${expected}; received ${item.status}`,
@@ -104,6 +112,7 @@ export const markDraftOutboxItemReady = (
       gmailDraftId: draft.gmailDraftId,
       subject: draft.subject ?? item.subject,
       body: draft.body ?? item.body,
+      reviewState: 'ready',
       scheduledSendAt: null,
       error: null,
     },
@@ -119,6 +128,9 @@ export const approveDraftOutboxItem = (
   requireStatus(item, 'draft_ready', 'approveDraftOutboxItem');
   if (!item.gmailDraftId) {
     throw new DraftOutboxTransitionError('approveDraftOutboxItem requires gmailDraftId');
+  }
+  if (item.reviewState !== 'ready') {
+    throw new DraftOutboxTransitionError('approveDraftOutboxItem requires reviewState ready');
   }
 
   return withUpdate(
@@ -201,4 +213,3 @@ export const failDraftOutboxItem = (
 
   return withUpdate(item, { status: 'failed', scheduledSendAt: null, error }, now);
 };
-

@@ -6,6 +6,7 @@ export const OUTBOX_STATUSES = [
   'sending',
   'sent',
   'cancelled',
+  'no_reply_needed',
   'failed',
 ] as const;
 
@@ -31,13 +32,10 @@ export const APPROVABLE_STATUSES = new Set<OutboxStatus>(['draft_ready']);
 export const groupOutboxItemsByStatus = <T extends OutboxItemLike>(
   items: readonly T[],
 ): OutboxItemsByStatus<T> => {
-  const grouped = OUTBOX_STATUSES.reduce(
-    (acc, status) => {
-      acc[status] = [];
-      return acc;
-    },
-    {} as OutboxItemsByStatus<T>,
-  );
+  const grouped = OUTBOX_STATUSES.reduce((acc, status) => {
+    acc[status] = [];
+    return acc;
+  }, {} as OutboxItemsByStatus<T>);
 
   for (const item of items) {
     grouped[item.status].push(item);
@@ -46,14 +44,10 @@ export const groupOutboxItemsByStatus = <T extends OutboxItemLike>(
   return grouped;
 };
 
-export const getReviewPendingCount = <T extends OutboxItemLike>(
-  grouped: OutboxItemsByStatus<T>,
-) => grouped.draft_ready.length;
+export const getReviewPendingCount = <T extends OutboxItemLike>(grouped: OutboxItemsByStatus<T>) =>
+  grouped.draft_ready.length;
 
-export const getUndoSecondsRemaining = (
-  item: OutboxItemLike,
-  now: Date = new Date(),
-): number => {
+export const getUndoSecondsRemaining = (item: OutboxItemLike, now: Date = new Date()): number => {
   if (item.status !== 'approved' || !item.scheduledSendAt) return 0;
 
   const scheduledSendAt =

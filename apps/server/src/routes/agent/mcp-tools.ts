@@ -317,7 +317,29 @@ export type PreviewableDraft = {
   bcc?: string[];
   subject?: string;
   content?: string;
+  attachments?: Array<{
+    filename: string;
+    mimeType: string;
+    size: number;
+    body: string;
+  }>;
 };
+
+export function draftContentDigest(draft: PreviewableDraft): string {
+  const value = JSON.stringify({
+    to: draft.to ?? [],
+    cc: draft.cc ?? [],
+    bcc: draft.bcc ?? [],
+    subject: draft.subject ?? '',
+    body: draft.content ?? '',
+  });
+  let hash = 0xcbf29ce484222325n;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= BigInt(value.charCodeAt(index));
+    hash = BigInt.asUintN(64, hash * 0x100000001b3n);
+  }
+  return `draft-${hash.toString(36)}`;
+}
 
 /** Uniform not-found: missing and other-user drafts are indistinguishable. */
 export const DRAFT_NOT_FOUND_MESSAGE = 'Draft not found';
@@ -331,6 +353,7 @@ export function formatDraftPreview(draft: PreviewableDraft | null): string {
     bcc: draft.bcc ?? [],
     subject: draft.subject ?? '',
     bodyText: stripMailHtml(draft.content ?? '').slice(0, MAX_PREVIEW_BODY_CHARS),
+    contentDigest: draftContentDigest(draft),
     unsent: true,
   });
 }
@@ -344,6 +367,13 @@ export interface UpdateDraftDeps {
     bcc?: string;
     subject: string;
     message: string;
+    attachments?: Array<{
+      name: string;
+      type: string;
+      size: number;
+      lastModified: number;
+      base64: string;
+    }>;
     id: string;
     threadId: string | null;
   }) => Promise<{ id?: string | null }>;
@@ -357,6 +387,7 @@ export type UpdateDraftInput = {
   subject?: string;
   message?: string;
   threadId?: string;
+  expectedContentDigest?: string;
 };
 
 const joinRecipients = (recipients: DraftRecipient[]) =>
@@ -374,12 +405,22 @@ export async function handleUpdateDraft(
 ): Promise<string> {
   const existing = await deps.getDraft(input.draftId).catch(() => null);
   if (!existing) return DRAFT_NOT_FOUND_MESSAGE;
+  if (input.expectedContentDigest && input.expectedContentDigest !== draftContentDigest(existing)) {
+    return `Draft ${input.draftId} changed since preview — update NOT applied`;
+  }
   await deps.saveDraft({
     to: input.to ? joinRecipients(input.to) : (existing.to ?? []).join(', '),
     cc: input.cc ? joinRecipients(input.cc) : (existing.cc ?? []).join(', ') || undefined,
     bcc: input.bcc ? joinRecipients(input.bcc) : (existing.bcc ?? []).join(', ') || undefined,
     subject: input.subject ?? existing.subject ?? '',
     message: input.message ?? existing.content ?? '',
+    attachments: existing.attachments?.map((attachment) => ({
+      name: attachment.filename,
+      type: attachment.mimeType,
+      size: attachment.size,
+      lastModified: 0,
+      base64: attachment.body,
+    })),
     id: input.draftId,
     threadId: input.threadId ?? null,
   });
@@ -657,6 +698,7 @@ export function buildDraftPreviewObject(draft: PreviewableDraft) {
     bcc: draft.bcc ?? [],
     subject: draft.subject ?? '',
     bodyText: stripMailHtml(draft.content ?? '').slice(0, MAX_PREVIEW_BODY_CHARS),
+    contentDigest: draftContentDigest(draft),
     unsent: true as const,
   };
 }
@@ -796,6 +838,10 @@ export const mcpToolSchemas = {
     bcc: z.array(draftRecipientSchema).optional(),
     subject: z.string().optional().describe('Replacement subject (omitted = keep current)'),
     message: z.string().optional().describe('Replacement body (omitted = keep current)'),
+    expectedContentDigest: z
+      .string()
+      .optional()
+      .describe('Digest returned by previewDraft; mismatch rejects the update without overwriting'),
     threadId: z
       .string()
       .optional()
@@ -891,7 +937,8 @@ export const mcpToolDescriptions: Record<McpToolName, string> = {
     'Update an EXISTING Gmail draft in place (recipients, subject, body). The result is still an ' +
     'UNSENT draft in the user Gmail Drafts folder — this NEVER sends the email; sending remains ' +
     'a human action in Zero. Omitted fields keep their current value. Idempotent: repeating the ' +
-    'same update leaves the same stored draft. Pass threadId to keep a reply attached to its thread.',
+    'same update leaves the same stored draft. Pass expectedContentDigest from previewDraft to ' +
+    'reject stale edits instead of overwriting a newer human change. Pass threadId to keep a reply attached to its thread.',
   sendConfirmedDraft:
     'THE ONLY send-capable tool. Sends an EXISTING Gmail draft — but ONLY after an explicit ' +
     'in-tool human confirmation: the tool raises an MCP elicitation showing the exact ' +

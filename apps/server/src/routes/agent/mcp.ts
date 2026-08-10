@@ -542,7 +542,7 @@ export class ZeroMCP extends McpAgent<typeof env, Record<string, unknown>, { use
                 bcc: data.bcc,
                 subject: data.subject,
                 message: data.message,
-                attachments: [],
+                attachments: data.attachments,
                 id: data.id,
                 threadId: data.threadId,
                 fromEmail: null,
@@ -556,6 +556,7 @@ export class ZeroMCP extends McpAgent<typeof env, Record<string, unknown>, { use
             subject: s.subject,
             message: s.message,
             threadId: s.threadId,
+            expectedContentDigest: s.expectedContentDigest,
           },
         );
         return text(message);

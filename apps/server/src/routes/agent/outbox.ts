@@ -27,12 +27,12 @@ import {
   type DraftOutboxItem,
 } from '../../lib/draft-outbox';
 import { generateAutomaticDraft } from '../../thread-workflow-utils';
-import { invariant } from '../../lib/invariant';
 import type { ParsedDraft } from '../../lib/driver/types';
-import type { ZeroDriverInternal } from './internal';
-import { reSyncThread } from '../../lib/server-utils';
 import type { CreateDraftData } from '../../lib/schemas';
+import { reSyncThread } from '../../lib/server-utils';
+import type { ZeroDriverInternal } from './internal';
 import type { IOutgoingMessage } from '../../types';
+import { invariant } from '../../lib/invariant';
 import { createDb } from '../../db';
 
 export const DRAFT_OUTBOX_CONNECTION_ID_KEY = 'draftOutboxConnectionId';
@@ -127,6 +127,9 @@ async function generateDraftOutboxItem(
 
     await markDraftOutboxJobReady(db, current, {
       gmailDraftId: createdDraft.id,
+      to: splitRecipients(draftData.to),
+      cc: splitRecipients(draftData.cc),
+      bcc: splitRecipients(draftData.bcc),
       subject: draftData.subject,
       body: draftData.message,
     });
@@ -190,12 +193,14 @@ async function createDraftDataForOutboxItem(
 
   const thread = await self.getThread(item.threadId);
   const latestMessage = thread.latest ?? thread.messages[thread.messages.length - 1];
-  const replyTo = latestMessage?.sender?.email ?? '';
+  const replyTo = item.to.length ? item.to.join(', ') : (latestMessage?.sender?.email ?? '');
   const cc =
-    latestMessage?.cc
-      ?.map((recipient) => recipient.email)
-      .filter((email) => email && email !== self.connection?.email)
-      .join(', ') ?? '';
+    item.cc.length > 0
+      ? item.cc.join(', ')
+      : (latestMessage?.cc
+          ?.map((recipient) => recipient.email)
+          .filter((email) => email && email !== self.connection?.email)
+          .join(', ') ?? '');
   const originalSubject = latestMessage?.subject || item.subject;
   const replySubject = originalSubject.startsWith('Re: ')
     ? originalSubject
@@ -209,7 +214,7 @@ async function createDraftDataForOutboxItem(
   return {
     to: replyTo,
     cc,
-    bcc: '',
+    bcc: item.bcc.join(', '),
     subject: item.subject === 'Draft' ? replySubject : item.subject,
     message: generatedBody,
     attachments: [],
@@ -217,6 +222,13 @@ async function createDraftDataForOutboxItem(
     threadId: item.threadId,
     fromEmail: self.connection.email,
   };
+}
+
+function splitRecipients(value?: string) {
+  return (value ?? '')
+    .split(',')
+    .map((recipient) => recipient.trim())
+    .filter(Boolean);
 }
 
 function toRecipients(emails?: string[]): IOutgoingMessage['to'] {

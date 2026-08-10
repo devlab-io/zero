@@ -297,6 +297,7 @@
               "sending",
               "sent",
               "cancelled",
+              "no_reply_needed",
               "failed"
             ],
             "description": "Filter to one outbox status"
@@ -422,7 +423,7 @@
       "category": "write",
       "mutates": true,
       "idempotent": true,
-      "description": "Update an EXISTING Gmail draft in place (recipients, subject, body). The result is still an UNSENT draft in the user Gmail Drafts folder — this NEVER sends the email; sending remains a human action in Zero. Omitted fields keep their current value. Idempotent: repeating the same update leaves the same stored draft. Pass threadId to keep a reply attached to its thread.",
+      "description": "Update an EXISTING Gmail draft in place (recipients, subject, body). The result is still an UNSENT draft in the user Gmail Drafts folder — this NEVER sends the email; sending remains a human action in Zero. Omitted fields keep their current value. Idempotent: repeating the same update leaves the same stored draft. Pass expectedContentDigest from previewDraft to reject stale edits instead of overwriting a newer human change. Pass threadId to keep a reply attached to its thread.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -461,6 +462,10 @@
           "draftId": {
             "type": "string",
             "description": "Existing Gmail draft id to update in place"
+          },
+          "expectedContentDigest": {
+            "type": "string",
+            "description": "Digest returned by previewDraft; mismatch rejects the update without overwriting"
           },
           "message": {
             "type": "string",

@@ -34,11 +34,13 @@ describe('queue view model', () => {
       makeItem({ id: 'ready-1', status: 'draft_ready' }),
       makeItem({ id: 'queued-1', status: 'queued' }),
       makeItem({ id: 'ready-2', status: 'draft_ready' }),
+      makeItem({ id: 'newsletter-1', status: 'no_reply_needed' }),
     ]);
 
     expect(Object.keys(grouped)).toEqual([...OUTBOX_STATUSES]);
     expect(grouped.queued.map((item) => item.id)).toEqual(['queued-1']);
     expect(grouped.draft_ready.map((item) => item.id)).toEqual(['ready-1', 'ready-2']);
+    expect(grouped.no_reply_needed.map((item) => item.id)).toEqual(['newsletter-1']);
     expect(getReviewPendingCount(grouped)).toBe(2);
   });
 

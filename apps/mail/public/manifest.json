@@ -3,7 +3,7 @@
   "short_name": "Reta",
   "description": "A fast, focused email client built in Tahiti by Devlab.",
   "scope": "/",
-  "start_url": "/mail/inbox",
+  "start_url": "/queue",
   "display": "standalone",
   "background_color": "#140151",
   "theme_color": "#6f00ff",

@@ -38,6 +38,7 @@ import {
   SEND_NOT_CONFIRMED_MESSAGE,
   SEND_NO_RECIPIENT_MESSAGE,
   DRAFT_NOT_FOUND_MESSAGE,
+  draftContentDigest,
   formatDraftPreview,
   handleUpdateDraft,
   stripMailHtml,
@@ -57,6 +58,7 @@ import {
   mcpToolSchemas,
   resolveIdempotentDraft,
   type DraftIdempotencyStore,
+  type UpdateDraftDeps,
 } from './mcp-tools';
 import type { DraftOutboxItem, DraftOutboxStatus } from '../../lib/draft-outbox/state-machine';
 import { writeFileSync, readFileSync } from 'node:fs';
@@ -82,8 +84,18 @@ const seedItem = (status: DraftOutboxStatus): DraftOutboxItem => ({
   mission: 'Répondre à la relance facture',
   status,
   gmailDraftId: status === 'draft_ready' || status === 'approved' ? 'gdraft-1' : null,
+  to: ['client@example.com'],
+  cc: [],
+  bcc: [],
   subject: 'Re: Facture 2026-07',
   body: 'Ia ora na, ...',
+  sourceAttachments: [],
+  classification: 'reply_needed',
+  classificationReason: null,
+  generationMode: 'server',
+  reviewState: status === 'draft_ready' ? 'ready' : 'pending',
+  contentRevision: 1,
+  contentDigest: 'digest-1',
   idempotencyKey: 'idem-1',
   scheduledSendAt: null,
   error: status === 'failed' ? 'Gmail rate limited' : null,
@@ -544,6 +556,60 @@ describe('P9 — previewDraft / updateDraft / getThreadCitations (handlers purs)
     expect(saved[0]).toEqual(saved[1]);
   });
 
+  it('handleUpdateDraft conserve les pièces jointes du brouillon existant', async () => {
+    const saved: { value?: Parameters<UpdateDraftDeps['saveDraft']>[0] } = {};
+    await handleUpdateDraft(
+      {
+        getDraft: async () => ({
+          id: 'dr-1',
+          to: ['a@b.pf'],
+          subject: 'S',
+          content: 'C',
+          attachments: [
+            {
+              filename: 'devis.pdf',
+              mimeType: 'application/pdf',
+              size: 1200,
+              body: 'cGRm',
+            },
+          ],
+        }),
+        saveDraft: async (data) => {
+          saved.value = data;
+          return { id: 'dr-1' };
+        },
+      },
+      { draftId: 'dr-1', message: 'Nouvelle version' },
+    );
+    expect(saved.value?.attachments).toEqual([
+      {
+        name: 'devis.pdf',
+        type: 'application/pdf',
+        size: 1200,
+        lastModified: 0,
+        base64: 'cGRm',
+      },
+    ]);
+  });
+
+  it('handleUpdateDraft refuse une empreinte obsolète sans aucune écriture', async () => {
+    const existing = { id: 'dr-1', to: ['a@b.pf'], subject: 'S', content: 'Version humaine' };
+    let writes = 0;
+    const message = await handleUpdateDraft(
+      {
+        getDraft: async () => existing,
+        saveDraft: async () => {
+          writes += 1;
+          return { id: 'dr-1' };
+        },
+      },
+      { draftId: 'dr-1', message: 'Version agent', expectedContentDigest: 'ancienne-version' },
+    );
+    expect(message).toMatch(/update NOT applied/);
+    expect(writes).toBe(0);
+    expect(draftContentDigest(existing)).not.toBe('ancienne-version');
+  });
+
   it('buildThreadCitations : plus récentes d’abord, quote VERBATIM détaggée bornée, ids exacts', () => {
     const messages = [
       {
@@ -812,6 +878,12 @@ describe('P9 — structuredContent + ressources embarquées (SDK 1.29)', () => {
       bcc: [],
       subject: 'S',
       bodyText: 'corps',
+      contentDigest: draftContentDigest({
+        id: 'dr-1',
+        to: ['a@b.pf'],
+        subject: 'S',
+        content: '<p>corps</p>',
+      }),
       unsent: true,
     });
   });
