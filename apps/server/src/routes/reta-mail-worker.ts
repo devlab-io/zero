@@ -183,7 +183,12 @@ export const retaMailWorkerRouter = new Hono<HonoContext>()
       let currentDigest = item.contentDigest;
       if (job.kind === 'revise') {
         if (!item.gmailDraftId) return c.json({ error: 'Draft missing' }, 409);
-        providerDraft = (await agent.getDraft(item.gmailDraftId)) as ProviderDraft;
+        try {
+          providerDraft = (await agent.getDraft(item.gmailDraftId)) as ProviderDraft;
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          throw new Error(`RETA provider draft read failed: ${message}`);
+        }
         currentDigest = await createDraftContentDigest({
           to: providerDraft.to ?? [],
           cc: providerDraft.cc ?? [],
@@ -206,17 +211,23 @@ export const retaMailWorkerRouter = new Hono<HonoContext>()
       const cc = normalizeMailAddresses(item.cc);
       const bcc = normalizeMailAddresses(item.bcc);
 
-      const saved = await agent.createDraft({
-        to: to.join(', '),
-        cc: cc.join(', '),
-        bcc: bcc.join(', '),
-        subject: parsed.data.subject,
-        message: parsed.data.body,
-        attachments: serializedAttachments(providerDraft),
-        id: item.gmailDraftId ?? null,
-        threadId: item.threadId ?? null,
-        fromEmail: null,
-      });
+      let saved;
+      try {
+        saved = await agent.createDraft({
+          to: to.join(', '),
+          cc: cc.join(', '),
+          bcc: bcc.join(', '),
+          subject: parsed.data.subject,
+          message: parsed.data.body,
+          attachments: serializedAttachments(providerDraft),
+          id: item.gmailDraftId ?? null,
+          threadId: item.threadId ?? null,
+          fromEmail: null,
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        throw new Error(`RETA provider draft write failed: ${message}`);
+      }
       if (!saved?.id) {
         await failDraftRevisionJob(db, {
           jobId: job.id,
