@@ -6,8 +6,8 @@ const source = readFileSync(join(__dirname, 'queue-review.tsx'), 'utf8');
 
 describe('queue draft editor synchronization', () => {
   it('does not replace unsaved edits on every polling response', () => {
-    expect(source).toContain('const syncedServerRevision = useRef<string | null>(null)');
-    expect(source).toContain('if (syncedServerRevision.current === revisionKey) return');
+    expect(source).toContain('key={`${item.id}:${item.contentRevision}`}');
+    expect(source).not.toContain('key={item.id}\n                      item={item}');
   });
 
   it('loads a new server revision into TipTap without emitting another edit', () => {

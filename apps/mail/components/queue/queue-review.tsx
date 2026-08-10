@@ -20,8 +20,8 @@ import {
   XCircle,
 } from 'lucide-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { SendJobsSection } from '@/components/queue/send-jobs-section';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useTRPC, useTRPCClient } from '@/providers/query-provider';
 import { defaultExtensions } from '@/components/create/extensions';
 import { useShortcuts } from '@/lib/hotkeys/use-hotkey-utils';
@@ -604,7 +604,7 @@ export function QueueReview({ embedded = false }: { embedded?: boolean } = {}) {
                 <div className="grid gap-2">
                   {statusItems.map((item) => (
                     <QueueItemRow
-                      key={item.id}
+                      key={`${item.id}:${item.contentRevision}`}
                       item={item}
                       displayStatus={undoDeadlines[item.id] ? 'approved' : item.status}
                       isSelected={item.id === selectedItemId}
@@ -735,18 +735,6 @@ function QueueItemRow({
   const [subject, setSubject] = useState(item.subject);
   const [body, setBody] = useState(item.body);
   const [instruction, setInstruction] = useState('');
-  const syncedServerRevision = useRef<string | null>(null);
-
-  useEffect(() => {
-    const revisionKey = `${item.id}:${item.contentRevision}`;
-    if (syncedServerRevision.current === revisionKey) return;
-    setTo(item.to.join(', '));
-    setCc(item.cc.join(', '));
-    setBcc(item.bcc.join(', '));
-    setSubject(item.subject);
-    setBody(item.body);
-    syncedServerRevision.current = revisionKey;
-  }, [item.bcc, item.body, item.cc, item.contentRevision, item.id, item.subject, item.to]);
 
   const parseAddresses = (value: string) =>
     value
