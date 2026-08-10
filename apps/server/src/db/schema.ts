@@ -1207,7 +1207,8 @@ export const teamMemberAbsence = createTable(
 // Outbox d'envoi autoritatif : chaque mail.send devient une ligne send_job avant
 // tout contact Gmail. La contrainte unique (connection_id, client_submission_key)
 // est la barrière d'idempotence des doubles clics/retries client ; `payload` est
-// nullifié une fois `sent` (rétention minimale), conservé sur `failed` pour retry.
+// réduit au seul `draftId` une fois `sent` (rétention minimale), conservé en
+// entier sur `failed` pour retry.
 export const sendJob = createTable(
   'send_job',
   {

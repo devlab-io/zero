@@ -127,11 +127,26 @@ export const claimSendJob = async (
   return claimed ?? null;
 };
 
-/** Succès fournisseur : sending → sent ; payload nullifié (rétention minimale). */
+/**
+ * Succès fournisseur : sending → sent. Le contenu, les destinataires et les PJ
+ * sont effacés ; seul l'id du brouillon source est conservé lorsqu'il existe.
+ * Cette référence minimale empêche l'interface de reproposer un brouillon que
+ * Gmail n'a pas encore retiré de sa liste après l'envoi.
+ */
 export const markSendJobSent = async (db: DB, id: string): Promise<SendJobRow | null> => {
   const [updated] = await db
     .update(sendJob)
-    .set({ status: 'sent', payload: null, error: null, updatedAt: new Date() })
+    .set({
+      status: 'sent',
+      payload: sql`case
+        when jsonb_typeof(${sendJob.payload}) = 'object'
+          and ${sendJob.payload} ? 'draftId'
+        then jsonb_build_object('draftId', ${sendJob.payload} ->> 'draftId')
+        else null
+      end`,
+      error: null,
+      updatedAt: new Date(),
+    })
     .where(and(eq(sendJob.id, id), eq(sendJob.status, 'sending')))
     .returning();
   return updated ?? null;

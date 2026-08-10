@@ -55,7 +55,19 @@ const ops = {
   markSendJobSent: vi.fn(async (_db: unknown, id: string) => {
     const job = jobs.get(id);
     if (!job || job.status !== 'sending') return null;
-    const updated = { ...job, status: 'sent' as const, payload: null, updatedAt: new Date() };
+    const draftId =
+      job.payload &&
+      typeof job.payload === 'object' &&
+      'draftId' in job.payload &&
+      typeof job.payload.draftId === 'string'
+        ? job.payload.draftId
+        : null;
+    const updated = {
+      ...job,
+      status: 'sent' as const,
+      payload: draftId ? { draftId } : null,
+      updatedAt: new Date(),
+    };
     jobs.set(id, updated);
     return updated;
   }),
@@ -113,7 +125,7 @@ beforeEach(() => {
 });
 
 describe('send-outbox consumer — chemin send_job', () => {
-  it('claim → envoi → sent (payload nullifié) + resync du fil + ack', async () => {
+  it('claim → envoi → sent (payload sans données mail) + resync du fil + ack', async () => {
     jobs.set('j1', makeJob({ id: 'j1', threadId: 'th-1' }));
     const message = msg({ messageId: 'j1', jobId: 'j1', connectionId: 'conn-1' });
 
@@ -141,6 +153,7 @@ describe('send-outbox consumer — chemin send_job', () => {
     expect(stub.sendDraft).toHaveBeenCalledWith('dr-1', expect.any(Object));
     expect(stub.create).not.toHaveBeenCalled();
     expect(jobs.get('j2')?.status).toBe('sent');
+    expect(jobs.get('j2')?.payload).toEqual({ draftId: 'dr-1' });
   });
 
   it('payload draftId + sendAsStored → sendStoredDraft SEUL (brouillon envoyé tel que stocké)', async () => {
@@ -161,6 +174,7 @@ describe('send-outbox consumer — chemin send_job', () => {
     expect(stub.sendDraft).not.toHaveBeenCalled();
     expect(stub.create).not.toHaveBeenCalled();
     expect(jobs.get('j2b')?.status).toBe('sent');
+    expect(jobs.get('j2b')?.payload).toEqual({ draftId: 'dr-2' });
   });
 
   it('sendAsStored SANS draftId : ignoré — création normale', async () => {
