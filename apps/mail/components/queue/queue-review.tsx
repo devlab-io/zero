@@ -15,6 +15,7 @@ import {
   FileText,
   Laptop,
   LoaderCircle,
+  Mail,
   Paperclip,
   RefreshCcw,
   RotateCcw,
@@ -30,10 +31,14 @@ import {
   parseEditableAddressList,
   type EditableQueueDraft,
 } from '@/components/queue/queue-editor-model';
+import {
+  mailboxSearchRow,
+  matchesQueueSearch,
+  type MailboxSearchRow,
+} from '@/components/queue/queue-search-model';
 import { draftListRow, type DraftListRow } from '@/components/drafts/draft-workspace-model';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { matchesQueueSearch } from '@/components/queue/queue-search-model';
 import { SendJobsSection } from '@/components/queue/send-jobs-section';
 import { useTRPC, useTRPCClient } from '@/providers/query-provider';
 import { defaultExtensions } from '@/components/create/extensions';
@@ -182,6 +187,16 @@ export function QueueReview({ embedded = false }: { embedded?: boolean } = {}) {
     }),
     enabled: savedDraftSearch.length >= 2,
   });
+  const mailboxSearchQuery = useQuery({
+    ...trpc.mail.listThreads.queryOptions({
+      q: savedDraftSearch,
+      folder: '',
+      cursor: '',
+      maxResults: 25,
+      localPreview: true,
+    }),
+    enabled: savedDraftSearch.length >= 2,
+  });
 
   const prepareMutation = useMutation({
     mutationFn: (pageToken?: string) =>
@@ -301,9 +316,19 @@ export function QueueReview({ embedded = false }: { embedded?: boolean } = {}) {
       .map(draftListRow)
       .filter((row) => !agentDraftIds.has(row.id));
   }, [items, savedDraftSearch, savedDraftSearchQuery.data]);
+  const mailboxSearchResults = useMemo(() => {
+    if (savedDraftSearch.length < 2) return [];
+    const queuedThreadIds = new Set(
+      items.flatMap((item) => (item.threadId ? [item.threadId] : [])),
+    );
+    return (mailboxSearchQuery.data?.threads ?? [])
+      .map(mailboxSearchRow)
+      .filter((row) => !queuedThreadIds.has(row.id));
+  }, [items, mailboxSearchQuery.data, savedDraftSearch]);
   const selectedItem = visibleItems.find((item) => item.id === selectedItemId) ?? null;
   const hasSearch = searchQuery.trim().length > 0;
-  const resultCount = visibleItems.length + savedDraftSearchResults.length;
+  const resultCount =
+    visibleItems.length + savedDraftSearchResults.length + mailboxSearchResults.length;
 
   useEffect(() => {
     if (!visibleItems.length) {
@@ -678,7 +703,10 @@ export function QueueReview({ embedded = false }: { embedded?: boolean } = {}) {
               }
             />
           </div>
-        ) : visibleItems.length === 0 && savedDraftSearchResults.length === 0 && !hasSearch ? (
+        ) : visibleItems.length === 0 &&
+          savedDraftSearchResults.length === 0 &&
+          mailboxSearchResults.length === 0 &&
+          !hasSearch ? (
           <div className="p-5">
             <StateMessage
               title={m['queue.emptyTitle']()}
@@ -694,7 +722,7 @@ export function QueueReview({ embedded = false }: { embedded?: boolean } = {}) {
                     ? m['queue.search.results']({ count: resultCount })
                     : m['queue.search.queueCount']({ count: visibleItems.length })}
                 </p>
-                {savedDraftSearchQuery.isFetching ? (
+                {savedDraftSearchQuery.isFetching || mailboxSearchQuery.isFetching ? (
                   <LoaderCircle className="text-muted-foreground h-4 w-4 animate-spin" />
                 ) : null}
               </div>
@@ -720,9 +748,29 @@ export function QueueReview({ embedded = false }: { embedded?: boolean } = {}) {
                   </div>
                 ) : null}
 
+                {hasSearch && mailboxSearchResults.length > 0 ? (
+                  <div className="mb-3">
+                    <p className="text-muted-foreground px-2 pb-1.5 text-[11px] font-semibold uppercase tracking-[0.12em]">
+                      {m['queue.search.mailboxThreads']()}
+                    </p>
+                    <div className="space-y-1">
+                      {mailboxSearchResults.map((thread) => (
+                        <MailboxSearchResultRow
+                          key={thread.id}
+                          thread={thread}
+                          onOpen={() =>
+                            navigate(`/mail/inbox?threadId=${encodeURIComponent(thread.id)}`)
+                          }
+                        />
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+
                 {visibleItems.length > 0 ? (
                   <div>
-                    {hasSearch && savedDraftSearchResults.length > 0 ? (
+                    {hasSearch &&
+                    (savedDraftSearchResults.length > 0 || mailboxSearchResults.length > 0) ? (
                       <p className="text-muted-foreground px-2 pb-1.5 text-[11px] font-semibold uppercase tracking-[0.12em]">
                         {m['queue.search.agentDrafts']()}
                       </p>
@@ -745,7 +793,9 @@ export function QueueReview({ embedded = false }: { embedded?: boolean } = {}) {
                   </div>
                 ) : null}
 
-                {visibleItems.length === 0 && savedDraftSearchResults.length === 0 ? (
+                {visibleItems.length === 0 &&
+                savedDraftSearchResults.length === 0 &&
+                mailboxSearchResults.length === 0 ? (
                   <div className="flex min-h-48 flex-col items-center justify-center px-4 text-center">
                     <Search className="text-muted-foreground h-5 w-5" />
                     <p className="mt-3 text-sm font-medium">{m['queue.search.noResults']()}</p>
@@ -910,6 +960,41 @@ function SavedDraftSearchRow({ draft, onOpen }: { draft: DraftListRow; onOpen: (
             {draft.preview}
           </span>
         ) : null}
+      </span>
+    </button>
+  );
+}
+
+function MailboxSearchResultRow({
+  thread,
+  onOpen,
+}: {
+  thread: MailboxSearchRow;
+  onOpen: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      className="hover:border-border hover:bg-muted/55 focus-visible:ring-primary/35 flex w-full gap-2.5 rounded-lg border border-transparent px-3 py-2.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2"
+    >
+      <span className="bg-muted text-muted-foreground mt-0.5 rounded-md p-1.5">
+        <Mail className="h-3.5 w-3.5" />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="flex items-center justify-between gap-2">
+          <span className="truncate text-xs font-semibold">
+            {thread.sender || m['queue.search.noRecipient']()}
+          </span>
+          {thread.receivedAt ? (
+            <span className="text-muted-foreground shrink-0 text-[10px] tabular-nums">
+              {formatDate(thread.receivedAt)}
+            </span>
+          ) : null}
+        </span>
+        <span className="mt-0.5 line-clamp-2 block text-sm leading-5">
+          {thread.subject || m['queue.item.untitled']()}
+        </span>
       </span>
     </button>
   );

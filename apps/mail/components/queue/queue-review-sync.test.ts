@@ -36,11 +36,16 @@ describe('queue draft editor synchronization', () => {
     expect(source).toContain('item={selectedItem}');
   });
 
-  it('searches saved drafts as well as Agent replies without duplicating Agent drafts', () => {
+  it('searches saved drafts and the mailbox as well as Agent replies', () => {
     expect(source).toContain('trpc.drafts.list.queryOptions');
+    expect(source).toContain('trpc.mail.listThreads.queryOptions');
+    expect(source).toContain("folder: ''");
+    expect(source).toContain('localPreview: true');
     expect(source).toContain('savedDraftSearchResults');
+    expect(source).toContain('mailboxSearchResults');
     expect(source).toContain('agentDraftIds.has(row.id)');
     expect(source).toContain('<SavedDraftSearchRow');
+    expect(source).toContain('<MailboxSearchResultRow');
   });
 
   it('flushes a dirty draft when switching the selected result', () => {

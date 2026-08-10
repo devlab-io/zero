@@ -1,3 +1,5 @@
+import type { ThreadListItem } from '@zero/types';
+
 export type QueueSearchableItem = {
   to: string[];
   cc: string[];
@@ -7,6 +9,13 @@ export type QueueSearchableItem = {
   mission?: string | null;
   classificationReason?: string | null;
   sourceAttachments: Array<{ filename: string }>;
+};
+
+export type MailboxSearchRow = {
+  id: string;
+  sender: string;
+  subject: string;
+  receivedAt: string | null;
 };
 
 const normalizeSearchText = (value: string) =>
@@ -35,3 +44,10 @@ export const matchesQueueSearch = (item: QueueSearchableItem, query: string): bo
 
   return haystack.includes(needle);
 };
+
+export const mailboxSearchRow = (item: ThreadListItem): MailboxSearchRow => ({
+  id: item.id,
+  sender: item.sender?.name?.trim() || item.sender?.email?.trim() || '',
+  subject: item.subject?.trim() || '',
+  receivedAt: item.receivedOn ?? null,
+});

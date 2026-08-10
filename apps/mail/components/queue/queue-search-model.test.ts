@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { matchesQueueSearch, type QueueSearchableItem } from './queue-search-model';
+import {
+  mailboxSearchRow,
+  matchesQueueSearch,
+  type QueueSearchableItem,
+} from './queue-search-model';
 
 const item: QueueSearchableItem = {
   to: ['guillaume@brapac.pf'],
@@ -32,5 +36,22 @@ describe('matchesQueueSearch', () => {
 
   it('rejects unrelated queries', () => {
     expect(matchesQueueSearch(item, 'newsletter exotic')).toBe(false);
+  });
+
+  it('builds a compact mailbox result from the thread projection', () => {
+    expect(
+      mailboxSearchRow({
+        id: 'thread-brapac',
+        historyId: null,
+        subject: "Fwd: Modélisation du cycle d'engagement BRAPAC",
+        sender: { name: 'BRAPAC', email: 'contact@brapac.pf' },
+        receivedOn: '2026-07-15T18:00:00.000Z',
+      }),
+    ).toEqual({
+      id: 'thread-brapac',
+      sender: 'BRAPAC',
+      subject: "Fwd: Modélisation du cycle d'engagement BRAPAC",
+      receivedAt: '2026-07-15T18:00:00.000Z',
+    });
   });
 });
