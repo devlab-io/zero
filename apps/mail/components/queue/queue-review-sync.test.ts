@@ -36,6 +36,12 @@ describe('queue draft editor synchronization', () => {
     expect(source).toContain('item={selectedItem}');
   });
 
+  it('shows the source conversation beside the editable reply', () => {
+    expect(source).toContain('<QueueThreadContext');
+    expect(source).toContain('threadId={item.threadId}');
+    expect(source).toContain('xl:grid-cols-[minmax(300px,2fr)_minmax(0,3fr)]');
+  });
+
   it('searches saved drafts and the mailbox as well as Agent replies', () => {
     expect(source).toContain('trpc.drafts.list.queryOptions');
     expect(source).toContain('trpc.mail.listThreads.queryOptions');

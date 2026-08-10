@@ -1033,6 +1033,27 @@
   "queue": {
     "title": "Replies to send",
     "subtitle": "Review and edit each reply. After you click Send, you have 15 seconds to cancel.",
+    "context": {
+      "title": "Email you’re replying to",
+      "messageCount": [
+        {
+          "declarations": ["input count", "local countPlural = count: plural"],
+          "selectors": ["countPlural"],
+          "match": {
+            "countPlural=one": "# message",
+            "countPlural=other": "# messages"
+          }
+        }
+      ],
+      "latestInbound": "Received message",
+      "latestFromYou": "Last message sent",
+      "showHistory": "Show earlier messages ({count})",
+      "hideHistory": "Hide earlier messages",
+      "reason": "Why it’s in the queue",
+      "empty": "No linked conversation",
+      "emptyDescription": "This draft is not attached to a mailbox thread.",
+      "loadFailed": "The conversation could not be loaded."
+    },
     "prepare": {
       "button": "Prepare my queue",
       "loading": "Scanning...",

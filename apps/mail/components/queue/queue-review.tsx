@@ -39,6 +39,7 @@ import {
 import { draftListRow, type DraftListRow } from '@/components/drafts/draft-workspace-model';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { QueueThreadContext } from '@/components/queue/queue-thread-context';
 import { SendJobsSection } from '@/components/queue/send-jobs-section';
 import { useTRPC, useTRPCClient } from '@/providers/query-provider';
 import { defaultExtensions } from '@/components/create/extensions';
@@ -558,7 +559,7 @@ export function QueueReview({ embedded = false }: { embedded?: boolean } = {}) {
           </div>
         </div>
 
-        <div className="mt-3 flex flex-col gap-2 lg:flex-row lg:items-center">
+        <div className="mt-2.5 flex flex-col gap-2 lg:flex-row lg:items-center">
           <div className="relative min-w-0 flex-1">
             <Search className="text-muted-foreground pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2" />
             <Input
@@ -617,7 +618,7 @@ export function QueueReview({ embedded = false }: { embedded?: boolean } = {}) {
             )}
           </div>
         </div>
-        <div className="text-muted-foreground mt-2 flex min-w-0 flex-wrap items-center gap-2 text-xs">
+        <div className="text-muted-foreground mt-1.5 hidden min-w-0 flex-wrap items-center gap-2 text-xs md:flex">
           <span>{m['queue.prepare.mailbox']()}</span>
           <span aria-hidden="true">·</span>
           <span>{m['queue.prepare.exclusionsShort']()}</span>
@@ -644,7 +645,7 @@ export function QueueReview({ embedded = false }: { embedded?: boolean } = {}) {
           </div>
         ) : null}
 
-        <div className="mt-2 flex items-center gap-2 overflow-x-auto pb-1">
+        <div className="mt-1.5 flex items-center gap-2 overflow-x-auto pb-1">
           <StatusFilterButton
             active={statusFilter === 'all'}
             count={items.length}
@@ -683,7 +684,7 @@ export function QueueReview({ embedded = false }: { embedded?: boolean } = {}) {
       </header>
 
       <div className="flex min-h-0 flex-1 flex-col bg-zinc-50/40 dark:bg-zinc-950/30">
-        <div className="shrink-0 px-4 pt-4 sm:px-6">
+        <div className="shrink-0 px-4 pt-3 empty:hidden sm:px-6">
           {/* Envois send_job (queued/sending/failed) — file DISTINCTE du draft
               outbox IA ci-dessous, rendue indépendamment de ses états. */}
           <SendJobsSection />
@@ -817,13 +818,12 @@ export function QueueReview({ embedded = false }: { embedded?: boolean } = {}) {
               </div>
             </aside>
 
-            <main className="min-h-0 overflow-y-auto p-3 sm:p-4 lg:p-5">
+            <main className="flex min-h-0 min-w-0 flex-col overflow-hidden">
               {selectedItem ? (
                 <QueueItemRow
                   key={`${selectedItem.id}:${selectedItem.contentRevision}`}
                   item={selectedItem}
                   displayStatus={undoDeadlines[selectedItem.id] ? 'approved' : selectedItem.status}
-                  isSelected
                   isActionMutating={isActionMutating}
                   isSaving={
                     updateDraftMutation.isPending &&
@@ -846,16 +846,17 @@ export function QueueReview({ embedded = false }: { embedded?: boolean } = {}) {
                     revisionMutation.mutateAsync({ id: selectedItem.id, instruction })
                   }
                   onRetryRevision={() => retryRevisionMutation.mutateAsync(selectedItem.id)}
-                  onSelect={() => setSelectedItemId(selectedItem.id)}
                   statusLabel={
                     labels[undoDeadlines[selectedItem.id] ? 'approved' : selectedItem.status]
                   }
                 />
               ) : (
-                <StateMessage
-                  title={m['queue.search.selectTitle']()}
-                  description={m['queue.search.selectDescription']()}
-                />
+                <div className="p-4">
+                  <StateMessage
+                    title={m['queue.search.selectTitle']()}
+                    description={m['queue.search.selectDescription']()}
+                  />
+                </div>
               )}
             </main>
           </div>
@@ -915,7 +916,7 @@ function QueueItemListRow({
       onClick={onSelect}
       aria-current={selected ? 'true' : undefined}
       className={cn(
-        'focus-visible:ring-primary/35 w-full rounded-lg border px-3 py-2.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2',
+        'focus-visible:ring-primary/35 w-full rounded-lg border px-2.5 py-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-2',
         selected
           ? 'border-primary/30 bg-primary/[0.07]'
           : 'hover:border-border hover:bg-muted/55 border-transparent',
@@ -932,15 +933,13 @@ function QueueItemListRow({
           {formatDate(item.updatedAt)}
         </span>
       </div>
-      <p className="mt-1.5 line-clamp-2 text-sm font-semibold leading-5">
+      <p className="mt-1 truncate text-[13px] font-semibold leading-5">
         {item.subject || m['queue.item.untitled']()}
       </p>
-      <p className="text-muted-foreground mt-1 truncate text-xs">
+      <p className="text-muted-foreground mt-0.5 truncate text-xs leading-4">
         {recipients || m['queue.search.noRecipient']()}
+        {preview ? ` — ${preview}` : ''}
       </p>
-      {preview ? (
-        <p className="text-muted-foreground mt-1 line-clamp-2 text-xs leading-4">{preview}</p>
-      ) : null}
     </button>
   );
 }
@@ -1035,7 +1034,6 @@ function StateMessage({
 function QueueItemRow({
   item,
   displayStatus,
-  isSelected,
   isActionMutating,
   isSaving,
   now,
@@ -1047,12 +1045,10 @@ function QueueItemRow({
   onSave,
   onRequestRevision,
   onRetryRevision,
-  onSelect,
   statusLabel,
 }: {
   item: QueueItem;
   displayStatus: OutboxStatus;
-  isSelected: boolean;
   isActionMutating: boolean;
   isSaving: boolean;
   now: Date;
@@ -1070,7 +1066,6 @@ function QueueItemRow({
   }) => Promise<unknown>;
   onRequestRevision: (instruction: string) => Promise<unknown>;
   onRetryRevision: () => Promise<unknown> | void;
-  onSelect: () => void;
   statusLabel: string;
 }) {
   const [to, setTo] = useState(normalizeEditableAddresses(item.to).join(', '));
@@ -1214,18 +1209,10 @@ function QueueItemRow({
           : m['queue.item.autosaved']();
 
   return (
-    <article
-      className={cn(
-        'overflow-hidden rounded-xl border bg-white shadow-sm transition-colors dark:bg-zinc-950',
-        isSelected
-          ? 'border-zinc-400 ring-1 ring-zinc-300 dark:border-zinc-600 dark:ring-zinc-700'
-          : 'border-zinc-200 hover:border-zinc-300 dark:border-zinc-800 dark:hover:border-zinc-700',
-      )}
-      onFocus={onSelect}
-      onMouseDown={onSelect}
-      tabIndex={0}
-    >
-      <div className="flex flex-col gap-3 border-b border-zinc-200 px-4 py-3 lg:flex-row lg:items-center lg:justify-between dark:border-zinc-800">
+    <article className="flex min-h-0 flex-1 flex-col bg-white dark:bg-zinc-950">
+      {/* Barre d'actions permanente : statut, autosave, envoi/annulation
+          restent visibles quelle que soit la longueur du fil ou du brouillon. */}
+      <div className="flex shrink-0 flex-wrap items-center justify-between gap-x-3 gap-y-1.5 border-b border-zinc-200 px-3 py-2 sm:px-4 dark:border-zinc-800">
         <div className="flex min-w-0 flex-wrap items-center gap-2">
           <Badge variant="outline" className={cn('border', statusTone[displayStatus])}>
             {statusLabel}
@@ -1254,7 +1241,7 @@ function QueueItemRow({
           ) : null}
         </div>
 
-        <div className="flex shrink-0 flex-wrap gap-2 lg:justify-end">
+        <div className="flex shrink-0 flex-wrap items-center gap-2 lg:justify-end">
           {canOpen ? (
             <Button
               type="button"
@@ -1329,101 +1316,136 @@ function QueueItemRow({
         </div>
       </div>
 
-      <div className="space-y-4 p-4">
-        {item.status === 'draft_ready' ? (
-          <div className="grid gap-3">
-            <div className="grid gap-3 lg:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)_minmax(0,1fr)]">
-              <QueueField label={m['queue.item.to']()}>
-                <Input
-                  value={to}
-                  onChange={(event) => setTo(event.target.value)}
-                  disabled={!canEdit || isSaving}
-                />
-              </QueueField>
-              <QueueField label={m['queue.item.cc']()}>
-                <Input
-                  value={cc}
-                  onChange={(event) => setCc(event.target.value)}
-                  disabled={!canEdit || isSaving}
-                />
-              </QueueField>
-              <QueueField label={m['queue.item.bcc']()}>
-                <Input
-                  value={bcc}
-                  onChange={(event) => setBcc(event.target.value)}
-                  disabled={!canEdit || isSaving}
-                />
-              </QueueField>
-            </div>
-            <QueueField label={m['queue.item.subject']()}>
-              <Input
-                className="h-11 text-base font-medium"
-                value={subject}
-                onChange={(event) => setSubject(event.target.value)}
-                disabled={!canEdit || isSaving}
-              />
-            </QueueField>
-            <QueueField label={m['queue.item.message']()}>
-              <QueueBodyEditor
-                key={item.contentRevision}
-                initialValue={body}
-                onChange={setBody}
-                disabled={!canEdit || isSaving}
-              />
-            </QueueField>
-          </div>
-        ) : (
-          <div className="min-w-0 space-y-2">
-            <h2 className="text-lg font-semibold text-zinc-950 dark:text-zinc-50">
-              {item.subject || m['queue.item.untitled']()}
-            </h2>
-            <p className="text-muted-foreground text-sm">
-              {m['queue.item.to']()}: {normalizeEditableAddresses(item.to).join(', ') || '—'}
-            </p>
-            {preview ? (
-              <p className="max-w-4xl text-sm leading-6 text-zinc-600 dark:text-zinc-400">
-                {preview}
-              </p>
-            ) : null}
-          </div>
-        )}
+      {/* Poste de travail : le fil source est LU dans la même vue que la
+          réponse — colonne contexte + colonne édition, chacune avec son
+          propre défilement en xl ; empilées (contexte d'abord) en dessous. */}
+      <div className="grid min-h-0 flex-1 grid-cols-1 overflow-y-auto xl:grid-cols-[minmax(300px,2fr)_minmax(0,3fr)] xl:overflow-hidden">
+        <QueueThreadContext
+          threadId={item.threadId}
+          classificationReason={item.classificationReason}
+          className="border-b border-zinc-200 xl:min-h-0 xl:border-b-0 xl:border-r dark:border-zinc-800"
+        />
 
-        {errorMessage ? (
-          <div
-            className={cn(
-              'flex items-start gap-2 rounded-lg border px-3 py-2 text-sm',
-              runtimeWasUpdated
-                ? 'border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-200'
-                : 'border-red-200 bg-red-50 text-red-800 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-300',
+        <div className="min-w-0 xl:min-h-0 xl:overflow-y-auto">
+          <div className="space-y-3 p-3 sm:p-4">
+            {item.status === 'draft_ready' ? (
+              <div className="grid gap-3">
+                <div className="grid gap-2 sm:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)_minmax(0,1fr)]">
+                  <QueueField label={m['queue.item.to']()}>
+                    <Input
+                      value={to}
+                      onChange={(event) => setTo(event.target.value)}
+                      disabled={!canEdit || isSaving}
+                    />
+                  </QueueField>
+                  <QueueField label={m['queue.item.cc']()}>
+                    <Input
+                      value={cc}
+                      onChange={(event) => setCc(event.target.value)}
+                      disabled={!canEdit || isSaving}
+                    />
+                  </QueueField>
+                  <QueueField label={m['queue.item.bcc']()}>
+                    <Input
+                      value={bcc}
+                      onChange={(event) => setBcc(event.target.value)}
+                      disabled={!canEdit || isSaving}
+                    />
+                  </QueueField>
+                </div>
+                <QueueField label={m['queue.item.subject']()}>
+                  <Input
+                    className="h-10 text-base font-medium"
+                    value={subject}
+                    onChange={(event) => setSubject(event.target.value)}
+                    disabled={!canEdit || isSaving}
+                  />
+                </QueueField>
+                <QueueField label={m['queue.item.message']()}>
+                  <QueueBodyEditor
+                    key={item.contentRevision}
+                    initialValue={body}
+                    onChange={setBody}
+                    disabled={!canEdit || isSaving}
+                  />
+                </QueueField>
+              </div>
+            ) : (
+              <div className="min-w-0 space-y-2">
+                <h2 className="text-lg font-semibold text-zinc-950 dark:text-zinc-50">
+                  {item.subject || m['queue.item.untitled']()}
+                </h2>
+                <p className="text-muted-foreground text-sm">
+                  {m['queue.item.to']()}: {normalizeEditableAddresses(item.to).join(', ') || '—'}
+                </p>
+                {preview ? (
+                  <p className="max-w-4xl text-sm leading-6 text-zinc-600 dark:text-zinc-400">
+                    {preview}
+                  </p>
+                ) : null}
+              </div>
             )}
-          >
-            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-            <p>{errorMessage}</p>
-          </div>
-        ) : null}
 
-        {item.sourceAttachments.length ? (
-          <div className="text-muted-foreground flex flex-wrap items-center gap-2 text-xs">
-            <Paperclip className="h-3.5 w-3.5" />
-            <span className="font-medium">{m['queue.item.attachments']()}:</span>
-            {item.sourceAttachments.map((attachment, index) => (
-              <span
-                key={`${attachment.filename}-${index}`}
-                className="rounded border px-1.5 py-0.5"
+            {errorMessage ? (
+              <div
+                className={cn(
+                  'flex items-start gap-2 rounded-lg border px-3 py-2 text-sm',
+                  runtimeWasUpdated
+                    ? 'border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-200'
+                    : 'border-red-200 bg-red-50 text-red-800 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-300',
+                )}
               >
-                {attachment.filename}
-              </span>
-            ))}
-          </div>
-        ) : null}
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                <p>{errorMessage}</p>
+              </div>
+            ) : null}
 
-        {item.status === 'draft_ready' ? (
-          <div className="grid gap-2 rounded-lg border border-violet-200 bg-violet-50/60 p-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end dark:border-violet-500/20 dark:bg-violet-500/10">
-            <div className="grid gap-1.5">
+            {item.sourceAttachments.length ? (
+              <div className="text-muted-foreground flex flex-wrap items-center gap-2 text-xs">
+                <Paperclip className="h-3.5 w-3.5" />
+                <span className="font-medium">{m['queue.item.attachments']()}:</span>
+                {item.sourceAttachments.map((attachment, index) => (
+                  <span
+                    key={`${attachment.filename}-${index}`}
+                    className="rounded border px-1.5 py-0.5"
+                  >
+                    {attachment.filename}
+                  </span>
+                ))}
+              </div>
+            ) : null}
+
+            <div className="text-muted-foreground flex flex-wrap gap-x-4 gap-y-1 text-xs">
+              {updatedAt ? (
+                <span>
+                  {m['queue.item.updated']()}: {updatedAt}
+                </span>
+              ) : null}
+              {createdAt ? (
+                <span>
+                  {m['queue.item.created']()}: {createdAt}
+                </span>
+              ) : null}
+              {scheduledAt ? (
+                <span>
+                  {m['queue.item.scheduled']()}: {scheduledAt}
+                </span>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Pied fixe : l'instruction Codex reste à portée de main pendant la
+          lecture du fil comme pendant l'édition de la réponse. */}
+      {item.status === 'draft_ready' ? (
+        <div className="shrink-0 border-t border-violet-200 bg-violet-50/60 px-3 py-2.5 sm:px-4 dark:border-violet-500/20 dark:bg-violet-500/10">
+          <div className="flex flex-col gap-2 lg:flex-row lg:items-end">
+            <div className="grid min-w-0 flex-1 gap-1">
               <Label htmlFor={`instruction-${item.id}`}>{m['queue.item.instruction']()}</Label>
               <Textarea
                 id={`instruction-${item.id}`}
-                className="min-h-20 bg-white dark:bg-zinc-950"
+                className="min-h-11 bg-white dark:bg-zinc-950"
                 value={instruction}
                 onChange={(event) => setInstruction(event.target.value)}
                 placeholder={m['queue.item.instructionPlaceholder']()}
@@ -1433,40 +1455,23 @@ function QueueItemRow({
             <Button
               type="button"
               variant="secondary"
+              className="shrink-0"
               onClick={() => void requestRevision()}
               disabled={!instruction.trim() || correctionPending || isActionMutating || isSaving}
             >
               <Sparkles className="h-4 w-4" />
               {m['queue.actions.correct']()}
             </Button>
-            <span className="text-muted-foreground text-xs lg:col-span-2">
+          </div>
+          {correctionPending || item.reviewState === 'stale' ? (
+            <p className="text-muted-foreground mt-1.5 text-xs">
               {correctionPending
                 ? m['queue.item.revisionRequested']()
-                : item.reviewState === 'stale'
-                  ? m['queue.item.revisionStale']()
-                  : ''}
-            </span>
-          </div>
-        ) : null}
-
-        <div className="text-muted-foreground flex flex-wrap gap-x-4 gap-y-1 text-xs">
-          {updatedAt ? (
-            <span>
-              {m['queue.item.updated']()}: {updatedAt}
-            </span>
-          ) : null}
-          {createdAt ? (
-            <span>
-              {m['queue.item.created']()}: {createdAt}
-            </span>
-          ) : null}
-          {scheduledAt ? (
-            <span>
-              {m['queue.item.scheduled']()}: {scheduledAt}
-            </span>
+                : m['queue.item.revisionStale']()}
+            </p>
           ) : null}
         </div>
-      </div>
+      ) : null}
     </article>
   );
 }

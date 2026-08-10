@@ -1033,6 +1033,27 @@
   "queue": {
     "title": "Réponses à envoyer",
     "subtitle": "Relisez et modifiez chaque réponse. Après un clic sur Envoyer, vous avez 15 secondes pour annuler.",
+    "context": {
+      "title": "Mail auquel vous répondez",
+      "messageCount": [
+        {
+          "declarations": ["input count", "local countPlural = count: plural"],
+          "selectors": ["countPlural"],
+          "match": {
+            "countPlural=one": "# message",
+            "countPlural=other": "# messages"
+          }
+        }
+      ],
+      "latestInbound": "Message reçu",
+      "latestFromYou": "Dernier message envoyé",
+      "showHistory": "Afficher l'historique ({count})",
+      "hideHistory": "Masquer l'historique",
+      "reason": "Pourquoi il est dans la file",
+      "empty": "Aucune conversation liée",
+      "emptyDescription": "Ce brouillon n'est rattaché à aucun fil de la boîte.",
+      "loadFailed": "Le fil n'a pas pu être chargé."
+    },
     "prepare": {
       "button": "Préparer ma file",
       "loading": "Analyse en cours...",
