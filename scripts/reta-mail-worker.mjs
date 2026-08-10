@@ -2,9 +2,9 @@
 
 import { mkdtemp, mkdir, readFile, rm, unlink, writeFile } from 'node:fs/promises';
 import { execFile, spawn } from 'node:child_process';
+import { dirname, join } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
 import { promisify } from 'node:util';
-import { join } from 'node:path';
 
 const execFileAsync = promisify(execFile);
 const API_URL = (
@@ -24,6 +24,19 @@ const SESSION_DIR = join(STATE_DIR, 'sessions');
 const OUTPUT_SCHEMA =
   process.env.RETA_WORKER_OUTPUT_SCHEMA ||
   join(homedir(), '.local', 'share', 'reta-mail-worker', 'output.schema.json');
+const CODEX_RUNTIME_PATH = Array.from(
+  new Set(
+    [
+      dirname(process.execPath),
+      dirname(CODEX_PATH),
+      ...(process.env.PATH || '').split(':'),
+      '/opt/homebrew/bin',
+      '/usr/local/bin',
+      '/usr/bin',
+      '/bin',
+    ].filter(Boolean),
+  ),
+).join(':');
 
 const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 const log = (message, fields = {}) =>
@@ -124,10 +137,19 @@ async function runCodex(job, allowFreshRetry = true) {
     const args = activeSessionId
       ? ['exec', 'resume', ...common, activeSessionId, '-']
       : ['exec', '--sandbox', 'read-only', '--skip-git-repo-check', '-C', WORK_DIR, ...common, '-'];
-    const child = spawn(CODEX_PATH, args, { stdio: ['pipe', 'pipe', 'pipe'] });
-    child.stdin.end(promptFor(job));
     let stdout = '';
     let stderr = '';
+    const child = spawn(CODEX_PATH, args, {
+      stdio: ['pipe', 'pipe', 'pipe'],
+      env: { ...process.env, PATH: CODEX_RUNTIME_PATH },
+    });
+    // A launcher can exit before consuming stdin (bad runtime, invalid flags,
+    // etc.). EPIPE must be reported through the normal exit-code path instead
+    // of crashing the long-lived launchd process.
+    child.stdin.on('error', (error) => {
+      if (error.code !== 'EPIPE') stderr += `\nstdin: ${error.message}`;
+    });
+    child.stdin.end(promptFor(job));
     child.stdout.on('data', (chunk) => {
       stdout += chunk.toString();
     });
