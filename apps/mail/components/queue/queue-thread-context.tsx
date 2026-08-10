@@ -80,7 +80,7 @@ export function QueueThreadContext({
           <MessagesSquare className="text-muted-foreground h-4 w-4 shrink-0" />
           <h3 className="truncate text-sm font-medium">{m['queue.context.title']()}</h3>
         </div>
-        {messageCount > 0 ? (
+        {messageCount > 1 ? (
           <span className="text-muted-foreground shrink-0 text-xs tabular-nums">
             {m['queue.context.messageCount']({ count: messageCount })}
           </span>

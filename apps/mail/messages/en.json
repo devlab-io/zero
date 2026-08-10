@@ -1035,16 +1035,7 @@
     "subtitle": "Review and edit each reply. After you click Send, you have 15 seconds to cancel.",
     "context": {
       "title": "Email you’re replying to",
-      "messageCount": [
-        {
-          "declarations": ["input count", "local countPlural = count: plural"],
-          "selectors": ["countPlural"],
-          "match": {
-            "countPlural=one": "# message",
-            "countPlural=other": "# messages"
-          }
-        }
-      ],
+      "messageCount": "{count} messages",
       "latestInbound": "Received message",
       "latestFromYou": "Last message sent",
       "showHistory": "Show earlier messages ({count})",

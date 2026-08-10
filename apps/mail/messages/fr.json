@@ -1035,16 +1035,7 @@
     "subtitle": "Relisez et modifiez chaque réponse. Après un clic sur Envoyer, vous avez 15 secondes pour annuler.",
     "context": {
       "title": "Mail auquel vous répondez",
-      "messageCount": [
-        {
-          "declarations": ["input count", "local countPlural = count: plural"],
-          "selectors": ["countPlural"],
-          "match": {
-            "countPlural=one": "# message",
-            "countPlural=other": "# messages"
-          }
-        }
-      ],
+      "messageCount": "{count} messages",
       "latestInbound": "Message reçu",
       "latestFromYou": "Dernier message envoyé",
       "showHistory": "Afficher l'historique ({count})",
