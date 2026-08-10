@@ -8,6 +8,32 @@ export type DraftListRow = {
   receivedAt: number | null;
 };
 
+export type DraftSendJob = {
+  id: string;
+  connectionId: string;
+  status: 'queued' | 'sending' | 'sent' | 'cancelled' | 'failed';
+  draftId: string | null;
+  error: string | null;
+  subject: string | null;
+  to: string[];
+  sendAt: number | null;
+  createdAt: number;
+};
+
+const HIDDEN_DRAFT_SEND_STATUSES = new Set<DraftSendJob['status']>(['queued', 'sending', 'sent']);
+
+export const draftIdsHiddenBySendJobs = (jobs: readonly DraftSendJob[]): Set<string> =>
+  new Set(
+    jobs.flatMap((job) =>
+      job.draftId && HIDDEN_DRAFT_SEND_STATUSES.has(job.status) ? [job.draftId] : [],
+    ),
+  );
+
+export const upsertOptimisticDraftSendJob = (
+  jobs: readonly DraftSendJob[] | undefined,
+  job: DraftSendJob,
+): DraftSendJob[] => [job, ...(jobs ?? []).filter((current) => current.id !== job.id)];
+
 type DraftRaw = {
   subject?: unknown;
   receivedOn?: unknown;

@@ -1969,11 +1969,14 @@ export declare const appRouter: import("@trpc/server").TRPCBuiltRouter<{
         }>;
         listSendJobs: import("@trpc/server").TRPCQueryProcedure<{
             input: {
+                limit?: number | undefined;
                 statuses?: ("failed" | "sending" | "sent" | "queued" | "cancelled")[] | undefined;
             } | undefined;
             output: {
                 id: string;
+                connectionId: string;
                 status: "failed" | "sending" | "sent" | "queued" | "cancelled";
+                draftId: string | null;
                 error: string | null;
                 subject: string | null;
                 to: string[];

@@ -936,7 +936,10 @@ export const mailRouter = router({
   listSendJobs: activeDriverProcedure
     .input(
       z
-        .object({ statuses: z.array(z.enum(sendJobStatuses)).optional() })
+        .object({
+          statuses: z.array(z.enum(sendJobStatuses)).optional(),
+          limit: z.number().int().min(1).max(100).optional().default(50),
+        })
         .optional()
         .default({}),
     )
@@ -945,13 +948,19 @@ export const mailRouter = router({
         const jobs = await listSendJobsForUser(db, {
           userId: ctx.sessionUser.id,
           statuses: input.statuses,
-          limit: 20,
+          limit: input.limit,
         });
         return jobs.map((job) => {
-          const payload = job.payload as { subject?: string; to?: { email: string }[] } | null;
+          const payload = job.payload as {
+            draftId?: string;
+            subject?: string;
+            to?: { email: string }[];
+          } | null;
           return {
             id: job.id,
+            connectionId: job.connectionId,
             status: job.status,
+            draftId: payload?.draftId ?? null,
             error: job.error,
             subject: payload?.subject ?? null,
             to: payload?.to?.map((recipient) => recipient.email) ?? [],

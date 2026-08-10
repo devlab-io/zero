@@ -1,6 +1,7 @@
 import {
   buildConfirmedDirectSend,
   canDirectSend,
+  draftIdsHiddenBySendJobs,
   draftListRow,
   matchesDraftSearch,
   moveDraftSelection,
@@ -8,7 +9,9 @@ import {
   selectDraftRange,
   stripDraftHtml,
   toggleDraftSelection,
+  upsertOptimisticDraftSendJob,
   type DraftListRow,
+  type DraftSendJob,
 } from './draft-workspace-model';
 import {
   Bot,
@@ -30,30 +33,33 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { DraftBulkActionBar, DraftDeleteDialog } from './draft-bulk-actions';
 import { preloadComposeSurface } from '@/components/create/compose-surface';
 import { useOptimisticActions } from '@/hooks/use-optimistic-actions';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { optimisticActionsAtom } from '@/store/optimistic-updates';
 import { useHotkeys, useHotkeysContext } from 'react-hotkeys-hook';
 import { useMailboxOverview } from '@/hooks/use-mailbox-overview';
 import { useAutoLoadDraftPage } from './use-auto-load-draft-page';
 import { QueueReview } from '@/components/queue/queue-review';
+import { useActiveConnection } from '@/hooks/use-connections';
+import { useSendStatusWatch } from '@/hooks/use-send-status';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { interpretSendOutcome } from '@/lib/send-outcome';
 import { useTRPC } from '@/providers/query-provider';
-import { useEffect, useMemo, useState } from 'react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Checkbox } from '@/components/ui/checkbox';
 import { useSettings } from '@/hooks/use-settings';
 import { useThreads } from '@/hooks/use-threads';
+import { isSendResult } from '@/lib/email-utils';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { useDraft } from '@/hooks/use-drafts';
+import { cn, FOLDERS } from '@/lib/utils';
 import { m } from '@/paraglide/messages';
 import { useAtomValue } from 'jotai';
 import { useQueryState } from 'nuqs';
-import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 
 type DraftView = 'drafts' | 'agent';
@@ -72,10 +78,30 @@ const recipientLabel = (values?: string[]) =>
   values?.filter(Boolean).join(', ') || m['draftWorkspace.noRecipient']();
 
 export function DraftWorkspace() {
+  const trpc = useTRPC();
+  const queryClient = useQueryClient();
+  const { watchSendStatus } = useSendStatusWatch();
   const [viewParam, setViewParam] = useQueryState('view');
   const view: DraftView = viewParam === 'agent' ? 'agent' : 'drafts';
   const [threadsQuery, items, , loadMore] = useThreads();
+  const { data: activeConnection } = useActiveConnection();
   const mailboxOverview = useMailboxOverview();
+  const draftSendJobsQuery = useQuery(
+    trpc.mail.listSendJobs.queryOptions(
+      { limit: 100 },
+      {
+        refetchInterval: (query) =>
+          ((query.state.data ?? []) as DraftSendJob[]).some(
+            (job) =>
+              job.connectionId === activeConnection?.id &&
+              (job.status === 'queued' || job.status === 'sending'),
+          )
+            ? 2_000
+            : false,
+        refetchOnWindowFocus: true,
+      },
+    ),
+  );
   const optimisticActions = useAtomValue(optimisticActionsAtom);
   const optimisticallyDeletedIds = useMemo(
     () =>
@@ -86,11 +112,33 @@ export function DraftWorkspace() {
       ),
     [optimisticActions],
   );
-  const rows = useMemo(
-    () => items.map(draftListRow).filter((row) => !optimisticallyDeletedIds.has(row.id)),
-    [items, optimisticallyDeletedIds],
+  const providerRows = useMemo(() => items.map(draftListRow), [items]);
+  const activeDraftSendJobs = useMemo(
+    () =>
+      ((draftSendJobsQuery.data ?? []) as DraftSendJob[]).filter(
+        (job) => job.connectionId === activeConnection?.id,
+      ),
+    [activeConnection?.id, draftSendJobsQuery.data],
   );
-  const draftCount = mailboxOverview.data?.folders.drafts ?? rows.length;
+  const hiddenBySendJobs = useMemo(
+    () => draftIdsHiddenBySendJobs(activeDraftSendJobs),
+    [activeDraftSendJobs],
+  );
+  const rows = useMemo(
+    () =>
+      providerRows.filter(
+        (row) => !optimisticallyDeletedIds.has(row.id) && !hiddenBySendJobs.has(row.id),
+      ),
+    [hiddenBySendJobs, optimisticallyDeletedIds, providerRows],
+  );
+  const hiddenLoadedDraftCount = providerRows.filter((row) => hiddenBySendJobs.has(row.id)).length;
+  const providerDraftCount = mailboxOverview.data?.folders.drafts ?? providerRows.length;
+  const draftCount = Math.max(
+    0,
+    providerDraftCount > providerRows.length
+      ? providerDraftCount - hiddenLoadedDraftCount
+      : Math.min(providerDraftCount, rows.length),
+  );
   const [search, setSearch] = useState('');
   const filteredRows = useMemo(
     () => rows.filter((row) => matchesDraftSearch(row, search)),
@@ -104,6 +152,24 @@ export function DraftWorkspace() {
   const [, setDraftId] = useQueryState('draftId');
   const { optimisticDeleteDrafts } = useOptimisticActions();
   const { enableScope, disableScope } = useHotkeysContext();
+  const reconciledTerminalJobIds = useRef(new Set<string>());
+
+  useEffect(() => {
+    const terminalDraftJobs = activeDraftSendJobs.filter(
+      (job) =>
+        Boolean(job.draftId) &&
+        (job.status === 'sent' || job.status === 'failed' || job.status === 'cancelled'),
+    );
+    const unseenJobs = terminalDraftJobs.filter(
+      (job) => !reconciledTerminalJobIds.current.has(job.id),
+    );
+    if (!unseenJobs.length) return;
+    unseenJobs.forEach((job) => reconciledTerminalJobIds.current.add(job.id));
+    void queryClient.invalidateQueries({
+      queryKey: trpc.mail.listThreads.infiniteQueryKey({ folder: FOLDERS.DRAFT }),
+    });
+    void queryClient.invalidateQueries({ queryKey: trpc.mail.mailboxOverview.queryKey() });
+  }, [activeDraftSendJobs, queryClient, trpc]);
 
   const selectedRow = filteredRows.find((row) => row.id === selectedId) ?? null;
   const selectedDraftRows = rows.filter((row) => selectedDraftIds.has(row.id));
@@ -228,8 +294,6 @@ export function DraftWorkspace() {
   // --- Envoi direct (Mod+Enter) : brouillon COMPLET chargé, confirmation
   // explicite, clé d'idempotence stable par brouillon, envoi TEL QUE STOCKÉ
   // côté serveur (PJ/destinataires/threading/signature préservés).
-  const trpc = useTRPC();
-  const queryClient = useQueryClient();
   const { mutateAsync: sendEmail, isPending: isSendingDraft } = useMutation(
     trpc.mail.send.mutationOptions(),
   );
@@ -266,8 +330,26 @@ export function DraftWorkspace() {
       }
       setSendCandidate(null);
       toast.success(m['draftWorkspace.sendQueued']());
-      void queryClient.invalidateQueries({ queryKey: trpc.mail.listThreads.queryKey() });
-      void queryClient.invalidateQueries({ queryKey: trpc.drafts.get.queryKey({ id: draftId }) });
+      if (isSendResult(result)) {
+        queryClient.setQueryData(
+          trpc.mail.listSendJobs.queryKey({ limit: 100 }),
+          (current: DraftSendJob[] | undefined) =>
+            upsertOptimisticDraftSendJob(current, {
+              id: result.messageId,
+              connectionId: activeConnection?.id ?? '',
+              status: 'queued',
+              draftId,
+              error: null,
+              subject: submission.subject || null,
+              to: submission.to.map((recipient) => recipient.email),
+              sendAt: result.sendAt ?? null,
+              createdAt: Date.now(),
+            }),
+        );
+        watchSendStatus(result.messageId, result.sendAt);
+      }
+      void queryClient.invalidateQueries({ queryKey: trpc.mail.listSendJobs.queryKey() });
+      queryClient.removeQueries({ queryKey: trpc.drafts.get.queryKey({ id: draftId }) });
     } catch (error) {
       // La clé est déterministe par draft : retry, double frappe et reload
       // convergent vers le même send_job côté serveur.
@@ -446,7 +528,9 @@ export function DraftWorkspace() {
             />
 
             <div className="min-h-0 flex-1 overflow-y-auto p-2" role="list">
-              {threadsQuery.isLoading || (rows.length === 0 && threadsQuery.isFetchingNextPage) ? (
+              {threadsQuery.isLoading ||
+              draftSendJobsQuery.isLoading ||
+              (rows.length === 0 && threadsQuery.isFetchingNextPage) ? (
                 <DraftListSkeleton />
               ) : filteredRows.length ? (
                 <div className="space-y-1">

@@ -10,10 +10,14 @@ import { markStage } from '@/lib/perf-stages';
 import { m } from '@/paraglide/messages';
 import { log } from '@/lib/log';
 
+import {
+  upsertOptimisticDraftSendJob,
+  type DraftSendJob,
+} from '@/components/drafts/draft-workspace-model';
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useSendStatusWatch } from '@/hooks/use-send-status';
 import { useTRPC } from '@/providers/query-provider';
-import { useMutation } from '@tanstack/react-query';
 import { useSettings } from '@/hooks/use-settings';
 import { useSession } from '@/lib/auth-client';
 import { serializeFiles } from '@/lib/schemas';
@@ -74,6 +78,7 @@ export function CreateEmail({
 
   const [, setIsDraftFailed] = useState(false);
   const trpc = useTRPC();
+  const queryClient = useQueryClient();
   const { mutateAsync: sendEmail } = useMutation(trpc.mail.send.mutationOptions());
   const [isComposeOpen, setIsComposeOpen] = useQueryState('isComposeOpen');
   const [, setThreadId] = useQueryState('threadId');
@@ -151,6 +156,25 @@ export function CreateEmail({
     // Suivi asynchrone : un échec Gmail après l'enqueue devient un toast
     // actionnable (Retry) au lieu d'un faux succès silencieux.
     if (isSendResult(result)) {
+      const sentDraftId = draftId ?? propDraftId ?? null;
+      if (sentDraftId) {
+        queryClient.setQueryData(
+          trpc.mail.listSendJobs.queryKey({ limit: 100 }),
+          (current: DraftSendJob[] | undefined) =>
+            upsertOptimisticDraftSendJob(current, {
+              id: result.messageId,
+              connectionId: activeConnection?.id ?? '',
+              status: 'queued',
+              draftId: sentDraftId,
+              error: null,
+              subject: data.subject || null,
+              to: data.to,
+              sendAt: result.sendAt ?? null,
+              createdAt: Date.now(),
+            }),
+        );
+        void queryClient.invalidateQueries({ queryKey: trpc.mail.listSendJobs.queryKey() });
+      }
       watchSendStatus(result.messageId, result.sendAt);
     }
 

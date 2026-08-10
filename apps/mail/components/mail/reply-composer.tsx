@@ -1,8 +1,13 @@
+import {
+  upsertOptimisticDraftSendJob,
+  type DraftSendJob,
+} from '@/components/drafts/draft-workspace-model';
 import { useSharesForThread, useTeamMembers, useTeamRealtime } from '@/hooks/use-teams';
 import { deriveReplyRecipients, deriveReplySubject } from './reply-recipients';
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { ComposerOwnerGate } from '@/components/create/composer-owner-gate';
 import { constructReplyBody, constructForwardBody } from '@/lib/utils';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useReplyStatePurge } from '@/hooks/use-reply-state-purge';
 import { resolveReplyTeamContext } from '@/lib/reply-team-context';
 import { useActiveConnection } from '@/hooks/use-connections';
@@ -13,7 +18,6 @@ import { markDraftAbandoned } from '@/lib/abandoned-drafts';
 import { interpretSendOutcome } from '@/lib/send-outcome';
 import { useHotkeysContext } from 'react-hotkeys-hook';
 import { useTRPC } from '@/providers/query-provider';
-import { useMutation } from '@tanstack/react-query';
 import { useUndoSend } from '@/hooks/use-undo-send';
 import { loadGitHubEmojis } from '@/lib/emoji-data';
 import { useSettings } from '@/hooks/use-settings';
@@ -61,6 +65,7 @@ export default function ReplyCompose({
   const { data: emailData, refetch, latestDraft } = useThread(threadId);
   const { data: draft } = useDraft(draftId ?? null);
   const trpc = useTRPC();
+  const queryClient = useQueryClient();
   const { mutateAsync: sendEmail } = useMutation(trpc.mail.send.mutationOptions());
   const { mutateAsync: deleteDraft } = useMutation(trpc.drafts.delete.mutationOptions());
   const { data: activeConnection } = useActiveConnection();
@@ -358,6 +363,24 @@ export default function ReplyCompose({
       // Suivi asynchrone : un échec Gmail après l'enqueue devient un toast
       // actionnable (Retry) au lieu d'un faux succès silencieux.
       if (isSendResult(result)) {
+        if (draftId) {
+          queryClient.setQueryData(
+            trpc.mail.listSendJobs.queryKey({ limit: 100 }),
+            (current: DraftSendJob[] | undefined) =>
+              upsertOptimisticDraftSendJob(current, {
+                id: result.messageId,
+                connectionId: activeConnection.id,
+                status: 'queued',
+                draftId,
+                error: null,
+                subject: data.subject || null,
+                to: data.to,
+                sendAt: result.sendAt ?? null,
+                createdAt: Date.now(),
+              }),
+          );
+          void queryClient.invalidateQueries({ queryKey: trpc.mail.listSendJobs.queryKey() });
+        }
         watchSendStatus(result.messageId, result.sendAt);
       }
       posthog.capture('Reply Email Sent');

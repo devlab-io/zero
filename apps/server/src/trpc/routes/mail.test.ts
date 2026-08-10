@@ -681,6 +681,44 @@ describe('mail router — send (enqueue durable, jamais Gmail dans la requête)'
   });
 });
 
+describe('mail router — suivi des envois de brouillons', () => {
+  it('expose le draftId et accepte une fenêtre assez large pour la file RETA', async () => {
+    sendOutbox.listSendJobsForUser.mockResolvedValueOnce([
+      {
+        id: 'job-brapac',
+        connectionId: 'conn-1',
+        status: 'queued',
+        payload: {
+          draftId: 'draft-brapac',
+          subject: 'BRAPAC — point d’avancement',
+          to: [{ email: 'g.pion@brapac.pf' }],
+        },
+        error: null,
+        scheduledSendAt: null,
+        createdAt: new Date('2026-08-10T16:11:00.000Z'),
+      },
+    ]);
+
+    const result = await call('listSendJobs', { limit: 100 });
+
+    expect(sendOutbox.listSendJobsForUser).toHaveBeenCalledWith(expect.anything(), {
+      userId: 'user-1',
+      statuses: undefined,
+      limit: 100,
+    });
+    expect(result).toEqual([
+      expect.objectContaining({
+        id: 'job-brapac',
+        connectionId: 'conn-1',
+        status: 'queued',
+        draftId: 'draft-brapac',
+        subject: 'BRAPAC — point d’avancement',
+        to: ['g.pion@brapac.pf'],
+      }),
+    ]);
+  });
+});
+
 describe('mail router — getSendStatus / retrySend', () => {
   const base = { to: [{ email: 'x@y.co' }], subject: 'S', message: 'M' };
 

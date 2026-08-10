@@ -10,6 +10,8 @@ import {
   buildConfirmedDirectSend,
   canDirectSend,
   directSendClientId,
+  draftIdsHiddenBySendJobs,
+  upsertOptimisticDraftSendJob,
 } from './draft-workspace-model';
 import { describe, expect, it } from 'vitest';
 
@@ -107,6 +109,45 @@ describe('draft workspace model', () => {
     expect(nextDraftAfterDeletion(ids, 'd', new Set(['c', 'd']))).toBe('b');
     expect(nextDraftAfterDeletion(ids, 'a', new Set(['b', 'c']))).toBe('a');
     expect(nextDraftAfterDeletion(ids, 'a', new Set(ids))).toBeNull();
+  });
+
+  it('hides drafts once their send is queued, sending or sent', () => {
+    const base = {
+      connectionId: 'conn-1',
+      error: null,
+      subject: 'BRAPAC',
+      to: ['g.pion@brapac.pf'],
+      sendAt: null,
+      createdAt: 1,
+    };
+    const hidden = draftIdsHiddenBySendJobs([
+      { ...base, id: 'j1', draftId: 'd-queued', status: 'queued' },
+      { ...base, id: 'j2', draftId: 'd-sending', status: 'sending' },
+      { ...base, id: 'j3', draftId: 'd-sent', status: 'sent' },
+      { ...base, id: 'j4', draftId: 'd-failed', status: 'failed' },
+      { ...base, id: 'j5', draftId: 'd-cancelled', status: 'cancelled' },
+      { ...base, id: 'j6', draftId: null, status: 'queued' },
+    ]);
+
+    expect([...hidden]).toEqual(['d-queued', 'd-sending', 'd-sent']);
+  });
+
+  it('injects an accepted send job immediately without duplicating a retry', () => {
+    const first = {
+      id: 'job-brapac',
+      connectionId: 'conn-1',
+      status: 'queued' as const,
+      draftId: 'draft-brapac',
+      error: null,
+      subject: 'BRAPAC',
+      to: ['g.pion@brapac.pf'],
+      sendAt: null,
+      createdAt: 1,
+    };
+    const updated = upsertOptimisticDraftSendJob([first], { ...first, status: 'sending' });
+
+    expect(updated).toHaveLength(1);
+    expect(updated[0]).toMatchObject({ id: 'job-brapac', status: 'sending' });
   });
 });
 
