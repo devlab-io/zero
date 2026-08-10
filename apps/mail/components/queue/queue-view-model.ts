@@ -12,9 +12,22 @@ export const OUTBOX_STATUSES = [
 
 export type OutboxStatus = (typeof OUTBOX_STATUSES)[number];
 
+export const QUEUE_DISPLAY_STATUSES: readonly OutboxStatus[] = [
+  'draft_ready',
+  'generating',
+  'queued',
+  'failed',
+  'approved',
+  'sending',
+  'no_reply_needed',
+  'sent',
+  'cancelled',
+];
+
 export type OutboxItemLike = {
   id: string;
   status: OutboxStatus;
+  reviewState?: 'pending' | 'revision_requested' | 'revising' | 'ready' | 'stale' | 'failed';
   scheduledSendAt?: Date | string | null;
 };
 
@@ -29,6 +42,9 @@ export const CANCELABLE_STATUSES = new Set<OutboxStatus>([
 
 export const APPROVABLE_STATUSES = new Set<OutboxStatus>(['draft_ready']);
 
+export const getOutboxDisplayStatus = (item: OutboxItemLike): OutboxStatus =>
+  item.reviewState === 'failed' && item.status !== 'draft_ready' ? 'failed' : item.status;
+
 export const groupOutboxItemsByStatus = <T extends OutboxItemLike>(
   items: readonly T[],
 ): OutboxItemsByStatus<T> => {
@@ -38,7 +54,7 @@ export const groupOutboxItemsByStatus = <T extends OutboxItemLike>(
   }, {} as OutboxItemsByStatus<T>);
 
   for (const item of items) {
-    grouped[item.status].push(item);
+    grouped[getOutboxDisplayStatus(item)].push(item);
   }
 
   return grouped;

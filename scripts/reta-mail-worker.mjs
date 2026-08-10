@@ -14,6 +14,7 @@ const APP_URL = (
   process.env.RETA_APP_URL || 'https://zero-production.devlab-tahiti.workers.dev'
 ).replace(/\/$/, '');
 const POLL_MS = Number(process.env.RETA_WORKER_POLL_MS || 15_000);
+const RUNTIME_CHECK_MS = Number(process.env.RETA_WORKER_RUNTIME_CHECK_MS || 5 * 60_000);
 const CODEX_PATH = process.env.RETA_CODEX_PATH || 'codex';
 const KEYCHAIN_SERVICE = 'io.devlab.reta.mail-worker';
 const KEYCHAIN_ACCOUNT = process.env.RETA_WORKER_KEYCHAIN_ACCOUNT || process.env.USER || 'default';
@@ -37,6 +38,7 @@ const CODEX_RUNTIME_PATH = Array.from(
     ].filter(Boolean),
   ),
 ).join(':');
+let runtimeCheckedAt = 0;
 
 const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 const log = (message, fields = {}) =>
@@ -77,6 +79,25 @@ async function workerFetch(path, token, init = {}) {
     throw error;
   }
   return body;
+}
+
+async function ensureCodexRuntime() {
+  if (Date.now() - runtimeCheckedAt < RUNTIME_CHECK_MS) return;
+  try {
+    const { stdout } = await execFileAsync(CODEX_PATH, ['--version'], {
+      env: { ...process.env, PATH: CODEX_RUNTIME_PATH },
+      timeout: 15_000,
+    });
+    const version = stdout.trim();
+    if (!version) throw new Error('version absente');
+    runtimeCheckedAt = Date.now();
+    log('worker_runtime_ready', { version });
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      `Runtime Codex indisponible (${detail.slice(0, 180)}). Aucun brouillon n’a été réservé.`,
+    );
+  }
 }
 
 const promptFor = (job) =>
@@ -195,6 +216,10 @@ async function runCodex(job, allowFreshRetry = true) {
 }
 
 async function processOne(token) {
+  // Validate the complete launchd -> codex -> node chain before claiming a
+  // server job. A broken runtime therefore stays pending instead of creating a
+  // visible code-127 failure in RETA.
+  await ensureCodexRuntime();
   const claimed = await workerFetch('/jobs/claim-next', token, {
     method: 'POST',
     body: '{}',

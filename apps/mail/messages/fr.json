@@ -1040,6 +1040,7 @@
       "summary": "{replyCount} réponses à préparer, {noReplyCount} sans réponse nécessaire et {excludedCount} fils exclus sur {scannedCount} analysés.",
       "failed": "Impossible de préparer la file",
       "mailbox": "Boîte analysée : thomas@devlab.io · 30 derniers jours · 30 fils",
+      "exclusionsShort": "Fils répondus, spam, corbeille et brouillons exclus",
       "exclusions": "Exclus : fils déjà répondus, spam, corbeille et brouillons. Les newsletters, notifications et réponses automatiques restent visibles."
     },
     "worker": {
@@ -1094,6 +1095,9 @@
       "rejected": "Brouillon annulé.",
       "undone": "Approbation annulée.",
       "retried": "Job remis en file.",
+      "retryMany": "Relancer {count} préparations",
+      "retriedMany": "{count} préparations remises en file.",
+      "retryPreparation": "Relancer la préparation",
       "failed": "L'action sur la file a échoué",
       "cannotApprove": "Ce brouillon n’est pas prêt à être envoyé",
       "cannotReject": "Cet élément ne peut plus être annulé",
@@ -1142,6 +1146,9 @@
       "revisionStale": "Le brouillon a changé : relance la correction à partir de la dernière version.",
       "saved": "Brouillon enregistré",
       "saveFailed": "Impossible d’enregistrer le brouillon",
+      "autosavePending": "Modifications en attente",
+      "autosaved": "Enregistré automatiquement",
+      "workerRuntimeRecovered": "Le worker local a été corrigé. Cette préparation peut maintenant être relancée.",
       "correctionQueued": "Correction ajoutée à la file Codex",
       "undoCountdown": "Annuler pendant {seconds}s"
     }

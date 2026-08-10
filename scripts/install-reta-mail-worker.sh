@@ -18,6 +18,11 @@ if [[ "$(uname -s)" != "Darwin" ]]; then
   exit 1
 fi
 
+if ! env PATH="${RUNTIME_PATH}" "${CODEX_PATH}" --version >/dev/null 2>&1; then
+  print -u2 "Codex ne démarre pas avec l’environnement launchd. Installation interrompue avant de réserver des brouillons."
+  exit 1
+fi
+
 REFRESH_ONLY="false"
 if [[ "${1:-}" == "--refresh" ]]; then
   REFRESH_ONLY="true"

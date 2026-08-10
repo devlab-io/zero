@@ -1,27 +1,36 @@
 import {
   APPROVABLE_STATUSES,
   CANCELABLE_STATUSES,
-  OUTBOX_STATUSES,
+  QUEUE_DISPLAY_STATUSES,
   getReviewPendingCount,
   getUndoSecondsRemaining,
   groupOutboxItemsByStatus,
   type OutboxStatus,
 } from '@/components/queue/queue-view-model';
 import {
+  draftSignature,
+  isLegacyWorkerRuntimeError,
+  normalizeEditableAddresses,
+  parseEditableAddressList,
+  type EditableQueueDraft,
+} from '@/components/queue/queue-editor-model';
+import {
+  AlertTriangle,
+  Check,
   CheckCircle2,
   ExternalLink,
   Laptop,
+  LoaderCircle,
   Paperclip,
   RefreshCcw,
   RotateCcw,
-  Save,
   Sparkles,
   Undo2,
   XCircle,
 } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { SendJobsSection } from '@/components/queue/send-jobs-section';
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useTRPC, useTRPCClient } from '@/providers/query-provider';
 import { defaultExtensions } from '@/components/create/extensions';
 import { useShortcuts } from '@/lib/hotkeys/use-hotkey-utils';
@@ -243,13 +252,34 @@ export function QueueReview({ embedded = false }: { embedded?: boolean } = {}) {
     onError: () => toast.error(m['queue.actions.failed']()),
   });
 
+  const retryAllRevisionFailuresMutation = useMutation({
+    mutationFn: async (ids: string[]) => {
+      for (const id of ids) {
+        await trpcClient.outbox.retryRevision.mutate({ id });
+      }
+      return ids.length;
+    },
+    onSuccess: async (count) => {
+      toast.success(m['queue.actions.retriedMany']({ count }));
+      await invalidateOutbox();
+    },
+    onError: async () => {
+      toast.error(m['queue.actions.failed']());
+      await invalidateOutbox();
+    },
+  });
+
   const grouped = useMemo(() => groupOutboxItemsByStatus(items), [items]);
   const pendingReviewCount = getReviewPendingCount(grouped);
   const labels = statusLabels();
   const descriptions = statusDescriptions();
+  const retryableRevisionItems = useMemo(
+    () => items.filter((item) => item.reviewState === 'failed' && item.status !== 'draft_ready'),
+    [items],
+  );
 
   const visibleStatuses = useMemo(
-    () => (statusFilter === 'all' ? OUTBOX_STATUSES : [statusFilter]),
+    () => (statusFilter === 'all' ? QUEUE_DISPLAY_STATUSES : [statusFilter]),
     [statusFilter],
   );
   const visibleItems = useMemo(
@@ -413,13 +443,13 @@ export function QueueReview({ embedded = false }: { embedded?: boolean } = {}) {
 
   useShortcuts(queueShortcuts, shortcutHandlers, { scope: 'queue', preventDefault: true });
 
-  const isMutating =
+  const isActionMutating =
     approveMutation.isPending ||
     cancelMutation.isPending ||
     retryMutation.isPending ||
-    updateDraftMutation.isPending ||
     revisionMutation.isPending ||
-    retryRevisionMutation.isPending;
+    retryRevisionMutation.isPending ||
+    retryAllRevisionFailuresMutation.isPending;
   const workerDevice =
     workerDevicesQuery.data?.find((device) => device.enrolled && !device.revokedAt) ?? null;
   const workerLastSeen = workerDevice?.lastSeenAt ? new Date(workerDevice.lastSeenAt) : null;
@@ -485,22 +515,25 @@ export function QueueReview({ embedded = false }: { embedded?: boolean } = {}) {
           </div>
         </div>
 
-        <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs dark:border-zinc-800 dark:bg-zinc-900/50">
-          <div className="text-muted-foreground flex min-w-0 flex-wrap items-center gap-2">
-            <span>{m['queue.prepare.mailbox']()}</span>
+        <div className="mt-3 grid gap-3 rounded-lg border border-zinc-200 bg-zinc-50/80 p-3 lg:grid-cols-[1fr_auto] lg:items-center dark:border-zinc-800 dark:bg-zinc-900/50">
+          <div className="min-w-0 space-y-1">
+            <div className="text-muted-foreground flex min-w-0 flex-wrap items-center gap-2 text-xs">
+              <span>{m['queue.prepare.mailbox']()}</span>
+              <span aria-hidden="true">·</span>
+              <span>{m['queue.prepare.exclusionsShort']()}</span>
+            </div>
             {triageSummary ? (
-              <span className="text-foreground font-medium">
+              <p className="text-foreground text-xs font-medium">
                 {m['queue.prepare.summary']({
                   replyCount: triageSummary.replyNeededCount,
                   noReplyCount: triageSummary.noReplyNeededCount,
                   scannedCount: triageSummary.scannedCount,
                   excludedCount: triageSummary.excludedCount,
                 })}
-              </span>
+              </p>
             ) : null}
-            <span>{m['queue.prepare.exclusions']()}</span>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-1.5">
             <Badge variant="outline" className={workerOnline ? statusTone.draft_ready : ''}>
               <Laptop className="mr-1 h-3.5 w-3.5" />
               {workerDevice
@@ -510,7 +543,7 @@ export function QueueReview({ embedded = false }: { embedded?: boolean } = {}) {
                 : m['queue.worker.never']()}
             </Badge>
             {workerLastSeen ? (
-              <span className="text-muted-foreground">
+              <span className="text-muted-foreground text-xs">
                 {m['queue.worker.lastSeen']({ date: formatDate(workerLastSeen) ?? '—' })}
               </span>
             ) : null}
@@ -546,14 +579,14 @@ export function QueueReview({ embedded = false }: { embedded?: boolean } = {}) {
           </div>
         ) : null}
 
-        <div className="mt-4 flex gap-2 overflow-x-auto pb-1">
+        <div className="mt-3 flex items-center gap-2 overflow-x-auto pb-1">
           <StatusFilterButton
             active={statusFilter === 'all'}
             count={items.length}
             label={m['queue.filterAll']()}
             onClick={() => setStatusFilter('all')}
           />
-          {OUTBOX_STATUSES.map((status) => (
+          {QUEUE_DISPLAY_STATUSES.filter((status) => grouped[status].length > 0).map((status) => (
             <StatusFilterButton
               key={status}
               active={statusFilter === status}
@@ -562,10 +595,29 @@ export function QueueReview({ embedded = false }: { embedded?: boolean } = {}) {
               onClick={() => setStatusFilter(status)}
             />
           ))}
+          {retryableRevisionItems.length > 1 ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="ml-auto shrink-0"
+              onClick={() =>
+                retryAllRevisionFailuresMutation.mutate(
+                  retryableRevisionItems.map((item) => item.id),
+                )
+              }
+              disabled={retryAllRevisionFailuresMutation.isPending || !workerOnline}
+            >
+              <RotateCcw className="h-4 w-4" />
+              {retryAllRevisionFailuresMutation.isPending
+                ? m['queue.actions.retrying']()
+                : m['queue.actions.retryMany']({ count: retryableRevisionItems.length })}
+            </Button>
+          ) : null}
         </div>
       </header>
 
-      <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-4 py-4 sm:px-6">
+      <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto bg-zinc-50/40 px-4 py-5 sm:px-6 dark:bg-zinc-950/30">
         {/* Envois send_job (queued/sending/failed) — file DISTINCTE du draft
             outbox IA ci-dessous, rendue indépendamment de ses états. */}
         <SendJobsSection />
@@ -592,7 +644,7 @@ export function QueueReview({ embedded = false }: { embedded?: boolean } = {}) {
             if (!statusItems.length) return null;
 
             return (
-              <div key={status} className="space-y-2">
+              <div key={status} className="space-y-3">
                 <div className="flex items-center gap-2">
                   <Badge variant="outline" className={cn('border', statusTone[status])}>
                     {labels[status]}
@@ -601,14 +653,18 @@ export function QueueReview({ embedded = false }: { embedded?: boolean } = {}) {
                     {descriptions[status]}
                   </span>
                 </div>
-                <div className="grid gap-2">
+                <div className="grid gap-4">
                   {statusItems.map((item) => (
                     <QueueItemRow
                       key={`${item.id}:${item.contentRevision}`}
                       item={item}
-                      displayStatus={undoDeadlines[item.id] ? 'approved' : item.status}
+                      displayStatus={undoDeadlines[item.id] ? 'approved' : status}
                       isSelected={item.id === selectedItemId}
-                      isMutating={isMutating}
+                      isActionMutating={isActionMutating}
+                      isSaving={
+                        updateDraftMutation.isPending &&
+                        updateDraftMutation.variables?.id === item.id
+                      }
                       now={now}
                       undoDeadline={undoDeadlines[item.id]}
                       onApprove={() => approveItem(item)}
@@ -627,7 +683,7 @@ export function QueueReview({ embedded = false }: { embedded?: boolean } = {}) {
                       }
                       onRetryRevision={() => retryRevisionMutation.mutateAsync(item.id)}
                       onSelect={() => setSelectedItemId(item.id)}
-                      statusLabel={labels[undoDeadlines[item.id] ? 'approved' : item.status]}
+                      statusLabel={labels[undoDeadlines[item.id] ? 'approved' : status]}
                     />
                   ))}
                 </div>
@@ -694,7 +750,8 @@ function QueueItemRow({
   item,
   displayStatus,
   isSelected,
-  isMutating,
+  isActionMutating,
+  isSaving,
   now,
   undoDeadline,
   onApprove,
@@ -710,13 +767,14 @@ function QueueItemRow({
   item: QueueItem;
   displayStatus: OutboxStatus;
   isSelected: boolean;
-  isMutating: boolean;
+  isActionMutating: boolean;
+  isSaving: boolean;
   now: Date;
   undoDeadline?: Date | string;
-  onApprove: () => void;
-  onCancel: () => void;
-  onOpen: () => void;
-  onRetry: () => void;
+  onApprove: () => Promise<unknown> | void;
+  onCancel: () => Promise<unknown> | void;
+  onOpen: () => Promise<unknown> | void;
+  onRetry: () => Promise<unknown> | void;
   onSave: (draft: {
     to: string[];
     cc: string[];
@@ -725,37 +783,107 @@ function QueueItemRow({
     body: string;
   }) => Promise<unknown>;
   onRequestRevision: (instruction: string) => Promise<unknown>;
-  onRetryRevision: () => Promise<unknown>;
+  onRetryRevision: () => Promise<unknown> | void;
   onSelect: () => void;
   statusLabel: string;
 }) {
-  const [to, setTo] = useState(item.to.join(', '));
-  const [cc, setCc] = useState(item.cc.join(', '));
-  const [bcc, setBcc] = useState(item.bcc.join(', '));
+  const [to, setTo] = useState(normalizeEditableAddresses(item.to).join(', '));
+  const [cc, setCc] = useState(normalizeEditableAddresses(item.cc).join(', '));
+  const [bcc, setBcc] = useState(normalizeEditableAddresses(item.bcc).join(', '));
   const [subject, setSubject] = useState(item.subject);
   const [body, setBody] = useState(item.body);
   const [instruction, setInstruction] = useState('');
+  const [saveState, setSaveState] = useState<'saved' | 'pending' | 'saving' | 'error'>('saved');
+  const autosaveTimerRef = useRef<number | null>(null);
+  const savePromiseRef = useRef<Promise<unknown> | null>(null);
+  const onSaveRef = useRef(onSave);
 
-  const parseAddresses = (value: string) =>
-    value
-      .split(',')
-      .map((address) => address.trim())
-      .filter(Boolean);
   const canEdit = item.status === 'draft_ready' && item.reviewState !== 'revising';
   const correctionPending =
     item.reviewState === 'revision_requested' || item.reviewState === 'revising';
-  const save = () =>
-    onSave({
-      to: parseAddresses(to),
-      cc: parseAddresses(cc),
-      bcc: parseAddresses(bcc),
+  const currentDraft = useMemo<EditableQueueDraft>(
+    () => ({
+      to: parseEditableAddressList(to),
+      cc: parseEditableAddressList(cc),
+      bcc: parseEditableAddressList(bcc),
       subject,
       body,
-    });
+    }),
+    [bcc, body, cc, subject, to],
+  );
+  const serverDraft = useMemo<EditableQueueDraft>(
+    () => ({
+      to: normalizeEditableAddresses(item.to),
+      cc: normalizeEditableAddresses(item.cc),
+      bcc: normalizeEditableAddresses(item.bcc),
+      subject: item.subject,
+      body: item.body,
+    }),
+    [item.bcc, item.body, item.cc, item.subject, item.to],
+  );
+  const currentSignature = draftSignature(currentDraft);
+  const isDirty = currentSignature !== draftSignature(serverDraft);
+  const currentDraftRef = useRef(currentDraft);
+  const isDirtyRef = useRef(isDirty);
+  onSaveRef.current = onSave;
+  currentDraftRef.current = currentDraft;
+  isDirtyRef.current = isDirty;
+
+  const persistCurrentDraft = useCallback(async () => {
+    if (autosaveTimerRef.current !== null) {
+      window.clearTimeout(autosaveTimerRef.current);
+      autosaveTimerRef.current = null;
+    }
+    if (!isDirtyRef.current) return;
+    if (savePromiseRef.current) return savePromiseRef.current;
+
+    setSaveState('saving');
+    const savePromise = onSaveRef.current(currentDraftRef.current);
+    savePromiseRef.current = savePromise;
+    try {
+      await savePromise;
+      setSaveState('saved');
+    } catch (error) {
+      setSaveState('error');
+      throw error;
+    } finally {
+      savePromiseRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!canEdit || correctionPending || !isDirty) {
+      if (!isDirty) {
+        setSaveState((current) => (current === 'error' ? current : 'saved'));
+      }
+      return;
+    }
+
+    setSaveState('pending');
+    autosaveTimerRef.current = window.setTimeout(() => {
+      void persistCurrentDraft().catch(() => {});
+    }, 850);
+    return () => {
+      if (autosaveTimerRef.current !== null) {
+        window.clearTimeout(autosaveTimerRef.current);
+        autosaveTimerRef.current = null;
+      }
+    };
+  }, [canEdit, correctionPending, currentSignature, isDirty, persistCurrentDraft]);
+
   const requestRevision = async () => {
     if (!instruction.trim()) return;
+    await persistCurrentDraft();
     await onRequestRevision(instruction.trim());
     setInstruction('');
+  };
+  const approve = async () => {
+    await persistCurrentDraft();
+    await onApprove();
+  };
+  const open = async () => {
+    await persistCurrentDraft();
+    await onOpen();
   };
   const countdownItem = {
     ...item,
@@ -770,230 +898,105 @@ function QueueItemRow({
   const canApprove = APPROVABLE_STATUSES.has(item.status) && item.reviewState === 'ready';
   const canCancel = CANCELABLE_STATUSES.has(item.status) || undoSeconds > 0;
   const canOpen = !!item.gmailDraftId || !!item.threadId;
+  const canRetryRevision = item.reviewState === 'failed' && item.status !== 'failed';
+  const runtimeWasUpdated = isLegacyWorkerRuntimeError(item.error);
+  const errorMessage = runtimeWasUpdated ? m['queue.item.workerRuntimeRecovered']() : item.error;
+  const saveLabel =
+    isSaving || saveState === 'saving'
+      ? m['queue.actions.saving']()
+      : saveState === 'pending' || isDirty
+        ? m['queue.item.autosavePending']()
+        : saveState === 'error'
+          ? m['queue.item.saveFailed']()
+          : m['queue.item.autosaved']();
 
   return (
     <article
       className={cn(
-        'rounded-md border bg-white p-4 shadow-sm transition-colors dark:bg-zinc-950',
+        'overflow-hidden rounded-xl border bg-white shadow-sm transition-colors dark:bg-zinc-950',
         isSelected
-          ? 'border-zinc-900 ring-1 ring-zinc-900 dark:border-zinc-100 dark:ring-zinc-100'
+          ? 'border-zinc-400 ring-1 ring-zinc-300 dark:border-zinc-600 dark:ring-zinc-700'
           : 'border-zinc-200 hover:border-zinc-300 dark:border-zinc-800 dark:hover:border-zinc-700',
       )}
       onFocus={onSelect}
       onMouseDown={onSelect}
       tabIndex={0}
     >
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-        <div className="min-w-0 flex-1 space-y-2">
-          <div className="flex flex-wrap items-center gap-2">
+      <div className="flex flex-col gap-3 border-b border-zinc-200 px-4 py-3 lg:flex-row lg:items-center lg:justify-between dark:border-zinc-800">
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <Badge variant="outline" className={cn('border', statusTone[displayStatus])}>
+            {statusLabel}
+          </Badge>
+          {item.status === 'draft_ready' ? (
+            <span
+              className={cn(
+                'inline-flex items-center gap-1 text-xs',
+                saveState === 'error' ? 'text-red-600 dark:text-red-300' : 'text-muted-foreground',
+              )}
+            >
+              {isSaving || saveState === 'saving' ? (
+                <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+              ) : saveState === 'error' ? (
+                <AlertTriangle className="h-3.5 w-3.5" />
+              ) : (
+                <Check className="h-3.5 w-3.5" />
+              )}
+              {saveLabel}
+            </span>
+          ) : null}
+          {undoSeconds > 0 ? (
             <Badge variant="outline" className={cn('border', statusTone[displayStatus])}>
-              {statusLabel}
+              {m['queue.item.undoCountdown']({ seconds: undoSeconds })}
             </Badge>
-            {isSelected ? (
-              <Badge
-                variant="outline"
-                className="border-zinc-300 text-zinc-600 dark:border-zinc-700 dark:text-zinc-300"
-              >
-                {m['queue.selected']()}
-              </Badge>
-            ) : null}
-            {undoSeconds > 0 ? (
-              <Badge
-                variant="outline"
-                className="border-blue-300 text-blue-700 dark:border-blue-500/40 dark:text-blue-300"
-              >
-                {m['queue.item.undoCountdown']({ seconds: undoSeconds })}
-              </Badge>
-            ) : null}
-          </div>
-
-          {item.status === 'draft_ready' ? (
-            <div className="grid gap-3 rounded-md border border-zinc-200 bg-zinc-50/70 p-3 dark:border-zinc-800 dark:bg-zinc-900/40">
-              <div className="grid gap-3 lg:grid-cols-3">
-                <QueueField label={m['queue.item.to']()}>
-                  <Input
-                    value={to}
-                    onChange={(event) => setTo(event.target.value)}
-                    disabled={!canEdit}
-                  />
-                </QueueField>
-                <QueueField label={m['queue.item.cc']()}>
-                  <Input
-                    value={cc}
-                    onChange={(event) => setCc(event.target.value)}
-                    disabled={!canEdit}
-                  />
-                </QueueField>
-                <QueueField label={m['queue.item.bcc']()}>
-                  <Input
-                    value={bcc}
-                    onChange={(event) => setBcc(event.target.value)}
-                    disabled={!canEdit}
-                  />
-                </QueueField>
-              </div>
-              <QueueField label={m['queue.item.subject']()}>
-                <Input
-                  value={subject}
-                  onChange={(event) => setSubject(event.target.value)}
-                  disabled={!canEdit}
-                />
-              </QueueField>
-              <QueueField label={m['queue.item.message']()}>
-                <QueueBodyEditor
-                  key={item.contentRevision}
-                  initialValue={body}
-                  onChange={setBody}
-                  disabled={!canEdit}
-                />
-              </QueueField>
-              <div className="flex justify-end">
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={save}
-                  disabled={!canEdit || isMutating}
-                >
-                  <Save className="h-4 w-4" />
-                  {m['queue.actions.save']()}
-                </Button>
-              </div>
-            </div>
-          ) : (
-            <div className="min-w-0">
-              <h2 className="truncate text-base font-semibold text-zinc-950 dark:text-zinc-50">
-                {item.subject || m['queue.item.untitled']()}
-              </h2>
-              <p className="text-muted-foreground mt-1 text-xs">
-                {m['queue.item.to']()}: {item.to.join(', ') || '—'}
-              </p>
-              {preview ? (
-                <p className="mt-1 line-clamp-2 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
-                  {preview}
-                </p>
-              ) : null}
-            </div>
-          )}
-
-          <dl className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-zinc-500 dark:text-zinc-400">
-            {item.threadId ? (
-              <MetaItem label={m['queue.item.thread']()} value={item.threadId} />
-            ) : null}
-            {item.gmailDraftId ? (
-              <MetaItem label={m['queue.item.draftId']()} value={item.gmailDraftId} />
-            ) : null}
-            {item.mission ? (
-              <MetaItem label={m['queue.item.mission']()} value={item.mission} />
-            ) : null}
-            {createdAt ? <MetaItem label={m['queue.item.created']()} value={createdAt} /> : null}
-            {updatedAt ? <MetaItem label={m['queue.item.updated']()} value={updatedAt} /> : null}
-            {scheduledAt ? (
-              <MetaItem label={m['queue.item.scheduled']()} value={scheduledAt} />
-            ) : null}
-          </dl>
-
-          {item.error ? (
-            <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-300">
-              <span className="font-medium">{m['queue.item.error']()}:</span> {item.error}
-            </p>
-          ) : null}
-
-          {item.sourceAttachments.length ? (
-            <div className="text-muted-foreground flex flex-wrap items-center gap-2 text-xs">
-              <Paperclip className="h-3.5 w-3.5" />
-              <span className="font-medium">{m['queue.item.attachments']()}:</span>
-              {item.sourceAttachments.map((attachment, index) => (
-                <span
-                  key={`${attachment.filename}-${index}`}
-                  className="rounded border px-1.5 py-0.5"
-                >
-                  {attachment.filename}
-                </span>
-              ))}
-            </div>
-          ) : null}
-
-          {item.status === 'draft_ready' ? (
-            <div className="grid gap-2 rounded-md border border-violet-200 bg-violet-50/60 p-3 dark:border-violet-500/20 dark:bg-violet-500/10">
-              <Label htmlFor={`instruction-${item.id}`}>{m['queue.item.instruction']()}</Label>
-              <Textarea
-                id={`instruction-${item.id}`}
-                value={instruction}
-                onChange={(event) => setInstruction(event.target.value)}
-                placeholder={m['queue.item.instructionPlaceholder']()}
-                disabled={correctionPending || isMutating}
-              />
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <span className="text-muted-foreground text-xs">
-                  {correctionPending
-                    ? m['queue.item.revisionRequested']()
-                    : item.reviewState === 'stale'
-                      ? m['queue.item.revisionStale']()
-                      : ''}
-                </span>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="secondary"
-                  onClick={requestRevision}
-                  disabled={!instruction.trim() || correctionPending || isMutating}
-                >
-                  <Sparkles className="h-4 w-4" />
-                  {m['queue.actions.correct']()}
-                </Button>
-              </div>
-            </div>
           ) : null}
         </div>
 
         <div className="flex shrink-0 flex-wrap gap-2 lg:justify-end">
-          <Button type="button" size="sm" onClick={onApprove} disabled={!canApprove || isMutating}>
-            <CheckCircle2 className="h-4 w-4" />
-            {m['queue.actions.approve']()}
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            onClick={onCancel}
-            disabled={!canCancel || isMutating}
-          >
-            <XCircle className="h-4 w-4" />
-            {m['queue.actions.reject']()}
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            onClick={onOpen}
-            disabled={!canOpen || isMutating}
-          >
-            <ExternalLink className="h-4 w-4" />
-            {m['queue.actions.open']()}
-          </Button>
-          {item.status === 'failed' ? (
+          {canOpen ? (
             <Button
               type="button"
               size="sm"
               variant="outline"
+              onClick={() => void open()}
+              disabled={isActionMutating || isSaving}
+            >
+              <ExternalLink className="h-4 w-4" />
+              {m['queue.actions.open']()}
+            </Button>
+          ) : null}
+          {canRetryRevision ? (
+            <Button
+              type="button"
+              size="sm"
+              onClick={onRetryRevision}
+              disabled={isActionMutating || isSaving}
+            >
+              <RotateCcw className="h-4 w-4" />
+              {runtimeWasUpdated
+                ? m['queue.actions.retryPreparation']()
+                : m['queue.actions.retry']()}
+            </Button>
+          ) : null}
+          {item.status === 'failed' ? (
+            <Button
+              type="button"
+              size="sm"
               onClick={onRetry}
-              disabled={isMutating}
+              disabled={isActionMutating || isSaving}
             >
               <RotateCcw className="h-4 w-4" />
               {m['queue.actions.retry']()}
             </Button>
           ) : null}
-          {item.reviewState === 'failed' && item.status !== 'failed' ? (
+          {canApprove ? (
             <Button
               type="button"
               size="sm"
-              variant="outline"
-              onClick={onRetryRevision}
-              disabled={isMutating}
+              onClick={() => void approve()}
+              disabled={isActionMutating || isSaving || correctionPending}
             >
-              <RotateCcw className="h-4 w-4" />
-              {m['queue.actions.retry']()}
+              <CheckCircle2 className="h-4 w-4" />
+              {m['queue.actions.approve']()}
             </Button>
           ) : null}
           {undoSeconds > 0 ? (
@@ -1002,24 +1005,166 @@ function QueueItemRow({
               size="sm"
               variant="secondary"
               onClick={onCancel}
-              disabled={isMutating}
+              disabled={isActionMutating}
             >
               <Undo2 className="h-4 w-4" />
               {m['queue.actions.undo']()}
             </Button>
           ) : null}
+          {canCancel && undoSeconds === 0 ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              onClick={onCancel}
+              disabled={isActionMutating || isSaving}
+            >
+              <XCircle className="h-4 w-4" />
+              {m['queue.actions.reject']()}
+            </Button>
+          ) : null}
+        </div>
+      </div>
+
+      <div className="space-y-4 p-4">
+        {item.status === 'draft_ready' ? (
+          <div className="grid gap-3">
+            <div className="grid gap-3 lg:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)_minmax(0,1fr)]">
+              <QueueField label={m['queue.item.to']()}>
+                <Input
+                  value={to}
+                  onChange={(event) => setTo(event.target.value)}
+                  disabled={!canEdit || isSaving}
+                />
+              </QueueField>
+              <QueueField label={m['queue.item.cc']()}>
+                <Input
+                  value={cc}
+                  onChange={(event) => setCc(event.target.value)}
+                  disabled={!canEdit || isSaving}
+                />
+              </QueueField>
+              <QueueField label={m['queue.item.bcc']()}>
+                <Input
+                  value={bcc}
+                  onChange={(event) => setBcc(event.target.value)}
+                  disabled={!canEdit || isSaving}
+                />
+              </QueueField>
+            </div>
+            <QueueField label={m['queue.item.subject']()}>
+              <Input
+                className="h-11 text-base font-medium"
+                value={subject}
+                onChange={(event) => setSubject(event.target.value)}
+                disabled={!canEdit || isSaving}
+              />
+            </QueueField>
+            <QueueField label={m['queue.item.message']()}>
+              <QueueBodyEditor
+                key={item.contentRevision}
+                initialValue={body}
+                onChange={setBody}
+                disabled={!canEdit || isSaving}
+              />
+            </QueueField>
+          </div>
+        ) : (
+          <div className="min-w-0 space-y-2">
+            <h2 className="text-lg font-semibold text-zinc-950 dark:text-zinc-50">
+              {item.subject || m['queue.item.untitled']()}
+            </h2>
+            <p className="text-muted-foreground text-sm">
+              {m['queue.item.to']()}: {normalizeEditableAddresses(item.to).join(', ') || '—'}
+            </p>
+            {preview ? (
+              <p className="max-w-4xl text-sm leading-6 text-zinc-600 dark:text-zinc-400">
+                {preview}
+              </p>
+            ) : null}
+          </div>
+        )}
+
+        {errorMessage ? (
+          <div
+            className={cn(
+              'flex items-start gap-2 rounded-lg border px-3 py-2 text-sm',
+              runtimeWasUpdated
+                ? 'border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-200'
+                : 'border-red-200 bg-red-50 text-red-800 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-300',
+            )}
+          >
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+            <p>{errorMessage}</p>
+          </div>
+        ) : null}
+
+        {item.sourceAttachments.length ? (
+          <div className="text-muted-foreground flex flex-wrap items-center gap-2 text-xs">
+            <Paperclip className="h-3.5 w-3.5" />
+            <span className="font-medium">{m['queue.item.attachments']()}:</span>
+            {item.sourceAttachments.map((attachment, index) => (
+              <span
+                key={`${attachment.filename}-${index}`}
+                className="rounded border px-1.5 py-0.5"
+              >
+                {attachment.filename}
+              </span>
+            ))}
+          </div>
+        ) : null}
+
+        {item.status === 'draft_ready' ? (
+          <div className="grid gap-2 rounded-lg border border-violet-200 bg-violet-50/60 p-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end dark:border-violet-500/20 dark:bg-violet-500/10">
+            <div className="grid gap-1.5">
+              <Label htmlFor={`instruction-${item.id}`}>{m['queue.item.instruction']()}</Label>
+              <Textarea
+                id={`instruction-${item.id}`}
+                className="min-h-20 bg-white dark:bg-zinc-950"
+                value={instruction}
+                onChange={(event) => setInstruction(event.target.value)}
+                placeholder={m['queue.item.instructionPlaceholder']()}
+                disabled={correctionPending || isActionMutating || isSaving}
+              />
+            </div>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => void requestRevision()}
+              disabled={!instruction.trim() || correctionPending || isActionMutating || isSaving}
+            >
+              <Sparkles className="h-4 w-4" />
+              {m['queue.actions.correct']()}
+            </Button>
+            <span className="text-muted-foreground text-xs lg:col-span-2">
+              {correctionPending
+                ? m['queue.item.revisionRequested']()
+                : item.reviewState === 'stale'
+                  ? m['queue.item.revisionStale']()
+                  : ''}
+            </span>
+          </div>
+        ) : null}
+
+        <div className="text-muted-foreground flex flex-wrap gap-x-4 gap-y-1 text-xs">
+          {updatedAt ? (
+            <span>
+              {m['queue.item.updated']()}: {updatedAt}
+            </span>
+          ) : null}
+          {createdAt ? (
+            <span>
+              {m['queue.item.created']()}: {createdAt}
+            </span>
+          ) : null}
+          {scheduledAt ? (
+            <span>
+              {m['queue.item.scheduled']()}: {scheduledAt}
+            </span>
+          ) : null}
         </div>
       </div>
     </article>
-  );
-}
-
-function MetaItem({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex min-w-0 items-center gap-1">
-      <dt className="shrink-0 font-medium text-zinc-600 dark:text-zinc-300">{label}:</dt>
-      <dd className="max-w-[18rem] truncate">{value}</dd>
-    </div>
   );
 }
 
@@ -1049,7 +1194,8 @@ function QueueBodyEditor({
     onUpdate: ({ editor: currentEditor }) => onChange(currentEditor.getHTML()),
     editorProps: {
       attributes: {
-        class: 'prose prose-sm dark:prose-invert min-h-40 max-w-none px-3 py-2 focus:outline-none',
+        class:
+          'prose prose-sm dark:prose-invert min-h-56 max-w-none px-4 py-3 leading-6 focus:outline-none',
       },
     },
   });
@@ -1067,7 +1213,7 @@ function QueueBodyEditor({
   }, [editor, initialValue]);
 
   return (
-    <div className="rounded-md border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950">
+    <div className="rounded-md border border-zinc-200 bg-white transition-shadow focus-within:border-zinc-400 focus-within:ring-2 focus-within:ring-zinc-200 dark:border-zinc-800 dark:bg-zinc-950 dark:focus-within:border-zinc-600 dark:focus-within:ring-zinc-800">
       <EditorContent editor={editor} />
     </div>
   );

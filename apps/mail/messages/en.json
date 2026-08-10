@@ -1040,6 +1040,7 @@
       "summary": "{replyCount} replies to prepare, {noReplyCount} needing no reply, and {excludedCount} excluded across {scannedCount} scanned threads.",
       "failed": "Could not prepare the queue",
       "mailbox": "Mailbox: thomas@devlab.io · last 30 days · 30 threads",
+      "exclusionsShort": "Answered threads, spam, trash and drafts excluded",
       "exclusions": "Excluded: threads already answered, spam, trash, and drafts. Newsletters, notifications, and automatic replies remain visible."
     },
     "worker": {
@@ -1094,6 +1095,9 @@
       "rejected": "Draft cancelled.",
       "undone": "Approval undone.",
       "retried": "Job queued again.",
+      "retryMany": "Retry {count} preparations",
+      "retriedMany": "{count} preparations queued again.",
+      "retryPreparation": "Prepare again",
       "failed": "Queue action failed",
       "cannotApprove": "This draft is not ready to send",
       "cannotReject": "This item can no longer be cancelled",
@@ -1142,6 +1146,9 @@
       "revisionStale": "The draft changed: request the correction again from the latest version.",
       "saved": "Draft saved",
       "saveFailed": "Could not save the draft",
+      "autosavePending": "Changes pending",
+      "autosaved": "Saved automatically",
+      "workerRuntimeRecovered": "The local worker was updated. This preparation can now be retried.",
       "correctionQueued": "Correction added to the Codex queue",
       "undoCountdown": "Undo for {seconds}s"
     }

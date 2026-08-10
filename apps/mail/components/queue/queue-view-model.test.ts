@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   OUTBOX_STATUSES,
+  QUEUE_DISPLAY_STATUSES,
   getReviewPendingCount,
   getUndoSecondsRemaining,
   groupOutboxItemsByStatus,
@@ -42,6 +43,21 @@ describe('queue view model', () => {
     expect(grouped.draft_ready.map((item) => item.id)).toEqual(['ready-1', 'ready-2']);
     expect(grouped.no_reply_needed.map((item) => item.id)).toEqual(['newsletter-1']);
     expect(getReviewPendingCount(grouped)).toBe(2);
+  });
+
+  it('puts editable drafts first and exposes failed generation jobs as failures', () => {
+    const runtimeFailure = {
+      ...makeItem({ id: 'runtime-failure', status: 'queued' }),
+      reviewState: 'failed' as const,
+    };
+    const grouped = groupOutboxItemsByStatus([
+      runtimeFailure,
+      makeItem({ id: 'ready-1', status: 'draft_ready' }),
+    ]);
+
+    expect(QUEUE_DISPLAY_STATUSES[0]).toBe('draft_ready');
+    expect(grouped.queued).toEqual([]);
+    expect(grouped.failed.map((item) => item.id)).toEqual(['runtime-failure']);
   });
 
   it('returns a bounded approval undo countdown', () => {

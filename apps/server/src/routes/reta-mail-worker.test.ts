@@ -7,6 +7,10 @@ const source = readFileSync(
   resolve(dirname(fileURLToPath(import.meta.url)), 'reta-mail-worker.ts'),
   'utf8',
 );
+const workerSource = readFileSync(
+  resolve(dirname(fileURLToPath(import.meta.url)), '../../../../scripts/reta-mail-worker.mjs'),
+  'utf8',
+);
 
 describe('RETA local worker surface', () => {
   it('exposes enrollment, claim, complete and fail without any send endpoint', () => {
@@ -30,5 +34,15 @@ describe('RETA local worker surface', () => {
     expect(source).not.toContain('await agent.getThread(item.threadId)');
     expect(source).toContain("claimed.job.kind === 'compose' && !context.some");
     expect(source).toContain('Aucun brouillon n’a été créé.');
+  });
+
+  it('checks the complete Codex runtime before reserving a job', () => {
+    const runtimeCheck = workerSource.indexOf('await ensureCodexRuntime();');
+    const jobClaim = workerSource.indexOf("await workerFetch('/jobs/claim-next'");
+
+    expect(runtimeCheck).toBeGreaterThan(-1);
+    expect(jobClaim).toBeGreaterThan(runtimeCheck);
+    expect(workerSource).toContain('PATH: CODEX_RUNTIME_PATH');
+    expect(workerSource).toContain('Aucun brouillon n’a été réservé.');
   });
 });
