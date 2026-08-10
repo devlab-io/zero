@@ -8,28 +8,32 @@ import {
   type OutboxStatus,
 } from '@/components/queue/queue-view-model';
 import {
+  AlertTriangle,
+  Check,
+  CheckCircle2,
+  ExternalLink,
+  FileText,
+  Laptop,
+  LoaderCircle,
+  Paperclip,
+  RefreshCcw,
+  RotateCcw,
+  Search,
+  Sparkles,
+  Undo2,
+  XCircle,
+} from 'lucide-react';
+import {
   draftSignature,
   isLegacyWorkerRuntimeError,
   normalizeEditableAddresses,
   parseEditableAddressList,
   type EditableQueueDraft,
 } from '@/components/queue/queue-editor-model';
-import {
-  AlertTriangle,
-  Check,
-  CheckCircle2,
-  ExternalLink,
-  Laptop,
-  LoaderCircle,
-  Paperclip,
-  RefreshCcw,
-  RotateCcw,
-  Sparkles,
-  Undo2,
-  XCircle,
-} from 'lucide-react';
+import { draftListRow, type DraftListRow } from '@/components/drafts/draft-workspace-model';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { matchesQueueSearch } from '@/components/queue/queue-search-model';
 import { SendJobsSection } from '@/components/queue/send-jobs-section';
 import { useTRPC, useTRPCClient } from '@/providers/query-provider';
 import { defaultExtensions } from '@/components/create/extensions';
@@ -106,18 +110,6 @@ const statusLabels = (): Record<OutboxStatus, string> => ({
   failed: m['queue.status.failed'](),
 });
 
-const statusDescriptions = (): Record<OutboxStatus, string> => ({
-  queued: m['queue.statusDescription.queued'](),
-  generating: m['queue.statusDescription.generating'](),
-  draft_ready: m['queue.statusDescription.draftReady'](),
-  approved: m['queue.statusDescription.approved'](),
-  sending: m['queue.statusDescription.sending'](),
-  sent: m['queue.statusDescription.sent'](),
-  cancelled: m['queue.statusDescription.cancelled'](),
-  no_reply_needed: m['queue.statusDescription.noReplyNeeded'](),
-  failed: m['queue.statusDescription.failed'](),
-});
-
 const formatDate = (value?: Date | string | null) => {
   if (!value) return null;
 
@@ -145,6 +137,8 @@ export function QueueReview({ embedded = false }: { embedded?: boolean } = {}) {
   const [, setComposeOpen] = useQueryState('isComposeOpen');
   const { enableScope, disableScope } = useHotkeysContext();
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [savedDraftSearch, setSavedDraftSearch] = useState('');
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
   const [undoDeadlines, setUndoDeadlines] = useState<Record<string, Date | string>>({});
   const [nextTriagePageToken, setNextTriagePageToken] = useState<string | null>(null);
@@ -167,6 +161,11 @@ export function QueueReview({ embedded = false }: { embedded?: boolean } = {}) {
     return () => window.clearInterval(interval);
   }, []);
 
+  useEffect(() => {
+    const timer = window.setTimeout(() => setSavedDraftSearch(searchQuery.trim()), 250);
+    return () => window.clearTimeout(timer);
+  }, [searchQuery]);
+
   const outboxQuery = useQuery({
     ...trpc.outbox.list.queryOptions({}),
     refetchInterval: 3_000,
@@ -176,6 +175,13 @@ export function QueueReview({ embedded = false }: { embedded?: boolean } = {}) {
     refetchInterval: 15_000,
   });
   const items = useMemo(() => (outboxQuery.data ?? []) as QueueItem[], [outboxQuery.data]);
+  const savedDraftSearchQuery = useQuery({
+    ...trpc.drafts.list.queryOptions({
+      q: savedDraftSearch,
+      maxResults: 25,
+    }),
+    enabled: savedDraftSearch.length >= 2,
+  });
 
   const prepareMutation = useMutation({
     mutationFn: (pageToken?: string) =>
@@ -269,7 +275,6 @@ export function QueueReview({ embedded = false }: { embedded?: boolean } = {}) {
   const grouped = useMemo(() => groupOutboxItemsByStatus(items), [items]);
   const pendingReviewCount = getReviewPendingCount(grouped);
   const labels = statusLabels();
-  const descriptions = statusDescriptions();
   const retryableRevisionItems = useMemo(
     () => items.filter((item) => item.reviewState === 'failed' && item.status !== 'draft_ready'),
     [items],
@@ -279,11 +284,26 @@ export function QueueReview({ embedded = false }: { embedded?: boolean } = {}) {
     () => (statusFilter === 'all' ? QUEUE_DISPLAY_STATUSES : [statusFilter]),
     [statusFilter],
   );
-  const visibleItems = useMemo(
+  const statusItems = useMemo(
     () => visibleStatuses.flatMap((status) => grouped[status]),
     [grouped, visibleStatuses],
   );
+  const visibleItems = useMemo(
+    () => statusItems.filter((item) => matchesQueueSearch(item, searchQuery)),
+    [searchQuery, statusItems],
+  );
+  const savedDraftSearchResults = useMemo(() => {
+    if (savedDraftSearch.length < 2) return [];
+    const agentDraftIds = new Set(
+      items.flatMap((item) => (item.gmailDraftId ? [item.gmailDraftId] : [])),
+    );
+    return (savedDraftSearchQuery.data?.threads ?? [])
+      .map(draftListRow)
+      .filter((row) => !agentDraftIds.has(row.id));
+  }, [items, savedDraftSearch, savedDraftSearchQuery.data]);
   const selectedItem = visibleItems.find((item) => item.id === selectedItemId) ?? null;
+  const hasSearch = searchQuery.trim().length > 0;
+  const resultCount = visibleItems.length + savedDraftSearchResults.length;
 
   useEffect(() => {
     if (!visibleItems.length) {
@@ -512,25 +532,29 @@ export function QueueReview({ embedded = false }: { embedded?: boolean } = {}) {
           </div>
         </div>
 
-        <div className="mt-3 grid gap-3 rounded-lg border border-zinc-200 bg-zinc-50/80 p-3 lg:grid-cols-[1fr_auto] lg:items-center dark:border-zinc-800 dark:bg-zinc-900/50">
-          <div className="min-w-0 space-y-1">
-            <div className="text-muted-foreground flex min-w-0 flex-wrap items-center gap-2 text-xs">
-              <span>{m['queue.prepare.mailbox']()}</span>
-              <span aria-hidden="true">·</span>
-              <span>{m['queue.prepare.exclusionsShort']()}</span>
-            </div>
-            {triageSummary ? (
-              <p className="text-foreground text-xs font-medium">
-                {m['queue.prepare.summary']({
-                  replyCount: triageSummary.replyNeededCount,
-                  noReplyCount: triageSummary.noReplyNeededCount,
-                  scannedCount: triageSummary.scannedCount,
-                  excludedCount: triageSummary.excludedCount,
-                })}
-              </p>
+        <div className="mt-3 flex flex-col gap-2 lg:flex-row lg:items-center">
+          <div className="relative min-w-0 flex-1">
+            <Search className="text-muted-foreground pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2" />
+            <Input
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+              placeholder={m['queue.search.placeholder']()}
+              aria-label={m['queue.search.label']()}
+              className="h-10 bg-white pl-9 pr-9 dark:bg-zinc-950"
+            />
+            {searchQuery ? (
+              <button
+                type="button"
+                onClick={() => setSearchQuery('')}
+                aria-label={m['queue.search.clear']()}
+                className="text-muted-foreground hover:text-foreground absolute right-2.5 top-1/2 -translate-y-1/2"
+              >
+                <XCircle className="h-4 w-4" />
+              </button>
             ) : null}
           </div>
-          <div className="flex flex-wrap items-center gap-1.5">
+
+          <div className="flex min-h-10 flex-wrap items-center gap-1.5 rounded-md border border-zinc-200 bg-zinc-50/80 px-2.5 py-1.5 dark:border-zinc-800 dark:bg-zinc-900/50">
             <Badge variant="outline" className={workerOnline ? statusTone.draft_ready : ''}>
               <Laptop className="mr-1 h-3.5 w-3.5" />
               {workerDevice
@@ -567,6 +591,24 @@ export function QueueReview({ embedded = false }: { embedded?: boolean } = {}) {
             )}
           </div>
         </div>
+        <div className="text-muted-foreground mt-2 flex min-w-0 flex-wrap items-center gap-2 text-xs">
+          <span>{m['queue.prepare.mailbox']()}</span>
+          <span aria-hidden="true">·</span>
+          <span>{m['queue.prepare.exclusionsShort']()}</span>
+          {triageSummary ? (
+            <>
+              <span aria-hidden="true">·</span>
+              <span className="text-foreground font-medium">
+                {m['queue.prepare.summary']({
+                  replyCount: triageSummary.replyNeededCount,
+                  noReplyCount: triageSummary.noReplyNeededCount,
+                  scannedCount: triageSummary.scannedCount,
+                  excludedCount: triageSummary.excludedCount,
+                })}
+              </span>
+            </>
+          ) : null}
+        </div>
         {enrollmentCode ? (
           <div className="mt-2 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100">
             <p>{m['queue.worker.enrollment']()}</p>
@@ -576,7 +618,7 @@ export function QueueReview({ embedded = false }: { embedded?: boolean } = {}) {
           </div>
         ) : null}
 
-        <div className="mt-3 flex items-center gap-2 overflow-x-auto pb-1">
+        <div className="mt-2 flex items-center gap-2 overflow-x-auto pb-1">
           <StatusFilterButton
             active={statusFilter === 'all'}
             count={items.length}
@@ -614,79 +656,149 @@ export function QueueReview({ embedded = false }: { embedded?: boolean } = {}) {
         </div>
       </header>
 
-      <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto bg-zinc-50/40 px-4 py-5 sm:px-6 dark:bg-zinc-950/30">
-        {/* Envois send_job (queued/sending/failed) — file DISTINCTE du draft
-            outbox IA ci-dessous, rendue indépendamment de ses états. */}
-        <SendJobsSection />
+      <div className="flex min-h-0 flex-1 flex-col bg-zinc-50/40 dark:bg-zinc-950/30">
+        <div className="shrink-0 px-4 pt-4 sm:px-6">
+          {/* Envois send_job (queued/sending/failed) — file DISTINCTE du draft
+              outbox IA ci-dessous, rendue indépendamment de ses états. */}
+          <SendJobsSection />
+        </div>
         {outboxQuery.isLoading ? (
-          <StateMessage title={m['queue.loading']()} />
+          <div className="p-5">
+            <StateMessage title={m['queue.loading']()} />
+          </div>
         ) : outboxQuery.error ? (
-          <StateMessage
-            title={m['queue.errorTitle']()}
-            action={
-              <Button variant="outline" size="sm" onClick={() => outboxQuery.refetch()}>
-                <RefreshCcw className="h-4 w-4" />
-                {m['queue.refresh']()}
-              </Button>
-            }
-          />
-        ) : visibleItems.length === 0 ? (
-          <StateMessage
-            title={m['queue.emptyTitle']()}
-            description={m['queue.emptyDescription']()}
-          />
+          <div className="p-5">
+            <StateMessage
+              title={m['queue.errorTitle']()}
+              action={
+                <Button variant="outline" size="sm" onClick={() => outboxQuery.refetch()}>
+                  <RefreshCcw className="h-4 w-4" />
+                  {m['queue.refresh']()}
+                </Button>
+              }
+            />
+          </div>
+        ) : visibleItems.length === 0 && savedDraftSearchResults.length === 0 && !hasSearch ? (
+          <div className="p-5">
+            <StateMessage
+              title={m['queue.emptyTitle']()}
+              description={m['queue.emptyDescription']()}
+            />
+          </div>
         ) : (
-          visibleStatuses.map((status) => {
-            const statusItems = grouped[status];
-            if (!statusItems.length) return null;
-
-            return (
-              <div key={status} className="space-y-3">
-                <div className="flex items-center gap-2">
-                  <Badge variant="outline" className={cn('border', statusTone[status])}>
-                    {labels[status]}
-                  </Badge>
-                  <span className="text-sm text-zinc-500 dark:text-zinc-400">
-                    {descriptions[status]}
-                  </span>
-                </div>
-                <div className="grid gap-4">
-                  {statusItems.map((item) => (
-                    <QueueItemRow
-                      key={`${item.id}:${item.contentRevision}`}
-                      item={item}
-                      displayStatus={undoDeadlines[item.id] ? 'approved' : status}
-                      isSelected={item.id === selectedItemId}
-                      isActionMutating={isActionMutating}
-                      isSaving={
-                        updateDraftMutation.isPending &&
-                        updateDraftMutation.variables?.id === item.id
-                      }
-                      now={now}
-                      undoDeadline={undoDeadlines[item.id]}
-                      onApprove={() => approveItem(item)}
-                      onCancel={() => cancelItem(item)}
-                      onOpen={() => openItem(item)}
-                      onRetry={() => retryItem(item)}
-                      onSave={(draft) =>
-                        updateDraftMutation.mutateAsync({
-                          id: item.id,
-                          expectedContentDigest: item.contentDigest,
-                          ...draft,
-                        })
-                      }
-                      onRequestRevision={(instruction) =>
-                        revisionMutation.mutateAsync({ id: item.id, instruction })
-                      }
-                      onRetryRevision={() => retryRevisionMutation.mutateAsync(item.id)}
-                      onSelect={() => setSelectedItemId(item.id)}
-                      statusLabel={labels[undoDeadlines[item.id] ? 'approved' : status]}
-                    />
-                  ))}
-                </div>
+          <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[320px_minmax(0,1fr)] xl:grid-cols-[360px_minmax(0,1fr)]">
+            <aside className="border-border/60 flex min-h-0 flex-col border-r bg-white/75 dark:bg-zinc-950/50">
+              <div className="border-border/60 flex min-h-11 shrink-0 items-center justify-between gap-3 border-b px-3 py-2">
+                <p className="text-sm font-medium">
+                  {hasSearch
+                    ? m['queue.search.results']({ count: resultCount })
+                    : m['queue.search.queueCount']({ count: visibleItems.length })}
+                </p>
+                {savedDraftSearchQuery.isFetching ? (
+                  <LoaderCircle className="text-muted-foreground h-4 w-4 animate-spin" />
+                ) : null}
               </div>
-            );
-          })
+
+              <div className="min-h-0 flex-1 overflow-y-auto p-2">
+                {hasSearch && savedDraftSearchResults.length > 0 ? (
+                  <div className="mb-3">
+                    <p className="text-muted-foreground px-2 pb-1.5 text-[11px] font-semibold uppercase tracking-[0.12em]">
+                      {m['queue.search.savedDrafts']()}
+                    </p>
+                    <div className="space-y-1">
+                      {savedDraftSearchResults.map((draft) => (
+                        <SavedDraftSearchRow
+                          key={draft.id}
+                          draft={draft}
+                          onOpen={() => {
+                            setDraftId(draft.id);
+                            setComposeOpen('true');
+                          }}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+
+                {visibleItems.length > 0 ? (
+                  <div>
+                    {hasSearch && savedDraftSearchResults.length > 0 ? (
+                      <p className="text-muted-foreground px-2 pb-1.5 text-[11px] font-semibold uppercase tracking-[0.12em]">
+                        {m['queue.search.agentDrafts']()}
+                      </p>
+                    ) : null}
+                    <div className="space-y-1">
+                      {visibleItems.map((item) => {
+                        const displayStatus = undoDeadlines[item.id] ? 'approved' : item.status;
+                        return (
+                          <QueueItemListRow
+                            key={item.id}
+                            item={item}
+                            selected={item.id === selectedItemId}
+                            statusLabel={labels[displayStatus]}
+                            displayStatus={displayStatus}
+                            onSelect={() => setSelectedItemId(item.id)}
+                          />
+                        );
+                      })}
+                    </div>
+                  </div>
+                ) : null}
+
+                {visibleItems.length === 0 && savedDraftSearchResults.length === 0 ? (
+                  <div className="flex min-h-48 flex-col items-center justify-center px-4 text-center">
+                    <Search className="text-muted-foreground h-5 w-5" />
+                    <p className="mt-3 text-sm font-medium">{m['queue.search.noResults']()}</p>
+                    <p className="text-muted-foreground mt-1 text-xs leading-5">
+                      {m['queue.search.noResultsDescription']()}
+                    </p>
+                  </div>
+                ) : null}
+              </div>
+            </aside>
+
+            <main className="min-h-0 overflow-y-auto p-3 sm:p-4 lg:p-5">
+              {selectedItem ? (
+                <QueueItemRow
+                  key={`${selectedItem.id}:${selectedItem.contentRevision}`}
+                  item={selectedItem}
+                  displayStatus={undoDeadlines[selectedItem.id] ? 'approved' : selectedItem.status}
+                  isSelected
+                  isActionMutating={isActionMutating}
+                  isSaving={
+                    updateDraftMutation.isPending &&
+                    updateDraftMutation.variables?.id === selectedItem.id
+                  }
+                  now={now}
+                  undoDeadline={undoDeadlines[selectedItem.id]}
+                  onApprove={() => approveItem(selectedItem)}
+                  onCancel={() => cancelItem(selectedItem)}
+                  onOpen={() => openItem(selectedItem)}
+                  onRetry={() => retryItem(selectedItem)}
+                  onSave={(draft) =>
+                    updateDraftMutation.mutateAsync({
+                      id: selectedItem.id,
+                      expectedContentDigest: selectedItem.contentDigest,
+                      ...draft,
+                    })
+                  }
+                  onRequestRevision={(instruction) =>
+                    revisionMutation.mutateAsync({ id: selectedItem.id, instruction })
+                  }
+                  onRetryRevision={() => retryRevisionMutation.mutateAsync(selectedItem.id)}
+                  onSelect={() => setSelectedItemId(selectedItem.id)}
+                  statusLabel={
+                    labels[undoDeadlines[selectedItem.id] ? 'approved' : selectedItem.status]
+                  }
+                />
+              ) : (
+                <StateMessage
+                  title={m['queue.search.selectTitle']()}
+                  description={m['queue.search.selectDescription']()}
+                />
+              )}
+            </main>
+          </div>
         )}
       </div>
     </section>
@@ -717,6 +829,88 @@ function StatusFilterButton({
     >
       <span>{label}</span>
       <span className="bg-current/10 rounded-full px-1.5 text-xs">{count}</span>
+    </button>
+  );
+}
+
+function QueueItemListRow({
+  item,
+  selected,
+  displayStatus,
+  statusLabel,
+  onSelect,
+}: {
+  item: QueueItem;
+  selected: boolean;
+  displayStatus: OutboxStatus;
+  statusLabel: string;
+  onSelect: () => void;
+}) {
+  const recipients = normalizeEditableAddresses(item.to).join(', ');
+  const preview = getPreview(item.body);
+
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      aria-current={selected ? 'true' : undefined}
+      className={cn(
+        'focus-visible:ring-primary/35 w-full rounded-lg border px-3 py-2.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2',
+        selected
+          ? 'border-primary/30 bg-primary/[0.07]'
+          : 'hover:border-border hover:bg-muted/55 border-transparent',
+      )}
+    >
+      <div className="flex items-center justify-between gap-2">
+        <Badge
+          variant="outline"
+          className={cn('h-5 max-w-[70%] border px-1.5 text-[10px]', statusTone[displayStatus])}
+        >
+          <span className="truncate">{statusLabel}</span>
+        </Badge>
+        <span className="text-muted-foreground shrink-0 text-[10px] tabular-nums">
+          {formatDate(item.updatedAt)}
+        </span>
+      </div>
+      <p className="mt-1.5 line-clamp-2 text-sm font-semibold leading-5">
+        {item.subject || m['queue.item.untitled']()}
+      </p>
+      <p className="text-muted-foreground mt-1 truncate text-xs">
+        {recipients || m['queue.search.noRecipient']()}
+      </p>
+      {preview ? (
+        <p className="text-muted-foreground mt-1 line-clamp-2 text-xs leading-4">{preview}</p>
+      ) : null}
+    </button>
+  );
+}
+
+function SavedDraftSearchRow({ draft, onOpen }: { draft: DraftListRow; onOpen: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      className="hover:border-border hover:bg-muted/55 focus-visible:ring-primary/35 flex w-full gap-2.5 rounded-lg border border-transparent px-3 py-2.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2"
+    >
+      <span className="bg-muted text-muted-foreground mt-0.5 rounded-md p-1.5">
+        <FileText className="h-3.5 w-3.5" />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="flex items-center justify-between gap-2">
+          <span className="truncate text-xs font-semibold">{draft.recipient}</span>
+          {draft.receivedAt ? (
+            <span className="text-muted-foreground shrink-0 text-[10px] tabular-nums">
+              {formatDate(new Date(draft.receivedAt))}
+            </span>
+          ) : null}
+        </span>
+        <span className="mt-0.5 line-clamp-2 block text-sm leading-5">{draft.subject}</span>
+        {draft.preview ? (
+          <span className="text-muted-foreground mt-1 line-clamp-1 block text-xs">
+            {draft.preview}
+          </span>
+        ) : null}
+      </span>
     </button>
   );
 }
@@ -872,6 +1066,18 @@ function QueueItemRow({
       }
     };
   }, [canEdit, correctionPending, currentSignature, isDirty, persistCurrentDraft]);
+
+  useEffect(
+    () => () => {
+      if (autosaveTimerRef.current !== null) {
+        window.clearTimeout(autosaveTimerRef.current);
+      }
+      if (isDirtyRef.current && !savePromiseRef.current) {
+        void onSaveRef.current(currentDraftRef.current).catch(() => {});
+      }
+    },
+    [],
+  );
 
   const requestRevision = async () => {
     if (!instruction.trim()) return;

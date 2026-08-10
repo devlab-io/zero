@@ -6,7 +6,7 @@ const source = readFileSync(join(__dirname, 'queue-review.tsx'), 'utf8');
 
 describe('queue draft editor synchronization', () => {
   it('does not replace unsaved edits on every polling response', () => {
-    expect(source).toContain('key={`${item.id}:${item.contentRevision}`}');
+    expect(source).toContain('key={`${selectedItem.id}:${selectedItem.contentRevision}`}');
     expect(source).not.toContain('key={item.id}\n                      item={item}');
   });
 
@@ -27,5 +27,24 @@ describe('queue draft editor synchronization', () => {
     expect(source).toContain('hasUserInputRef.current && currentEditor.isFocused');
     expect(source).toContain('event.isTrusted && view.hasFocus()');
     expect(source).toContain('beforeinput: (view, event) =>');
+  });
+
+  it('uses a searchable master-detail layout instead of stacking every editor', () => {
+    expect(source).toContain("m['queue.search.placeholder']()");
+    expect(source).toContain('lg:grid-cols-[320px_minmax(0,1fr)]');
+    expect(source).toContain('<QueueItemListRow');
+    expect(source).toContain('item={selectedItem}');
+  });
+
+  it('searches saved drafts as well as Agent replies without duplicating Agent drafts', () => {
+    expect(source).toContain('trpc.drafts.list.queryOptions');
+    expect(source).toContain('savedDraftSearchResults');
+    expect(source).toContain('agentDraftIds.has(row.id)');
+    expect(source).toContain('<SavedDraftSearchRow');
+  });
+
+  it('flushes a dirty draft when switching the selected result', () => {
+    expect(source).toContain('isDirtyRef.current && !savePromiseRef.current');
+    expect(source).toContain('onSaveRef.current(currentDraftRef.current)');
   });
 });

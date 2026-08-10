@@ -1063,6 +1063,20 @@
       "retryFailed": "Impossible de relancer cet envoi"
     },
     "filterAll": "Tous les statuts",
+    "search": {
+      "label": "Rechercher des brouillons",
+      "placeholder": "Rechercher un destinataire, un objet ou un message...",
+      "clear": "Effacer la recherche",
+      "results": "{count} résultats",
+      "queueCount": "{count} réponses",
+      "savedDrafts": "Mes brouillons",
+      "agentDrafts": "Réponses Agent",
+      "noResults": "Aucun brouillon trouvé",
+      "noResultsDescription": "La recherche couvre les réponses Agent et vos brouillons enregistrés.",
+      "selectTitle": "Sélectionnez une réponse",
+      "selectDescription": "Choisissez une réponse Agent pour la modifier ici, ou ouvrez un brouillon enregistré depuis les résultats.",
+      "noRecipient": "Aucun destinataire"
+    },
     "pendingForReview": "{count} à relire",
     "loading": "Chargement de la file...",
     "emptyTitle": "Aucune réponse dans ce statut",

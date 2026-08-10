@@ -1063,6 +1063,20 @@
       "retryFailed": "Could not retry this send"
     },
     "filterAll": "All statuses",
+    "search": {
+      "label": "Search drafts",
+      "placeholder": "Search recipient, subject or message...",
+      "clear": "Clear search",
+      "results": "{count} results",
+      "queueCount": "{count} replies",
+      "savedDrafts": "My drafts",
+      "agentDrafts": "Agent replies",
+      "noResults": "No matching draft",
+      "noResultsDescription": "Search covers Agent replies and your saved drafts.",
+      "selectTitle": "Select a reply",
+      "selectDescription": "Choose an Agent reply to edit it here, or open a saved draft from the search results.",
+      "noRecipient": "No recipient"
+    },
     "pendingForReview": "{count} pending review",
     "loading": "Loading queue...",
     "emptyTitle": "No replies in this status",
