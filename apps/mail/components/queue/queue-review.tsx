@@ -1414,7 +1414,7 @@ function QueueItemRow({
             </Button>
           ) : null}
           {canApprove ? (
-            <span className="text-muted-foreground hidden text-xs md:inline">
+            <span className="text-muted-foreground hidden text-xs xl:inline">
               {m['queue.item.sendHint']()}
             </span>
           ) : null}

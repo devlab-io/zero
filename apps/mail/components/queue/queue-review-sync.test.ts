@@ -54,6 +54,7 @@ describe('queue draft editor synchronization', () => {
 
   it('makes Send the terminal primary action with the 15s cancel hint beside it', () => {
     expect(source).toContain("m['queue.item.sendHint']()");
+    expect(source).toContain('text-muted-foreground hidden text-xs xl:inline');
     const cancelIndex = source.indexOf("m['queue.actions.reject']()");
     const sendIndex = source.indexOf("m['queue.actions.approve']()");
     expect(cancelIndex).toBeGreaterThan(0);
