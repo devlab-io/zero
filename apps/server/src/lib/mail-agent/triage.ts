@@ -9,7 +9,15 @@ const NO_REPLY_LOCAL_PART =
 const AUTOMATIC_REPLY_SUBJECT =
   /^(?:automatic reply|auto(?:matic)?[ -]?reply|out of office|réponse automatique|absence du bureau)\s*:/i;
 
-const normalizeEmail = (value: string | undefined) => value?.trim().toLowerCase() ?? '';
+export const normalizeMailAddress = (value: string | undefined) => {
+  const trimmed = value?.trim() ?? '';
+  const bracketed = trimmed.match(/<\s*([^<>]+?)\s*>/);
+  return (bracketed?.[1] ?? trimmed).trim().toLowerCase();
+};
+
+export const normalizeMailAddresses = (values: string[]) => [
+  ...new Set(values.map(normalizeMailAddress).filter(Boolean)),
+];
 
 const replySubject = (subject: string) =>
   /^re\s*:/i.test(subject.trim()) ? subject.trim() : `Re: ${subject.trim() || '(sans objet)'}`;
@@ -31,16 +39,16 @@ export function classifyTriageThread(input: {
   thread: IGetThreadResponse;
   mailboxEmail: string;
 }): TriageCandidate | null {
-  const mailboxEmail = normalizeEmail(input.mailboxEmail);
+  const mailboxEmail = normalizeMailAddress(input.mailboxEmail);
   const latest =
     input.thread.latest ?? input.thread.messages.findLast((message) => !message.isDraft);
   if (!latest || latest.isDraft) return null;
 
   const labels = new Set(input.thread.labels.map((label) => label.id.toUpperCase()));
   if (labels.has('SPAM') || labels.has('TRASH') || labels.has('DRAFT')) return null;
-  if (normalizeEmail(latest.sender.email) === mailboxEmail) return null;
+  if (normalizeMailAddress(latest.sender.email) === mailboxEmail) return null;
 
-  const senderEmail = normalizeEmail(latest.replyTo || latest.sender.email);
+  const senderEmail = normalizeMailAddress(latest.replyTo || latest.sender.email);
   if (!senderEmail) return null;
   const senderLocalPart = senderEmail.split('@')[0] ?? '';
   const isAutomaticReply = AUTOMATIC_REPLY_SUBJECT.test(latest.subject.trim());
@@ -49,7 +57,7 @@ export function classifyTriageThread(input: {
     NO_REPLY_LOCAL_PART.test(senderLocalPart) ||
     isAutomaticReply;
   const cc = [...latest.to, ...(latest.cc ?? [])]
-    .map((recipient) => normalizeEmail(recipient.email))
+    .map((recipient) => normalizeMailAddress(recipient.email))
     .filter((email) => email && email !== mailboxEmail && email !== senderEmail);
   const attachments = input.thread.messages.flatMap((message) =>
     (message.attachments ?? [])

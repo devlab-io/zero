@@ -1,4 +1,9 @@
-import { RETA_TRIAGE_MAILBOX, classifyTriageThread, triageSearchQuery } from './triage';
+import {
+  RETA_TRIAGE_MAILBOX,
+  classifyTriageThread,
+  normalizeMailAddresses,
+  triageSearchQuery,
+} from './triage';
 import type { IGetThreadResponse } from '../driver/types';
 import { describe, expect, it } from 'vitest';
 
@@ -59,6 +64,16 @@ describe('RETA mail triage', () => {
       subject: 'Re: Projet',
       sourceAttachments: [{ filename: 'devis.pdf', mimeType: 'application/pdf', size: 1200 }],
     });
+  });
+
+  it('retire les chevrons et espaces hérités des en-têtes de destinataires', () => {
+    expect(
+      normalizeMailAddresses([
+        '<shane@devlab.io>',
+        ' <chloe@eg-exoticgardens.com>',
+        'Shane <shane@devlab.io>',
+      ]),
+    ).toEqual(['shane@devlab.io', 'chloe@eg-exoticgardens.com']);
   });
 
   it('écarte un fil déjà répondu par Thomas', () => {

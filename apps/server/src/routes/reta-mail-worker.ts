@@ -7,6 +7,7 @@ import {
   getClaimedDraftRevision,
   updateDraftOutboxSnapshot,
 } from '../lib/mail-agent';
+import { normalizeMailAddresses } from '../lib/mail-agent/triage';
 import { createDraftContentDigest } from '../lib/draft-outbox';
 import { getThread, getZeroAgent } from '../lib/server-utils';
 import type { ParsedDraft } from '../lib/driver/types';
@@ -201,10 +202,14 @@ export const retaMailWorkerRouter = new Hono<HonoContext>()
         return c.json({ error: 'Draft changed; no update applied' }, 409);
       }
 
+      const to = normalizeMailAddresses(item.to);
+      const cc = normalizeMailAddresses(item.cc);
+      const bcc = normalizeMailAddresses(item.bcc);
+
       const saved = await agent.createDraft({
-        to: item.to.join(', '),
-        cc: item.cc.join(', '),
-        bcc: item.bcc.join(', '),
+        to: to.join(', '),
+        cc: cc.join(', '),
+        bcc: bcc.join(', '),
         subject: parsed.data.subject,
         message: parsed.data.body,
         attachments: serializedAttachments(providerDraft),
@@ -222,18 +227,18 @@ export const retaMailWorkerRouter = new Hono<HonoContext>()
       }
 
       const digest = await createDraftContentDigest({
-        to: item.to,
-        cc: item.cc,
-        bcc: item.bcc,
+        to,
+        cc,
+        bcc,
         subject: parsed.data.subject,
         body: parsed.data.body,
       });
       const updated = await updateDraftOutboxSnapshot(db, {
         id: item.id,
         expectedRevision: item.contentRevision,
-        to: item.to,
-        cc: item.cc,
-        bcc: item.bcc,
+        to,
+        cc,
+        bcc,
         subject: parsed.data.subject,
         body: parsed.data.body,
         digest,
