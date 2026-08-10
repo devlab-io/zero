@@ -19,6 +19,9 @@ describe('queue thread message rendering', () => {
       'Bonjour Thomas\nMerci & à bientôt',
     );
     expect(queueMessageText('<ul><li>Un</li><li>Deux</li></ul>')).toBe('• Un\n• Deux');
+    expect(queueMessageText('<div>Bonjour</div><div>Ci-joint mon CV</div>')).toBe(
+      'Bonjour\nCi-joint mon CV',
+    );
   });
 
   it('does not throw on an invalid numeric entity', () => {

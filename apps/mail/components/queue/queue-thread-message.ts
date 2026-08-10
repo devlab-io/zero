@@ -59,7 +59,7 @@ export const queueMessageText = (html: string) =>
     html
       .replace(/<br\s*\/?>/gi, '\n')
       .replace(/<li\b[^>]*>/gi, '• ')
-      .replace(/<\/(?:blockquote|li|ol|p|ul)>/gi, '\n')
+      .replace(/<\/(?:blockquote|div|li|ol|p|ul)>/gi, '\n')
       .replace(/<[^>]*>/g, ''),
   )
     .replace(/[ \t]+\n/g, '\n')
