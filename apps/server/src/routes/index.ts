@@ -60,6 +60,10 @@ function hashIpAddress(ip: string | undefined): string | undefined {
 
 export const api = new Hono<HonoContext>()
   .use(contextStorage())
+  // Must be registered inside the /api sub-app before its catch-all session
+  // middleware. Otherwise @hono/trpc-server interprets `reta-mail-worker` as
+  // a tRPC procedure path and the local worker cannot enroll or claim jobs.
+  .route('/reta-mail-worker', retaMailWorkerRouter)
   // r14 : chemin RAPIDE get-session — enregistré AVANT le middleware global,
   // donc SANS la pré-résolution de session ni le tracing par-requête que ce
   // middleware impose à toutes les routes (CUA r13 : RTT get-session
@@ -339,9 +343,6 @@ export const app = new Hono<HonoContext>()
     },
     { replaceRequest: false },
   )
-  // Worker local RETA : authentification par appareil révocable, surface
-  // volontairement limitée au claim/complete/fail. Aucune route d'envoi.
-  .route('/api/reta-mail-worker', retaMailWorkerRouter)
   .route('/api', api)
   // P18 — webhooks Linear entrants : montés HORS du middleware de session
   // (authentification par HMAC sur octets bruts, pas par cookie), AVANT tout

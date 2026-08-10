@@ -10,6 +10,7 @@ import { join } from 'node:path';
 const source = readFileSync(join(__dirname, 'index.ts'), 'utf8');
 
 describe('ordre de routage /api (r14)', () => {
+  const retaMailWorkerMount = source.indexOf(".route('/reta-mail-worker', retaMailWorkerRouter)");
   const fastRoute = source.indexOf(".get('/auth/get-session'");
   const globalMiddleware = source.indexOf(".use('*', async (c, next) => {");
   const genericAuthRoute = source.indexOf("'/auth/*'");
@@ -25,6 +26,13 @@ describe('ordre de routage /api (r14)', () => {
     expect(fastRoute).toBeGreaterThan(-1);
     expect(globalMiddleware).toBeGreaterThan(-1);
     expect(fastRoute).toBeLessThan(globalMiddleware);
+  });
+
+  it('le worker RETA reste dans /api mais avant le middleware de session et le catch-all tRPC', () => {
+    expect(retaMailWorkerMount).toBeGreaterThan(-1);
+    expect(retaMailWorkerMount).toBeLessThan(globalMiddleware);
+    expect(retaMailWorkerMount).toBeLessThan(trpcMount);
+    expect(source).not.toContain(".route('/api/reta-mail-worker', retaMailWorkerRouter)");
   });
 
   it('la route générique /auth/* (OAuth, callbacks, sign-out) reste APRÈS le middleware complet', () => {
