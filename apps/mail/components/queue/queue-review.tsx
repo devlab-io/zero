@@ -20,8 +20,8 @@ import {
   XCircle,
 } from 'lucide-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { SendJobsSection } from '@/components/queue/send-jobs-section';
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useTRPC, useTRPCClient } from '@/providers/query-provider';
 import { defaultExtensions } from '@/components/create/extensions';
 import { useShortcuts } from '@/lib/hotkeys/use-hotkey-utils';
@@ -735,14 +735,18 @@ function QueueItemRow({
   const [subject, setSubject] = useState(item.subject);
   const [body, setBody] = useState(item.body);
   const [instruction, setInstruction] = useState('');
+  const syncedServerRevision = useRef<string | null>(null);
 
   useEffect(() => {
+    const revisionKey = `${item.id}:${item.contentRevision}`;
+    if (syncedServerRevision.current === revisionKey) return;
     setTo(item.to.join(', '));
     setCc(item.cc.join(', '));
     setBcc(item.bcc.join(', '));
     setSubject(item.subject);
     setBody(item.body);
-  }, [item.bcc, item.body, item.cc, item.contentRevision, item.subject, item.to]);
+    syncedServerRevision.current = revisionKey;
+  }, [item.bcc, item.body, item.cc, item.contentRevision, item.id, item.subject, item.to]);
 
   const parseAddresses = (value: string) =>
     value
@@ -1065,6 +1069,14 @@ function QueueBodyEditor({
   useEffect(() => {
     editor?.setEditable(!disabled);
   }, [disabled, editor]);
+
+  useEffect(() => {
+    if (!editor) return;
+    const nextContent = initialValue || '<p></p>';
+    if (editor.getHTML() !== nextContent) {
+      editor.commands.setContent(nextContent, false);
+    }
+  }, [editor, initialValue]);
 
   return (
     <div className="rounded-md border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950">
