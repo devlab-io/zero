@@ -68,9 +68,11 @@ async function workerFetch(path, token, init = {}) {
   });
   const body = await response.json().catch(() => ({}));
   if (!response.ok) {
-    const error = new Error(
-      typeof body.error === 'string' ? body.error : `HTTP ${response.status}`,
+    const parts = [body.error, body.message].filter(
+      (part, index, values) =>
+        typeof part === 'string' && part.trim() && values.indexOf(part) === index,
     );
+    const error = new Error(parts.length ? parts.join(': ') : `HTTP ${response.status}`);
     error.status = response.status;
     throw error;
   }
