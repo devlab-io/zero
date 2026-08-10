@@ -1100,6 +1100,7 @@
     "selected": "Selected",
     "noSelection": "Select a queue item first",
     "keyboardTitle": "Queue keys",
+    "keyboardNavigate": "Navigate",
     "keyboardApprove": "Send",
     "keyboardReject": "Reject",
     "keyboardOpen": "View thread",
@@ -1178,7 +1179,8 @@
       "autosaved": "Saved automatically",
       "workerRuntimeRecovered": "The local worker was updated. This preparation can now be retried.",
       "correctionQueued": "Correction added to the Codex queue",
-      "undoCountdown": "Undo for {seconds}s"
+      "undoCountdown": "Undo for {seconds}s",
+      "sendHint": "You have 15 seconds to cancel after Send."
     }
   },
   "navigation": {

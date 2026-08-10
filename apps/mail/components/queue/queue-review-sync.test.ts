@@ -44,6 +44,23 @@ describe('queue draft editor synchronization', () => {
     expect(source).toContain('xl:h-auto');
   });
 
+  it('keeps the queue navigable and sendable from the keyboard', () => {
+    expect(source).toContain('moveDraftSelection');
+    expect(source).toContain("keys: ['j']");
+    expect(source).toContain("keys: ['k']");
+    expect(source).toContain('data-queue-row');
+    expect(source).toContain('CSS.escape(selectedItemId)');
+  });
+
+  it('makes Send the terminal primary action with the 15s cancel hint beside it', () => {
+    expect(source).toContain("m['queue.item.sendHint']()");
+    const cancelIndex = source.indexOf("m['queue.actions.reject']()");
+    const sendIndex = source.indexOf("m['queue.actions.approve']()");
+    expect(cancelIndex).toBeGreaterThan(0);
+    expect(sendIndex).toBeGreaterThan(cancelIndex);
+    expect(source).toContain("m['queue.item.undoCountdown']({ seconds: undoSeconds })");
+  });
+
   it('searches saved drafts and the mailbox as well as Agent replies', () => {
     expect(source).toContain('trpc.drafts.list.queryOptions');
     expect(source).toContain('trpc.mail.listThreads.queryOptions');

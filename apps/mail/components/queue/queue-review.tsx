@@ -36,7 +36,11 @@ import {
   matchesQueueSearch,
   type MailboxSearchRow,
 } from '@/components/queue/queue-search-model';
-import { draftListRow, type DraftListRow } from '@/components/drafts/draft-workspace-model';
+import {
+  draftListRow,
+  moveDraftSelection,
+  type DraftListRow,
+} from '@/components/drafts/draft-workspace-model';
 import { pruneSentDraftFromCache, publishDraftSent } from '@/lib/draft-send-reconciliation';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -106,6 +110,20 @@ const statusTone: Record<OutboxStatus, string> = {
     'border-red-200 bg-red-50 text-red-800 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-300',
 };
 
+// Pastille compacte par statut : la liste reste lisible sans répéter un badge
+// plein sur chaque ligne (le badge n'apparaît que hors draft_ready).
+const statusDotTone: Record<OutboxStatus, string> = {
+  queued: 'bg-sky-500',
+  generating: 'bg-amber-500',
+  draft_ready: 'bg-emerald-500',
+  approved: 'bg-blue-500',
+  sending: 'bg-cyan-500',
+  sent: 'bg-zinc-400',
+  cancelled: 'bg-rose-500',
+  no_reply_needed: 'bg-violet-500',
+  failed: 'bg-red-500',
+};
+
 const statusLabels = (): Record<OutboxStatus, string> => ({
   queued: m['queue.status.queued'](),
   generating: m['queue.status.generating'](),
@@ -116,6 +134,18 @@ const statusLabels = (): Record<OutboxStatus, string> => ({
   cancelled: m['queue.status.cancelled'](),
   no_reply_needed: m['queue.status.noReplyNeeded'](),
   failed: m['queue.status.failed'](),
+});
+
+const statusDescriptions = (): Record<OutboxStatus, string> => ({
+  queued: m['queue.statusDescription.queued'](),
+  generating: m['queue.statusDescription.generating'](),
+  draft_ready: m['queue.statusDescription.draftReady'](),
+  approved: m['queue.statusDescription.approved'](),
+  sending: m['queue.statusDescription.sending'](),
+  sent: m['queue.statusDescription.sent'](),
+  cancelled: m['queue.statusDescription.cancelled'](),
+  no_reply_needed: m['queue.statusDescription.noReplyNeeded'](),
+  failed: m['queue.statusDescription.failed'](),
 });
 
 const formatDate = (value?: Date | string | null) => {
@@ -379,6 +409,13 @@ export function QueueReview({ embedded = false }: { embedded?: boolean } = {}) {
     }
   }, [selectedItemId, visibleItems]);
 
+  useEffect(() => {
+    if (!selectedItemId) return;
+    document.querySelector(`[data-queue-row="${CSS.escape(selectedItemId)}"]`)?.scrollIntoView({
+      block: 'nearest',
+    });
+  }, [selectedItemId]);
+
   const invalidateOutbox = async () => {
     await queryClient.invalidateQueries({ queryKey: trpc.outbox.list.queryKey() });
   };
@@ -473,6 +510,20 @@ export function QueueReview({ embedded = false }: { embedded?: boolean } = {}) {
   const queueShortcuts = useMemo<Shortcut[]>(
     () => [
       {
+        keys: ['j'],
+        action: 'selectNext',
+        type: 'single',
+        description: m['queue.keyboardNavigate'](),
+        scope: 'queue',
+      },
+      {
+        keys: ['k'],
+        action: 'selectPrevious',
+        type: 'single',
+        description: m['queue.keyboardNavigate'](),
+        scope: 'queue',
+      },
+      {
         keys: ['d'],
         action: 'approveSelected',
         type: 'single',
@@ -511,7 +562,19 @@ export function QueueReview({ embedded = false }: { embedded?: boolean } = {}) {
     [],
   );
 
+  const moveSelection = (direction: -1 | 1) => {
+    setSelectedItemId((current) =>
+      moveDraftSelection(
+        visibleItems.map((item) => item.id),
+        current,
+        direction,
+      ),
+    );
+  };
+
   const shortcutHandlers = {
+    selectNext: () => moveSelection(1),
+    selectPrevious: () => moveSelection(-1),
     approveSelected: () => {
       void approveItem(selectedItem);
     },
@@ -545,31 +608,42 @@ export function QueueReview({ embedded = false }: { embedded?: boolean } = {}) {
       )}
     >
       <header className={cn('border-border/60 border-b px-4 sm:px-6', embedded ? 'py-3' : 'py-4')}>
-        <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
-          {embedded ? (
-            <div className="flex min-w-0 flex-wrap items-center gap-2">
-              <Badge
-                variant="outline"
-                className="border-emerald-300 text-emerald-700 dark:border-emerald-500/40 dark:text-emerald-300"
+        {!embedded ? (
+          <div className="min-w-0 space-y-1.5 pb-3">
+            <h1 className="text-2xl font-semibold tracking-normal">{m['queue.title']()}</h1>
+            <p className="text-muted-foreground max-w-3xl text-sm">{m['queue.subtitle']()}</p>
+          </div>
+        ) : null}
+
+        {/* Barre outils unique : compteur à relire, recherche globale, scan et
+            worker Codex tiennent sur une ligne — le reste du header respire. */}
+        <div className="flex flex-col gap-2 lg:flex-row lg:items-center">
+          <Badge
+            variant="outline"
+            className="h-10 shrink-0 self-start rounded-md border-emerald-300 px-3 text-sm text-emerald-700 lg:self-auto dark:border-emerald-500/40 dark:text-emerald-300"
+          >
+            {m['queue.pendingForReview']({ count: pendingReviewCount })}
+          </Badge>
+          <div className="relative min-w-0 flex-1">
+            <Search className="text-muted-foreground pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2" />
+            <Input
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+              placeholder={m['queue.search.placeholder']()}
+              aria-label={m['queue.search.label']()}
+              className="h-10 bg-white pl-9 pr-9 dark:bg-zinc-950"
+            />
+            {searchQuery ? (
+              <button
+                type="button"
+                onClick={() => setSearchQuery('')}
+                aria-label={m['queue.search.clear']()}
+                className="text-muted-foreground hover:text-foreground absolute right-2.5 top-1/2 -translate-y-1/2"
               >
-                {m['queue.pendingForReview']({ count: pendingReviewCount })}
-              </Badge>
-              <p className="text-muted-foreground text-sm">{m['queue.subtitle']()}</p>
-            </div>
-          ) : (
-            <div className="min-w-0 space-y-2">
-              <div className="flex flex-wrap items-center gap-2">
-                <h1 className="text-2xl font-semibold tracking-normal">{m['queue.title']()}</h1>
-                <Badge
-                  variant="outline"
-                  className="border-emerald-300 text-emerald-700 dark:border-emerald-500/40 dark:text-emerald-300"
-                >
-                  {m['queue.pendingForReview']({ count: pendingReviewCount })}
-                </Badge>
-              </div>
-              <p className="text-muted-foreground max-w-3xl text-sm">{m['queue.subtitle']()}</p>
-            </div>
-          )}
+                <XCircle className="h-4 w-4" />
+              </button>
+            ) : null}
+          </div>
 
           <div className="flex flex-wrap items-center gap-2">
             <Button
@@ -592,66 +666,45 @@ export function QueueReview({ embedded = false }: { embedded?: boolean } = {}) {
                 {m['queue.prepare.loadMore']()}
               </Button>
             ) : null}
-          </div>
-        </div>
-
-        <div className="mt-2.5 flex flex-col gap-2 lg:flex-row lg:items-center">
-          <div className="relative min-w-0 flex-1">
-            <Search className="text-muted-foreground pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2" />
-            <Input
-              value={searchQuery}
-              onChange={(event) => setSearchQuery(event.target.value)}
-              placeholder={m['queue.search.placeholder']()}
-              aria-label={m['queue.search.label']()}
-              className="h-10 bg-white pl-9 pr-9 dark:bg-zinc-950"
-            />
-            {searchQuery ? (
-              <button
-                type="button"
-                onClick={() => setSearchQuery('')}
-                aria-label={m['queue.search.clear']()}
-                className="text-muted-foreground hover:text-foreground absolute right-2.5 top-1/2 -translate-y-1/2"
-              >
-                <XCircle className="h-4 w-4" />
-              </button>
-            ) : null}
-          </div>
-
-          <div className="flex min-h-10 flex-wrap items-center gap-1.5 rounded-md border border-zinc-200 bg-zinc-50/80 px-2.5 py-1.5 dark:border-zinc-800 dark:bg-zinc-900/50">
-            <Badge variant="outline" className={workerOnline ? statusTone.draft_ready : ''}>
-              <Laptop className="mr-1 h-3.5 w-3.5" />
-              {workerDevice
-                ? workerOnline
-                  ? m['queue.worker.online']()
-                  : m['queue.worker.offline']()
-                : m['queue.worker.never']()}
-            </Badge>
-            {workerLastSeen ? (
-              <span className="text-muted-foreground text-xs">
-                {m['queue.worker.lastSeen']({ date: formatDate(workerLastSeen) ?? '—' })}
-              </span>
-            ) : null}
-            {!workerDevice ? (
-              <Button
-                type="button"
-                size="sm"
+            <div className="flex min-h-10 items-center gap-1.5 rounded-md border border-zinc-200 bg-zinc-50/80 px-2.5 py-1.5 dark:border-zinc-800 dark:bg-zinc-900/50">
+              <Badge
                 variant="outline"
-                onClick={() => enrollmentMutation.mutate()}
-                disabled={enrollmentMutation.isPending}
+                className={workerOnline ? statusTone.draft_ready : ''}
+                title={
+                  workerLastSeen
+                    ? m['queue.worker.lastSeen']({ date: formatDate(workerLastSeen) ?? '—' })
+                    : undefined
+                }
               >
-                {m['queue.worker.configure']()}
-              </Button>
-            ) : (
-              <Button
-                type="button"
-                size="sm"
-                variant="ghost"
-                onClick={() => revokeDeviceMutation.mutate(workerDevice.id)}
-                disabled={revokeDeviceMutation.isPending}
-              >
-                {m['queue.worker.revoke']()}
-              </Button>
-            )}
+                <Laptop className="mr-1 h-3.5 w-3.5" />
+                {workerDevice
+                  ? workerOnline
+                    ? m['queue.worker.online']()
+                    : m['queue.worker.offline']()
+                  : m['queue.worker.never']()}
+              </Badge>
+              {!workerDevice ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => enrollmentMutation.mutate()}
+                  disabled={enrollmentMutation.isPending}
+                >
+                  {m['queue.worker.configure']()}
+                </Button>
+              ) : (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => revokeDeviceMutation.mutate(workerDevice.id)}
+                  disabled={revokeDeviceMutation.isPending}
+                >
+                  {m['queue.worker.revoke']()}
+                </Button>
+              )}
+            </div>
           </div>
         </div>
         <div className="text-muted-foreground mt-1.5 hidden min-w-0 flex-wrap items-center gap-2 text-xs md:flex">
@@ -697,25 +750,32 @@ export function QueueReview({ embedded = false }: { embedded?: boolean } = {}) {
               onClick={() => setStatusFilter(status)}
             />
           ))}
-          {retryableRevisionItems.length > 1 ? (
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              className="ml-auto shrink-0"
-              onClick={() =>
-                retryAllRevisionFailuresMutation.mutate(
-                  retryableRevisionItems.map((item) => item.id),
-                )
-              }
-              disabled={retryAllRevisionFailuresMutation.isPending || !workerOnline}
-            >
-              <RotateCcw className="h-4 w-4" />
-              {retryAllRevisionFailuresMutation.isPending
-                ? m['queue.actions.retrying']()
-                : m['queue.actions.retryMany']({ count: retryableRevisionItems.length })}
-            </Button>
-          ) : null}
+          <div className="ml-auto flex shrink-0 items-center gap-2">
+            <div className="text-muted-foreground hidden items-center gap-2 text-xs xl:flex">
+              <QueueShortcutHint keys="J / K" label={m['queue.keyboardNavigate']()} />
+              <QueueShortcutHint keys="D" label={m['queue.keyboardApprove']()} />
+              <QueueShortcutHint keys="R" label={m['queue.keyboardReject']()} />
+              <QueueShortcutHint keys="F" label={m['queue.keyboardOpen']()} />
+            </div>
+            {retryableRevisionItems.length > 1 ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() =>
+                  retryAllRevisionFailuresMutation.mutate(
+                    retryableRevisionItems.map((item) => item.id),
+                  )
+                }
+                disabled={retryAllRevisionFailuresMutation.isPending || !workerOnline}
+              >
+                <RotateCcw className="h-4 w-4" />
+                {retryAllRevisionFailuresMutation.isPending
+                  ? m['queue.actions.retrying']()
+                  : m['queue.actions.retryMany']({ count: retryableRevisionItems.length })}
+              </Button>
+            ) : null}
+          </div>
         </div>
       </header>
 
@@ -749,6 +809,18 @@ export function QueueReview({ embedded = false }: { embedded?: boolean } = {}) {
             <StateMessage
               title={m['queue.emptyTitle']()}
               description={m['queue.emptyDescription']()}
+              action={
+                <Button
+                  type="button"
+                  onClick={() => prepareMutation.mutate(undefined)}
+                  disabled={prepareMutation.isPending}
+                >
+                  <Sparkles className="h-4 w-4" />
+                  {prepareMutation.isPending
+                    ? m['queue.prepare.loading']()
+                    : m['queue.prepare.button']()}
+                </Button>
+              }
             />
           </div>
         ) : (
@@ -930,6 +1002,17 @@ function StatusFilterButton({
   );
 }
 
+function QueueShortcutHint({ keys, label }: { keys: string; label: string }) {
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <kbd className="bg-muted border-border/60 rounded border px-1.5 py-0.5 font-mono text-[10px] font-semibold">
+        {keys}
+      </kbd>
+      {label}
+    </span>
+  );
+}
+
 function QueueItemListRow({
   item,
   selected,
@@ -949,6 +1032,7 @@ function QueueItemListRow({
   return (
     <button
       type="button"
+      data-queue-row={item.id}
       onClick={onSelect}
       aria-current={selected ? 'true' : undefined}
       className={cn(
@@ -958,24 +1042,37 @@ function QueueItemListRow({
           : 'hover:border-border hover:bg-muted/55 border-transparent',
       )}
     >
-      <div className="flex items-center justify-between gap-2">
-        <Badge
-          variant="outline"
-          className={cn('h-5 max-w-[70%] border px-1.5 text-[10px]', statusTone[displayStatus])}
+      <div className="flex items-center gap-2">
+        <span
+          title={statusLabel}
+          className={cn('h-2 w-2 shrink-0 rounded-full', statusDotTone[displayStatus])}
         >
-          <span className="truncate">{statusLabel}</span>
-        </Badge>
+          <span className="sr-only">{statusLabel}</span>
+        </span>
+        <span className="min-w-0 flex-1 truncate text-[13px] font-semibold leading-5">
+          {recipients || m['queue.search.noRecipient']()}
+        </span>
         <span className="text-muted-foreground shrink-0 text-[10px] tabular-nums">
           {formatDate(item.updatedAt)}
         </span>
       </div>
-      <p className="mt-1 truncate text-[13px] font-semibold leading-5">
+      <p className="mt-0.5 truncate text-[13px] leading-5">
         {item.subject || m['queue.item.untitled']()}
       </p>
-      <p className="text-muted-foreground mt-0.5 truncate text-xs leading-4">
-        {recipients || m['queue.search.noRecipient']()}
-        {preview ? ` — ${preview}` : ''}
-      </p>
+      {preview ? (
+        <p className="text-muted-foreground mt-0.5 truncate text-xs leading-4">{preview}</p>
+      ) : null}
+      {displayStatus !== 'draft_ready' ? (
+        <Badge
+          variant="outline"
+          className={cn(
+            'mt-1.5 h-5 max-w-full border px-1.5 text-[10px]',
+            statusTone[displayStatus],
+          )}
+        >
+          <span className="truncate">{statusLabel}</span>
+        </Badge>
+      ) : null}
     </button>
   );
 }
@@ -1233,6 +1330,7 @@ function QueueItemRow({
   const canCancel = CANCELABLE_STATUSES.has(item.status) || undoSeconds > 0;
   const canOpen = !!item.gmailDraftId || !!item.threadId;
   const canRetryRevision = item.reviewState === 'failed' && item.status !== 'failed';
+  const statusDescription = statusDescriptions()[displayStatus];
   const runtimeWasUpdated = isLegacyWorkerRuntimeError(item.error);
   const errorMessage = runtimeWasUpdated ? m['queue.item.workerRuntimeRecovered']() : item.error;
   const saveLabel =
@@ -1247,10 +1345,16 @@ function QueueItemRow({
   return (
     <article className="flex min-h-0 flex-1 flex-col bg-white lg:mr-14 dark:bg-zinc-950">
       {/* Barre d'actions permanente : statut, autosave, envoi/annulation
-          restent visibles quelle que soit la longueur du fil ou du brouillon. */}
+          restent visibles quelle que soit la longueur du fil ou du brouillon.
+          Envoyer termine la rangée en action primaire, le rappel des 15 s
+          juste à côté ; pendant le délai, Annuler porte le compte à rebours. */}
       <div className="flex shrink-0 flex-wrap items-center justify-between gap-x-3 gap-y-1.5 border-b border-zinc-200 px-3 py-2 sm:px-4 dark:border-zinc-800">
         <div className="flex min-w-0 flex-wrap items-center gap-2">
-          <Badge variant="outline" className={cn('border', statusTone[displayStatus])}>
+          <Badge
+            variant="outline"
+            title={statusDescription}
+            className={cn('border', statusTone[displayStatus])}
+          >
             {statusLabel}
           </Badge>
           {item.status === 'draft_ready' ? (
@@ -1270,11 +1374,6 @@ function QueueItemRow({
               {saveLabel}
             </span>
           ) : null}
-          {undoSeconds > 0 ? (
-            <Badge variant="outline" className={cn('border', statusTone[displayStatus])}>
-              {m['queue.item.undoCountdown']({ seconds: undoSeconds })}
-            </Badge>
-          ) : null}
         </div>
 
         <div className="flex shrink-0 flex-wrap items-center gap-2 lg:justify-end">
@@ -1282,7 +1381,7 @@ function QueueItemRow({
             <Button
               type="button"
               size="sm"
-              variant="outline"
+              variant="ghost"
               onClick={() => void open()}
               disabled={isActionMutating || isSaving}
             >
@@ -1315,6 +1414,23 @@ function QueueItemRow({
             </Button>
           ) : null}
           {canApprove ? (
+            <span className="text-muted-foreground hidden text-xs md:inline">
+              {m['queue.item.sendHint']()}
+            </span>
+          ) : null}
+          {canCancel && undoSeconds === 0 ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={onCancel}
+              disabled={isActionMutating || isSaving}
+            >
+              <XCircle className="h-4 w-4" />
+              {m['queue.actions.reject']()}
+            </Button>
+          ) : null}
+          {canApprove ? (
             <Button
               type="button"
               size="sm"
@@ -1323,30 +1439,13 @@ function QueueItemRow({
             >
               <CheckCircle2 className="h-4 w-4" />
               {m['queue.actions.approve']()}
+              <kbd className="ml-1 rounded bg-white/15 px-1.5 py-0.5 font-mono text-[10px]">D</kbd>
             </Button>
           ) : null}
           {undoSeconds > 0 ? (
-            <Button
-              type="button"
-              size="sm"
-              variant="secondary"
-              onClick={onCancel}
-              disabled={isActionMutating}
-            >
+            <Button type="button" size="sm" onClick={onCancel} disabled={isActionMutating}>
               <Undo2 className="h-4 w-4" />
-              {m['queue.actions.undo']()}
-            </Button>
-          ) : null}
-          {canCancel && undoSeconds === 0 ? (
-            <Button
-              type="button"
-              size="sm"
-              variant="ghost"
-              onClick={onCancel}
-              disabled={isActionMutating || isSaving}
-            >
-              <XCircle className="h-4 w-4" />
-              {m['queue.actions.reject']()}
+              {m['queue.item.undoCountdown']({ seconds: undoSeconds })}
             </Button>
           ) : null}
         </div>
@@ -1354,7 +1453,7 @@ function QueueItemRow({
 
       {/* Poste de travail : le fil source est LU dans la même vue que la
           réponse — colonne contexte + colonne édition, chacune avec son
-          propre défilement en xl ; empilées (contexte d'abord) en dessous. */}
+          propre défilement dès xl ; empilées (contexte d'abord) en dessous. */}
       <div className="grid min-h-0 flex-1 grid-cols-1 overflow-y-auto xl:grid-cols-[minmax(300px,2fr)_minmax(0,3fr)] xl:overflow-hidden">
         <QueueThreadContext
           threadId={item.threadId}
@@ -1366,14 +1465,14 @@ function QueueItemRow({
           <div className="space-y-3 p-3 sm:p-4">
             {item.status === 'draft_ready' ? (
               <div className="grid gap-3">
-                <div className="grid gap-2 sm:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)_minmax(0,1fr)]">
-                  <QueueField label={m['queue.item.to']()}>
-                    <Input
-                      value={to}
-                      onChange={(event) => setTo(event.target.value)}
-                      disabled={!canEdit || isSaving}
-                    />
-                  </QueueField>
+                <QueueField label={m['queue.item.to']()}>
+                  <Input
+                    value={to}
+                    onChange={(event) => setTo(event.target.value)}
+                    disabled={!canEdit || isSaving}
+                  />
+                </QueueField>
+                <div className="grid gap-2 sm:grid-cols-2">
                   <QueueField label={m['queue.item.cc']()}>
                     <Input
                       value={cc}

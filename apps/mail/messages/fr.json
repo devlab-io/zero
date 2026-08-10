@@ -1100,6 +1100,7 @@
     "selected": "Sélectionné",
     "noSelection": "Sélectionnez d'abord un élément de la file",
     "keyboardTitle": "Touches de file",
+    "keyboardNavigate": "Naviguer",
     "keyboardApprove": "Envoyer",
     "keyboardReject": "Rejeter",
     "keyboardOpen": "Voir le fil",
@@ -1178,7 +1179,8 @@
       "autosaved": "Enregistré automatiquement",
       "workerRuntimeRecovered": "Le worker local a été corrigé. Cette préparation peut maintenant être relancée.",
       "correctionQueued": "Correction ajoutée à la file Codex",
-      "undoCountdown": "Annuler pendant {seconds}s"
+      "undoCountdown": "Annuler pendant {seconds}s",
+      "sendHint": "Après Envoyer, vous avez 15 secondes pour annuler."
     }
   },
   "navigation": {
