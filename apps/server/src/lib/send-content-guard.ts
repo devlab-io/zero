@@ -35,6 +35,9 @@ export const meaningfulEmailText = (body?: string | null) => {
 export const hasMeaningfulEmailBody = (body?: string | null) =>
   meaningfulEmailText(body).length > 0;
 
+export const hasRetaBranding = (body?: string | null) =>
+  body ? /reta\s+by\s+devlab/i.test(decodeCommonEntities(stripHtml(body))) : false;
+
 export class UnsafeEmailContentError extends Error {
   constructor(message = 'Email body is empty or contains only the Reta signature') {
     super(message);
@@ -54,4 +57,9 @@ export const assertSendableEmail = (input: {
     throw new UnsafeEmailContentError('Email has no recipient');
   }
   assertMeaningfulEmailBody(input.body);
+  if (hasRetaBranding(input.body)) {
+    throw new UnsafeEmailContentError(
+      'Reta signature is no longer allowed. Reload the app and try again.',
+    );
+  }
 };

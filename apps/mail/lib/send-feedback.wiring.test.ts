@@ -24,4 +24,14 @@ describe('send feedback wiring', () => {
     expect(composer).toContain('shouldFinalizeComposerSend(sendOutcome)');
     expect(replyHost.match(/return false;/g)?.length).toBeGreaterThanOrEqual(3);
   });
+
+  it('never appends Reta branding to outgoing email bodies', () => {
+    const replyHost = read('components/mail/reply-composer.tsx');
+    const createHost = read('components/create/create-email.tsx');
+    const generalSettings = read('app/(routes)/settings/general/page.tsx');
+
+    expect(createHost).not.toContain('Sent via');
+    expect(replyHost).not.toContain('Sent via');
+    expect(generalSettings).not.toContain('name="zeroSignature"');
+  });
 });

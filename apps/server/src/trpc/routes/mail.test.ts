@@ -539,6 +539,20 @@ describe('mail router — send (enqueue durable, jamais Gmail dans la requête)'
     expect(send_email_queue.send).not.toHaveBeenCalled();
   });
 
+  it('refuse une ancienne page qui ajoute encore la signature Reta à un vrai message', async () => {
+    const result = await call('send', {
+      ...base,
+      message: '<p>Bonjour Yves, merci.</p><p>Sent via <a>Reta by Devlab</a></p>',
+    });
+
+    expect(result).toEqual({
+      success: false,
+      error: 'Reta signature is no longer allowed. Reload the app and try again.',
+    });
+    expect(sendOutbox.createSendJob).not.toHaveBeenCalled();
+    expect(send_email_queue.send).not.toHaveBeenCalled();
+  });
+
   it('refuse avant enqueue un sendAsStored dont le brouillon fournisseur est vide', async () => {
     stub.getDraft.mockResolvedValueOnce({
       id: 'dr-empty',

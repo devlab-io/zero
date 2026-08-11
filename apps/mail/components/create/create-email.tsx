@@ -117,10 +117,6 @@ export function CreateEmail({
   }) => {
     const fromEmail = data.fromEmail || aliases?.[0]?.email || userEmail;
 
-    const zeroSignature = settings?.settings.zeroSignature
-      ? '<p style="color: #666; font-size: 12px;">Sent via <a href="https://devlab.io/" style="color: #6f00ff; text-decoration: none;">Reta by Devlab</a></p>'
-      : '';
-
     // Le clic Send confirme l'ENQUEUE DURABLE (ligne send_job Postgres + Queue
     // acceptée), jamais l'appel Gmail : la réponse est quasi immédiate et
     // l'issue réelle est suivie par watchSendStatus ci-dessous. Pas d'early
@@ -134,7 +130,7 @@ export function CreateEmail({
       cc: data.cc?.map((email) => ({ email, name: email.split('@')[0] || email })),
       bcc: data.bcc?.map((email) => ({ email, name: email.split('@')[0] || email })),
       subject: data.subject,
-      message: data.message + zeroSignature,
+      message: data.message,
       attachments: await serializeFiles(data.attachments),
       fromEmail: userName.trim() ? `${userName.replace(/[<>]/g, '')} <${fromEmail}>` : fromEmail,
       draftId: draftId ?? undefined,

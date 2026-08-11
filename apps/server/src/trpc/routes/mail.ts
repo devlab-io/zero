@@ -619,10 +619,13 @@ export const mailRouter = router({
             recipients: [...mail.to, ...(mail.cc ?? []), ...(mail.bcc ?? [])],
           });
         }
-      } catch {
+      } catch (error) {
         return {
           success: false,
-          error: 'Email body is empty or contains only the Reta signature',
+          error:
+            error instanceof Error
+              ? error.message
+              : 'Email body is empty or contains only the Reta signature',
         } as const;
       }
 

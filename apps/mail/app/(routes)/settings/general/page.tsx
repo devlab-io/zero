@@ -134,7 +134,6 @@ export default function GeneralPage() {
       timezone: getBrowserTimezone(),
       dynamicContent: false,
       customPrompt: '',
-      zeroSignature: true,
       defaultEmailAlias: '',
       animations: false,
       confirmDirectDraftSend: true,
@@ -291,27 +290,6 @@ export default function GeneralPage() {
     [aliases],
   );
 
-  const renderZeroSignatureField = useCallback(
-    ({
-      field,
-    }: {
-      field: ControllerRenderProps<z.infer<typeof userSettingsSchema>, 'zeroSignature'>;
-    }) => (
-      <FormItem className="flex max-w-xl flex-row items-center justify-between rounded-lg border px-4 py-2">
-        <div className="space-y-0.5">
-          <FormLabel>{m['pages.settings.general.zeroSignature']()}</FormLabel>
-          <FormDescription>
-            {m['pages.settings.general.zeroSignatureDescription']()}
-          </FormDescription>
-        </div>
-        <FormControl>
-          <Switch checked={field.value} onCheckedChange={field.onChange} />
-        </FormControl>
-      </FormItem>
-    ),
-    [],
-  );
-
   const renderAutoReadField = useCallback(
     ({
       field,
@@ -419,11 +397,6 @@ export default function GeneralPage() {
               )}
             </div>
 
-            <FormField
-              control={form.control}
-              name="zeroSignature"
-              render={renderZeroSignatureField}
-            />
             <FormField control={form.control} name="autoRead" render={renderAutoReadField} />
             <FormField
               control={form.control}

@@ -255,21 +255,17 @@ export default function ReplyCompose({
           }))
         : undefined;
 
-      const zeroSignature = settings?.settings.zeroSignature
-        ? '<p style="color: #666; font-size: 12px;">Sent via <a href="https://devlab.io/" style="color: #6f00ff; text-decoration: none;">Reta by Devlab</a></p>'
-        : '';
-
       const emailBody =
         mode === 'forward'
           ? constructForwardBody(
-              data.message + zeroSignature,
+              data.message,
               new Date(replyToMessage.receivedOn || '').toLocaleString(),
               { ...replyToMessage.sender, subject: replyToMessage.subject },
               toRecipients,
               //   replyToMessage.decodedBody,
             )
           : constructReplyBody(
-              data.message + zeroSignature,
+              data.message,
               new Date(replyToMessage.receivedOn || '').toLocaleString(),
               replyToMessage.sender,
               toRecipients,

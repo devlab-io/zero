@@ -2,6 +2,7 @@ import {
   assertMeaningfulEmailBody,
   assertSendableEmail,
   hasMeaningfulEmailBody,
+  hasRetaBranding,
   meaningfulEmailText,
   UnsafeEmailContentError,
 } from './send-content-guard';
@@ -33,11 +34,13 @@ describe('send content guard', () => {
   });
 
   it('keeps real prose before the signature', () => {
-    expect(
-      meaningfulEmailText(
-        '<p>Bonjour Yves, merci pour ton retour.</p><p>Sent via <a>Reta by Devlab</a></p>',
-      ),
-    ).toBe('Bonjour Yves, merci pour ton retour.');
+    const body = '<p>Bonjour Yves, merci pour ton retour.</p><p>Sent via <a>Reta by Devlab</a></p>';
+
+    expect(meaningfulEmailText(body)).toBe('Bonjour Yves, merci pour ton retour.');
+    expect(hasRetaBranding(body)).toBe(true);
+    expect(() => assertSendableEmail({ body, recipients: ['client@example.com'] })).toThrow(
+      /no longer allowed/,
+    );
   });
 
   it('rejects a body without any recipient', () => {
