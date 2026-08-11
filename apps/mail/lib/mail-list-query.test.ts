@@ -1,5 +1,6 @@
 import {
   MAIL_LIST_QUERY_BEHAVIOR,
+  MAIL_LIST_RECONCILE_MS,
   MAIL_LIST_STALE_MS,
   mailListQueryBehaviorForFolder,
 } from './mail-list-query';
@@ -33,7 +34,9 @@ describe('MAIL_LIST_QUERY_BEHAVIOR — snapshot puis réconciliation stale-only'
     });
     expect(mailListQueryBehaviorForFolder('inbox')).toMatchObject({
       refetchOnMount: true,
-      refetchOnWindowFocus: false,
+      refetchOnWindowFocus: 'always',
+      refetchInterval: MAIL_LIST_RECONCILE_MS,
+      refetchIntervalInBackground: false,
     });
   });
 

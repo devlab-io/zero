@@ -13,16 +13,24 @@ import { FOLDERS } from '@/lib/utils';
  *   les rows restent affichées pendant le vol. C'est la garantie de fraîcheur
  *   du dossier COURANT, que le warmer périodique (voisins uniquement) ne
  *   couvre pas : entré à 6 min, on voit le snapshot immédiatement puis une
- *   seule réconciliation en fond (audit r6 — l'ancien refetchOnMount:false
- *   laissait un dossier ouvert périmé indéfiniment hors websocket).
+ *   première réconciliation en fond (audit r6 — l'ancien refetchOnMount:false
+ *   laissait un dossier ouvert périmé indéfiniment) ;
+ * - changements externes : focus immédiat et sondage visible borné à 60 s,
+ *   notamment pour les réponses envoyées depuis Shortwave ou Gmail.
  */
 export const MAIL_LIST_STALE_MS = 5 * 60 * 1000;
+export const MAIL_LIST_RECONCILE_MS = 60 * 1000;
 
 export const MAIL_LIST_QUERY_BEHAVIOR = {
   staleTime: MAIL_LIST_STALE_MS,
   refetchOnMount: true,
-  refetchOnWindowFocus: false,
-  refetchIntervalInBackground: true,
+  // Messages can be sent or received from Shortwave/Gmail while RETA remains
+  // open. Returning to the tab must therefore reconcile immediately; a visible
+  // mailbox also catches up within one minute without relying on the removed
+  // legacy mail websocket.
+  refetchOnWindowFocus: 'always' as const,
+  refetchInterval: MAIL_LIST_RECONCILE_MS,
+  refetchIntervalInBackground: false,
 } as const;
 
 /**
@@ -35,5 +43,5 @@ export const MAIL_LIST_QUERY_BEHAVIOR = {
 export const mailListQueryBehaviorForFolder = (folder?: string) => ({
   ...MAIL_LIST_QUERY_BEHAVIOR,
   refetchOnMount: folder === FOLDERS.DRAFT ? ('always' as const) : true,
-  refetchOnWindowFocus: folder === FOLDERS.DRAFT ? ('always' as const) : false,
+  refetchOnWindowFocus: 'always' as const,
 });

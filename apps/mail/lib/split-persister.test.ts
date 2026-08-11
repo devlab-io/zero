@@ -385,9 +385,8 @@ describe('restore prioritaire BLOQUANT (r16)', () => {
       messages: { decodedBody: string }[];
     };
     expect(data.messages[1].decodedBody).toHaveLength(1_500_000);
-    // …et satisfait le contrat zéro-réseau du lecteur : corps complets →
-    // staleTime 1 h + refetchOnMount false (useOpenThreadQueryOptions dérive
-    // les deux de hasCompleteThreadBodies).
+    // …et permet au lecteur de peindre immédiatement depuis le cache. La
+    // réconciliation Shortwave/Gmail se fait ensuite en arrière-plan.
     expect(hasCompleteThreadBodies(data)).toBe(true);
   });
 

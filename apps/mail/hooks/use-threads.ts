@@ -21,6 +21,7 @@ import {
   useQuery,
   useQueryClient,
 } from '@tanstack/react-query';
+import { threadDetailQueryBehavior, threadDetailStaleTime } from '@/lib/thread-detail-query';
 import { backgroundQueueAtom, isThreadInBackgroundQueueAtom } from '@/store/backgroundQueue';
 import { emailContentQueryKey, resolveEmailContentTheme } from '@/lib/email-content-query';
 import { extractCollabFilters, filterThreadsByCollabSets } from '@/lib/collab-search';
@@ -28,7 +29,6 @@ import { requestImmediateDetailPersist } from '@/lib/detail-persist-flush';
 import { canReuseMailListPlaceholder } from '@/lib/mail-list-placeholder';
 import { mailListQueryBehaviorForFolder } from '@/lib/mail-list-query';
 import { useTRPC, useTRPCClient } from '@/providers/query-provider';
-import { hasCompleteThreadBodies } from '@/lib/thread-detail-cache';
 import { recordOpenThreadTimings } from '@/lib/open-thread-timing';
 import { isSimpleLiteralSearch } from '@/lib/search-intent';
 import { mailListMaxResults } from '@/lib/mail-pagination';
@@ -43,8 +43,6 @@ import { useSettings } from './use-settings';
 import { useParams } from 'react-router';
 import { useTheme } from 'next-themes';
 import { useQueryState } from 'nuqs';
-
-const THREAD_STALE_MS = 60 * 60 * 1000;
 
 function useOpenThreadQueryOptions() {
   const trpc = useTRPC();
@@ -92,12 +90,11 @@ function useOpenThreadQueryOptions() {
           return result.thread;
         },
         enabled,
-        staleTime: (query) => (hasCompleteThreadBodies(query.state.data) ? THREAD_STALE_MS : 0),
-        // Websocket invalidations keep cached threads fresh. Refetching on every
-        // mount duplicated openThread during navigation and flooded the user DO.
-        // A projected/legacy cache entry without decoded bodies is the exception:
-        // the active reader must repair it instead of showing an empty panel forever.
-        refetchOnMount: (query) => enabled && !hasCompleteThreadBodies(query.state.data),
+        // Shortwave/Gmail can mutate this thread outside RETA. The frontend no
+        // longer consumes the legacy mail websocket, so bounded reconciliation
+        // is required even when the persisted body is structurally complete.
+        staleTime: (query) => threadDetailStaleTime(query.state.data),
+        ...threadDetailQueryBehavior(enabled),
       }),
     [queryClient, shouldLoadImages, theme, trpc, trpcClient],
   );
