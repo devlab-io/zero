@@ -135,15 +135,10 @@ export function preprocessEmailHtml(html: string): string {
 }
 
 // ————————————————————————————————————————————————————————————————————————
-// Réparation de contraste CONTEXTUELLE (r17). Preuve prod : « Récap Kura
-// fournisseurs — 31/07/2026 » est authoré en texte blanc inline pour un client
-// sombre, sans fond explicite ; notre canevas hôte étant forcé light (correctif
-// Microsoft ci-dessous, conservé), le texte devient blanc-sur-blanc, visible
-// uniquement sélectionné. Règle : un texte clair n'est réécrit en sombre QUE
-// si son contexte de fond effectif est clair (canevas implicite, ou ancêtre le
-// plus proche à fond explicite clair). Un fond ancêtre explicitement sombre —
-// ou non interprétable (gradient, image, var()) — préserve le texte tel quel :
-// jamais d'override global qui casserait les vrais emails sombres.
+// Réparation de contraste CONTEXTUELLE. Le canevas implicite suit le thème de
+// RETA ; une couleur auteur illisible est donc adaptée dans les deux sens.
+// Les fonds explicites les plus proches restent la source de vérité et les
+// fonds non interprétables (gradient, image, var()) sont préservés.
 // ————————————————————————————————————————————————————————————————————————
 
 type Rgb = [number, number, number];
@@ -251,20 +246,21 @@ function contrastRatio(luminanceA: number, luminanceB: number): number {
 }
 
 /**
- * Seuil de réparation : en dessous de 1,9:1 contre le fond clair effectif, le
- * texte est illisible (blanc 1,05 ; #eee 1,2 ; #ccc 1,6 ; #bbb 1,87) — les
- * gris volontairement atténués (#aaa : 2,3 ; #999 : 2,8) restent intacts.
+ * Seuil de réparation : en dessous de 1,9:1 contre le fond effectif, le texte
+ * est considéré illisible. Les gris volontairement atténués restent intacts.
  */
 const REPAIR_CONTRAST_THRESHOLD = 1.9;
 /** Un fond dont la luminance ≤ 0,37 donne ≥ 2,5:1 à un texte blanc : sombre. */
 const DARK_BACKGROUND_MAX_LUMINANCE = 0.37;
-const WHITE_LUMINANCE = 1;
-/** Couleur de remplacement — le texte par défaut du canevas hôte. */
-const REPAIRED_TEXT_COLOR = '#1a1a1a';
+/** Couleurs de remplacement — texte du canevas hôte selon le thème RETA. */
+const REPAIRED_LIGHT_TEXT_COLOR = '#1a1a1a';
+const REPAIRED_DARK_TEXT_COLOR = '#e7e7e7';
+const LIGHT_CANVAS_LUMINANCE = relativeLuminance([247, 247, 245]);
+const DARK_CANVAS_LUMINANCE = relativeLuminance([27, 27, 27]);
 
 type BackgroundContext =
   | { kind: 'light'; luminance: number } // canevas implicite ou fond explicite clair
-  | { kind: 'dark' }
+  | { kind: 'dark'; luminance: number }
   | { kind: 'unknown' }; // gradient/image/var()/nom inconnu : conservateur
 
 const COLOR_DECLARATION = /((?:^|[;\s])color\s*:\s*)([^;]+)/gi;
@@ -305,7 +301,7 @@ function resolveOwnBackground(
     if (parsed === null) return { kind: 'unknown' };
     const luminance = relativeLuminance(parsed);
     return luminance <= DARK_BACKGROUND_MAX_LUMINANCE
-      ? { kind: 'dark' }
+      ? { kind: 'dark', luminance }
       : { kind: 'light', luminance };
   }
   return null;
@@ -336,10 +332,14 @@ function lastOwnColorValue(style: string): string | null {
   return value ? value.trim() : null;
 }
 
-function isUnreadableOnLight(rawValue: string, backgroundLuminance: number): boolean {
+function isUnreadableOnBackground(rawValue: string, backgroundLuminance: number): boolean {
   const parsed = parseCssColor(rawValue);
   if (parsed === null) return false;
   return contrastRatio(relativeLuminance(parsed), backgroundLuminance) < REPAIR_CONTRAST_THRESHOLD;
+}
+
+function repairedTextColor(context: Exclude<BackgroundContext, { kind: 'unknown' }>): string {
+  return context.kind === 'dark' ? REPAIRED_DARK_TEXT_COLOR : REPAIRED_LIGHT_TEXT_COLOR;
 }
 
 function appendColorDeclaration(attribs: Record<string, string>, value: string): void {
@@ -350,7 +350,7 @@ function appendColorDeclaration(attribs: Record<string, string>, value: string):
       : `color:${value}`;
 }
 
-function repairForegroundContrast($: cheerio.CheerioAPI): void {
+function repairForegroundContrast($: cheerio.CheerioAPI, theme: 'light' | 'dark'): void {
   const visit = (
     element: DomElement,
     context: BackgroundContext,
@@ -363,46 +363,55 @@ function repairForegroundContrast($: cheerio.CheerioAPI): void {
     if (element.type === 'tag' && element.attribs) {
       const attribs = element.attribs;
       const style = attribs['style'] ?? '';
-      const own = resolveOwnBackground(style, attribs['bgcolor']);
+      // html/body forment le canevas du message : RETA les rend transparents
+      // afin d'éviter un grand rectangle blanc dans l'app sombre (ou sombre
+      // dans l'app claire). Les surfaces internes de l'email restent intactes.
+      const isCanvasElement = element.name === 'html' || element.name === 'body';
+      const own = isCanvasElement ? null : resolveOwnBackground(style, attribs['bgcolor']);
       if (own !== null) nextContext = own;
 
       const ownColor = lastOwnColorValue(style);
       if (ownColor !== null) {
         let effective = ownColor;
-        if (nextContext.kind === 'light') {
+        if (nextContext.kind !== 'unknown') {
           const backgroundLuminance = nextContext.luminance;
-          if (isUnreadableOnLight(ownColor, backgroundLuminance)) effective = REPAIRED_TEXT_COLOR;
+          const replacement = repairedTextColor(nextContext);
+          if (isUnreadableOnBackground(ownColor, backgroundLuminance)) effective = replacement;
           const repaired = style.replace(
             COLOR_DECLARATION,
             (declaration, prefix: string, rawValue: string) => {
-              if (!isUnreadableOnLight(rawValue, backgroundLuminance)) return declaration;
+              if (!isUnreadableOnBackground(rawValue, backgroundLuminance)) return declaration;
               const important = /!important\s*$/i.test(rawValue.trim()) ? ' !important' : '';
-              return `${prefix}${REPAIRED_TEXT_COLOR}${important}`;
+              return `${prefix}${replacement}${important}`;
             },
           );
           if (repaired !== style) attribs['style'] = repaired;
         }
         nextInherited = { original: ownColor, effective };
-      } else if (
-        (nextContext.kind === 'dark' || nextContext.kind === 'unknown') &&
-        inherited.original !== null &&
-        inherited.effective !== inherited.original
-      ) {
-        // Sous-arbre sombre/inconnu héritant d'un ancêtre RÉPARÉ : la couleur
-        // d'auteur originale est matérialisée ici — le rendu du sous-arbre
-        // sombre est strictement celui voulu par l'auteur.
-        appendColorDeclaration(attribs, inherited.original);
-        nextInherited = { original: inherited.original, effective: inherited.original };
-      } else if (
-        nextContext.kind === 'light' &&
-        inherited.effective !== null &&
-        isUnreadableOnLight(inherited.effective, nextContext.luminance)
-      ) {
-        // Inverse : section à fond clair héritant d'un texte clair posé pour
-        // un ancêtre sombre — illisible ici, réparée localement sans toucher
-        // l'ancêtre.
-        appendColorDeclaration(attribs, REPAIRED_TEXT_COLOR);
-        nextInherited = { original: inherited.original, effective: REPAIRED_TEXT_COLOR };
+      } else if (inherited.effective !== null) {
+        if (
+          nextContext.kind === 'unknown' &&
+          inherited.original !== null &&
+          inherited.effective !== inherited.original
+        ) {
+          // Fond inconnu : revenir à la couleur auteur, sans supposer le rendu.
+          appendColorDeclaration(attribs, inherited.original);
+          nextInherited = { original: inherited.original, effective: inherited.original };
+        } else if (nextContext.kind !== 'unknown') {
+          const originalIsReadable =
+            inherited.original !== null &&
+            !isUnreadableOnBackground(inherited.original, nextContext.luminance);
+          if (inherited.effective !== inherited.original && originalIsReadable) {
+            // Le contexte a changé : restaurer la couleur auteur dès qu'elle
+            // redevient lisible sur le nouveau fond.
+            appendColorDeclaration(attribs, inherited.original!);
+            nextInherited = { original: inherited.original, effective: inherited.original };
+          } else if (isUnreadableOnBackground(inherited.effective, nextContext.luminance)) {
+            const replacement = repairedTextColor(nextContext);
+            appendColorDeclaration(attribs, replacement);
+            nextInherited = { original: inherited.original, effective: replacement };
+          }
+        }
       }
     }
 
@@ -411,14 +420,20 @@ function repairForegroundContrast($: cheerio.CheerioAPI): void {
 
   const root = $.root()[0] as unknown as DomElement | undefined;
   if (root) {
-    visit(root, { kind: 'light', luminance: WHITE_LUMINANCE }, { original: null, effective: null });
+    visit(
+      root,
+      theme === 'dark'
+        ? { kind: 'dark', luminance: DARK_CANVAS_LUMINANCE }
+        : { kind: 'light', luminance: LIGHT_CANVAS_LUMINANCE },
+      { original: null, effective: null },
+    );
   }
 }
 
-// Client-side: Light styling + image preferences
+// Styling thémé + préférences d'images
 export function applyEmailPreferences(
   preprocessedHtml: string,
-  _theme: 'light' | 'dark',
+  theme: 'light' | 'dark',
   shouldLoadImages: boolean,
 ): { processedHtml: string; hasBlockedImages: boolean } {
   let hasBlockedImages = false;
@@ -439,48 +454,49 @@ export function applyEmailPreferences(
     });
   }
 
-  // r17 : réparation de contraste contextuelle — APRÈS le blocage d'images
-  // (les spans masqués n'ont pas de texte), AVANT la sérialisation. Ne touche
-  // que le texte clair en contexte de fond clair/implicite ; les emails
-  // réellement sombres (fond explicite sombre, racine sombre) et les fonds
-  // non interprétables sont préservés tels quels.
-  repairForegroundContrast($);
+  // Réparation contextuelle APRÈS le blocage d'images et AVANT la
+  // sérialisation. Seules les couleurs illisibles sur leur fond effectif sont
+  // adaptées ; les fonds explicites et non interprétables restent préservés.
+  repairForegroundContrast($, theme);
 
   const html = $.html();
 
-  // Email HTML is authored against a light default canvas unless it declares
-  // its own background. Making the implicit canvas dark leaves sender-defined
-  // colors such as Microsoft's #242424 almost black on black. Keep the neutral
-  // email canvas light in both app themes; genuinely dark emails retain their
-  // explicit backgrounds and text colors.
+  // Le canevas du mail suit RETA. La passe de contraste ci-dessus adapte les
+  // couleurs auteur illisibles sur le thème courant tout en préservant les
+  // surfaces explicites réellement dessinées par l'expéditeur.
+  const dark = theme === 'dark';
+  const canvasBackground = dark ? '#1b1b1b' : '#f7f7f5';
+  const canvasText = dark ? REPAIRED_DARK_TEXT_COLOR : '#242424';
+  const linkColor = dark ? '#7db1ff' : '#2563eb';
+  const mutedColor = dark ? '#a8a8a8' : '#6b7280';
+  const quoteBorder = dark ? '#4a4a4a' : '#d1d5db';
+  const selectionBackground = dark ? '#315a8a' : '#b3d4fc';
   const themeStyles = `
     <style type="text/css">
       :host {
         display: block;
         line-height: 1.5;
-        color-scheme: only light;
-        /* r17b : !important — dans la cascade shadow, les déclarations
-           IMPORTANTES du contexte shadow battent celles du document extérieur
-           sur l'hôte. Sans cela, une classe posée sur le div hôte (l'ancien
-           dark:text-white) renverse silencieusement le canevas : les emails
-           text/plain, sans aucune couleur propre, héritaient du blanc du
-           thème sombre sur ce fond blanc (prod + staging, mail Kura réel). */
-        background-color: #ffffff !important;
-        color: #1a1a1a !important;
+        color-scheme: ${theme};
+        background-color: ${canvasBackground} !important;
+        color: ${canvasText} !important;
       }
 
       *, *::before, *::after {
         box-sizing: border-box;
       }
 
+      html,
       body {
         margin: 0;
         padding: 0;
+        background: transparent !important;
+        background-color: transparent !important;
+        color: inherit !important;
       }
 
       a {
         cursor: pointer;
-        color: #2563eb;
+        color: ${linkColor};
         text-decoration: underline;
       }
 
@@ -489,20 +505,20 @@ export function applyEmailPreferences(
       }
 
       ::selection {
-        background: #b3d4fc;
+        background: ${selectionBackground};
         text-shadow: none;
       }
 
       /* Styling for collapsed quoted text */
       details.quoted-toggle {
-        border-left: 2px solid #d1d5db;
+        border-left: 2px solid ${quoteBorder};
         padding-left: 8px;
         margin-top: 0.75rem;
       }
 
       details.quoted-toggle summary {
         cursor: pointer;
-        color: #6B7280;
+        color: ${mutedColor};
         list-style: none;
         user-select: none;
       }
@@ -512,7 +528,7 @@ export function applyEmailPreferences(
       }
 
       [data-theme-color="muted"] {
-        color: #6B7280;
+        color: ${mutedColor};
       }
     </style>
   `;

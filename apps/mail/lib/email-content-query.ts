@@ -6,7 +6,8 @@ export type EmailContentTheme = 'light' | 'dark';
 // avant le correctif garderaient un texte blanc-sur-blanc.
 // v5 (r17b) : canevas :host verrouillé !important — les rendus v4 (staging)
 // n'ont pas la garde et restent renversables par une classe du document hôte.
-export const EMAIL_CONTENT_RENDER_VERSION = 5;
+// v6 : le canevas et la réparation de contraste suivent enfin le thème RETA.
+export const EMAIL_CONTENT_RENDER_VERSION = 6;
 
 export function resolveEmailContentTheme(theme?: string | null): EmailContentTheme {
   return theme === 'dark' ? 'dark' : 'light';

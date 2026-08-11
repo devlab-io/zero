@@ -2,7 +2,7 @@ import { processEmailHtml } from './email-processor';
 import { describe, expect, it } from 'vitest';
 
 describe('processEmailHtml email canvas', () => {
-  it('keeps dark sender text readable when the application theme is dark', () => {
+  it('uses a soft dark canvas and repairs dark sender text in dark mode', () => {
     const result = processEmailHtml({
       html: `
         <div style="color: #242424">
@@ -15,12 +15,35 @@ describe('processEmailHtml email canvas', () => {
       theme: 'dark',
     });
 
-    expect(result.processedHtml).toContain('color-scheme: only light');
-    // r17b : le canevas est verrouillé !important — voir le test dédié.
-    expect(result.processedHtml).toContain('background-color: #ffffff !important');
-    expect(result.processedHtml).toContain('color: #1a1a1a !important');
-    expect(result.processedHtml).toContain('style="color:#242424"');
-    expect(result.processedHtml).toContain('color: #2563eb');
+    expect(result.processedHtml).toContain('color-scheme: dark');
+    expect(result.processedHtml).toContain('background-color: #1b1b1b !important');
+    expect(result.processedHtml).toContain('color: #e7e7e7 !important');
+    expect(result.processedHtml).toContain('style="color:#e7e7e7"');
+    expect(result.processedHtml).toContain('color: #7db1ff');
+  });
+
+  it('uses a soft light canvas instead of pure white in light mode', () => {
+    const result = processEmailHtml({
+      html: '<p>Bonjour Thomas</p>',
+      shouldLoadImages: false,
+      theme: 'light',
+    });
+
+    expect(result.processedHtml).toContain('color-scheme: light');
+    expect(result.processedHtml).toContain('background-color: #f7f7f5 !important');
+    expect(result.processedHtml).toContain('color: #242424 !important');
+  });
+
+  it('neutralizes a document-level white canvas in dark mode', () => {
+    const result = processEmailHtml({
+      html: '<html style="background:#fff"><body style="background:#fff;color:#111">Message</body></html>',
+      shouldLoadImages: false,
+      theme: 'dark',
+    });
+
+    expect(result.processedHtml).toContain('background: transparent !important');
+    expect(result.processedHtml).not.toContain('style="background:#fff');
+    expect(result.processedHtml).toContain('<body>Message</body>');
   });
 
   it('preserves an email that explicitly defines its own dark surface', () => {
@@ -164,18 +187,11 @@ describe('processEmailHtml — réparation de contraste contextuelle (r17)', () 
   });
 });
 
-// r17b : POURQUOI staging restait blanc malgré r17. Le mail Kura réel
-// (19fb4a042f3a4c70, vérifié via Gmail) est TEXT/PLAIN : le driver Gmail le
-// convertit en texte + <br>, sans AUCUNE couleur — la passe r17 n'a donc rien
-// à réparer, et c'est correct. Le blanc venait du CLIENT : le div hôte du
-// shadow DOM portait `dark:text-white`, et les règles du document extérieur
-// sur l'hôte battent les règles :host normales du shadow (CSS Scoping) — tout
-// texte sans couleur propre héritait du blanc du thème sombre sur le canevas
-// blanc. Garde serveur : les déclarations :host du canevas sont !important
-// (dans la cascade shadow, l'important du contexte shadow bat le document
-// extérieur) — plus aucune classe hôte ne peut renverser le canevas.
-describe('processEmailHtml — canevas verrouillé pour les emails text/plain (r17b)', () => {
-  it('email text/plain (forme réelle du driver : texte + <br>) : contenu inchangé, canevas !important', () => {
+// r17b/r18 : un email text/plain n'a aucune couleur propre. Sa lisibilité
+// repose donc entièrement sur le canevas du shadow root, qui doit suivre le
+// thème de RETA sans pouvoir être renversé par une classe du document hôte.
+describe('processEmailHtml — canevas thémé pour les emails text/plain', () => {
+  it('email text/plain : contenu inchangé et canevas sombre cohérent', () => {
     const plainTextAsHtml =
       'Run quotidien factures fournisseurs vers Kura — 31/07/2026.<br><br>Envoyé vers Kura: 0 facture.<br><br>Comptes scannés:<br>- thomas@devlab.io: profil vérifié.';
     const result = processEmailHtml({
@@ -189,9 +205,8 @@ describe('processEmailHtml — canevas verrouillé pour les emails text/plain (r
       'Run quotidien factures fournisseurs vers Kura — 31/07/2026.<br><br>Envoyé vers Kura: 0 facture.',
     );
     expect(result.processedHtml).not.toContain('style="color');
-    // …et la lisibilité repose entièrement sur le canevas :host, verrouillé
-    // !important pour battre toute classe posée sur l'élément hôte.
-    expect(result.processedHtml).toContain('background-color: #ffffff !important');
-    expect(result.processedHtml).toContain('color: #1a1a1a !important');
+    // …et la lisibilité repose entièrement sur le canevas :host thémé.
+    expect(result.processedHtml).toContain('background-color: #1b1b1b !important');
+    expect(result.processedHtml).toContain('color: #e7e7e7 !important');
   });
 });
