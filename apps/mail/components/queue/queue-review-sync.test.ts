@@ -36,10 +36,12 @@ describe('queue draft editor synchronization', () => {
     expect(source).toContain('item={selectedItem}');
   });
 
-  it('shows the source conversation before the editable reply in one reading column', () => {
+  it('shows the source conversation before the editable reply on one flat full-width surface', () => {
     expect(source).toContain('<QueueThreadContext');
     expect(source).toContain('threadId={item.threadId}');
-    expect(source).toContain('mx-auto w-full max-w-4xl');
+    expect(source).toContain('<div className="w-full">');
+    expect(source).not.toContain('mx-auto w-full max-w-4xl');
+    expect(source).not.toContain('rounded-xl border border-zinc-200 shadow-sm');
     expect(source).not.toContain('xl:grid-cols-[minmax(300px,2fr)_minmax(0,3fr)]');
     expect(source).not.toContain('h-[260px] min-h-[260px]');
     const threadIndex = source.indexOf('<QueueThreadContext\n');

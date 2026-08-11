@@ -1201,6 +1201,7 @@ function QueueItemRow({
   onRetryRevision: () => Promise<unknown> | void;
   statusLabel: string;
 }) {
+  const { data: activeConnection } = useActiveConnection();
   const [to, setTo] = useState(normalizeEditableAddresses(item.to).join(', '));
   const [cc, setCc] = useState(normalizeEditableAddresses(item.cc).join(', '));
   const [bcc, setBcc] = useState(normalizeEditableAddresses(item.bcc).join(', '));
@@ -1451,24 +1452,32 @@ function QueueItemRow({
         </div>
       </div>
 
-      {/* Shortwave-style conversation: one reading column, then the editable
-          reply as the final message in the same thread. */}
+      {/* Flat conversation surface: the source thread and the editable reply
+          share the full pane, like successive messages in the mailbox. */}
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto w-full max-w-4xl space-y-4 px-3 py-4 sm:px-5 sm:py-6">
+        <div className="w-full">
           <QueueThreadContext
             threadId={item.threadId}
+            subject={item.subject}
             classificationReason={item.classificationReason}
           />
 
           {item.status === 'draft_ready' ? (
-            <section className="bg-background overflow-hidden rounded-xl border border-zinc-200 shadow-sm dark:border-zinc-800">
-              <div className="border-b border-zinc-100 px-4 py-3 dark:border-zinc-900">
-                <p className="text-sm font-semibold">{m['queue.item.message']()}</p>
-                <p className="text-muted-foreground mt-0.5 text-xs">{saveLabel}</p>
+            <section className="border-border/70 border-b">
+              <div className="border-border/70 flex min-h-16 items-center gap-3 border-b px-4 py-2 sm:px-5">
+                <span className="bg-primary/10 text-primary flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-semibold">
+                  {activeConnection?.email?.slice(0, 1).toUpperCase() || 'T'}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-semibold">
+                    {activeConnection?.email || m['queue.item.message']()}
+                  </p>
+                  <p className="text-muted-foreground mt-0.5 text-xs">{saveLabel}</p>
+                </div>
               </div>
 
-              <div className="divide-y divide-zinc-100 dark:divide-zinc-900">
-                <div className="grid grid-cols-[3rem_minmax(0,1fr)] items-center px-4">
+              <div className="divide-border/60 divide-y">
+                <div className="grid grid-cols-[3rem_minmax(0,1fr)] items-center px-4 sm:px-5">
                   <Label className="text-muted-foreground text-xs">{m['queue.item.to']()}</Label>
                   <Input
                     className="h-10 border-0 bg-transparent px-0 shadow-none focus-visible:ring-0"
@@ -1477,7 +1486,7 @@ function QueueItemRow({
                     disabled={!canEdit || isSaving}
                   />
                 </div>
-                <div className="grid gap-x-4 px-4 sm:grid-cols-2">
+                <div className="grid gap-x-4 px-4 sm:grid-cols-2 sm:px-5">
                   <div className="grid grid-cols-[3rem_minmax(0,1fr)] items-center">
                     <Label className="text-muted-foreground text-xs">{m['queue.item.cc']()}</Label>
                     <Input
@@ -1497,7 +1506,7 @@ function QueueItemRow({
                     />
                   </div>
                 </div>
-                <div className="grid grid-cols-[3rem_minmax(0,1fr)] items-center px-4">
+                <div className="grid grid-cols-[3rem_minmax(0,1fr)] items-center px-4 sm:px-5">
                   <Label className="text-muted-foreground text-xs">
                     {m['queue.item.subject']()}
                   </Label>
@@ -1518,7 +1527,7 @@ function QueueItemRow({
               />
 
               {item.sourceAttachments.length ? (
-                <div className="text-muted-foreground flex flex-wrap items-center gap-2 border-t border-zinc-100 px-4 py-3 text-xs dark:border-zinc-900">
+                <div className="text-muted-foreground border-border/60 flex flex-wrap items-center gap-2 border-t px-4 py-3 text-xs sm:px-5">
                   <Paperclip className="h-3.5 w-3.5" />
                   <span className="font-medium">{m['queue.item.attachments']()}:</span>
                   {item.sourceAttachments.map((attachment, index) => (
@@ -1533,7 +1542,7 @@ function QueueItemRow({
               ) : null}
             </section>
           ) : (
-            <section className="bg-background min-w-0 space-y-2 rounded-xl border p-4">
+            <section className="border-border/70 min-w-0 border-b px-4 py-4 sm:px-5">
               <h2 className="text-lg font-semibold text-zinc-950 dark:text-zinc-50">
                 {item.subject || m['queue.item.untitled']()}
               </h2>
@@ -1549,10 +1558,10 @@ function QueueItemRow({
           {errorMessage ? (
             <div
               className={cn(
-                'flex items-start gap-2 rounded-lg border px-3 py-2 text-sm',
+                'flex items-start gap-2 border-b px-4 py-3 text-sm sm:px-5',
                 runtimeWasUpdated
-                  ? 'border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-200'
-                  : 'border-red-200 bg-red-50 text-red-800 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-300',
+                  ? 'border-amber-200 bg-amber-50/70 text-amber-900 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-200'
+                  : 'border-red-200 bg-red-50/70 text-red-800 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-300',
               )}
             >
               <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
@@ -1561,13 +1570,18 @@ function QueueItemRow({
           ) : null}
 
           {item.status === 'draft_ready' ? (
-            <section className="rounded-xl border border-violet-200 bg-violet-50/60 p-3 dark:border-violet-500/20 dark:bg-violet-500/10">
-              <div className="flex flex-col gap-2 lg:flex-row lg:items-end">
-                <div className="grid min-w-0 flex-1 gap-1">
-                  <Label htmlFor={`instruction-${item.id}`}>{m['queue.item.instruction']()}</Label>
+            <section className="border-border/70 border-b px-4 py-3 sm:px-5">
+              <div className="flex flex-col gap-2 xl:flex-row xl:items-center">
+                <div className="grid min-w-0 flex-1 gap-1 xl:grid-cols-[8rem_minmax(0,1fr)] xl:items-center">
+                  <Label
+                    className="text-muted-foreground text-xs"
+                    htmlFor={`instruction-${item.id}`}
+                  >
+                    {m['queue.item.instruction']()}
+                  </Label>
                   <Textarea
                     id={`instruction-${item.id}`}
-                    className="min-h-11 bg-white dark:bg-zinc-950"
+                    className="min-h-10 resize-y border-0 bg-transparent px-0 py-2 shadow-none focus-visible:ring-0"
                     value={instruction}
                     onChange={(event) => setInstruction(event.target.value)}
                     placeholder={m['queue.item.instructionPlaceholder']()}
@@ -1576,7 +1590,8 @@ function QueueItemRow({
                 </div>
                 <Button
                   type="button"
-                  variant="secondary"
+                  variant="ghost"
+                  size="sm"
                   className="shrink-0"
                   onClick={() => void requestRevision()}
                   disabled={
@@ -1597,7 +1612,7 @@ function QueueItemRow({
             </section>
           ) : null}
 
-          <div className="text-muted-foreground flex flex-wrap gap-x-4 gap-y-1 px-1 text-xs">
+          <div className="text-muted-foreground flex flex-wrap gap-x-4 gap-y-1 px-4 py-3 text-xs sm:px-5">
             {updatedAt ? (
               <span>
                 {m['queue.item.updated']()}: {updatedAt}
