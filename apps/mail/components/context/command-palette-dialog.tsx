@@ -15,6 +15,8 @@ import { useSearchValue } from '@/hooks/use-search-value';
 import { CommandDialog } from '@/components/ui/command';
 import { useLocation, useNavigate } from 'react-router';
 import { navigationConfig } from '@/config/navigation';
+import { useTRPC } from '@/providers/query-provider';
+import { useQuery } from '@tanstack/react-query';
 import { useThreads } from '@/hooks/use-threads';
 import { getMainSearchTerm } from '@/lib/utils';
 import { useLabels } from '@/hooks/use-labels';
@@ -78,8 +80,10 @@ export function CommandPaletteDialog({
   const [emailSuggestions, setEmailSuggestions] = useState<string[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [commandInputValue, setCommandInputValue] = useState('');
+  const [debouncedEmailQuery, setDebouncedEmailQuery] = useState('');
   const navigate = useNavigate();
   const { pathname } = useLocation();
+  const trpc = useTRPC();
 
   const { userLabels = [] } = useLabels();
 
@@ -90,20 +94,44 @@ export function CommandPaletteDialog({
   useEffect(() => {
     if (threads && Array.isArray(threads)) {
       const emails = new Set<string>();
-      // NOTE: useThreads yields a minimal thread shape ({ id, historyId }); the
-      // `from`/`to` reads below resolve to undefined at runtime (pre-existing —
-      // see job report "bugs réels"). Kept `any` to preserve that behaviour.
-      threads.forEach((thread: any) => {
-        if (thread?.from?.email) emails.add(thread.from.email);
-        if (thread?.to && Array.isArray(thread.to)) {
-          thread.to.forEach((recipient: { email?: string } | null) => {
-            if (recipient?.email) emails.add(recipient.email);
-          });
-        }
+      threads.forEach((thread) => {
+        if (thread?.sender?.email) emails.add(thread.sender.email);
       });
       setEmailSuggestions(Array.from(emails).slice(0, 20));
     }
   }, [threads]);
+
+  const liveEmailQuery = currentView === 'search' ? searchQuery : commandInputValue;
+
+  useEffect(() => {
+    const query = liveEmailQuery.trim();
+    if (query.length < 2) {
+      setDebouncedEmailQuery('');
+      return;
+    }
+
+    const timer = window.setTimeout(() => setDebouncedEmailQuery(query), 180);
+    return () => window.clearTimeout(timer);
+  }, [liveEmailQuery]);
+
+  // La palette recherche dans TOUTE la boîte, indépendamment du dossier affiché.
+  // La projection locale renvoie immédiatement sujet + expéditeur sans attendre
+  // une recherche Gmail complète ni charger le corps des fils.
+  const liveEmailResultsQuery = useQuery(
+    trpc.mail.listThreads.queryOptions(
+      {
+        q: debouncedEmailQuery,
+        folder: '',
+        cursor: '',
+        maxResults: 8,
+        localPreview: true,
+      },
+      {
+        enabled: debouncedEmailQuery.length >= 2,
+        staleTime: 60 * 1000,
+      },
+    ),
+  );
 
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
@@ -308,42 +336,21 @@ export function CommandPaletteDialog({
     [activeFilters, searchValue.folder, isProcessing, addFilter, setOpen, setSearchValue],
   );
 
-  const quickSearchResults = useMemo(() => {
-    try {
-      if (!searchQuery || searchQuery.length < 2 || !threads) return [];
+  const quickSearchResults = useMemo(
+    () =>
+      (liveEmailResultsQuery.data?.threads ?? []).map((thread) => ({
+        id: thread.id,
+        subject: thread.subject,
+        sender: thread.sender,
+        receivedOn: thread.receivedOn,
+      })),
+    [liveEmailResultsQuery.data?.threads],
+  );
 
-      const validThreads = Array.isArray(threads) ? threads.filter(Boolean) : [];
-      if (validThreads.length === 0) return [];
-
-      return validThreads
-        .filter((thread: any) => {
-          try {
-            if (!thread || typeof thread !== 'object') return false;
-
-            const query = searchQuery.toLowerCase();
-
-            const snippet = thread.snippet?.toString() || '';
-            const subject = thread.subject?.toString() || '';
-            const fromName = thread.from?.name?.toString() || '';
-            const fromEmail = thread.from?.email?.toString() || '';
-
-            return (
-              snippet.toLowerCase().includes(query) ||
-              subject.toLowerCase().includes(query) ||
-              fromName.toLowerCase().includes(query) ||
-              fromEmail.toLowerCase().includes(query)
-            );
-          } catch (err) {
-            log.error('Error filtering thread:', err);
-            return false;
-          }
-        })
-        .slice(0, 5);
-    } catch (error) {
-      log.error('Error processing search results:', error);
-      return [];
-    }
-  }, [searchQuery, threads]);
+  const normalizedLiveEmailQuery = liveEmailQuery.trim();
+  const isEmailSearchLoading =
+    normalizedLiveEmailQuery.length >= 2 &&
+    (normalizedLiveEmailQuery !== debouncedEmailQuery || liveEmailResultsQuery.isFetching);
 
   const allCommands = useMemo<CommandGroupData[]>(() => {
     const searchCommands: CommandItem[] = [];
@@ -454,7 +461,7 @@ export function CommandPaletteDialog({
     });
 
     return result;
-  }, [pathname, setIsComposeOpen, quickFilterOptions]);
+  }, [pathname, setIsAskRetaOpen, setIsComposeOpen, quickFilterOptions]);
 
   const hasMatchingCommands = useMemo(() => {
     if (!commandInputValue.trim()) return true;
@@ -476,11 +483,13 @@ export function CommandPaletteDialog({
     activeFilters,
     commandInputValue,
     isProcessing,
+    isEmailSearchLoading,
     hasMatchingCommands,
     allCommands,
     searchQuery,
     recentSearches,
     quickSearchResults,
+    emailSearchQuery: normalizedLiveEmailQuery,
     userLabels,
     selectedDateFilter,
     selectedDate,

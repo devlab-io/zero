@@ -46,11 +46,13 @@ export interface CommandPaletteViewProps {
   activeFilters: ActiveFilter[];
   commandInputValue: string;
   isProcessing: boolean;
+  isEmailSearchLoading: boolean;
   hasMatchingCommands: boolean;
   allCommands: CommandGroupData[];
   searchQuery: string;
   recentSearches: string[];
   quickSearchResults: QuickSearchThread[];
+  emailSearchQuery: string;
   userLabels: PaletteLabel[];
   selectedDateFilter: string | null;
   selectedDate: Date | undefined;
@@ -84,6 +86,9 @@ export function MainView({
   hasMatchingCommands,
   handleSearch,
   isProcessing,
+  isEmailSearchLoading,
+  quickSearchResults,
+  emailSearchQuery,
   allCommands,
   runCommand,
   navigate,
@@ -122,11 +127,17 @@ export function MainView({
 
       <CommandInput
         autoFocus
-        placeholder="Type a command or search..."
+        placeholder="Search emails or run a command..."
         value={commandInputValue}
         onValueChange={setCommandInputValue}
         onKeyDown={(e) => {
-          if (e.key === 'Enter' && commandInputValue.trim() && !hasMatchingCommands) {
+          if (
+            e.key === 'Enter' &&
+            commandInputValue.trim() &&
+            !hasMatchingCommands &&
+            quickSearchResults.length === 0 &&
+            !isEmailSearchLoading
+          ) {
             e.preventDefault();
             handleSearch(commandInputValue, true);
           }
@@ -135,15 +146,39 @@ export function MainView({
       <Separator />
       <CommandList>
         <CommandEmpty>
-          {isProcessing ? (
+          {isProcessing || isEmailSearchLoading ? (
             <Loader2 className="m-auto h-4 w-4 animate-spin" />
+          ) : emailSearchQuery.length >= 2 ? (
+            <>No email found for “{emailSearchQuery}”</>
           ) : (
-            <>
-              No results found, press <span className="font-bold">ENTER</span> to search for emails
-              in this folder
-            </>
+            <>No matching command</>
           )}
         </CommandEmpty>
+        {emailSearchQuery.length >= 2 && quickSearchResults.length > 0 && (
+          <CommandGroup heading="Emails">
+            {quickSearchResults.map((thread) => {
+              const sender = thread.sender ?? thread.from;
+              return (
+                <CommandItem
+                  key={thread.id}
+                  value={[thread.subject, sender?.name, sender?.email].filter(Boolean).join(' ')}
+                  onSelect={() => {
+                    if (!thread.id) return;
+                    runCommand(() => navigate(`/mail/inbox?threadId=${thread.id}`));
+                  }}
+                >
+                  <Mail className="h-4 w-4 opacity-60" />
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate font-medium">{thread.subject || 'No subject'}</div>
+                    <div className="text-muted-foreground truncate text-xs">
+                      {sender?.name || sender?.email || 'Unknown sender'}
+                    </div>
+                  </div>
+                </CommandItem>
+              );
+            })}
+          </CommandGroup>
+        )}
         {allCommands.map((group, groupIndex) => (
           <Fragment key={group.group}>
             {group.items.length > 0 && (
@@ -279,7 +314,7 @@ export function SearchView({
                   runCommand(() => {
                     try {
                       if (thread && thread.id) {
-                        navigate(`/inbox?threadId=${thread.id}`);
+                        navigate(`/mail/inbox?threadId=${thread.id}`);
                       }
                     } catch (error) {
                       log.error('Error navigating to thread:', error);
@@ -293,8 +328,12 @@ export function SearchView({
                 <div className="ml-2 flex flex-1 flex-col overflow-hidden">
                   <span className="truncate font-medium">{thread.subject || 'No Subject'}</span>
                   <span className="text-muted-foreground truncate text-xs">
-                    {thread.from?.name || thread.from?.email || 'Unknown sender'} -{' '}
-                    {thread.snippet || ''}
+                    {thread.sender?.name ||
+                      thread.sender?.email ||
+                      thread.from?.name ||
+                      thread.from?.email ||
+                      'Unknown sender'}
+                    {thread.snippet ? ` — ${thread.snippet}` : ''}
                   </span>
                 </div>
               </CommandItem>

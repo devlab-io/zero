@@ -68,8 +68,10 @@ export interface CommandGroupData {
 export interface QuickSearchThread {
   id?: string;
   subject?: string;
+  sender?: { name?: string; email?: string } | null;
   from?: { name?: string; email?: string } | null;
   snippet?: string;
+  receivedOn?: string;
 }
 
 /** Minimal label shape consumed by the labels view (loose superset of useLabels). */
