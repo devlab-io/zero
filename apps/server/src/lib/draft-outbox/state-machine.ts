@@ -1,3 +1,5 @@
+import { assertMeaningfulEmailBody } from '../send-content-guard';
+
 export const draftOutboxStatuses = [
   'queued',
   'generating',
@@ -132,6 +134,11 @@ export const approveDraftOutboxItem = (
   if (item.reviewState !== 'ready') {
     throw new DraftOutboxTransitionError('approveDraftOutboxItem requires reviewState ready');
   }
+  try {
+    assertMeaningfulEmailBody(item.body);
+  } catch {
+    throw new DraftOutboxTransitionError('approveDraftOutboxItem requires a non-empty email body');
+  }
 
   return withUpdate(
     item,
@@ -182,6 +189,13 @@ export const beginSendingDraftOutboxItem = (
   requireStatus(item, 'approved', 'beginSendingDraftOutboxItem');
   if (!item.gmailDraftId) {
     throw new DraftOutboxTransitionError('beginSendingDraftOutboxItem requires gmailDraftId');
+  }
+  try {
+    assertMeaningfulEmailBody(item.body);
+  } catch {
+    throw new DraftOutboxTransitionError(
+      'beginSendingDraftOutboxItem requires a non-empty email body',
+    );
   }
 
   return withUpdate(item, { status: 'sending', error: null }, now);

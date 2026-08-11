@@ -32,6 +32,7 @@ import {
   type TriageCandidate,
 } from '../../lib/mail-agent/triage';
 import { activeDriverProcedure, privateProcedure, router } from '../trpc';
+import { assertSendableEmail } from '../../lib/send-content-guard';
 import { createDraftContentDigest } from '../../lib/draft-outbox';
 import { getZeroAgent } from '../../lib/server-utils';
 import { getContext } from 'hono/context-storage';
@@ -156,12 +157,59 @@ export const outboxRouter = router({
     .input(z.object({ id: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
       try {
+        const snapshot = await withOutboxDb((db) =>
+          getOwnedDraftOutboxItem(db, {
+            id: input.id,
+            userId: ctx.sessionUser.id,
+          }),
+        );
+        if (!snapshot.gmailDraftId) {
+          throw new DraftOutboxTransitionError('approveDraftOutboxItem requires gmailDraftId');
+        }
+
+        const executionCtx = getContext<HonoContext>().executionCtx;
+        const { stub: agent } = await getZeroAgent(snapshot.connectionId, executionCtx);
+        const providerDraft = (await agent.getDraft(snapshot.gmailDraftId)) as ProviderDraft;
+        try {
+          assertSendableEmail({
+            body: providerDraft.content,
+            recipients: [
+              ...(providerDraft.to ?? []),
+              ...(providerDraft.cc ?? []),
+              ...(providerDraft.bcc ?? []),
+            ],
+          });
+        } catch {
+          throw new DraftOutboxTransitionError(
+            'Le brouillon est vide ou ne contient que la signature Reta. Envoi bloqué.',
+          );
+        }
+
+        const providerDigest = await createDraftContentDigest({
+          to: providerDraft.to ?? [],
+          cc: providerDraft.cc ?? [],
+          bcc: providerDraft.bcc ?? [],
+          subject: providerDraft.subject ?? '',
+          body: providerDraft.content ?? '',
+        });
+        if (providerDigest !== snapshot.contentDigest) {
+          throw new TRPCError({
+            code: 'CONFLICT',
+            message: 'Le brouillon Gmail a changé. Recharge la file avant de l’envoyer.',
+          });
+        }
+
         const item = await withOutboxDb(async (db) => {
           const current = await getOwnedDraftOutboxItem(db, {
             id: input.id,
             userId: ctx.sessionUser.id,
           });
-
+          if (current.contentDigest !== snapshot.contentDigest) {
+            throw new TRPCError({
+              code: 'CONFLICT',
+              message: 'Le brouillon a changé. Recharge la file avant de l’envoyer.',
+            });
+          }
           return approveDraftOutboxJob(db, current);
         });
 

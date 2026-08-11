@@ -67,10 +67,20 @@ export interface EmailComposerProps {
 
 export type ComposerFormValues = z.infer<typeof schema>;
 
+export const hasMeaningfulComposerMessage = (html: string) =>
+  html
+    .replace(/<!--[\s\S]*?-->/g, ' ')
+    .replace(/<br\s*\/?>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;|&#160;|&#x0*a0;/gi, ' ')
+    .replace(/[\u200B-\u200D\u2060\uFEFF]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim().length > 0;
+
 export const schema = z.object({
   to: z.array(z.string().email()).min(1),
   subject: z.string().min(1),
-  message: z.string().min(1),
+  message: z.string().refine(hasMeaningfulComposerMessage, 'Message content is required'),
   attachments: z.array(z.any()).optional(),
   headers: z.any().optional(),
   cc: z.array(z.string().email()).optional(),

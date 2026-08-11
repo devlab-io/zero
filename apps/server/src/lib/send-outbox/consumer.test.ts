@@ -91,6 +91,12 @@ function makeKV() {
 }
 
 const stub = {
+  getDraft: vi.fn(async () => ({
+    to: ['x@y.co'],
+    cc: [],
+    bcc: [],
+    content: '<p>Stored body</p>',
+  })),
   sendDraft: vi.fn(async () => {}),
   sendStoredDraft: vi.fn(async () => {}),
   create: vi.fn(async () => {}),
@@ -122,6 +128,12 @@ beforeEach(() => {
   jobs.clear();
   statusKV = makeKV();
   payloadKV = makeKV();
+  stub.getDraft.mockResolvedValue({
+    to: ['x@y.co'],
+    cc: [],
+    bcc: [],
+    content: '<p>Stored body</p>',
+  });
 });
 
 describe('send-outbox consumer — chemin send_job', () => {
@@ -142,7 +154,10 @@ describe('send-outbox consumer — chemin send_job', () => {
   it('payload avec draftId → sendDraft, pas create', async () => {
     jobs.set(
       'j2',
-      makeJob({ id: 'j2', payload: { draftId: 'dr-1', to: [], subject: 'S', message: 'M' } }),
+      makeJob({
+        id: 'j2',
+        payload: { draftId: 'dr-1', to: [{ email: 'x@y.co' }], subject: 'S', message: 'M' },
+      }),
     );
 
     await processSendEmailBatch(
@@ -177,12 +192,67 @@ describe('send-outbox consumer — chemin send_job', () => {
     expect(jobs.get('j2b')?.payload).toEqual({ draftId: 'dr-2' });
   });
 
+  it('sendAsStored refuse un brouillon vide ou réduit à la signature Reta', async () => {
+    jobs.set(
+      'j2-empty',
+      makeJob({
+        id: 'j2-empty',
+        payload: { draftId: 'dr-empty', sendAsStored: true, to: [], subject: 'S', message: '' },
+      }),
+    );
+    stub.getDraft.mockResolvedValueOnce({
+      to: ['client@example.com'],
+      cc: [],
+      bcc: [],
+      content: '<p>Sent via <a href="https://devlab.io">Reta by Devlab</a></p>',
+    });
+    const message = msg({ jobId: 'j2-empty', messageId: 'j2-empty', connectionId: 'conn-1' });
+
+    await processSendEmailBatch([message], deps());
+
+    expect(stub.sendStoredDraft).not.toHaveBeenCalled();
+    expect(jobs.get('j2-empty')?.status).toBe('failed');
+    expect(jobs.get('j2-empty')?.error).toContain('only the Reta signature');
+    expect(message.retry).toHaveBeenCalled();
+    expect(message.ack).not.toHaveBeenCalled();
+  });
+
+  it('refuse aussi un payload reconstruit vide avant tout appel fournisseur', async () => {
+    jobs.set(
+      'j2-payload-empty',
+      makeJob({
+        id: 'j2-payload-empty',
+        payload: {
+          to: [{ email: 'client@example.com' }],
+          subject: 'S',
+          message: '<p>Sent via <a>Reta by Devlab</a></p>',
+        },
+      }),
+    );
+    const message = msg({
+      jobId: 'j2-payload-empty',
+      messageId: 'j2-payload-empty',
+      connectionId: 'conn-1',
+    });
+
+    await processSendEmailBatch([message], deps());
+
+    expect(stub.create).not.toHaveBeenCalled();
+    expect(jobs.get('j2-payload-empty')?.status).toBe('failed');
+    expect(message.retry).toHaveBeenCalled();
+  });
+
   it('sendAsStored SANS draftId : ignoré — création normale', async () => {
     jobs.set(
       'j2c',
       makeJob({
         id: 'j2c',
-        payload: { sendAsStored: true, to: [], subject: 'S', message: 'M' },
+        payload: {
+          sendAsStored: true,
+          to: [{ email: 'x@y.co' }],
+          subject: 'S',
+          message: 'M',
+        },
       }),
     );
 

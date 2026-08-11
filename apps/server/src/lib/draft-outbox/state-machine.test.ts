@@ -48,6 +48,17 @@ describe('draft-outbox state machine guards', () => {
     );
   });
 
+  it('rejects approval when the stored body is empty or only the Reta signature', () => {
+    expect(() => approveDraftOutboxItem(baseItem({ body: '<p><br></p>' }))).toThrow(
+      /non-empty email body/,
+    );
+    expect(() =>
+      approveDraftOutboxItem(
+        baseItem({ body: '<p>Sent via <a href="https://devlab.io">Reta by Devlab</a></p>' }),
+      ),
+    ).toThrow(/non-empty email body/);
+  });
+
   it('allows cancellation during the countdown from approved', () => {
     const approved = baseItem({ status: 'approved', scheduledSendAt: new Date() });
 
@@ -78,5 +89,11 @@ describe('draft-outbox state machine guards', () => {
     expect(sent.status).toBe('sent');
     expect(sent.gmailDraftId).toBe('gmail_draft_1');
     expect(() => beginSendingDraftOutboxItem(sent)).toThrow(/terminal/);
+  });
+
+  it('refuses to start delivery if an approved item lost its body', () => {
+    expect(() => beginSendingDraftOutboxItem(baseItem({ status: 'approved', body: '' }))).toThrow(
+      /non-empty email body/,
+    );
   });
 });

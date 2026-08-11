@@ -147,6 +147,14 @@ const stub = {
   getMessageAttachments: vi.fn(async () => [{ filename: 'f', attachmentId: 'a' }]),
   getRawEmail: vi.fn(async () => 'RAW'),
   getMailboxCounts: vi.fn(async () => ({ inbox: 50, drafts: 4, sent: 10 })),
+  getDraft: vi.fn(async () => ({
+    id: 'dr-stored-1',
+    to: ['x@y.co'],
+    cc: [],
+    bcc: [],
+    subject: 'S',
+    content: '<p>Stored body</p>',
+  })),
   sendDraft: vi.fn(async () => {}),
   create: vi.fn(async () => {}),
   reloadFolder: vi.fn(async () => {}),
@@ -227,6 +235,14 @@ beforeEach(() => {
   getThreadsFromDB.mockResolvedValue({ threads: [] });
   getThread.mockResolvedValue({ result: { messages: [] } });
   stub.normalizeIds.mockImplementation(async (ids: string[]) => ({ threadIds: ids }));
+  stub.getDraft.mockResolvedValue({
+    id: 'dr-stored-1',
+    to: ['x@y.co'],
+    cc: [],
+    bcc: [],
+    subject: 'S',
+    content: '<p>Stored body</p>',
+  });
 });
 
 describe('mail router — lectures simples', () => {
@@ -507,6 +523,46 @@ describe('mail router — deleteAllSpam', () => {
 
 describe('mail router — send (enqueue durable, jamais Gmail dans la requête)', () => {
   const base = { to: [{ email: 'x@y.co' }], subject: 'S', message: 'M' };
+
+  it('refuse avant enqueue un HTML vide ou réduit à la signature Reta', async () => {
+    for (const message of [
+      '<p><br></p>',
+      '<p>Sent via <a href="https://devlab.io">Reta by Devlab</a></p>',
+    ]) {
+      const result = await call('send', { ...base, message });
+      expect(result).toEqual({
+        success: false,
+        error: 'Email body is empty or contains only the Reta signature',
+      });
+    }
+    expect(sendOutbox.createSendJob).not.toHaveBeenCalled();
+    expect(send_email_queue.send).not.toHaveBeenCalled();
+  });
+
+  it('refuse avant enqueue un sendAsStored dont le brouillon fournisseur est vide', async () => {
+    stub.getDraft.mockResolvedValueOnce({
+      id: 'dr-empty',
+      to: ['x@y.co'],
+      cc: [],
+      bcc: [],
+      subject: 'S',
+      content: '<p>Sent via <a>Reta by Devlab</a></p>',
+    });
+
+    const result = await call('send', {
+      ...base,
+      draftId: 'dr-empty',
+      sendAsStored: true,
+      clientSendId: 'draft-direct-empty123',
+    });
+
+    expect(result).toEqual({
+      success: false,
+      error: 'Email body is empty or contains only the Reta signature',
+    });
+    expect(sendOutbox.createSendJob).not.toHaveBeenCalled();
+    expect(send_email_queue.send).not.toHaveBeenCalled();
+  });
 
   it('immédiat (undoSend off) → send_job + Queue délai 0, aucun appel fournisseur', async () => {
     const r = await call('send', { ...base, threadId: 'th-9', clientSendId: 'submit-11111111' });

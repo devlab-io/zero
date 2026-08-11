@@ -430,8 +430,8 @@ export function QueueReview({ embedded = false }: { embedded?: boolean } = {}) {
       toast.success(m['queue.actions.approved']());
       await invalidateOutbox();
     },
-    onError: () => {
-      toast.error(m['queue.actions.failed']());
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : m['queue.actions.failed']());
     },
   });
 

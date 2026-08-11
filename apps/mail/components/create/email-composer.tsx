@@ -441,7 +441,7 @@ export function EmailComposer({
       }
     } catch (error) {
       log.error('Error sending email:', error);
-      toast.error('Failed to send email');
+      toast.error(error instanceof Error ? error.message : 'Failed to send email');
     } finally {
       setIsLoading(false);
     }

@@ -20,6 +20,7 @@ import {
 import { buildMailboxOverview, getMailboxActivityOrZero } from '../../lib/mailbox-overview';
 import { IGetThreadResponseSchema, type IGetThreadsResponse } from '../../lib/driver/types';
 import { activeDriverProcedure, router, privateProcedure } from '../trpc';
+import { assertSendableEmail } from '../../lib/send-content-guard';
 import { processEmailHtml } from '../../lib/email-processor';
 import { previewSearchText } from '../../lib/search-preview';
 import { defaultPageSize, FOLDERS } from '../../lib/utils';
@@ -592,6 +593,38 @@ export const mailRouter = router({
       } = input as typeof input & {
         scheduleAt?: string;
       };
+
+      // Garde serveur avant toute écriture d'outbox. Une signature Reta seule,
+      // un HTML vide ou un brouillon fournisseur sans destinataire ne doivent
+      // jamais produire un job d'envoi.
+      try {
+        if (input.sendAsStored) {
+          if (!draftId) {
+            return { success: false, error: 'Stored draft id is required' } as const;
+          }
+          const executionCtx = getContext<HonoContext>().executionCtx;
+          const { stub: agent } = await getZeroAgent(activeConnection.id, executionCtx);
+          const storedDraft = await agent.getDraft(draftId);
+          assertSendableEmail({
+            body: storedDraft.content,
+            recipients: [
+              ...(storedDraft.to ?? []),
+              ...(storedDraft.cc ?? []),
+              ...(storedDraft.bcc ?? []),
+            ],
+          });
+        } else {
+          assertSendableEmail({
+            body: mail.message,
+            recipients: [...mail.to, ...(mail.cc ?? []), ...(mail.bcc ?? [])],
+          });
+        }
+      } catch {
+        return {
+          success: false,
+          error: 'Email body is empty or contains only the Reta signature',
+        } as const;
+      }
 
       // P15 durci : le préflight/claim d'équipe est déplacé APRÈS toutes les
       // validations à retour anticipé (voir plus bas) — un claim ne peut

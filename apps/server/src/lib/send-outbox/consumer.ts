@@ -7,6 +7,7 @@ import {
 } from './index';
 import { toAttachmentFiles, type SerializedAttachment, type AttachmentFile } from '../attachments';
 import type { IEmailSendBatch, IOutgoingMessage } from '../../types';
+import { assertSendableEmail } from '../send-content-guard';
 import { logger } from '../logger';
 import type { DB } from '../../db';
 
@@ -18,6 +19,12 @@ export type SendEmailQueueMessage = {
 
 type SendAgentStub = {
   stub: {
+    getDraft: (draftId: string) => Promise<{
+      to?: string[];
+      cc?: string[];
+      bcc?: string[];
+      content?: string;
+    }>;
     sendDraft: (draftId: string, mail: IOutgoingMessage) => Promise<unknown>;
     sendStoredDraft: (draftId: string) => Promise<unknown>;
     create: (mail: IOutgoingMessage) => Promise<unknown>;
@@ -75,10 +82,19 @@ const deliver = async (
   // le fournisseur (PJ/destinataires/threading/signature préservés), aucune
   // reconstruction du corps depuis le payload.
   if (draftId && sendAsStored) {
+    const draft = await agent.stub.getDraft(draftId);
+    assertSendableEmail({
+      body: draft.content,
+      recipients: [...(draft.to ?? []), ...(draft.cc ?? []), ...(draft.bcc ?? [])],
+    });
     await agent.stub.sendStoredDraft(draftId);
     return;
   }
   const outgoing = materializeAttachments({ ...mail, threadId } as StoredSendPayload);
+  assertSendableEmail({
+    body: outgoing.message,
+    recipients: [...(outgoing.to ?? []), ...(outgoing.cc ?? []), ...(outgoing.bcc ?? [])],
+  });
   if (draftId) {
     await agent.stub.sendDraft(draftId, outgoing);
   } else {

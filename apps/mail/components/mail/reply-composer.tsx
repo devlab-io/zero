@@ -413,7 +413,9 @@ export default function ReplyCompose({
       return true;
     } catch (error) {
       log.error('Error sending email:', error);
-      toast.error(m['pages.createEmail.failedToSendEmail']());
+      toast.error(
+        error instanceof Error ? error.message : m['pages.createEmail.failedToSendEmail'](),
+      );
       return false;
     }
   };
