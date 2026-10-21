@@ -22,7 +22,7 @@ concurrency:
 jobs:
   main:
     timeout-minutes: 15
-    runs-on: ${{ vars.RUNNER_IMAGE || 'ubuntu-latest' }}
+    runs-on: ${{ vars.RUNNER_IMAGE || 'blacksmith-2vcpu-ubuntu-2404' }}
     steps:
       - name: Checkout Code 🛎
         uses: actions/checkout@v4

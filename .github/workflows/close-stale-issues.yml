@@ -6,7 +6,7 @@ on:
 
 jobs:
   stale:
-    runs-on: ${{ vars.RUNNER_IMAGE || 'ubuntu-latest' }}
+    runs-on: ${{ vars.RUNNER_IMAGE || 'blacksmith-2vcpu-ubuntu-2404' }}
     permissions:
       issues: write
       contents: read

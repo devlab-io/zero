@@ -12,7 +12,7 @@ permissions:
 
 jobs:
   deploy-to-production:
-    runs-on: ${{ vars.RUNNER_IMAGE || 'ubuntu-latest' }}
+    runs-on: ${{ vars.RUNNER_IMAGE || 'blacksmith-2vcpu-ubuntu-2404' }}
     name: Merge Staging to Production
     if: github.event.issue.pull_request && contains(github.event.issue.labels.*.name, 'production-deploy') && startsWith(github.event.comment.body, '/deploy') && github.event.comment.author_association == 'MEMBER'
     steps:
